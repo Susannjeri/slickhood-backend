@@ -13,10 +13,12 @@ import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.Delete;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
@@ -118,12 +120,34 @@ public class GarageService {
                 .build();
 
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(Duration.ofMinutes(60))
+                .signatureDuration(Duration.ofMinutes(5))
                 .getObjectRequest(getObjectRequest)
                 .build();
 
         return s3Presigner.presignGetObject(presignRequest).url().toString();
     }
+
+    /**
+     * Reads a private object for delivery through an authenticated application endpoint.
+     * Callers must perform ownership/permission checks before invoking this method.
+     */
+    public StoredObject download(String fileName) {
+        if (StringUtils.isBlank(fileName)) {
+            throw new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND);
+        }
+        try {
+            ResponseBytes<GetObjectResponse> object = s3Client.getObjectAsBytes(GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(fileName.startsWith("/") ? fileName.substring(1) : fileName)
+                    .build());
+            return new StoredObject(object.asByteArray(), object.response().contentType(), object.response().contentLength());
+        } catch (S3Exception exception) {
+            log.warn("Private object could not be read: {}", fileName);
+            throw new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND);
+        }
+    }
+
+    public record StoredObject(byte[] bytes, String contentType, Long contentLength) { }
 
     public List<String> listFiles(String prefix) {
         ListObjectsV2Request listRequest = ListObjectsV2Request.builder()

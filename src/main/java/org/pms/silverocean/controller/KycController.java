@@ -6,10 +6,15 @@ import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.kyc.KycDocumentType;
+import org.pms.silverocean.service.kyc.KycDocumentContent;
 import org.pms.silverocean.service.kyc.KycReviewRequest;
 import org.pms.silverocean.service.kyc.KycService;
 import org.pms.silverocean.service.kyc.StartKycRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -39,6 +44,22 @@ public class KycController {
 
     @PostMapping("/submit")
     public ResponseEntity<ResponseDTO> submit() { return ok(ResponseCode.KYC_SUBMITTED, service.submit()); }
+
+    @GetMapping("/documents/{documentId}/content")
+    public ResponseEntity<byte[]> documentContent(@PathVariable long documentId) {
+        KycDocumentContent document = service.documentContent(documentId);
+        MediaType mediaType;
+        try { mediaType = MediaType.parseMediaType(document.contentType()); }
+        catch (Exception ignored) { mediaType = MediaType.APPLICATION_OCTET_STREAM; }
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .header(HttpHeaders.PRAGMA, "no-cache")
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline()
+                        .filename(document.fileName(), java.nio.charset.StandardCharsets.UTF_8).build().toString())
+                .contentLength(document.contentLength())
+                .contentType(mediaType)
+                .body(document.bytes());
+    }
 
     @PostMapping("/admin/{caseId}/review")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).LIST_USERS)")

@@ -24,8 +24,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.ZonedDateTime;
 import java.util.HexFormat;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -147,17 +153,18 @@ public class KycService {
             ocr = new OcrResult("PROVIDER_UNAVAILABLE", 0, Map.of());
             document.setRejectionReason("Automatic extraction is temporarily unavailable; document requires review");
         }
+        Map<String,String> extractedFields = validateExtractedEvidence(ocr.fields(), user, kycCase);
         document.setOcrProvider(ocr.provider()); document.setOcrConfidence(ocr.confidence());
         if (ocrProvider.enabled()) {
-            document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(ocr.fields())));
-            document.setStatus(ocr.fields().isEmpty() || ocr.confidence() < 75 ?
+            document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(extractedFields)));
+            document.setStatus(extractedFields.isEmpty() || ocr.confidence() < 75 || extractedFields.containsKey("_validationWarnings") ?
                     DocumentStatus.REVIEW_REQUIRED.name() : DocumentStatus.OCR_COMPLETE.name());
         } else {
             document.setStatus(DocumentStatus.REVIEW_REQUIRED.name());
         }
         documentRepo.save(document);
         kycCase.setStatus(KycStatus.IN_PROGRESS.name()); caseRepo.save(kycCase);
-        return KycDocumentView.from(document, ocr.fields(), garageService.getPresignedUrl(document.getFileRef()));
+        return KycDocumentView.from(document, extractedFields, null);
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -232,6 +239,26 @@ public class KycService {
                 }).toList();
     }
 
+    /**
+     * Returns a KYC document only to its owner or a user with KYC review authority.
+     * The bytes are delivered by the authenticated API, never through a permanent public URL.
+     */
+    public KycDocumentContent documentContent(long documentId) {
+        KycDocument document = documentRepo.findById(documentId)
+                .filter(KycDocument::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND));
+        long requesterId = userDao.getUserId();
+        boolean reviewer = userDao.hasPermission(org.pms.silverocean.service.auth.roles.enums.Permission.LIST_USERS);
+        if (document.getUserId() != requesterId && !reviewer) {
+            // Do not disclose whether another customer's document exists.
+            throw new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND);
+        }
+        var stored = garageService.download(document.getFileRef());
+        String contentType = stored.contentType() == null ? document.getContentType() : stored.contentType();
+        return new KycDocumentContent(stored.bytes(), contentType, document.getOriginalFileName(),
+                stored.contentLength() == null ? stored.bytes().length : stored.contentLength());
+    }
+
     private byte[] validateAndRead(MultipartFile file) throws Exception {
         if (file == null || file.isEmpty() || file.getSize() > maxFileBytes || !ALLOWED_TYPES.contains(file.getContentType())) {
             throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
@@ -280,7 +307,7 @@ public class KycService {
 
     private KycCaseView view(KycCase kycCase, Users user) {
         List<KycDocumentView> docs = documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).stream()
-                .map(doc -> KycDocumentView.from(doc, decrypt(doc), garageService.getPresignedUrl(doc.getFileRef()))).toList();
+                .map(doc -> KycDocumentView.from(doc, decrypt(doc), null)).toList();
         return new KycCaseView(kycCase.getId(), kycCase.getStatus(), user.getAccountStatus(),
                 currentConsentVersion, kycCase.getReviewNotes(), kycCase.isPhoneVerified(), user.getPhoneNumber(),
                 timestamp(user.getPhoneVerifiedAt()), kycCase.getRegistryStatus(), ocrProvider.enabled(),
@@ -295,6 +322,36 @@ public class KycService {
             var decrypted = encryptionService.decrypt(document.getEncryptedExtractedData());
             return decrypted == null ? Map.of() : objectMapper.readValue(decrypted.decryptedValue(), new TypeReference<>() {});
         } catch (Exception ignored) { return Map.of(); }
+    }
+
+    private Map<String,String> validateExtractedEvidence(Map<String,String> source, Users user, KycCase kycCase) {
+        Map<String,String> fields = new LinkedHashMap<>(source == null ? Map.of() : source);
+        List<String> warnings = new ArrayList<>();
+        if (fields.containsKey("_validationWarnings")) warnings.add(fields.get("_validationWarnings"));
+        String detectedName = normalizeName(fields.get("fullName"));
+        String accountName = normalizeName(user.getFullName());
+        if (!detectedName.isBlank() && !accountName.isBlank()) {
+            Set<String> detectedTokens = new HashSet<>(List.of(detectedName.split(" ")));
+            Set<String> accountTokens = new HashSet<>(List.of(accountName.split(" ")));
+            detectedTokens.retainAll(accountTokens);
+            if (detectedTokens.isEmpty()) warnings.add("Name on the document does not match the account name");
+        }
+        String number = fields.get("documentNumber");
+        if (number != null) {
+            boolean conflicts = documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).stream()
+                    .map(this::decrypt).map(existing -> existing.get("documentNumber"))
+                    .filter(Objects::nonNull).anyMatch(existing -> !existing.equalsIgnoreCase(number));
+            if (conflicts) warnings.add("Document number conflicts with another uploaded identity document");
+        }
+        if (!warnings.isEmpty()) {
+            fields.put("_validationStatus", "REVIEW_REQUIRED");
+            fields.put("_validationWarnings", String.join("; ", new LinkedHashSet<>(warnings)));
+        }
+        return fields;
+    }
+
+    private String normalizeName(String value) {
+        return value == null ? "" : value.toUpperCase(Locale.ROOT).replaceAll("[^A-Z ]", " ").replaceAll("\\s+", " ").trim();
     }
 
     private String safeName(String name) {

@@ -9,6 +9,7 @@ import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.currencyexchange.CurrencyConversionService;
+import org.pms.silverocean.service.wrappers.IdNameDescDTO;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -34,15 +35,17 @@ public class WealthService {
     private final WealthObligationRepo obligationRepo; private final WealthVaultDocumentRepo vaultRepo;
     private final WealthGoalRepo goalRepo; private final UserDao userDao; private final GarageService garageService;
     private final CurrencyConversionService currencyConversionService;
-    private final UnitRepo unitRepo; private final PMSInvoiceRepo invoiceRepo;
+    private final UnitRepo unitRepo; private final PMSInvoiceRepo invoiceRepo; private final PropertyRepo propertyRepo;
     @Value("${wealth.base.currency:KES}") private String baseCurrency;
 
     public List<WealthAsset> assets(){return ownedAssets();}
+    public List<IdNameDescDTO> propertyOptions(){return propertyRepo.findAllWealthLinkableByUserId(userDao.getUserId());}
     @Transactional public WealthAsset createAsset(AssetRequest r){
+        validatePropertyLink(r.propertyId(),null);
         WealthAsset a=new WealthAsset();apply(a,r);a.setOwnerUserId(userDao.getUserId());a.setCreatedBy(userDao.getUserId());a.setActive(true);
         a=assetRepo.save(a); recordValuation(a,r.currentValue(),r.valuationDate(),"OPENING_VALUE","Initial asset value");return a;
     }
-    @Transactional public WealthAsset updateAsset(long id,AssetRequest r){WealthAsset a=asset(id);BigDecimal old=a.getCurrentValue();LocalDate oldDate=a.getValuationDate();apply(a,r);a=assetRepo.save(a);if(old.compareTo(r.currentValue())!=0||!oldDate.equals(r.valuationDate()))recordValuation(a,r.currentValue(),r.valuationDate(),"ASSET_UPDATE","Value updated from asset record");return a;}
+    @Transactional public WealthAsset updateAsset(long id,AssetRequest r){WealthAsset a=asset(id);validatePropertyLink(r.propertyId(),id);BigDecimal old=a.getCurrentValue();LocalDate oldDate=a.getValuationDate();apply(a,r);a=assetRepo.save(a);if(old.compareTo(r.currentValue())!=0||!oldDate.equals(r.valuationDate()))recordValuation(a,r.currentValue(),r.valuationDate(),"ASSET_UPDATE","Value updated from asset record");return a;}
     @Transactional public void archiveAsset(long id){WealthAsset a=asset(id);a.setActive(false);assetRepo.save(a);}
     @Transactional public WealthValuation addValuation(long assetId,ValuationRequest r){WealthAsset a=asset(assetId);a.setCurrentValue(r.amount());a.setValuationDate(r.valuationDate());assetRepo.save(a);return recordValuation(a,r.amount(),r.valuationDate(),r.source(),r.notes());}
     public List<WealthValuation> valuations(long assetId){asset(assetId);return valuationRepo.findAllByAssetIdAndActiveTrueOrderByValuationDateDesc(assetId);}
@@ -73,6 +76,7 @@ public class WealthService {
     }
 
     private void apply(WealthAsset a,AssetRequest r){a.setPropertyId(r.propertyId());a.setAssetType(r.assetType().toUpperCase());a.setName(r.name());a.setReference(r.reference());a.setLocation(r.location());a.setCurrency(r.currency().toUpperCase());a.setAcquisitionCost(Optional.ofNullable(r.acquisitionCost()).orElse(BigDecimal.ZERO));a.setAcquisitionDate(r.acquisitionDate());a.setCurrentValue(r.currentValue());a.setValuationDate(r.valuationDate());a.setStatus(r.status()==null?"ACTIVE":r.status().toUpperCase());}
+    private void validatePropertyLink(Long propertyId,Long currentAssetId){if(propertyId==null)return;long userId=userDao.getUserId();propertyRepo.findByIdAndStaffOrOwner(propertyId,userId).orElseThrow(this::notFound);assetRepo.findByOwnerUserIdAndPropertyIdAndActiveTrue(userId,propertyId).filter(existing->!Objects.equals(existing.getId(),currentAssetId)).ifPresent(existing->{throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);});}
     private WealthValuation recordValuation(WealthAsset a,BigDecimal amount,LocalDate date,String source,String notes){WealthValuation v=new WealthValuation();v.setAssetId(a.getId());v.setAmount(amount);v.setValuationDate(date);v.setSource(source);v.setNotes(notes);stamp(v);return valuationRepo.save(v);}
     private WealthAsset asset(long id){return assetRepo.findByIdAndOwnerUserIdAndActiveTrue(id,userDao.getUserId()).orElseThrow(this::notFound);}
     private List<WealthAsset> ownedAssets(){return assetRepo.findAllByOwnerUserIdAndActiveTrueOrderByName(userDao.getUserId());}

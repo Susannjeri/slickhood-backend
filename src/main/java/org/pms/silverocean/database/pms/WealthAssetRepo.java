@@ -6,4 +6,5 @@ import java.util.Optional;
 public interface WealthAssetRepo extends JpaRepository<WealthAsset,Long>{
  List<WealthAsset> findAllByOwnerUserIdAndActiveTrueOrderByName(long ownerUserId);
  Optional<WealthAsset> findByIdAndOwnerUserIdAndActiveTrue(long id,long ownerUserId);
+ Optional<WealthAsset> findByOwnerUserIdAndPropertyIdAndActiveTrue(long ownerUserId,long propertyId);
 }

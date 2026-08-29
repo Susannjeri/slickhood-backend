@@ -32,6 +32,19 @@ public class DocumentQualityService {
                 return new ImageQualityResult(false, image.getWidth(), image.getHeight(), 0,
                         "Image resolution is too low");
             }
+            Exposure exposure = exposure(image);
+            if (exposure.mean() < 42) {
+                return new ImageQualityResult(false, image.getWidth(), image.getHeight(), 0,
+                        "Image is too dark; retake it in even, natural light");
+            }
+            if (exposure.mean() > 235 || (exposure.highlightRatio() > 0.85 && exposure.standardDeviation() < 30)) {
+                return new ImageQualityResult(false, image.getWidth(), image.getHeight(), 0,
+                        "Image has excessive glare or overexposure; tilt the document away from direct light");
+            }
+            if (exposure.standardDeviation() < 24) {
+                return new ImageQualityResult(false, image.getWidth(), image.getHeight(), 0,
+                        "Document contrast is too low; place it on a plain surface and retake the image");
+            }
             double sharpness = laplacianVariance(image);
             if (sharpness < minSharpness) {
                 return new ImageQualityResult(false, image.getWidth(), image.getHeight(), sharpness,
@@ -65,4 +78,24 @@ public class DocumentQualityService {
     private int gray(int rgb) {
         return (int) (0.299 * ((rgb >> 16) & 255) + 0.587 * ((rgb >> 8) & 255) + 0.114 * (rgb & 255));
     }
+
+    private Exposure exposure(BufferedImage image) {
+        int step = Math.max(1, Math.min(image.getWidth(), image.getHeight()) / 600);
+        double sum = 0, sumSq = 0;
+        long highlights = 0, count = 0;
+        for (int y = 0; y < image.getHeight(); y += step) {
+            for (int x = 0; x < image.getWidth(); x += step) {
+                int value = gray(image.getRGB(x, y));
+                sum += value; sumSq += (double) value * value;
+                if (value >= 248) highlights++;
+                count++;
+            }
+        }
+        if (count == 0) return new Exposure(0, 0, 0);
+        double mean = sum / count;
+        double deviation = Math.sqrt(Math.max(0, sumSq / count - mean * mean));
+        return new Exposure(mean, deviation, (double) highlights / count);
+    }
+
+    private record Exposure(double mean, double standardDeviation, double highlightRatio) { }
 }

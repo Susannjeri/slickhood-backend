@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.Optional;
+import java.util.List;
 
 public interface PropertyRepo extends JpaRepository<Property, Long>,  JpaSpecificationExecutor<Property> {
     Optional<Property> findByNameAndAddressAndCreatedBy(String name, String address, long createdBy);
@@ -42,6 +43,9 @@ public interface PropertyRepo extends JpaRepository<Property, Long>,  JpaSpecifi
             " (p.createdBy=:userId" +
             " OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active))")
     Optional<Property> findByIdAndStaffOrOwner(long id, long userId);
+
+    @Query("SELECT DISTINCT new org.pms.silverocean.service.wrappers.IdNameDescDTO(p.id,p.name,p.address) FROM Property p WHERE p.active AND (p.createdBy=:userId OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active)) ORDER BY p.name")
+    List<IdNameDescDTO> findAllWealthLinkableByUserId(long userId);
 
 
     @Query("SELECT new org.pms.silverocean.service.wrappers.IdNameDescDTO(u.id, u.fullName) FROM Users u INNER JOIN Property p ON u.id = p.createdBy")
