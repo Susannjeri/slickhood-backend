@@ -265,6 +265,8 @@ public class PropertyService {
             if (unit.getId() != unitId) {
                 throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
             }
+        } else if (unitDao.findByIdAndStaffOrOwnerOrTenant(unitId, userDao.getUserId()).isEmpty()) {
+            throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
         }
         List<FormattedUnitChargesDTO> unitCharges = unitDao.getUnitCharges(unitId)
                 .stream().map(unitCharge -> new FormattedUnitChargesDTO(unitCharge.getId(), unitCharge.getCreatedOn(),
@@ -338,14 +340,19 @@ public class PropertyService {
     }
 
     public ResponseDTO editUnit(long unitId, UnitDTO unitDTO, MultipartFile image) {
-        Property property = null;
-        if (image != null && image.getSize() > 0) {
-            Pair<ResponseDTO, Property> validationResult = validateUnitAndImage(unitDTO, image);
-            if (validationResult.getLeft() != null) {
-                return validationResult.getLeft();
-            }
-            property = validationResult.getRight();
+        Optional<Property> targetProperty = propertyDao.findByIdAndCreatedBy(unitDTO.propertyId(), userDao.getUserId());
+        if (targetProperty.isEmpty()) {
+            return new ResponseDTO(false, ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY));
         }
+
+        if (image != null && image.getSize() > 0) {
+            Optional<ResponseDTO> imageValidationError = validateImage(image);
+            if (imageValidationError.isPresent()) {
+                return imageValidationError.get();
+            }
+        }
+        Property property = targetProperty.get();
 
         //get unit from db
         Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
@@ -405,6 +412,9 @@ public class PropertyService {
     }
 
     public List<PropertyManagerDetailsDTO> listUnitLandlordAndManagers(long unitId) {
+        if (unitDao.findByIdAndStaffOrOwnerOrTenant(unitId, userDao.getUserId()).isEmpty()) {
+            throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
+        }
         List<PropertyManagerDetailsDTO> propertyManagers = unitDao.findPropertyManagersByUnit(unitId).stream()
                 .map(user -> new PropertyManagerDetailsDTO(user.getFullName(), user.getPhoneNumber(), user.getEmail(), PMSRole.PROPERTY_MANAGER.getName())).toList();
         Users landlordDetails = unitDao.getLandlordDetails(unitId);
