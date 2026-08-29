@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Lease Agreement</title>
+    <style>
+        /* lora-regular - latin */
+        @font-face {
+            font-family: 'Lora';
+            font-style: normal;
+            font-weight: 400;
+            src: url('classpath:/static/fonts/lora-v37-latin-regular.ttf') format('truetype'); /* Chrome 4+, Firefox 3.5+, IE 9+, Safari 3.1+, iOS 4.2+, Android Browser 2.2+ */
+        }
+
+        /* lora-500 - latin */
+        @font-face {
+            font-family: 'Lora';
+            font-style: normal;
+            font-weight: 500;
+            src: url('classpath:/static/fonts/lora-v37-latin-500.ttf') format('truetype'); /* Chrome 4+, Firefox 3.5+, IE 9+, Safari 3.1+, iOS 4.2+, Android Browser 2.2+ */
+        }
+
+        /* lora-600 - latin */
+        @font-face {
+            font-family: 'Lora';
+            font-style: normal;
+            font-weight: 600;
+            src: url('classpath:/static/fonts/lora-v37-latin-600.ttf') format('truetype'); /* Chrome 4+, Firefox 3.5+, IE 9+, Safari 3.1+, iOS 4.2+, Android Browser 2.2+ */
+        }
+
+        /* outfit-regular - latin */
+        @font-face {
+            font-family: 'Outfit';
+            font-style: normal;
+            font-weight: 400;
+            src: url('classpath:/static/fonts/outfit-v15-latin-regular.ttf') format('truetype'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+        }
+
+        /* outfit-500 - latin */
+        @font-face {
+            font-family: 'Outfit';
+            font-style: normal;
+            font-weight: 500;
+            src: url('classpath:/static/fonts/outfit-v15-latin-500.ttf') format('truetype'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+        }
+
+        /* outfit-600 - latin */
+        @font-face {
+            font-family: 'Outfit';
+            font-style: normal;
+            font-weight: 600;
+            src: url('classpath:/static/fonts/outfit-v15-latin-600.ttf') format('truetype'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+        }
+
+        @page {
+            size: A4; margin: 20mm;
+
+            @bottom-right {
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 10pt;
+                color: #555;
+            }
+        }
+
+        body {
+            font-family: 'Lora', serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.7;
+            color: #2c3e50;
+            page-break-inside: auto;
+        }
+
+        .container {
+            background-color: white;
+            padding: 40px;
+            border: 1px solid #ddd;
+            page-break-inside: auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #000;
+            padding-bottom: 20px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .parties {
+            margin-bottom: 30px;
+        }
+
+        .party {
+            margin-bottom: 15px;
+        }
+
+        .party-label {
+            font-weight: bold;
+            display: inline-block;
+            width: 120px;
+        }
+
+        .section {
+            margin-bottom: 25px;
+            page-break-inside: avoid;
+        }
+
+        .section-title {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-decoration: underline;
+            page-break-after: avoid;
+        }
+
+        .section-content {
+            margin-left: 20px;
+            text-align: justify;
+        }
+
+        .term-item {
+            margin-bottom: 10px;
+        }
+
+        .signature-section {
+            margin-top: 50px;
+            border-top: 1px solid #000;
+            padding-top: 30px;
+            page-break-before: always;
+        }
+
+        .signature-line {
+            display: inline-block;
+            width: 45%;
+            margin-right: 5%;
+            margin-bottom: 40px;
+        }
+
+        .signature-blank {
+            border-bottom: 1px solid #000;
+            height: 30px;
+            margin-bottom: 5px;
+        }
+
+        .signature-name {
+            font-size: 12px;
+        }
+
+        .date-line {
+            margin-top: 20px;
+        }
+
+        .highlight {
+            font-weight: bold;
+        }
+
+        @media print {
+            body {
+                margin: 0;
+                padding: 0;
+                background-color: white;
+            }
+
+            .container {
+                border: none;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>{{^leaseAccepted}}
+            DRAFT {{/leaseAccepted}}{{#isRental}}
+            RESIDENTIAL LEASE AGREEMENT{{/isRental}}{{^isRental}}PROPERTY SALE AGREEMENT{{/isRental}}</h1>
+    </div>
+
+<!--    <div class="parties">-->
+
+<!--        <p>-->
+<!--            <span class="party-label">Landlord:</span> {{landlord_name}}<br/>-->
+<!--            <span class="party-label">Contact:</span> {{landlord_contact}}<br/>-->
+<!--        </p>-->
+
+<!--        <p style="margin-top: 15px;">-->
+<!--            <span class="party-label">Tenant:</span> {{tenant_name}}<br/>-->
+<!--            <span class="party-label">Contact:</span> {{tenant_contact}}<br/>-->
+<!--        </p>-->
+
+<!--        <p style="margin-top: 15px;">-->
+<!--            <span class="party-label">Property:</span> {{property_name}}<br/>-->
+<!--            <span class="party-label">Address:</span> {{property_address}}-->
+<!--        </p>-->
+<!--    </div>-->
+
+    {{#isRental}}
+        <div class="section">
+            <div class="section-title">1. PARTIES TO THE AGREEMENT</div>
+                <div class="section-content">
+                    <p>
+                        An agreement made on <span class="highlight">{{lease_date}}</span> between
+                        <span class="highlight">{{landlord_name}}</span> of Registration/ID No.
+                        <span class="highlight">{{landlord_id}}</span>, P.O. Box <span class="highlight">{{landlord_address}}</span>
+                        (hereinafter called “the Lessor”) of the one part, and
+                        <span class="highlight">{{tenant_name}}</span> of ID number <span class="highlight">{{tenant_id}}</span>,
+                        Telephone <span class="highlight">{{tenant_contact}}</span>, Email <span class="highlight">{{tenant_contact}}</span>,
+                        P.O. Box <span class="highlight">{{tenant_address}}</span> (hereinafter called “the Lessee/tenant”) of the other part.
+                    </p>
+                </div>
+            <div class="section-title">2. WHEREAS</div>
+            <div class="section-content">
+                <p>
+                    The Lessor is the owner of <span class="highlight">{{property_name}}</span>, Unit Number
+                    <span class="highlight">{{unit_number}}</span> located at <span class="highlight">{{property_address}}</span>, (Hereafter referred to
+                    as the ``lease property``)  AND WHEREAS the Lessor agrees to let and the Lessee agrees to take ALL
+                    THAT premises identified above,
+                </p>
+                {{#isSelfRenew}}
+                    <p>
+                        for a term of {{lease_duration}} months, commencing from {{move_in_date}}, and terminating on
+                        the day of {{move_out_date}}, (hereinafter called the "Tenancy period"). It shall self renew and
+                        continue until terminated in accordance with the provisions of this Lease.
+                    </p>
+                {{/isSelfRenew}}
+                {{^isSelfRenew}}
+                    <p>
+                        for a term of {{lease_duration}} months, commencing from {{move_in_date}}, and terminating on
+                        the day of {{move_out_date}}, (hereinafter called the "Tenancy period").
+                    </p>
+                {{/isSelfRenew}}
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">3. NOW THIS TENANCY AGREEMENT WITNESSETH </div>as follows: -
+            <div class="section-content">
+                <div class="section-title">3.1 Rent Payment</div>
+                <div class="term-item">
+                    The lessee shall pay a monthly rent of {{price}} payable monthly in advance by date {{rent_due_date}}
+                    day of the month without any deductions whatsoever OR only with prior AND mutual written agreement
+                    to the Landlord.
+
+<!--                    <span class="highlight">Monthly Rent:</span> The Tenant agrees to pay {{price}} per month, due-->
+<!--                    and payable on or before the {{rent_due_date}} day of each month.-->
+                    {{#hasCharges}}
+                        <div class="section-title">3.1.1 ADDITIONAL CHARGES</div>
+                        <div class="section-content">
+                            {{#hasSecurityDeposit}}
+                                <div class="term-item">
+                                    <span class="highlight">Security Deposit:</span>
+                                    Tenant shall deposit {{security_deposit}} prior to occupancy.
+                                    This deposit shall be held as security for the faithful performance of all terms of this Lease
+                                    and shall be refundable upon termination, less any lawful deductions.
+                                </div>
+                            {{/hasSecurityDeposit}}
+
+                            {{#hasLatePaymentFee}}
+                                <div class="term-item">
+                                    <span class="highlight">Late Fee:</span>
+                                    Any delays beyond the payment date of {{rent_due_date}} day of the month will attract a penalty
+                                    fee {{late_payment_fee}} per day until the amount is paid in full (“Late Fee”).
+                                </div>
+                            {{/hasLatePaymentFee}}
+
+                            {{#hasServiceCharge}}
+                                <div class="term-item">
+                                    <span class="highlight">Service Charge:</span>
+                                    Tenant shall pay a {{service_charge_period}} service charge of {{service_charge_amount}}
+                                    covering shared utilities, maintenance of common areas, and other building services.
+                                </div>
+                            {{/hasServiceCharge}}
+
+                            {{#hasWaterFees}}
+                                <div class="term-item">
+                                    <span class="highlight">Water Fees:</span>
+                                    Tenant shall be responsible for water usage charges amounting to {{water_fee_amount}}
+                                    per {{water_fee_unit}} on a {{water_fee_period}} basis.
+                                    The landlord shall ensure accurate meter readings and fair billing.
+                                </div>
+                            {{/hasWaterFees}}
+
+                            {{#hasElectricityFees}}
+                                <div class="term-item">
+                                    <span class="highlight">Electricity Fees:</span>
+                                    Tenant shall pay for electricity consumption billed at {{electricity_fee_amount}}
+                                    per {{electricity_fee_unit}} on a {{electricity_fee_period}} basis.
+                                </div>
+                            {{/hasElectricityFees}}
+
+                            {{#hasGarbageFees}}
+                                <div class="term-item">
+                                    <span class="highlight">Garbage Collection Fees:</span>
+                                    Tenant shall pay {{garbage_fee_amount}} on a {{garbage_fee_period}} basis
+                                    for waste collection and disposal services.
+                                </div>
+                            {{/hasGarbageFees}}
+
+                            {{#hasSecurityFees}}
+                                <div class="term-item">
+                                    <span class="highlight">Security Fees:</span>
+                                    Tenant shall pay {{security_fee_amount}} on a {{security_fee_period}} basis
+                                    toward on-site security services and surveillance.
+                                </div>
+                            {{/hasSecurityFees}}
+
+                            {{#hasParkingFees}}
+                                <div class="term-item">
+                                    <span class="highlight">Parking Fees:</span>
+                                    Tenant shall pay {{parking_fee_amount}} on a {{parking_fee_period}} basis
+                                    {{#parking_fee_unit}}per {{parking_fee_unit}}{{/parking_fee_unit}}
+                                    for the use of parking space(s) assigned under this Lease.
+                                </div>
+                            {{/hasParkingFees}}
+
+                        </div>
+                    {{/hasCharges}}
+                </div>
+            </div>
+        </div>
+    {{/isRental}}
+
+    {{^isRental}}
+        <div class="section">
+            <div class="section-title">1. SALE AGREEMENT</div>
+            <div class="section-content">
+                <p>This agreement represents the sale of unit {{unit_ref}} located at {{property_name}}
+                    , {{property_address}} between {{landlord_name}} (the Seller) and {{tenant_name}} (the Buyer).</p>
+                <p>The agreed sale amount is <span class="highlight">{{price}}</span>. The Buyer agrees to pay the
+                    amount according to the mutually agreed payment schedule.</p>
+            </div>
+        </div>
+    {{/isRental}}
+
+    {{#hasCharges}}
+        <div class="section">
+            <div class="section-title">{{#isRental}}
+                3.1.1 ADDITIONAL CHARGES{{/isRental}}{{^isRental}}2. CHARGES AND FEES{{/isRental}}</div>
+            <div class="section-content">
+                {{#hasSecurityDeposit}}
+                    <div class="term-item">
+                        <span class="highlight">Security Deposit:</span>
+                        Tenant shall deposit {{security_deposit}} prior to occupancy.
+                        This deposit shall be held as security for the faithful performance of all terms of this Lease
+                        and shall be refundable upon termination, less any lawful deductions.
+                    </div>
+                {{/hasSecurityDeposit}}
+
+                {{#hasLatePaymentFee}}
+                    <div class="term-item">
+                        <span class="highlight">Late Fee:</span>
+                        Any delays beyond the payment date of {{rent_due_date}} day of the month will attract a penalty
+                        fee {{late_payment_fee}} per day until the amount is paid in full (“Late Fee”).
+                    </div>
+                {{/hasLatePaymentFee}}
+
+                {{#hasServiceCharge}}
+                    <div class="term-item">
+                        <span class="highlight">Service Charge:</span>
+                        Tenant shall pay a {{service_charge_period}} service charge of {{service_charge_amount}}
+                        covering shared utilities, maintenance of common areas, and other building services.
+                    </div>
+                {{/hasServiceCharge}}
+
+                {{#hasWaterFees}}
+                    <div class="term-item">
+                        <span class="highlight">Water Fees:</span>
+                        Tenant shall be responsible for water usage charges amounting to {{water_fee_amount}}
+                        per {{water_fee_unit}} on a {{water_fee_period}} basis.
+                        The landlord shall ensure accurate meter readings and fair billing.
+                    </div>
+                {{/hasWaterFees}}
+
+                {{#hasElectricityFees}}
+                    <div class="term-item">
+                        <span class="highlight">Electricity Fees:</span>
+                        Tenant shall pay for electricity consumption billed at {{electricity_fee_amount}}
+                        per {{electricity_fee_unit}} on a {{electricity_fee_period}} basis.
+                    </div>
+                {{/hasElectricityFees}}
+
+                {{#hasGarbageFees}}
+                    <div class="term-item">
+                        <span class="highlight">Garbage Collection Fees:</span>
+                        Tenant shall pay {{garbage_fee_amount}} on a {{garbage_fee_period}} basis
+                        for waste collection and disposal services.
+                    </div>
+                {{/hasGarbageFees}}
+
+                {{#hasSecurityFees}}
+                    <div class="term-item">
+                        <span class="highlight">Security Fees:</span>
+                        Tenant shall pay {{security_fee_amount}} on a {{security_fee_period}} basis
+                        toward on-site security services and surveillance.
+                    </div>
+                {{/hasSecurityFees}}
+
+                {{#hasParkingFees}}
+                    <div class="term-item">
+                        <span class="highlight">Parking Fees:</span>
+                        Tenant shall pay {{parking_fee_amount}} on a {{parking_fee_period}} basis
+                        {{#parking_fee_unit}}per {{parking_fee_unit}}{{/parking_fee_unit}}
+                        for the use of parking space(s) assigned under this Lease.
+                    </div>
+                {{/hasParkingFees}}
+
+            </div>
+        </div>
+    {{/hasCharges}}
+    {{^isRental}}
+        <div class="section">
+            <div class="section-title">3. TRANSFER OF OWNERSHIP</div>
+            <div class="section-content">
+                <p>Upon full payment of the sale amount, ownership shall transfer to the Buyer, and the Seller shall
+                    execute all relevant documents to facilitate this transfer.</p>
+            </div>
+        </div>
+    {{/isRental}}
+    
+
+    <div class="section">
+        <div class="section-title">4. USE OF PROPERTY</div>
+        <div class="section-content">
+            <p>The property shall be used solely as a {{property_type}} unit. Tenant shall not use the property for any
+                illegal purpose or engage in any activity that violates applicable local, state, or federal laws. Tenant
+                shall not create a nuisance or maintain a condition that interferes with other residents' quiet
+                enjoyment of their spaces.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">5. PETS</div>
+        <div class="section-content">
+            <p>{{pets_policy}}</p>
+        </div>
+    </div>
+    {{#isRental}}
+        <div class="section">
+            <div class="section-title">6. LEASE TERMINATION AND NOTICE</div>
+            <div class="section-content">
+                <p>Either party may terminate this Lease by providing {{notice_period}} months written notice to the
+                    other
+                    party. Notice must be delivered in person, by message, or by email.{{^isSelfRenew}}
+                        Tenant must vacate the property and
+                        return all keys on or before {{move_out_date}}.{{/isSelfRenew}} Property must be left in clean,
+                    undamaged condition
+                    (normal wear and tear excepted).</p>
+            </div>
+        </div>
+        <div class="section">
+            <div class="section-title">7. SECURITY DEPOSIT RETURN</div>
+            <div class="section-content">
+                <p>The Landlord shall return the security deposit within {{deposit_return_days}} days of the lease
+                    termination date, less any deductions for unpaid rent, damages beyond normal wear and tear, or
+                    cleaning
+                    costs. The Landlord shall provide an itemized list of any deductions.</p>
+            </div>
+        </div>
+        <div class="section">
+            <div class="section-title">8. MAINTENANCE AND REPAIRS</div>
+            <div class="section-content">
+                <p>Tenant shall maintain the property in clean and sanitary condition. Tenant shall be responsible for
+                    minor
+                    repairs and maintenance costing less than {{repair_threshold}}. The Landlord shall be responsible
+                    for
+                    major repairs, structural issues, and repairs costing {{repair_threshold}} or more. Tenant shall
+                    promptly report any maintenance issues to the Landlord.</p>
+            </div>
+        </div>
+        <div class="section">
+            <div class="section-title">9. ENTRY AND INSPECTION</div>
+            <div class="section-content">
+                <p>The Landlord shall have the right to enter the property upon {{entry_notice_days}} days written
+                    notice
+                    for purposes of inspection, maintenance, repairs, or showing to prospective tenants or buyers. Entry
+                    shall occur during reasonable business hours except in case of emergency.</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">10. DEFAULT AND EVICTION</div>
+            <div class="section-content">
+                <p>If Tenant fails to pay rent when due, violates any material term of this Lease, or engages in illegal
+                    activity on the premises, Tenant shall be in default. Upon default, the Landlord may pursue legal
+                    remedies including eviction proceedings. Tenant shall be responsible for all court costs and
+                    attorney
+                    fees associated with eviction.</p>
+            </div>
+        </div>
+    {{/isRental}}
+
+    <div class="section">
+        <div class="section-title">{{#isRental}}
+            11. ENTIRE AGREEMENT{{/isRental}}{{^isRental}}6. ENTIRE AGREEMENT{{/isRental}}</div>
+        <div class="section-content">
+            <p>This Lease constitutes the entire agreement between the parties and supersedes all prior negotiations,
+                representations, and agreements. No modifications shall be valid unless in writing and signed by both
+                parties.</p>
+        </div>
+    </div>
+
+    <div class="signature-section">
+        <div class="signature-line">
+            <div class="signature-blank"></div>
+            <div class="signature-name">Landlord Signature</div>
+            <div class="date-line">
+                <span class="highlight">Date:</span> _____________________
+            </div>
+        </div>
+        <div class="signature-line">
+            <div class="signature-blank"></div>
+            <div class="signature-name">Tenant Signature</div>
+            <div class="date-line">
+                <span class="highlight">Date:</span> _____________________
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

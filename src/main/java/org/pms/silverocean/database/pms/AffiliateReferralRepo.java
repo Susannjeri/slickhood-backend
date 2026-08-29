@@ -1,0 +1,3 @@
+package org.pms.silverocean.database.pms;
+import org.pms.silverocean.database.pms.entities.AffiliateReferral;import org.springframework.data.jpa.repository.JpaRepository;import java.util.List;import java.util.Optional;
+public interface AffiliateReferralRepo extends JpaRepository<AffiliateReferral,Long>{Optional<AffiliateReferral> findByReferredUserIdAndActiveTrue(long userId);List<AffiliateReferral> findAllByAffiliateUserIdAndActiveTrueOrderByCreatedOnDesc(long affiliateUserId);long countByAffiliateUserIdAndActiveTrue(long id);long countByAffiliateUserIdAndStatusAndActiveTrue(long id,String status);}

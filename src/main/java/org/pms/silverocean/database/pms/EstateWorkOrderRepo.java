@@ -1,0 +1,1 @@
+package org.pms.silverocean.database.pms;import org.pms.silverocean.database.pms.entities.EstateWorkOrder;import org.springframework.data.jpa.repository.JpaRepository;import java.util.List;public interface EstateWorkOrderRepo extends JpaRepository<EstateWorkOrder,Long>{List<EstateWorkOrder>findAllByPropertyIdAndActiveTrueOrderByCreatedOnDesc(long propertyId);}

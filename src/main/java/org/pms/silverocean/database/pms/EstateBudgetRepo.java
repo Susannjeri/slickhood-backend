@@ -1,0 +1,1 @@
+package org.pms.silverocean.database.pms;import org.pms.silverocean.database.pms.entities.EstateBudget;import org.springframework.data.jpa.repository.JpaRepository;import java.util.List;public interface EstateBudgetRepo extends JpaRepository<EstateBudget,Long>{List<EstateBudget>findAllByPropertyIdAndActiveTrueOrderByBudgetYearDesc(long propertyId);}

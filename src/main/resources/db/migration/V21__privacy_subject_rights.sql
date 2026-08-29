@@ -1,0 +1,23 @@
+CREATE TABLE pms_privacy_request (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    uuid BINARY(16) NOT NULL,
+    created_on DATETIME(6),
+    active BIT NOT NULL,
+    created_by BIGINT,
+    last_modified_date DATETIME(6),
+    user_id BIGINT NOT NULL,
+    request_type VARCHAR(30) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    reason VARCHAR(1000),
+    due_at DATETIME(6) NOT NULL,
+    legal_hold BIT NOT NULL DEFAULT 0,
+    retention_basis VARCHAR(1000),
+    reviewer_notes VARCHAR(2000),
+    result_reference VARCHAR(500),
+    reviewed_by BIGINT,
+    reviewed_at DATETIME(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_privacy_request_uuid (uuid),
+    KEY idx_privacy_request_user (user_id, status, active),
+    KEY idx_privacy_request_due (status, due_at, active)
+);

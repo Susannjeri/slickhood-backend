@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Invoice - {{invoiceRef}}</title>
+    <style>
+        /* Reusing your font-face definitions */
+        @font-face {
+            font-family: 'Lora';
+            font-style: normal;
+            font-weight: 400;
+            src: url('classpath:/static/fonts/lora-v37-latin-regular.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Outfit';
+            font-style: normal;
+            font-weight: 600;
+            src: url('classpath:/static/fonts/outfit-v15-latin-600.ttf') format('truetype');
+        }
+
+        @page {
+            size: A4;
+            @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #7f8c8d; }
+        }
+
+        body {
+            font-family: 'Lora', serif;
+            color: #2c3e50;
+            line-height: 1.4;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            background-color: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+            /*max-width: 800px;*/
+            /*margin: 20px auto;*/
+        }
+
+        .header-table {
+            width: 100%;
+            border-bottom: 2px solid #2c3e50;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        .invoice-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 28px;
+            text-transform: uppercase;
+            color: #2c3e50;
+        }
+
+        .info-section {
+            width: 100%;
+            margin-bottom: 40px;
+        }
+
+        .info-box {
+            vertical-align: top;
+            width: 50%;
+        }
+
+        .label {
+            font-family: 'Outfit', sans-serif;
+            font-size: 10pt;
+            text-transform: uppercase;
+            color: #7f8c8d;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .value {
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        /* Items Table */
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 30px;
+        }
+
+        .items-table th {
+            font-family: 'Outfit', sans-serif;
+            background-color: #f8f9fa;
+            text-align: left;
+            padding: 12px;
+            border-bottom: 2px solid #dee2e6;
+            font-size: 11pt;
+        }
+
+        .items-table td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            vertical-align: top;
+        }
+
+        .amount-col {
+            text-align: right;
+            width: 120px;
+        }
+
+        .totals-section {
+            float: right;
+            width: 250px;
+        }
+
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+        }
+
+        .grand-total {
+            border-top: 2px solid #2c3e50;
+            font-family: 'Outfit', sans-serif;
+            font-size: 16pt;
+            margin-top: 10px;
+            padding-top: 10px;
+        }
+
+        .footer-note {
+            margin-top: 100px;
+            font-size: 10pt;
+            color: #7f8c8d;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+        }
+
+        .stamp {
+            border: 3px solid #e74c3c;
+            color: #e74c3c;
+            display: inline-block;
+            padding: 5px 15px;
+            font-family: 'Outfit', sans-serif;
+            text-transform: uppercase;
+            border-radius: 5px;
+            transform: rotate(-5deg);
+            opacity: 0.8;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <table class="header-table">
+        <tr>
+            <td>
+                <div class="invoice-title">Invoice</div>
+                <div style="font-size: 12pt; color: #7f8c8d;">Ref: {{invoiceRef}}</div>
+            </td>
+            <td style="text-align: right;">
+                <div class="value">{{propertyName}}</div>
+                <div style="font-size: 10pt;">{{propertyAddress}}</div>
+            </td>
+        </tr>
+    </table>
+
+    <table class="info-section">
+        <tr>
+            <td class="info-box">
+                <span class="label">Billed To:</span>
+                <span class="value">{{customerName}}</span>
+                <div style="font-size: 10pt;">
+                    {{customerEmail}}<br/>
+                    {{customerPhone}}<br/>
+                    Unit: {{unitRef}}
+                </div>
+            </td>
+            <td class="info-box" style="text-align: right;">
+                <span class="label">Date Issued:</span>
+                <span class="value">{{dateIssued}}</span>
+
+                <span class="label">Due Date:</span>
+                <span class="value">{{dueDate}}</span>
+            </td>
+        </tr>
+    </table>
+
+    <table class="items-table">
+        <thead>
+        <tr>
+            <th>Description</th>
+            <th class="amount-col">Amount ({{currency}})</th>
+        </tr>
+        </thead>
+        <tbody>
+        {{{descriptionHtml}}}
+        </tbody>
+    </table>
+
+    <div class="totals-section">
+        <div class="total-row grand-total">
+            <span>Total:</span>
+            <span>{{currency}} {{totalAmount}}</span>
+        </div>
+
+        {{#isPaid}}
+            <div class="stamp">Paid</div>
+        {{/isPaid}}
+    </div>
+
+    <div style="clear: both;"></div>
+
+    <div class="footer-note">
+        <span class="label">Payment Instructions:</span>
+        <p>Please use <strong>{{invoiceRef}}</strong> as your payment reference.
+            Payments should be made to {{propertyName}}. Login to your SlickHood account and complete the Payment on the Payments Tab</p>
+        <p style="text-align: center; margin-top: 30px;">Thank you for your prompt payment!</p>
+    </div>
+</div>
+
+</body>
+</html>

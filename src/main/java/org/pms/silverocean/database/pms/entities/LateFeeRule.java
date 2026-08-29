@@ -1,0 +1,3 @@
+package org.pms.silverocean.database.pms.entities;
+import jakarta.persistence.*;import lombok.Getter;import lombok.Setter;import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;import java.math.BigDecimal;
+@Entity @Table(name="pms_late_fee_rule",uniqueConstraints=@UniqueConstraint(name="uk_late_fee_rule_lease",columnNames="leaseId")) @Getter @Setter public class LateFeeRule extends BaseCreatorEntity{private long leaseId;@Column(nullable=false,precision=19,scale=2)private BigDecimal flatAmount=BigDecimal.ZERO;@Column(nullable=false,precision=8,scale=4)private BigDecimal percentageRate=BigDecimal.ZERO;private int graceDays;@Column(precision=19,scale=2)private BigDecimal maximumAmount;private boolean enabled=true;}

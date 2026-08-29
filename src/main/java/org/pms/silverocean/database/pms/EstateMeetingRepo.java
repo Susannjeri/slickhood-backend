@@ -1,0 +1,1 @@
+package org.pms.silverocean.database.pms;import org.pms.silverocean.database.pms.entities.EstateMeeting;import org.springframework.data.jpa.repository.JpaRepository;import java.util.List;public interface EstateMeetingRepo extends JpaRepository<EstateMeeting,Long>{List<EstateMeeting>findAllByPropertyIdAndActiveTrueOrderByScheduledAtDesc(long propertyId);}

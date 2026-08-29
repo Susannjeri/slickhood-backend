@@ -1,0 +1,1 @@
+package org.pms.silverocean.database.pms;import org.pms.silverocean.database.pms.entities.LateFeeRule;import org.springframework.data.jpa.repository.JpaRepository;import java.util.Optional;public interface LateFeeRuleRepo extends JpaRepository<LateFeeRule,Long>{Optional<LateFeeRule> findByLeaseIdAndActiveTrue(long leaseId);}

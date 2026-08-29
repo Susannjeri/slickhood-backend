@@ -1,0 +1,9 @@
+services:
+  main-app:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "${SERVER_PORT}:8989"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
