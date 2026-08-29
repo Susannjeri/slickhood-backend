@@ -40,7 +40,10 @@ import static org.mockito.Mockito.when;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect",
         "helpdesk.ai.enabled=false",
-        "lease.documents.legal-review-required=true"
+        "lease.documents.legal-review-required=true",
+        "garage.s3.access.key=test-access-key",
+        "garage.s3.secret.key=test-secret-key",
+        "garage.bootstrap.enabled=false"
 })
 @Transactional
 class RentalPaymentMySqlIT {
