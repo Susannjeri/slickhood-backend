@@ -2,7 +2,7 @@ name: Build and Deploy PMS to RHEL
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "main", "master" ]
 
 jobs:
   build-and-deploy:
