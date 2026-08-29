@@ -260,7 +260,13 @@ public class KycService {
     }
 
     private byte[] validateAndRead(MultipartFile file) throws Exception {
-        if (file == null || file.isEmpty() || file.getSize() > maxFileBytes || !ALLOWED_TYPES.contains(file.getContentType())) {
+        if (file == null || file.isEmpty()) {
+            throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
+        }
+        if (file.getSize() > maxFileBytes) {
+            throw new PMSCustomException(ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED);
+        }
+        if (!ALLOWED_TYPES.contains(file.getContentType())) {
             throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
         }
         byte[] bytes = file.getBytes();
