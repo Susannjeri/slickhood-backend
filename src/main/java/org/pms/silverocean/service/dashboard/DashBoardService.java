@@ -79,7 +79,8 @@ public class DashBoardService {
         return switch (activeRole) {
             case LANDLORD -> buildLandlordDto().thenApply(dto -> (ReportDto) dto);
             case SERVICE_PROVIDER -> buildServiceProviderDto().thenApply(dto -> (ReportDto) dto);
-            case ASSET_PORTFOLIO_MANAGER, AFFILIATE, FINANCE -> CompletableFuture.failedFuture(new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE));
+            case ASSET_PORTFOLIO_MANAGER, AFFILIATE -> CompletableFuture.failedFuture(new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE));
+            case SUPPORT, SALES_MARKETING, FINANCE -> buildInternalStaffDto(activeRole).thenApply(dto -> (ReportDto) dto);
             case TENANT -> buildTenantDto().thenApply(dto -> (ReportDto) dto);
             case PROPERTY_MANAGER -> buildPropertyManagerDto().thenApply(dto -> (ReportDto) dto);
             case ESTATE_MANAGER -> buildEstateManagerDto().thenApply(dto -> (ReportDto) dto);
@@ -90,6 +91,12 @@ public class DashBoardService {
             case GUARD -> buildGuardDto().thenApply(dto -> (ReportDto) dto);
             case SUPER_ADMIN -> buildSuperAdminDto().thenApply(dto -> (ReportDto) dto);
         };
+    }
+
+    private CompletableFuture<BusinessRoleDashboardDto> buildInternalStaffDto(PMSRole role) {
+        return CompletableFuture.completedFuture(new BusinessRoleDashboardDto(role.name(),
+                0, 0, 0, 0,
+                "Assigned work", "Awaiting action", "Completed today", "Escalations"));
     }
 
     private CompletableFuture<BusinessRoleDashboardDto> buildInsuranceDto(PMSRole role) {

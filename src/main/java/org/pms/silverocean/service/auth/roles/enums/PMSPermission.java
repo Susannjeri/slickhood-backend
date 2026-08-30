@@ -35,6 +35,7 @@ import static org.pms.silverocean.service.auth.roles.enums.Permission.EDIT_UNIT;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.EDIT_UNIT_CHARGES;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.LIST_LEASE_TEMPLATE;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.LIST_USERS;
+import static org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_INTERNAL_STAFF;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.RECORD_MANUAL_PAYMENT;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.REGISTER_VISITOR;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.ROTATE_KEY;
@@ -211,9 +212,11 @@ public enum PMSPermission {
             MANAGE_INSURANCE_PAYMENT_CONFIG, VERIFY_INSURANCE_PAYMENTS, ISSUE_INSURANCE_POLICIES,
             VIEW_INSURANCE_REPORTS, CREATE_ACCOUNT, EDIT_ACCOUNT, VIEW_ACCOUNT, DELETE_ACCOUNT,
             DECRYPT_ACCOUNT_PROPERTY)),
+    SUPPORT(PMSRole.SUPPORT, Set.of(LIST_USERS, VIEW_NOTIFICATIONS)),
+    SALES_MARKETING(PMSRole.SALES_MARKETING, Set.of(VIEW_PROPERTY_LIST, VIEW_SP_LIST, VIEW_SUBSCRIPTION_PLAN)),
     FINANCE(PMSRole.FINANCE, Set.of(VIEW_INVOICE_LIST, VIEW_INVOICE_PDF, VIEW_PAYMENT_LIST, VIEW_UNIT_LIST, VIEW_PROPERTY_LIST)),
     GUARD(PMSRole.GUARD, Set.of(VIEW_VISITOR_LIST, UPDATE_VISITOR_STATUS, VIEW_GATE_EVENTS)),
-    SUPER_ADMIN(PMSRole.SUPER_ADMIN, Set.of(LIST_USERS, VIEW_AUDIT_LOGS, VIEW_CONFIG, EDIT_CONFIG, VERIFY_PARAM,
+    SUPER_ADMIN(PMSRole.SUPER_ADMIN, Set.of(LIST_USERS, MANAGE_INTERNAL_STAFF, VIEW_AUDIT_LOGS, VIEW_CONFIG, EDIT_CONFIG, VERIFY_PARAM,
             VIEW_ALL_PARAMS, VIEW_NOTIFICATIONS, ROTATE_KEY, VIEW_INVOICE_LIST, VIEW_INVOICE_PDF,
             VIEW_PROPERTY_LANDLORDS, VIEW_PROPERTY_TENANTS, VIEW_UNIT_LIST, VIEW_PROPERTY_LIST,
             CREATE_SUBSCRIPTION_PLAN, EDIT_SUBSCRIPTION_PLAN, VIEW_SUBSCRIPTION_PLAN,

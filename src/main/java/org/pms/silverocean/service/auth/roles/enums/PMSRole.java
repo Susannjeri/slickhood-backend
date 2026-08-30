@@ -21,6 +21,8 @@ public enum PMSRole {
     BUYER("Buyer", "Reviews a property purchase, offer, due diligence, payments and handover", false),
     INSURANCE_ADVISER("InsuranceAdviser", "Authorised Silverwood adviser who reviews insurance applications, quotations, claims and renewals", false),
     INSURANCE_MANAGER("InsuranceManager", "Authorised Silverwood manager who maintains insurers, payment destinations and policy operations", false),
+    SUPPORT("Support", "SlickHood support staff who assist users and manage help-desk cases", false),
+    SALES_MARKETING("SalesMarketing", "SlickHood sales and marketing staff", false),
     FINANCE("Finance", "", false),
     GUARD("Guard", "Manages live check-ins and check-outs at property gates", false),
     SUPER_ADMIN("Superadmin", "Maintains functionality of the application", false);

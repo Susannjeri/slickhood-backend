@@ -223,6 +223,53 @@ class RoleServiceTest {
     }
 
     @Test
+    void assignRoleFromInvite_emailBoundInvite_rejectsDifferentUser() {
+        Invite invite = new Invite();
+        invite.setRecipient("intended@example.com");
+        Users forwardedLinkUser = new Users();
+        forwardedLinkUser.setEmail("different@example.com");
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class,
+                () -> roleService.assignRoleFromInvite(invite, null, forwardedLinkUser));
+
+        assertEquals(ResponseCode.INVALID_USER_DETAILS, exception.getResponseCode());
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+    }
+
+    @Test
+    void assignRoleFromInvite_internalStaffInvite_isOneTimeAndNotPropertyScoped() {
+        Role supportRole = new Role(PMSRole.SUPPORT.getName(), PMSRole.SUPPORT.getDescription(), false);
+        supportRole.setId(9L);
+        supportRole.setActive(true);
+        Invite invite = new Invite();
+        invite.setId(30L);
+        invite.setRoleId(supportRole.getId());
+        invite.setCreatedBy(999L);
+        invite.setType(InviteType.USER.name());
+        invite.setRecipient("staff@example.com");
+        invite.setActive(true);
+        Users assignor = new Users();
+        assignor.setId(999L);
+        assignor.setEmail("admin@example.com");
+        Users staff = new Users();
+        staff.setId(50L);
+        staff.setEmail("staff@example.com");
+
+        when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
+        when(roleRepo.findByIdAndActive(9L)).thenReturn(Optional.of(supportRole));
+        when(roleRepo.findById(9L)).thenReturn(Optional.of(supportRole));
+        when(userDao.findByEmail(staff.getEmail())).thenReturn(Optional.of(staff));
+        when(userRoleRepo.findByUserIdAndRoleId(staff.getId(), supportRole.getId())).thenReturn(0);
+
+        ResponseDTO response = roleService.assignRoleFromInvite(invite, null, staff);
+
+        assertTrue(response.isSuccess());
+        assertFalse(invite.isActive());
+        verify(inviteDao).updateInvite(invite);
+        verify(propertyManagerService, never()).addStaffToProperty(anyLong(), anyLong(), anyLong(), any(PMSRole.class));
+    }
+
+    @Test
     void assignRoleFromInvite_nonSelfAssignableRole_failure() {
 
         Invite invite = new Invite();

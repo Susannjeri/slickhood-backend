@@ -26,6 +26,8 @@ public class Invite extends BaseCreatorEntity implements Auditable {
     private String type;
     @Column(columnDefinition = "BIGINT DEFAULT NULL")
     private Long roleId;
+    @Column(length = 254)
+    private String recipient;
     private String token;
     private LocalDateTime expiryDate;
     private int visits = 0;
@@ -34,12 +36,12 @@ public class Invite extends BaseCreatorEntity implements Auditable {
     public String toAuditJSON() {
         return "{" +
                 "\"id\":" + getId() + "," +
-                "\"token\":\"" + token + "\"," +
                 "\"expiryDate\":\"" + expiryDate + "\"," +
                 "\"visits\":" + visits + "," +
                 "\"entityId\":" + getEntityId() + "," +
                 "\"type\":\"" + type + "\"," +
                 "\"invitedRoleId\":\"" + roleId + "\"," +
+                "\"recipient\":\"" + recipient + "\"," +
                 "\"createdOn\":\"" + getCreatedOn() + "\"," +
                 "\"createdBy\":" + getCreatedBy() + "," +
                 "\"updatedOn\":\"" + getLastModifiedDate() + "\"" +

@@ -170,17 +170,21 @@ public class RoleService {
     }
 
     public ResponseDTO assignRoleFromInvite(Invite invite, Long roleId, Users user) {
+        if (invite.getRecipient() != null && !invite.getRecipient().isBlank()
+                && !invite.getRecipient().equalsIgnoreCase(user.getEmail())) {
+            throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+        }
         String assignorEmail = userDao.findById(invite.getCreatedBy()).map(Users::getEmail).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
         ResponseDTO responseDTO = assignRole(invite.getRoleId() == null ? roleId : invite.getRoleId(), user.getEmail(), assignorEmail);
         if (responseDTO.isSuccess()) {
             invite.setVisits(invite.getVisits() + 1);
-            if (InviteType.valueOf(invite.getType()).isExpiresAfterUse()) {
+            if (InviteType.valueOf(invite.getType()).isExpiresAfterUse() || invite.getRoleId() != null) {
                 invite.setActive(false);
             }
             inviteDao.updateInvite(invite);
             roleRepo.findById(invite.getRoleId() == null ? roleId : invite.getRoleId()).ifPresent(role -> {
                 PMSRole pmsRole = PMSRole.roleFromSavedName(role.getName());
-                if (!pmsRole.isSelfAssignable()) {
+                if (!pmsRole.isSelfAssignable() && invite.getEntityId() != null) {
                     attachUserToEntity(invite.getId(), user.getId(), invite.getEntityId(), pmsRole);
                 }
             });

@@ -2,6 +2,7 @@ package org.pms.silverocean.service.auth.roles.enums;
 
 public class Permission {
     public static final String LIST_USERS = "list_users";
+    public static final String MANAGE_INTERNAL_STAFF = "manage_internal_staff";
     public static final String CREATE_PROPERTY = "create_property";
     public static final String EDIT_PROPERTY = "edit_property";
     public static final String DELETE_PROPERTY = "delete_property";

@@ -8,6 +8,8 @@ import org.pms.silverocean.controller.wrappers.VerifyContactRequest;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.notification.common.NotificationChannel;
 import org.pms.silverocean.service.users.SilverOceanUserService;
+import org.pms.silverocean.service.users.StaffInviteRequest;
+import org.pms.silverocean.service.invites.InviteService;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -29,10 +31,20 @@ import jakarta.validation.Valid;
 public class UserController {
     private final SilverOceanUserService silverOceanUserService;
     private final I18NService i18NService;
+    private final InviteService inviteService;
 
-    public UserController(SilverOceanUserService silverOceanUserService, I18NService i18NService) {
+    public UserController(SilverOceanUserService silverOceanUserService, I18NService i18NService, InviteService inviteService) {
         this.silverOceanUserService = silverOceanUserService;
         this.i18NService = i18NService;
+        this.inviteService = inviteService;
+    }
+
+    @PostMapping("/staff/invite")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INTERNAL_STAFF)")
+    public ResponseEntity<ResponseDTO> inviteInternalStaff(@Valid @RequestBody StaffInviteRequest request) {
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.INVITE_CREATED_SUCCESSFULLY.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.INVITE_CREATED_SUCCESSFULLY),
+                inviteService.createInternalStaffInvite(request)));
     }
 
     @GetMapping("/list")

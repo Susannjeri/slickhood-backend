@@ -21,6 +21,8 @@ import org.pms.silverocean.service.notification.common.NotificationChannel;
 import org.pms.silverocean.service.wrappers.EnumWrapper;
 import org.pms.silverocean.service.property.PropertyService;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import org.pms.silverocean.service.users.StaffInviteDTO;
+import org.pms.silverocean.service.users.StaffInviteRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -29,13 +31,18 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.pms.silverocean.common.PMSUtils.formatInviteLink;
 
 @Service
 public class InviteService {
+    private static final Set<PMSRole> INTERNAL_STAFF_ROLES = Set.of(
+            PMSRole.SUPPORT, PMSRole.SALES_MARKETING, PMSRole.FINANCE
+    );
     private final InviteDao inviteDao;
     private final PropertyService propertyService;
     private final UserDao userDao;
@@ -94,6 +101,45 @@ public class InviteService {
         invite.setRoleId(getRoleFromInviteType(inviteType));
         inviteDao.createInvite(invite);
         return formatInviteLink(configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(), invite.getToken());
+    }
+
+    public StaffInviteDTO createInternalStaffInvite(StaffInviteRequest request) {
+        if (!userDao.hasRole(PMSRole.SUPER_ADMIN)) {
+            throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+        }
+        if (!INTERNAL_STAFF_ROLES.contains(request.role())) {
+            throw new PMSCustomException(ResponseCode.INVALID_ROLE);
+        }
+
+        String recipient = request.email().trim().toLowerCase(Locale.ROOT);
+        try {
+            InternetAddress emailAddr = new InternetAddress(recipient);
+            emailAddr.validate();
+        } catch (AddressException e) {
+            throw new PMSCustomException(ResponseCode.INVALID_EMAIL);
+        }
+
+        Role role = roleRepo.findByName(request.role().getName())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_ROLE));
+        Invite invite = new Invite();
+        invite.setCreatedBy(userDao.getUserId());
+        invite.setToken(PMSUtils.randomMask());
+        invite.setExpiryDate(LocalDateTime.now().plusDays(
+                configService.getConfigByName(PMSConfigs.INVITE_LINK_EXPIRY_DAYS).get().intValue()));
+        invite.setActive(true);
+        invite.setType(InviteType.USER.name());
+        invite.setRoleId(role.getId());
+        invite.setRecipient(recipient);
+        inviteDao.createInvite(invite);
+        sendInvite(invite.getId(), recipient, NotificationChannel.EMAIL);
+        return new StaffInviteDTO(recipient, displayName(request.role()), invite.getExpiryDate());
+    }
+
+    private String displayName(PMSRole role) {
+        return switch (role) {
+            case SALES_MARKETING -> "Sales & Marketing";
+            default -> role.getName();
+        };
     }
 
     public void sendInvite(long inviteId, String contact, NotificationChannel channel) {
@@ -161,8 +207,16 @@ public class InviteService {
                 }
             }
             case USER -> {
-                if (userDao.getUserId() != null) {
-                    //user already registered, return home page
+                if (invite.getRoleId() != null && userDao.getUserId() != null) {
+                    responseDTO = roleService.assignRoleFromInvite(invite, null, userDao.getUserObject());
+                    if (responseDTO.isSuccess()) {
+                        responseDTO.setData(List.of(configService.getConfigByName(PMSConfigs.HOME_PAGE_URL).get().stringValue()));
+                    }
+                } else if (invite.getRoleId() != null) {
+                    responseDTO = new ResponseDTO(true, ResponseCode.ASSIGNED_ROLE_REGISTRATION_REQUIRED.getCode(),
+                            i18NService.getLocalizedMessage(ResponseCode.ASSIGNED_ROLE_REGISTRATION_REQUIRED),
+                            formatInviteLink(configService.getConfigByName(PMSConfigs.REGISTRATION_PAGE_URL).get().stringValue(), token));
+                } else if (userDao.getUserId() != null) {
                     responseDTO = new ResponseDTO(true, ResponseCode.HOME_PAGE.getCode(), ResponseCode.HOME_PAGE.getDescription(), configService.getConfigByName(PMSConfigs.HOME_PAGE_URL).get().stringValue());
                 } else {
                     //return user to registration page

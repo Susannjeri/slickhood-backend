@@ -30,7 +30,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class AccountActivationFilter extends OncePerRequestFilter {
     private static final Set<PMSRole> INTERNAL_ROLES = Set.of(
-            PMSRole.SUPER_ADMIN, PMSRole.FINANCE, PMSRole.INSURANCE_ADVISER,
+            PMSRole.SUPER_ADMIN, PMSRole.SUPPORT, PMSRole.SALES_MARKETING, PMSRole.FINANCE, PMSRole.INSURANCE_ADVISER,
             PMSRole.INSURANCE_MANAGER, PMSRole.GUARD, PMSRole.PROPERTY_MANAGER);
     private static final Set<String> ALLOWED_PREFIXES = Set.of(
             "/auth/", "/otp/", "/kyc/", "/role/", "/helpdesk/",
