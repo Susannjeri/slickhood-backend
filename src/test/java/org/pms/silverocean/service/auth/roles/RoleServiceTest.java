@@ -26,6 +26,7 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.auth.roles.PropertyManagerService;
 import org.pms.silverocean.service.invites.InviteDao;
 import org.pms.silverocean.service.invites.InviteType;
+import org.pms.silverocean.service.estate.EstateService;
 import org.pms.silverocean.service.subscription.SubscriptionProvisioningService;
 import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.kyc.KycService;
@@ -83,6 +84,9 @@ class RoleServiceTest {
 
     @Mock
     private TeamAccessService teamAccessService;
+
+    @Mock
+    private EstateService estateService;
 
     @InjectMocks
     private RoleService roleService;
@@ -181,6 +185,39 @@ class RoleServiceTest {
         assertTrue(response.isSuccess());
         assertEquals(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), response.getCode());
         verify(userRoleRepo).save(any(UserRole.class));
+    }
+
+    @Test
+    void assignRoleFromInvite_homeowner_createsOwnershipWithoutStaffAccess() {
+        Role homeownerRole = new Role(PMSRole.HOMEOWNER.getName(), PMSRole.HOMEOWNER.getDescription(), false);
+        homeownerRole.setId(12L);
+        homeownerRole.setActive(true);
+        Invite invite = new Invite();
+        invite.setId(41L);
+        invite.setRoleId(homeownerRole.getId());
+        invite.setCreatedBy(999L);
+        invite.setEntityId(77L);
+        invite.setType(InviteType.HOMEOWNER.name());
+        invite.setActive(true);
+        Users assignor = new Users();
+        assignor.setId(999L);
+        assignor.setEmail("manager@example.com");
+        Users homeowner = new Users();
+        homeowner.setId(200L);
+        homeowner.setEmail("owner@example.com");
+
+        when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
+        when(roleRepo.findByIdAndActive(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
+        when(roleRepo.findById(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
+        when(userDao.findByEmail(homeowner.getEmail())).thenReturn(Optional.of(homeowner));
+        when(userRoleRepo.findByUserIdAndRoleId(homeowner.getId(), homeownerRole.getId())).thenReturn(0);
+
+        ResponseDTO response = roleService.assignRoleFromInvite(invite, null, homeowner);
+
+        assertTrue(response.isSuccess());
+        verify(estateService).createOwnershipFromInvite(77L, homeowner.getId(), assignor.getId());
+        verify(propertyManagerService, never()).addStaffToProperty(anyLong(), anyLong(), anyLong(), any(PMSRole.class));
+        assertFalse(invite.isActive());
     }
 
 

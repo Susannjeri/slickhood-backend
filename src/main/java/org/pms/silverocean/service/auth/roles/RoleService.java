@@ -21,6 +21,7 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.auth.wrappers.RoleWrapper;
 import org.pms.silverocean.service.invites.InviteDao;
 import org.pms.silverocean.service.invites.InviteType;
+import org.pms.silverocean.service.estate.EstateService;
 import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.kyc.KycService;
 import org.pms.silverocean.service.teamaccess.TeamAccessService;
@@ -53,8 +54,9 @@ public class RoleService {
     private final AuditLogService auditLogService;
     private final KycService kycService;
     private final TeamAccessService teamAccessService;
+    private final EstateService estateService;
 
-    public RoleService(UserRoleRepo userRoleRepo, PermissionRepo permissionRepo, RoleRepo roleRepo, PropertyManagerService propertyManagerService, UserDao userDao, RolePermissionRepo rolePermissionRepo, I18NService i18NService, AuditLogService auditLogService, InviteDao inviteDao, KycService kycService, TeamAccessService teamAccessService) {
+    public RoleService(UserRoleRepo userRoleRepo, PermissionRepo permissionRepo, RoleRepo roleRepo, PropertyManagerService propertyManagerService, UserDao userDao, RolePermissionRepo rolePermissionRepo, I18NService i18NService, AuditLogService auditLogService, InviteDao inviteDao, KycService kycService, TeamAccessService teamAccessService, EstateService estateService) {
         this.userRoleRepo = userRoleRepo;
         this.permissionRepo = permissionRepo;
         this.roleRepo = roleRepo;
@@ -66,6 +68,7 @@ public class RoleService {
         this.inviteDao = inviteDao;
         this.kycService = kycService;
         this.teamAccessService = teamAccessService;
+        this.estateService = estateService;
     }
 
     public ResponseDTO selfAssignRole(long roleId) {
@@ -105,6 +108,10 @@ public class RoleService {
 
         if (PMSRole.TENANT.equals(pmsRole)) {
             return userRoleRepo.findTenantProperty(userId);
+        }
+
+        if (PMSRole.HOMEOWNER.equals(pmsRole)) {
+            return userRoleRepo.findHomeownerProperty(userId);
         }
 
         return userRoleRepo.findStaffPropertyByUserIdAndRole(userId, pmsRole.name());
@@ -175,6 +182,7 @@ public class RoleService {
     }
 
 
+    @Transactional
     public ResponseDTO assignRoleFromInvite(String inviteToken, Users user) {
         if (teamAccessService.isTeamToken(inviteToken)) {
             teamAccessService.accept(inviteToken);
@@ -184,6 +192,7 @@ public class RoleService {
         return assignRoleFromInvite(invite, null, user);
     }
 
+    @Transactional
     public ResponseDTO assignRoleFromInvite(Invite invite, Long roleId, Users user) {
         validateInviteRecipient(invite, user);
         String assignorEmail = userDao.findById(invite.getCreatedBy()).map(Users::getEmail).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
@@ -197,7 +206,7 @@ public class RoleService {
             roleRepo.findById(invite.getRoleId() == null ? roleId : invite.getRoleId()).ifPresent(role -> {
                 PMSRole pmsRole = PMSRole.roleFromSavedName(role.getName());
                 if (!pmsRole.isSelfAssignable() && invite.getEntityId() != null) {
-                    attachUserToEntity(invite.getId(), user.getId(), invite.getEntityId(), pmsRole);
+                    attachUserToEntity(invite, user.getId(), pmsRole);
                 }
             });
         }
@@ -233,9 +242,11 @@ public class RoleService {
         return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY));
     }
 
-    private void attachUserToEntity(long inviteId, long userId, long entityId, PMSRole pmsRole) {
-        if (!PMSRole.TENANT.equals(pmsRole)) {
-            propertyManagerService.addStaffToProperty(inviteId, userId, entityId, pmsRole);
+    private void attachUserToEntity(Invite invite, long userId, PMSRole pmsRole) {
+        if (PMSRole.HOMEOWNER.equals(pmsRole)) {
+            estateService.createOwnershipFromInvite(invite.getEntityId(), userId, invite.getCreatedBy());
+        } else if (!PMSRole.TENANT.equals(pmsRole)) {
+            propertyManagerService.addStaffToProperty(invite.getId(), userId, invite.getEntityId(), pmsRole);
         }
     }
 

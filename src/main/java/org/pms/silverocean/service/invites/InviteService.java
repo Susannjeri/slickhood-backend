@@ -88,13 +88,20 @@ public class InviteService {
                     throw new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND);
                 }
             }
-            case TENANT -> {
+            case TENANT, HOMEOWNER -> {
+                if (entityId == null) {
+                    throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+                }
+                if (inviteType == InviteType.HOMEOWNER && !Set.of(PMSRole.LANDLORD, PMSRole.ESTATE_MANAGER, PMSRole.SUPER_ADMIN)
+                        .contains(userDao.getActiveRole())) {
+                    throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);
+                }
                 ResponseDTO responseDTO = propertyService.getUnitByIDAndLoggedInUser(entityId);
                 if (!responseDTO.isSuccess()) {
                     throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
                 }
                 if (responseDTO.getData().get(0) instanceof UnitDTO unitDTO) {
-                    if (unitDTO.templateId() == null) {
+                    if (inviteType == InviteType.TENANT && unitDTO.templateId() == null) {
                         throw new PMSCustomException(ResponseCode.MISSING_LEASE_TEMPLATE);
                     }
                 } else {
