@@ -13,6 +13,7 @@ import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
+import org.pms.silverocean.service.users.ProfileType;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.springframework.beans.factory.annotation.Value;
@@ -390,7 +391,9 @@ public class KycService {
         return userRoleRepo.findByUserId(userId).stream().map(role -> PMSRole.roleFromSavedName(role.getName())).collect(Collectors.toSet());
     }
 
-    private Set<KycRequirement> requirements(Users user) { return requirementResolver.resolve(roles(user.getId())); }
+    private Set<KycRequirement> requirements(Users user) {
+        return requirementResolver.resolve(roles(user.getId()), ProfileType.valueOf(user.getProfileType()));
+    }
 
     private Set<String> missingRequirements(KycCase kycCase, Users user) {
         Set<KycDocumentType> uploaded = documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).stream()

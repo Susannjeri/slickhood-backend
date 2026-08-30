@@ -17,6 +17,7 @@ import org.pms.silverocean.service.auth.totp.TotpService;
 import org.pms.silverocean.service.auth.totp.TotpServiceFactory;
 import org.pms.silverocean.service.auth.totp.impl.OtpType;
 import org.pms.silverocean.service.geolocation.GeoLocationService;
+import org.pms.silverocean.service.users.ProfileType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Optional;
@@ -28,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.ArgumentCaptor;
 
 @ExtendWith(MockitoExtension.class)
 class UserAuthenticationServiceTest {
@@ -143,6 +145,55 @@ class UserAuthenticationServiceTest {
         assertEquals("new.user@example.com", request.getEmail());
         verify(roleService).saveUserAndAssignRoleOnRegistration(org.mockito.ArgumentMatchers.eq(1L), org.mockito.ArgumentMatchers.any(Users.class));
         verify(totpService).generateOTPCode("new.user@example.com");
+    }
+
+    @Test
+    void companyRegistrationPersistsLegalOrganizationAndRepresentativeSeparately() {
+        RegistrationDTO request = registration("owner@company.example", "Password1!");
+        request.setFullName("Jane Authorized Representative");
+        request.setProfileType(ProfileType.COMPANY);
+        request.setOrganizationName("  Mitero Hope SHG  ");
+        when(userDao.findByEmail("owner@company.example")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode("Password1!")).thenReturn("encoded");
+        when(totpService.generateOTPCode("owner@company.example")).thenReturn("OTP sent");
+
+        var response = service.register(request, "127.0.0.1");
+
+        assertTrue(response.isSuccess());
+        ArgumentCaptor<Users> user = ArgumentCaptor.forClass(Users.class);
+        verify(roleService).saveUserAndAssignRoleOnRegistration(org.mockito.ArgumentMatchers.eq(1L), user.capture());
+        assertEquals(ProfileType.COMPANY.name(), user.getValue().getProfileType());
+        assertEquals("Mitero Hope SHG", user.getValue().getOrganizationName());
+        assertEquals("Jane Authorized Representative", user.getValue().getFullName());
+    }
+
+    @Test
+    void companyRegistrationWithoutOrganizationNameIsRejectedBeforePersistence() {
+        RegistrationDTO request = registration("owner@company.example", "Password1!");
+        request.setProfileType(ProfileType.COMPANY);
+        request.setOrganizationName("   ");
+
+        var response = service.register(request, "127.0.0.1");
+
+        assertFalse(response.isSuccess());
+        assertEquals(ResponseCode.REGISTRATION_FAILED.getCode(), response.getCode());
+        verify(userDao, never()).save(org.mockito.ArgumentMatchers.any());
+        verify(roleService, never()).saveUserAndAssignRoleOnRegistration(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void registrationDefaultsToIndividualForBackwardCompatibleClients() {
+        RegistrationDTO request = registration("person@example.com", "Password1!");
+        request.setProfileType(null);
+        when(userDao.findByEmail("person@example.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode("Password1!")).thenReturn("encoded");
+        when(totpService.generateOTPCode("person@example.com")).thenReturn("OTP sent");
+
+        assertTrue(service.register(request, "127.0.0.1").isSuccess());
+        ArgumentCaptor<Users> user = ArgumentCaptor.forClass(Users.class);
+        verify(roleService).saveUserAndAssignRoleOnRegistration(org.mockito.ArgumentMatchers.eq(1L), user.capture());
+        assertEquals(ProfileType.INDIVIDUAL.name(), user.getValue().getProfileType());
+        assertEquals(null, user.getValue().getOrganizationName());
     }
 
     private RegistrationDTO registration(String email, String password) {

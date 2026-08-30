@@ -21,6 +21,7 @@ import org.pms.silverocean.service.auth.totp.impl.OtpType;
 import org.pms.silverocean.service.geolocation.GeoLocationResponse;
 import org.pms.silverocean.service.geolocation.GeoLocationService;
 import org.pms.silverocean.service.kyc.AccountStatus;
+import org.pms.silverocean.service.users.ProfileType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.scheduling.annotation.Async;
@@ -70,6 +71,11 @@ public class UserAuthenticationService {
     public ResponseDTO register(RegistrationDTO registrationDTO, String ipAddress) {
         String normalizedEmail = StringUtils.trimToEmpty(registrationDTO.getEmail()).toLowerCase(Locale.ROOT);
         registrationDTO.setEmail(normalizedEmail);
+        if (accountType(registrationDTO.getProfileType()) == ProfileType.COMPANY
+                && StringUtils.isBlank(registrationDTO.getOrganizationName())) {
+            return new ResponseDTO(false, ResponseCode.REGISTRATION_FAILED.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.REGISTRATION_FAILED));
+        }
         Optional<Users> checkIfUserExists;
         try {
             if (!signUpCache.add(normalizedEmail)) {
@@ -103,7 +109,9 @@ public class UserAuthenticationService {
                 .source(RegistrationChannel.LOCAL.name())
                 .locale(LocaleContextHolder.getLocale().getLanguage())
                 .accountStatus(AccountStatus.PENDING_EMAIL_VERIFICATION.name())
-                .fullName(registrationDTO.getFullName()).build();
+                .profileType(accountType(registrationDTO.getProfileType()).name())
+                .organizationName(organizationName(registrationDTO.getProfileType(), registrationDTO.getOrganizationName()))
+                .fullName(registrationDTO.getFullName().trim()).build();
         try {
             setLocationDetailsBasedOnIP(user);
             saveAndAssignRole(registrationDTO.getRoleId(), user, registrationDTO.getToken());
@@ -231,7 +239,8 @@ public class UserAuthenticationService {
      * @param ipAddress     The IP of the browser sending the request
      * @return a response of success with new JWT or failure
      */
-    public ResponseDTO googleLogin(String googleIdToken, Long roleId, String token, String referralCode, String referralCampaign, String ipAddress) {
+    public ResponseDTO googleLogin(String googleIdToken, Long roleId, String token, String referralCode, String referralCampaign,
+                                   ProfileType profileType, String organizationName, String ipAddress) {
         Optional<Users> validatedGoogleUser = googleAuthService.verifyIdToken(googleIdToken);
         if (validatedGoogleUser.isPresent()) {
             Optional<Users> checkIfUserExists;
@@ -252,6 +261,8 @@ public class UserAuthenticationService {
                     try {
                         if (StringUtils.isNotBlank(referralCode)) affiliateService.resolve(referralCode);
                         googleUser.setRegistrationIP(ipAddress);
+                        googleUser.setProfileType(accountType(profileType).name());
+                        googleUser.setOrganizationName(organizationName(profileType, organizationName));
                         googleUser.setLocale(LocaleContextHolder.getLocale().getLanguage());
                         googleUser.setEmailVerified(true);
                         googleUser.setActive(true);
@@ -339,5 +350,13 @@ public class UserAuthenticationService {
             // prevent account creation or strand a partially-created user.
             log.warn("Continuing registration without IP geolocation for {}", user.getRegistrationIP(), locationError);
         }
+    }
+
+    private ProfileType accountType(ProfileType profileType) {
+        return profileType == null ? ProfileType.INDIVIDUAL : profileType;
+    }
+
+    private String organizationName(ProfileType profileType, String organizationName) {
+        return accountType(profileType) == ProfileType.COMPANY ? StringUtils.trimToNull(organizationName) : null;
     }
 }

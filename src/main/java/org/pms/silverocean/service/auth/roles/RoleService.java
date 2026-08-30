@@ -27,6 +27,7 @@ import org.pms.silverocean.service.wrappers.IdNameDescDTO;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 import java.util.Map;
@@ -126,6 +127,7 @@ public class RoleService {
         return getPermissionsForUser(userByEmail.getId());
     }
 
+    @Transactional
     public void saveUserAndAssignRoleOnRegistration(long roleId, Users user) {
         checkIfRoleIsValidAndSelfAssignable(roleId);
         Users savedUser = userDao.save(user);
@@ -133,6 +135,7 @@ public class RoleService {
     }
 
 
+    @Transactional
     public void saveUserAndAssignRoleFromInvite(String inviteToken, Long roleId, Users user) {
         Invite invite = inviteDao.getInviteByToken(inviteToken, true)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.EXPIRED_INVITE_LINK));

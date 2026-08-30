@@ -45,7 +45,7 @@ public class AuthController {
     @PostMapping("/google")
     public ResponseEntity<ResponseDTO> googleLogin(HttpServletRequest request, @Validated @RequestBody GoogleLoginDTO googleLoginDTO) {
 
-        ResponseDTO login = userAuthenticationService.googleLogin(googleLoginDTO.getIdToken(), googleLoginDTO.getRoleId(), googleLoginDTO.getToken(), googleLoginDTO.getReferralCode(), googleLoginDTO.getReferralCampaign(), PMSUtils.getIPAddress(request));
+        ResponseDTO login = userAuthenticationService.googleLogin(googleLoginDTO.getIdToken(), googleLoginDTO.getRoleId(), googleLoginDTO.getToken(), googleLoginDTO.getReferralCode(), googleLoginDTO.getReferralCampaign(), googleLoginDTO.getProfileType(), googleLoginDTO.getOrganizationName(), PMSUtils.getIPAddress(request));
         return login.isSuccess() ? ResponseEntity.ok(login) : ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(login);
     }
 

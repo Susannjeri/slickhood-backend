@@ -55,6 +55,7 @@ public class Users extends BaseActiveEntity {
     private String accountStatus = AccountStatus.PENDING_EMAIL_VERIFICATION.name();
 
     private String profileType = "INDIVIDUAL";
+    private String organizationName;
     private String identificationNumber;
     private String taxPin;
     private LocalDateTime lastModifiedDate;

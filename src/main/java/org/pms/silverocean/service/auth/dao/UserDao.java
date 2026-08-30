@@ -74,7 +74,9 @@ public class UserDao {
 
     public Users save(Users user) {
         userCache.invalidate(user.getEmail());
-        if (user.getId() != 0) userCache.invalidate(user.getId());
+        // A new JPA entity has no generated id until after the first save.
+        // Never unbox that nullable id while preparing the cache invalidation.
+        if (user.getId() != null && user.getId() != 0L) userCache.invalidate(user.getId());
         return userRepo.save(user);
     }
 
