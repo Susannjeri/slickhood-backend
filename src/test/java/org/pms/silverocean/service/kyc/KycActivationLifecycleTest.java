@@ -61,6 +61,8 @@ class KycActivationLifecycleTest {
                 quality, ocr, garage,
                 encryption, new ObjectMapper());
         ReflectionTestUtils.setField(service, "maxFileBytes", 10_485_760L);
+        ReflectionTestUtils.setField(service, "minOcrConfidence", 75D);
+        ReflectionTestUtils.setField(service, "rejectOcrValidationWarnings", true);
     }
 
     @Test void submissionMovesCustomerIntoReviewGate() {
@@ -166,6 +168,34 @@ class KycActivationLifecycleTest {
         assertThat(result.status()).isEqualTo(DocumentStatus.REJECTED.name());
         assertThat(result.rejectionReason()).contains("document number");
         verify(garage).uploadBytes(any(), any(), any());
+    }
+
+    @Test void testingModeAcceptsModerateOcrEvidenceForControlledReview() throws Exception {
+        Users subject = customer(12);
+        subject.setFullName("Collectable Class");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("IDENTITY", "Identity document", true,
+                        Set.of(KycDocumentType.NATIONAL_ID_FRONT, KycDocumentType.PASSPORT))));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 800, 500, 20, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT)).thenReturn(
+                new OcrResult("TEST_OCR", 58, java.util.Map.of(
+                        "documentNumber", "12345678",
+                        "_validationWarnings", "Name could not be read confidently")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+        ReflectionTestUtils.setField(service, "minOcrConfidence", 55D);
+        ReflectionTestUtils.setField(service, "rejectOcrValidationWarnings", false);
+
+        KycDocumentView result = service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "test-id.jpg", "image/jpeg", image));
+
+        assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
+        assertThat(result.extractedFields()).containsEntry("_validationStatus", "REVIEW_REQUIRED");
+        assertThat(result.extractedFields()).containsKey("_validationWarnings");
     }
 
     @Test void disabledOcrBlocksUploadWithoutStoringDocument() {

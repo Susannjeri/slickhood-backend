@@ -53,6 +53,8 @@ public class KycService {
     private final ObjectMapper objectMapper;
     @Value("${kyc.consent.version:2026-08}") private String currentConsentVersion;
     @Value("${kyc.max-file-bytes:10485760}") private long maxFileBytes;
+    @Value("${kyc.ocr.min-confidence:75}") private double minOcrConfidence = 75;
+    @Value("${kyc.ocr.reject-validation-warnings:true}") private boolean rejectOcrValidationWarnings = true;
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public KycCaseView start(StartKycRequest request) {
@@ -342,7 +344,9 @@ public class KycService {
 
     private boolean ocrAccepted(KycDocumentType type, OcrResult ocr, Map<String, String> fields) {
         if (type == KycDocumentType.SELFIE) return true;
-        return ocr.confidence() >= 75 && !fields.containsKey("_validationWarnings");
+        boolean confidenceAccepted = ocr.confidence() >= minOcrConfidence;
+        boolean warningsAccepted = !rejectOcrValidationWarnings || !fields.containsKey("_validationWarnings");
+        return confidenceAccepted && warningsAccepted;
     }
 
     private String ocrRejectionReason(Map<String, String> fields) {
