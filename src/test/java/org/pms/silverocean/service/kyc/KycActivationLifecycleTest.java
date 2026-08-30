@@ -109,6 +109,47 @@ class KycActivationLifecycleTest {
         assertThat(subject.getAccountStatus()).isEqualTo(AccountStatus.KYC_REJECTED.name());
     }
 
+    @Test void reviewerKeepsGoodEvidenceAndReturnsOnlyTheInaccurateDocument() {
+        Users reviewer = customer(1); Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
+        KycDocument identity = document(81, 12); identity.setCaseId(40);
+        identity.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        identity.setStatus(DocumentStatus.OCR_COMPLETE.name());
+        KycDocument tax = document(82, 12); tax.setCaseId(40);
+        tax.setDocumentType(KycDocumentType.KRA_PIN_CERTIFICATE.name());
+        tax.setStatus(DocumentStatus.OCR_COMPLETE.name());
+        when(users.getUserObject()).thenReturn(reviewer); when(users.findById(12)).thenReturn(Optional.of(subject));
+        when(cases.findById(40L)).thenReturn(Optional.of(kycCase));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity, tax));
+
+        service.review(40, new KycReviewRequest(KycStatus.REJECTED, "One correction is required", List.of(
+                new KycDocumentReviewRequest(81, false, "The ID number is obscured by glare"),
+                new KycDocumentReviewRequest(82, true, null))));
+
+        assertThat(identity.getStatus()).isEqualTo(DocumentStatus.REJECTED.name());
+        assertThat(identity.getRejectionReason()).isEqualTo("The ID number is obscured by glare");
+        assertThat(tax.getStatus()).isEqualTo(DocumentStatus.VERIFIED.name());
+        assertThat(tax.getRejectionReason()).isNull();
+        assertThat(subject.getAccountStatus()).isEqualTo(AccountStatus.KYC_REJECTED.name());
+    }
+
+    @Test void reviewerMustDecideEveryCurrentDocument() {
+        Users reviewer = customer(1); Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
+        KycDocument identity = document(81, 12); identity.setCaseId(40);
+        identity.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        KycDocument tax = document(82, 12); tax.setCaseId(40);
+        tax.setDocumentType(KycDocumentType.KRA_PIN_CERTIFICATE.name());
+        when(users.getUserObject()).thenReturn(reviewer); when(users.findById(12)).thenReturn(Optional.of(subject));
+        when(cases.findById(40L)).thenReturn(Optional.of(kycCase));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity, tax));
+
+        assertThatThrownBy(() -> service.review(40,
+                new KycReviewRequest(KycStatus.REJECTED, "Incomplete decision", List.of(
+                        new KycDocumentReviewRequest(81, false, "Unreadable")))))
+                .isInstanceOf(RuntimeException.class);
+    }
+
     @Test void approvalCannotCreateAnActiveButIncompleteIdentity() {
         Users reviewer = customer(1); Users subject = customer(12);
         KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);

@@ -212,11 +212,18 @@ public class KycService {
         }
         long reviewer = currentUser().getId();
         List<KycDocument> currentDocuments = currentDocuments(kycCase, subject);
+        Map<Long, KycDocumentReviewRequest> documentDecisions = validateDocumentDecisions(
+                request, currentDocuments);
         if (request.decision() == KycStatus.APPROVED
                 && (!missingRequirements(kycCase, subject).isEmpty() || !kycCase.isPhoneVerified())) {
             throw new PMSCustomException(ResponseCode.KYC_MISSING_DOCUMENTS);
         }
-        kycCase.setStatus(request.decision().name()); kycCase.setReviewNotes(request.notes());
+        String reviewNotes = request.notes();
+        if (request.decision() == KycStatus.REJECTED && (reviewNotes == null || reviewNotes.isBlank())) {
+            reviewNotes = "Replace the rejected documents and submit the corrected evidence for review.";
+        }
+        final String recordedReviewNotes = reviewNotes;
+        kycCase.setStatus(request.decision().name()); kycCase.setReviewNotes(recordedReviewNotes);
         kycCase.setReviewedBy(reviewer); kycCase.setReviewedAt(ZonedDateTime.now()); caseRepo.save(kycCase);
         if (request.decision() == KycStatus.APPROVED) {
             String identificationNumber = null;
@@ -246,14 +253,13 @@ public class KycService {
                 documentRepo.save(document);
             });
         } else {
-            if (request.notes() == null || request.notes().isBlank()) {
-                throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
-            }
             subject.setVerified(false);
             subject.setAccountStatus(AccountStatus.KYC_REJECTED.name());
             currentDocuments.forEach(document -> {
-                document.setStatus(DocumentStatus.REJECTED.name());
-                document.setRejectionReason(request.notes());
+                KycDocumentReviewRequest decision = documentDecisions.get(document.getId());
+                boolean approved = decision != null && decision.approved();
+                document.setStatus(approved ? DocumentStatus.VERIFIED.name() : DocumentStatus.REJECTED.name());
+                document.setRejectionReason(approved ? null : rejectionReason(decision, recordedReviewNotes));
                 document.setReviewedBy(reviewer);
                 document.setReviewedAt(ZonedDateTime.now());
                 documentRepo.save(document);
@@ -261,6 +267,44 @@ public class KycService {
         }
         userDao.save(subject);
         return view(kycCase, subject);
+    }
+
+    private Map<Long, KycDocumentReviewRequest> validateDocumentDecisions(
+            KycReviewRequest request, List<KycDocument> currentDocuments) {
+        List<KycDocumentReviewRequest> submitted = request.documentsOrEmpty();
+        if (submitted.isEmpty()) {
+            // Compatibility for older clients: an approval accepts every current document,
+            // while a rejection returns every current document with the case-level reason.
+            return currentDocuments.stream().collect(Collectors.toMap(KycDocument::getId,
+                    document -> new KycDocumentReviewRequest(document.getId(),
+                            request.decision() == KycStatus.APPROVED, request.notes())));
+        }
+        Map<Long, KycDocumentReviewRequest> decisions = new LinkedHashMap<>();
+        for (KycDocumentReviewRequest decision : submitted) {
+            if (decisions.putIfAbsent(decision.documentId(), decision) != null) {
+                throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+            }
+            if (!decision.approved() && (decision.reason() == null || decision.reason().isBlank())) {
+                throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+            }
+        }
+        Set<Long> currentIds = currentDocuments.stream().map(KycDocument::getId).collect(Collectors.toSet());
+        if (!decisions.keySet().equals(currentIds)) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        boolean hasRejectedDocument = decisions.values().stream().anyMatch(decision -> !decision.approved());
+        if ((request.decision() == KycStatus.APPROVED && hasRejectedDocument)
+                || (request.decision() == KycStatus.REJECTED && !hasRejectedDocument)) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        return decisions;
+    }
+
+    private String rejectionReason(KycDocumentReviewRequest decision, String fallback) {
+        if (decision != null && decision.reason() != null && !decision.reason().isBlank()) {
+            return decision.reason().trim();
+        }
+        return fallback;
     }
 
     public List<KycAdminCaseView> reviewQueue() {
