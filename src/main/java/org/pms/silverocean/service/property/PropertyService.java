@@ -54,11 +54,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -67,6 +69,7 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -110,6 +113,10 @@ public class PropertyService {
     private int imageWidth;
     @Value("${min.upload.image.height:200}")
     private int imageHeight;
+    @Value("${max.upload.image.bytes:10485760}")
+    private long maxImageBytes;
+    @Value("${max.upload.image.pixels:40000000}")
+    private long maxImagePixels;
 
     @Value("${silverocean.dir}")
     private String appDir;
@@ -180,36 +187,31 @@ public class PropertyService {
         return new ResponseDTO(true, ResponseCode.MEASUREMENT_UNITS.getCode(), i18NService.getLocalizedMessage(ResponseCode.MEASUREMENT_UNITS), measurementUnits);
     }
 
+    @Transactional
     public ResponseDTO createProperty(PropertyDTO propertyDTO, MultipartFile image) {
         Users user = userDao.getUserObject();
         if (!user.isCompletedProfile()) {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
         }
-        try {
-            Optional<ResponseDTO> imageValidationError = validateImage(image);
-            if (imageValidationError.isPresent()) {
-                return imageValidationError.get();
-            }
-
-            Property property = new Property(propertyDTO);
-            property.setActive(true);
-            property.setCreatedBy(user.getId());
-
-            propertyDao.save(property);
-            property.setRef(PROPERTY_ID_PREFIX + Long.toHexString(property.getId()));
-            savePropertyImage(property, image, false);
-
-            return new ResponseDTO(true, ResponseCode.PROPERTY_CREATION_SUCCESS.getCode(),
-                    i18NService.getLocalizedMessage(ResponseCode.PROPERTY_CREATION_SUCCESS), Set.of(property.getId()));
-        } catch (PMSCustomException e) {
-            log.error(e.getMessage(), e);
-        } catch (IOException e) {
-            log.error("Error reading uploaded image", e);
-            return new ResponseDTO(false,
-                    ResponseCode.INVALID_IMAGE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_IMAGE));
+        Optional<ResponseDTO> imageValidationError = validateImage(image);
+        if (imageValidationError.isPresent()) {
+            return imageValidationError.get();
         }
-        return new ResponseDTO(false, ResponseCode.PROPERTY_CREATION_FAILED_DUPLICATE.getCode(),
-                i18NService.getLocalizedMessage(ResponseCode.PROPERTY_CREATION_FAILED_DUPLICATE));
+
+        Property property = new Property(propertyDTO);
+        property.setActive(true);
+        property.setCreatedBy(user.getId());
+
+        propertyDao.save(property);
+        property.setRef(PROPERTY_ID_PREFIX + Long.toHexString(property.getId()));
+        try {
+            savePropertyImage(property, image);
+        } catch (IOException e) {
+            throw new PMSCustomException(ResponseCode.INVALID_IMAGE, e);
+        }
+
+        return new ResponseDTO(true, ResponseCode.PROPERTY_CREATION_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.PROPERTY_CREATION_SUCCESS), Set.of(property.getId()));
     }
 
     public ResponseDTO createUnit(UnitDTO unitDTO, MultipartFile image) {
@@ -455,6 +457,7 @@ public class PropertyService {
         }
     }
 
+    @Transactional
     public ResponseDTO updateProperty(long propertyId, PropertyDTO propertyDTO, MultipartFile image) {
         Optional<Property> propertyFromDb = propertyDao.findByIdAndCreatedBy(propertyId, userDao.getUserId());
         if (propertyFromDb.isEmpty()) {
@@ -470,15 +473,13 @@ public class PropertyService {
                 if (imageValidationError.isPresent()) {
                     return imageValidationError.get();
                 }
-                savePropertyImage(property, image, true);
+                savePropertyImage(property, image);
             }
             propertyDao.update(property);
             return new ResponseDTO(true, ResponseCode.PROPERTY_UPDATED_SUCCESS.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.PROPERTY_UPDATED_SUCCESS), Set.of(propertyId));
         } catch (IOException e) {
-            log.error("Error reading uploaded image", e);
-            return new ResponseDTO(false,
-                    ResponseCode.INVALID_IMAGE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_IMAGE));
+            throw new PMSCustomException(ResponseCode.INVALID_IMAGE, e);
         }
     }
 
@@ -496,29 +497,69 @@ public class PropertyService {
     }
 
     private Optional<ResponseDTO> validateImage(MultipartFile image) {
-        try {
-            BufferedImage bufferedImage = ImageIO.read(image.getInputStream());
-            if (bufferedImage == null) {
-                return Optional.of(new ResponseDTO(false,
-                        ResponseCode.INVALID_IMAGE.getCode(),
-                        i18NService.getLocalizedMessage(ResponseCode.INVALID_IMAGE)));
-            }
-
-            int width = bufferedImage.getWidth();
-            int height = bufferedImage.getHeight();
-            if (width < imageWidth || height < imageHeight) {
-                return Optional.of(new ResponseDTO(false,
-                        ResponseCode.IMAGE_TOO_SMALL.getCode(),
-                        String.format(i18NService.getLocalizedMessage(ResponseCode.IMAGE_TOO_SMALL), imageWidth, imageHeight)));
-            }
-
-            return Optional.empty(); // means "valid"
-        } catch (IOException e) {
-            log.error("Error reading uploaded image", e);
-            return Optional.of(new ResponseDTO(false,
-                    ResponseCode.INVALID_IMAGE.getCode(),
-                    i18NService.getLocalizedMessage(ResponseCode.INVALID_IMAGE)));
+        if (image == null || image.isEmpty()) {
+            return imageError(ResponseCode.INVALID_IMAGE);
         }
+        if (image.getSize() > maxImageBytes) {
+            return imageError(ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED);
+        }
+        String declaredContentType = Objects.toString(image.getContentType(), "").toLowerCase(Locale.ROOT);
+        if (!Set.of("image/jpeg", "image/png", "image/webp").contains(declaredContentType)) {
+            return imageError(ResponseCode.INVALID_IMAGE);
+        }
+
+        try {
+            try (ImageInputStream stream = ImageIO.createImageInputStream(image.getInputStream())) {
+                if (stream == null) {
+                    return imageError(ResponseCode.INVALID_IMAGE);
+                }
+                var readers = ImageIO.getImageReaders(stream);
+                if (!readers.hasNext()) {
+                    return imageError(ResponseCode.INVALID_IMAGE);
+                }
+
+                ImageReader reader = readers.next();
+                try {
+                    reader.setInput(stream, true, true);
+                    String format = reader.getFormatName().toLowerCase(Locale.ROOT);
+                    if (!Set.of("jpeg", "jpg", "png", "webp").contains(format)) {
+                        return imageError(ResponseCode.INVALID_IMAGE);
+                    }
+                    boolean contentTypeMatches = switch (format) {
+                        case "jpeg", "jpg" -> "image/jpeg".equals(declaredContentType);
+                        case "png" -> "image/png".equals(declaredContentType);
+                        case "webp" -> "image/webp".equals(declaredContentType);
+                        default -> false;
+                    };
+                    if (!contentTypeMatches) {
+                        return imageError(ResponseCode.INVALID_IMAGE);
+                    }
+
+                    int width = reader.getWidth(0);
+                    int height = reader.getHeight(0);
+                    long pixels = Math.multiplyExact((long) width, (long) height);
+                    if (pixels > maxImagePixels) {
+                        return imageError(ResponseCode.INVALID_IMAGE);
+                    }
+                    if (width < imageWidth || height < imageHeight) {
+                        return Optional.of(new ResponseDTO(false,
+                                ResponseCode.IMAGE_TOO_SMALL.getCode(),
+                                String.format(i18NService.getLocalizedMessage(ResponseCode.IMAGE_TOO_SMALL), imageWidth, imageHeight)));
+                    }
+                } finally {
+                    reader.dispose();
+                }
+            }
+            return Optional.empty();
+        } catch (IOException | ArithmeticException e) {
+            log.error("Error reading uploaded image", e);
+            return imageError(ResponseCode.INVALID_IMAGE);
+        }
+    }
+
+    private Optional<ResponseDTO> imageError(ResponseCode responseCode) {
+        return Optional.of(new ResponseDTO(false, responseCode.getCode(),
+                i18NService.getLocalizedMessage(responseCode)));
     }
 
 
@@ -783,13 +824,17 @@ public class PropertyService {
                 .toList();
     }
 
-    private void savePropertyImage(Property property, MultipartFile image, boolean clearExisting) throws IOException { //unit/erwrwe234242342/sfssf.jpg
+    private void savePropertyImage(Property property, MultipartFile image) throws IOException {
         Path filePath = Paths.get(String.format("%d/%d/", property.getCreatedBy(), property.getId()));
-        if (clearExisting) {
-            garageService.deletePath(filePath.toString(), false);
-        }
-        garageService.uploadFile(filePath.toString(), image);
-        property.setThumbnail(image.getOriginalFilename());
+        String contentType = Objects.toString(image.getContentType(), "image/jpeg").toLowerCase(Locale.ROOT);
+        String extension = switch (contentType) {
+            case "image/png" -> "png";
+            case "image/webp" -> "webp";
+            default -> "jpg";
+        };
+        String fileName = "property-cover." + extension;
+        garageService.uploadBytes(filePath.resolve(fileName).toString().replace('\\', '/'), image.getBytes(), contentType);
+        property.setThumbnail(fileName);
         property.setImagePath(filePath.toString());
         propertyDao.update(property);
     }

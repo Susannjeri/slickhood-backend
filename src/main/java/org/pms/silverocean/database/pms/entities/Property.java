@@ -1,6 +1,9 @@
 package org.pms.silverocean.database.pms.entities;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.Column;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
@@ -13,6 +16,7 @@ import org.jspecify.annotations.NonNull;
 import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;
 import org.pms.silverocean.service.property.wrappers.PropertyDTO;
+import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 
 @Table(name = "pms_property", indexes = {
         @Index(name = "idx_created_by", columnList = "createdBy"),
@@ -28,29 +32,40 @@ import org.pms.silverocean.service.property.wrappers.PropertyDTO;
 public class Property extends BaseCreatorEntity implements Auditable {
     private String name;
     private String type;
+    @Column(length = 32, nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private PMSPropertyManagementMode managementMode = PMSPropertyManagementMode.RENTAL;
     private String address;
     private String mapLocation;
     private String currency;
     private String ref;
     private String imagePath;
     private String thumbnail;
+    @Builder.Default
     private boolean hasUnits = false;
 
 
     public Property(PropertyDTO dto) {
-        this.name = dto.name();
+        this.name = dto.name().trim();
         this.type = dto.type().name();
-        this.address = dto.address();
-        this.mapLocation = dto.mapLocation();
-        this.currency = StringUtils.isNotBlank(dto.currency()) ? dto.currency() : PMSUtils.getDefaultCurrency().getCurrencyCode();
+        this.managementMode = dto.managementMode() == null
+                ? PMSPropertyManagementMode.RENTAL
+                : dto.managementMode();
+        this.address = dto.address().trim();
+        this.mapLocation = dto.mapLocation().replaceAll("\\s+", "");
+        this.currency = StringUtils.isNotBlank(dto.currency()) ? dto.currency().trim().toUpperCase() : PMSUtils.getDefaultCurrency().getCurrencyCode();
     }
 
     public void updateFromDto(PropertyDTO dto) {
-        this.name = dto.name();
+        this.name = dto.name().trim();
         this.type = dto.type().name();
-        this.address = dto.address();
-        this.mapLocation = dto.mapLocation();
-        this.currency = StringUtils.isNotBlank(dto.currency()) ? dto.currency() : PMSUtils.getDefaultCurrency().getCurrencyCode();
+        if (dto.managementMode() != null) {
+            this.managementMode = dto.managementMode();
+        }
+        this.address = dto.address().trim();
+        this.mapLocation = dto.mapLocation().replaceAll("\\s+", "");
+        this.currency = StringUtils.isNotBlank(dto.currency()) ? dto.currency().trim().toUpperCase() : PMSUtils.getDefaultCurrency().getCurrencyCode();
     }
 
     @Override
@@ -69,6 +84,7 @@ public class Property extends BaseCreatorEntity implements Auditable {
                 "\"id\":" + getId() + "," +
                 "\"name\":\"" + name + "\"," +
                 "\"type\":\"" + type + "\"," +
+                "\"managementMode\":\"" + managementMode + "\"," +
                 "\"address\":\"" + address + "\"," +
                 "\"mapLocation\":\"" + mapLocation + "\"," +
                 "\"currency\":\"" + currency + "\"," +
