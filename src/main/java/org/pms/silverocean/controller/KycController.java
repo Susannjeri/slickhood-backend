@@ -45,6 +45,11 @@ public class KycController {
     @PostMapping("/submit")
     public ResponseEntity<ResponseDTO> submit() { return ok(ResponseCode.KYC_SUBMITTED, service.submit()); }
 
+    @PostMapping("/reprocess")
+    public ResponseEntity<ResponseDTO> reprocess() throws Exception {
+        return ok(ResponseCode.KYC_DETAILS, service.reprocessOwnDocuments());
+    }
+
     @GetMapping("/documents/{documentId}/content")
     public ResponseEntity<byte[]> documentContent(@PathVariable long documentId) {
         KycDocumentContent document = service.documentContent(documentId);

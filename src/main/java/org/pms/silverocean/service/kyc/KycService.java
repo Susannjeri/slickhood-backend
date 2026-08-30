@@ -136,8 +136,6 @@ public class KycService {
         String extension = "application/pdf".equals(file.getContentType()) ? ".pdf" :
                 ("image/png".equals(file.getContentType()) ? ".png" : ".jpg");
         String fileRef = "kyc/" + user.getId() + "/" + UUID.randomUUID() + extension;
-        garageService.uploadBytes(fileRef, bytes, file.getContentType());
-
         KycDocument document = new KycDocument();
         document.setCaseId(kycCase.getId()); document.setUserId(user.getId());
         document.setDocumentType(documentType.name()); document.setOriginalFileName(safeName(file.getOriginalFilename()));
@@ -145,23 +143,25 @@ public class KycService {
         document.setSha256(sha256); document.setWidth(quality.width()); document.setHeight(quality.height());
         document.setQualityScore(quality.sharpness()); document.setQualityStatus("PASSED"); document.setActive(true);
 
+        if (!ocrProvider.enabled()) {
+            throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+        }
         OcrResult ocr;
         try {
             ocr = ocrProvider.extract(bytes, file.getContentType(), documentType);
         } catch (RuntimeException providerFailure) {
-            // Provider outages must not lose an otherwise valid upload; route it to human review.
-            ocr = new OcrResult("PROVIDER_UNAVAILABLE", 0, Map.of());
-            document.setRejectionReason("Automatic extraction is temporarily unavailable; document requires review");
+            throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
         }
         Map<String,String> extractedFields = validateExtractedEvidence(ocr.fields(), user, kycCase);
         document.setOcrProvider(ocr.provider()); document.setOcrConfidence(ocr.confidence());
-        if (ocrProvider.enabled()) {
-            document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(extractedFields)));
-            document.setStatus(extractedFields.isEmpty() || ocr.confidence() < 75 || extractedFields.containsKey("_validationWarnings") ?
-                    DocumentStatus.REVIEW_REQUIRED.name() : DocumentStatus.OCR_COMPLETE.name());
+        document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(extractedFields)));
+        if (ocrAccepted(documentType, ocr, extractedFields)) {
+            document.setStatus(DocumentStatus.OCR_COMPLETE.name());
         } else {
-            document.setStatus(DocumentStatus.REVIEW_REQUIRED.name());
+            document.setStatus(DocumentStatus.REJECTED.name());
+            document.setRejectionReason(ocrRejectionReason(extractedFields));
         }
+        garageService.uploadBytes(fileRef, bytes, file.getContentType());
         documentRepo.save(document);
         kycCase.setStatus(KycStatus.IN_PROGRESS.name()); caseRepo.save(kycCase);
         return KycDocumentView.from(document, extractedFields, null);
@@ -188,24 +188,38 @@ public class KycService {
             throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
         }
         KycCase kycCase = caseRepo.findById(caseId).orElseThrow(() -> new PMSCustomException(ResponseCode.KYC_CASE_NOT_FOUND));
-        if (!KycStatus.SUBMITTED.name().equals(kycCase.getStatus()) && !KycStatus.REVIEW_REQUIRED.name().equals(kycCase.getStatus())) {
+        Users subject = userDao.findById(kycCase.getUserId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
+        boolean pendingReview = KycStatus.SUBMITTED.name().equals(kycCase.getStatus())
+                || KycStatus.REVIEW_REQUIRED.name().equals(kycCase.getStatus());
+        if (!pendingReview) {
             throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
         }
         long reviewer = currentUser().getId();
         kycCase.setStatus(request.decision().name()); kycCase.setReviewNotes(request.notes());
         kycCase.setReviewedBy(reviewer); kycCase.setReviewedAt(ZonedDateTime.now()); caseRepo.save(kycCase);
-        Users subject = userDao.findById(kycCase.getUserId())
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
         if (request.decision() == KycStatus.APPROVED) {
-            documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).stream()
-                    .map(this::decrypt).forEach(fields -> {
-                        if (fields.containsKey("documentNumber")) subject.setIdentificationNumber(fields.get("documentNumber"));
-                        if (fields.containsKey("taxPin")) subject.setTaxPin(fields.get("taxPin"));
-                    });
+            String identificationNumber = null;
+            String taxPin = null;
+            for (KycDocument document : documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId())) {
+                Map<String, String> fields = decrypt(document);
+                if (identificationNumber == null) identificationNumber = cleanVerifiedValue(fields.get("documentNumber"));
+                if (taxPin == null) taxPin = cleanVerifiedValue(fields.get("taxPin"));
+            }
+            if (identificationNumber == null || taxPin == null) {
+                throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+            }
+            if (!userDao.isValidIDAndTaxPin(subject.getId(), subject.getCountry(), identificationNumber, taxPin)) {
+                throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+            }
+            subject.setIdentificationNumber(identificationNumber.toUpperCase(Locale.ROOT));
+            subject.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
             subject.setVerified(true);
             subject.setAccountStatus(AccountStatus.ACTIVE.name());
             documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).forEach(document -> {
-                document.setStatus(DocumentStatus.VERIFIED.name());
+                if (!DocumentStatus.REJECTED.name().equals(document.getStatus())) {
+                    document.setStatus(DocumentStatus.VERIFIED.name());
+                }
                 document.setReviewedBy(reviewer);
                 document.setReviewedAt(ZonedDateTime.now());
                 documentRepo.save(document);
@@ -229,14 +243,94 @@ public class KycService {
     }
 
     public List<KycAdminCaseView> reviewQueue() {
-        return caseRepo.findByStatusInAndActiveTrueOrderBySubmittedAtAsc(
-                        List.of(KycStatus.SUBMITTED.name(), KycStatus.REVIEW_REQUIRED.name(), KycStatus.REJECTED.name()))
-                .stream().map(kycCase -> {
-                    Users subject = userDao.findById(kycCase.getUserId())
-                            .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
-                    return new KycAdminCaseView(subject.getId(), subject.getFullName(), subject.getEmail(),
-                            view(kycCase, subject));
-                }).toList();
+        List<KycAdminCaseView> queue = new ArrayList<>();
+        for (KycCase kycCase : caseRepo.findByStatusInAndActiveTrueOrderBySubmittedAtAsc(
+                List.of(KycStatus.SUBMITTED.name(), KycStatus.REVIEW_REQUIRED.name(), KycStatus.REJECTED.name()))) {
+            Users subject = userDao.findById(kycCase.getUserId())
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
+            queue.add(new KycAdminCaseView(subject.getId(), subject.getFullName(), subject.getEmail(),
+                    view(kycCase, subject)));
+        }
+        return queue;
+    }
+
+    private String cleanVerifiedValue(String value) {
+        if (value == null) return null;
+        String cleaned = value.replaceAll("\\s+", "").trim();
+        return cleaned.isEmpty() ? null : cleaned;
+    }
+
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public KycCaseView reprocessOwnDocuments() throws Exception {
+        if (!ocrProvider.enabled()) throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+        Users user = currentUser();
+        KycCase kycCase = ownCase();
+        for (KycDocument document : documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId())) {
+            KycDocumentType type = KycDocumentType.valueOf(document.getDocumentType());
+            var stored = garageService.download(document.getFileRef());
+            String contentType = stored.contentType() == null ? document.getContentType() : stored.contentType();
+            OcrResult ocr;
+            try {
+                ocr = ocrProvider.extract(stored.bytes(), contentType, type);
+            } catch (RuntimeException providerFailure) {
+                throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+            }
+            Map<String, String> fields = validateExtractedEvidence(ocr.fields(), user, kycCase);
+            document.setOcrProvider(ocr.provider());
+            document.setOcrConfidence(ocr.confidence());
+            document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(fields)));
+            if (ocrAccepted(type, ocr, fields)) {
+                document.setStatus(DocumentStatus.OCR_COMPLETE.name());
+                document.setRejectionReason(null);
+            } else {
+                document.setStatus(DocumentStatus.REJECTED.name());
+                document.setRejectionReason(ocrRejectionReason(fields));
+            }
+            documentRepo.save(document);
+        }
+
+        String identificationNumber = null;
+        String taxPin = null;
+        for (KycDocument document : documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId())) {
+            if (DocumentStatus.REJECTED.name().equals(document.getStatus())) continue;
+            Map<String, String> fields = decrypt(document);
+            if (identificationNumber == null) identificationNumber = cleanVerifiedValue(fields.get("documentNumber"));
+            if (taxPin == null) taxPin = cleanVerifiedValue(fields.get("taxPin"));
+        }
+        boolean complete = missingRequirements(kycCase, user).isEmpty()
+                && identificationNumber != null && taxPin != null;
+        if (complete && userDao.isValidIDAndTaxPin(user.getId(), user.getCountry(), identificationNumber, taxPin)) {
+            user.setIdentificationNumber(identificationNumber.toUpperCase(Locale.ROOT));
+            user.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
+            user.setVerified(true);
+            user.setAccountStatus(AccountStatus.ACTIVE.name());
+            kycCase.setStatus(KycStatus.APPROVED.name());
+            documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).stream()
+                    .filter(document -> !DocumentStatus.REJECTED.name().equals(document.getStatus()))
+                    .forEach(document -> {
+                        document.setStatus(DocumentStatus.VERIFIED.name());
+                        documentRepo.save(document);
+                    });
+        } else {
+            user.setVerified(false);
+            user.setAccountStatus(AccountStatus.PENDING_KYC.name());
+            kycCase.setStatus(KycStatus.IN_PROGRESS.name());
+        }
+        userDao.save(user);
+        caseRepo.save(kycCase);
+        return view(kycCase, user);
+    }
+
+    private boolean ocrAccepted(KycDocumentType type, OcrResult ocr, Map<String, String> fields) {
+        if (type == KycDocumentType.SELFIE) return true;
+        return ocr.confidence() >= 75 && !fields.containsKey("_validationWarnings");
+    }
+
+    private String ocrRejectionReason(Map<String, String> fields) {
+        String warning = fields.get("_validationWarnings");
+        return warning == null || warning.isBlank()
+                ? "The required identity data could not be read confidently. Upload a clearer original document."
+                : warning;
     }
 
     /**

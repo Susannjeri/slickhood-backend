@@ -12,6 +12,9 @@ import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.security.EncryptionService;
+import org.pms.silverocean.service.security.DecryptDTO;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,17 +36,30 @@ class KycActivationLifecycleTest {
     private UserDao users;
     private KycRequirementResolver requirements;
     private GarageService garage;
+    private EncryptionService encryption;
+    private DocumentQualityService quality;
+    private KycOcrProvider ocr;
     private KycService service;
 
     @BeforeEach void setUp() {
         cases = mock(KycCaseRepo.class); documents = mock(KycDocumentRepo.class);
         roles = mock(UserRoleRepo.class); users = mock(UserDao.class); requirements = mock(KycRequirementResolver.class); garage = mock(GarageService.class);
+        encryption = mock(EncryptionService.class);
+        quality = mock(DocumentQualityService.class);
+        ocr = mock(KycOcrProvider.class);
         when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(anyLong())).thenReturn(List.of());
+        when(documents.save(any(KycDocument.class))).thenAnswer(invocation -> {
+            KycDocument saved = invocation.getArgument(0);
+            if (saved.getId() == null) saved.setId(100L);
+            return saved;
+        });
         when(roles.findByUserId(any(Long.class))).thenReturn(Set.of());
         when(requirements.resolve(any())).thenReturn(Set.of());
+        when(users.isValidIDAndTaxPin(anyLong(), any(), any(), any())).thenReturn(true);
         service = new KycService(cases, documents, roles, users, requirements,
-                mock(DocumentQualityService.class), mock(KycOcrProvider.class), garage,
-                mock(EncryptionService.class), new ObjectMapper());
+                quality, ocr, garage,
+                encryption, new ObjectMapper());
+        ReflectionTestUtils.setField(service, "maxFileBytes", 10_485_760L);
     }
 
     @Test void submissionMovesCustomerIntoReviewGate() {
@@ -62,11 +79,18 @@ class KycActivationLifecycleTest {
         KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
         when(users.getUserObject()).thenReturn(reviewer); when(users.findById(12)).thenReturn(Optional.of(subject));
         when(cases.findById(40L)).thenReturn(Optional.of(kycCase));
+        KycDocument identity = document(81, 12); identity.setCaseId(40); identity.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name()); identity.setEncryptedExtractedData(new byte[]{1});
+        KycDocument tax = document(82, 12); tax.setCaseId(40); tax.setDocumentType(KycDocumentType.KRA_PIN_CERTIFICATE.name()); tax.setEncryptedExtractedData(new byte[]{2});
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity, tax));
+        when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"12345678\"}"));
+        when(encryption.decrypt(new byte[]{2})).thenReturn(new DecryptDTO(false, "{\"taxPin\":\"A123456789B\"}"));
 
         service.review(40, new KycReviewRequest(KycStatus.APPROVED, "Documents matched"));
 
         assertThat(subject.isVerified()).isTrue();
         assertThat(subject.getAccountStatus()).isEqualTo(AccountStatus.ACTIVE.name());
+        assertThat(subject.getIdentificationNumber()).isEqualTo("12345678");
+        assertThat(subject.getTaxPin()).isEqualTo("A123456789B");
         verify(users).save(subject);
     }
 
@@ -82,6 +106,33 @@ class KycActivationLifecycleTest {
         assertThat(subject.getAccountStatus()).isEqualTo(AccountStatus.KYC_REJECTED.name());
     }
 
+    @Test void approvalCannotCreateAnActiveButIncompleteIdentity() {
+        Users reviewer = customer(1); Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
+        when(users.getUserObject()).thenReturn(reviewer); when(users.findById(12)).thenReturn(Optional.of(subject));
+        when(cases.findById(40L)).thenReturn(Optional.of(kycCase));
+
+        assertThatThrownBy(() -> service.review(40,
+                new KycReviewRequest(KycStatus.APPROVED, "Documents matched")))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(subject.isVerified()).isFalse();
+        assertThat(subject.getIdentificationNumber()).isNull();
+        assertThat(subject.getTaxPin()).isNull();
+    }
+
+    @Test void approvedLegacyProfileCannotBeManuallyRepaired() {
+        Users reviewer = customer(1); Users subject = customer(12);
+        subject.setFullName("Legacy Customer"); subject.setPhoneNumber("+254700000012");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.APPROVED);
+        when(users.getUserObject()).thenReturn(reviewer); when(users.findById(12)).thenReturn(Optional.of(subject));
+        when(cases.findById(40L)).thenReturn(Optional.of(kycCase));
+
+        assertThatThrownBy(() -> service.review(40,
+                new KycReviewRequest(KycStatus.APPROVED, "Legacy profile repaired")))
+                .isInstanceOf(RuntimeException.class);
+    }
+
     @Test void ownerCanReadProtectedDocumentThroughAuthenticatedService() {
         KycDocument document = document(81,12);
         when(users.getUserId()).thenReturn(12L); when(documents.findById(81L)).thenReturn(Optional.of(document));
@@ -91,6 +142,41 @@ class KycActivationLifecycleTest {
 
         assertThat(content.bytes()).containsExactly(1,2);
         assertThat(content.contentType()).isEqualTo("image/jpeg");
+    }
+
+    @Test void unreadableIdentityDocumentIsRejectedByOcr() throws Exception {
+        Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT)).thenReturn(
+                new OcrResult("TEST_OCR", 42, java.util.Map.of("_validationWarnings", "Could not confidently extract: document number")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        KycDocumentView result = service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "id.jpg", "image/jpeg", image));
+
+        assertThat(result.status()).isEqualTo(DocumentStatus.REJECTED.name());
+        assertThat(result.rejectionReason()).contains("document number");
+        verify(garage).uploadBytes(any(), any(), any());
+    }
+
+    @Test void disabledOcrBlocksUploadWithoutStoringDocument() {
+        Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(false);
+
+        assertThatThrownBy(() -> service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "id.jpg", "image/jpeg", image)))
+                .isInstanceOf(RuntimeException.class);
+        verify(garage, never()).uploadBytes(any(), any(), any());
     }
 
     @Test void unrelatedCustomerCannotReadAnotherCustomersDocument() {
