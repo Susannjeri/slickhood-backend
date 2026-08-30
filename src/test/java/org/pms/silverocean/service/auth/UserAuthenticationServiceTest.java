@@ -128,6 +128,23 @@ class UserAuthenticationServiceTest {
         assertEquals(ResponseCode.LOGIN_FAILURE_VERIFICATION_REQUIRED.getCode(), response.getCode());
     }
 
+    @Test
+    void geolocationOutageDoesNotBlockARealRegistration() {
+        RegistrationDTO request = registration("  New.User@Example.COM ", "Password1!");
+        when(userDao.findByEmail("new.user@example.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode("Password1!")).thenReturn("encoded");
+        when(geoLocationService.getLocation("203.0.113.8")).thenThrow(new RuntimeException("location provider unavailable"));
+        when(totpService.generateOTPCode("new.user@example.com")).thenReturn("Use OTP sent to email");
+
+        var response = service.register(request, "203.0.113.8");
+
+        assertTrue(response.isSuccess());
+        assertEquals(ResponseCode.EMAIL_OTP_GENERATED.getCode(), response.getCode());
+        assertEquals("new.user@example.com", request.getEmail());
+        verify(roleService).saveUserAndAssignRoleOnRegistration(org.mockito.ArgumentMatchers.eq(1L), org.mockito.ArgumentMatchers.any(Users.class));
+        verify(totpService).generateOTPCode("new.user@example.com");
+    }
+
     private RegistrationDTO registration(String email, String password) {
         RegistrationDTO request = new RegistrationDTO();
         request.setEmail(email);

@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import java.time.ZonedDateTime;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
@@ -67,35 +68,36 @@ public class UserAuthenticationService {
     }
 
     public ResponseDTO register(RegistrationDTO registrationDTO, String ipAddress) {
+        String normalizedEmail = StringUtils.trimToEmpty(registrationDTO.getEmail()).toLowerCase(Locale.ROOT);
+        registrationDTO.setEmail(normalizedEmail);
         Optional<Users> checkIfUserExists;
         try {
-            if (signUpCache.contains(registrationDTO.getEmail())) {
+            if (!signUpCache.add(normalizedEmail)) {
                 return new ResponseDTO(false, ResponseCode.DUPLICATE_USER_DETAILS.getCode(), i18NService.getLocalizedMessage(ResponseCode.DUPLICATE_USER_DETAILS));
             }
-            signUpCache.add(registrationDTO.getEmail());
-            checkIfUserExists = userDao.findByEmail(registrationDTO.getEmail());
+            checkIfUserExists = userDao.findByEmail(normalizedEmail);
         } catch (Exception e) {
             log.error("Failed running SQL to find user", e);
-            signUpCache.remove(registrationDTO.getEmail());
+            signUpCache.remove(normalizedEmail);
             return new ResponseDTO(false, ResponseCode.LOGIN_ERROR.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_ERROR));
         }
         if (checkIfUserExists.isPresent()) {
-            signUpCache.remove(registrationDTO.getEmail());
+            signUpCache.remove(normalizedEmail);
             Users existingUser = checkIfUserExists.get();
             if (!existingUser.isActive()
                     && !existingUser.isEmailVerified()
                     && passwordEncoder.matches(registrationDTO.getPassword(), existingUser.getPassword())) {
-                return sendRegistrationVerification(registrationDTO.getEmail());
+                return sendRegistrationVerification(normalizedEmail);
             }
             return new ResponseDTO(false, ResponseCode.DUPLICATE_USER_DETAILS.getCode(), i18NService.getLocalizedMessage(ResponseCode.DUPLICATE_USER_DETAILS));
         }
         if (registrationDTO.getRoleId() == null && StringUtils.isBlank(registrationDTO.getToken())) {
             log.error("Local Register; could not register new user, missing role id");
-            signUpCache.remove(registrationDTO.getEmail());
+            signUpCache.remove(normalizedEmail);
             return new ResponseDTO(false, ResponseCode.REGISTRATION_FAILED.getCode(), i18NService.getLocalizedMessage(ResponseCode.REGISTRATION_FAILED));
         }
         if (StringUtils.isNotBlank(registrationDTO.getReferralCode())) affiliateService.resolve(registrationDTO.getReferralCode());
-        Users user = Users.builder().email(registrationDTO.getEmail())
+        Users user = Users.builder().email(normalizedEmail)
                 .password(passwordEncoder.encode(registrationDTO.getPassword()))
                 .registrationIP(ipAddress)
                 .source(RegistrationChannel.LOCAL.name())
@@ -105,19 +107,25 @@ public class UserAuthenticationService {
         try {
             setLocationDetailsBasedOnIP(user);
             saveAndAssignRole(registrationDTO.getRoleId(), user, registrationDTO.getToken());
-            affiliateService.attributeRegistration(registrationDTO.getReferralCode(), user.getId(), registrationDTO.getReferralCampaign());
+            if (StringUtils.isNotBlank(registrationDTO.getReferralCode())) {
+                try {
+                    affiliateService.attributeRegistration(registrationDTO.getReferralCode(), user.getId(), registrationDTO.getReferralCampaign());
+                } catch (Exception attributionError) {
+                    log.warn("User {} registered, but referral attribution could not be completed", user.getId(), attributionError);
+                }
+            }
         } catch (Exception e) {
             log.error("Could not register new user", e);
-            signUpCache.remove(registrationDTO.getEmail());
+            signUpCache.remove(normalizedEmail);
             if (e instanceof PMSCustomException) {
                 throw (PMSCustomException) e;
             }
             return new ResponseDTO(false, ResponseCode.REGISTRATION_FAILED.getCode(), i18NService.getLocalizedMessage(ResponseCode.REGISTRATION_FAILED));
         }
         try {
-            return sendRegistrationVerification(registrationDTO.getEmail());
+            return sendRegistrationVerification(normalizedEmail);
         } finally {
-            signUpCache.remove(registrationDTO.getEmail());
+            signUpCache.remove(normalizedEmail);
         }
     }
 
@@ -320,9 +328,16 @@ public class UserAuthenticationService {
     }
 
     private void setLocationDetailsBasedOnIP(Users user) {
-        GeoLocationResponse location = geolocationService.getLocation(user.getRegistrationIP());
-        user.setCountry(location.countryName());
-        user.setCity(location.city());
-        user.setCountryCode(location.countryCode());
+        try {
+            GeoLocationResponse location = geolocationService.getLocation(user.getRegistrationIP());
+            if (location == null) return;
+            user.setCountry(location.countryName());
+            user.setCity(location.city());
+            user.setCountryCode(location.countryCode());
+        } catch (Exception locationError) {
+            // Location is enrichment only. An external lookup outage must never
+            // prevent account creation or strand a partially-created user.
+            log.warn("Continuing registration without IP geolocation for {}", user.getRegistrationIP(), locationError);
+        }
     }
 }

@@ -11,7 +11,7 @@ import software.amazon.awssdk.services.textract.TextractClient;
 public class KycOcrConfig {
     @Bean
     @ConditionalOnProperty(name = "kyc.ocr.provider", havingValue = "aws-textract")
-    TextractClient textractClient(@Value("${kyc.ocr.aws.region:af-south-1}") String region) {
+    TextractClient textractClient(@Value("${kyc.ocr.aws.region:ap-south-1}") String region) {
         return TextractClient.builder().region(Region.of(region)).build();
     }
 }
