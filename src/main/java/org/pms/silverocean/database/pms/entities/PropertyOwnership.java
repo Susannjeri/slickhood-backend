@@ -6,6 +6,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;
 import java.time.LocalDate;
+import java.time.ZonedDateTime;
 
 @Entity
 @Table(name = "pms_property_ownership", indexes = {
@@ -20,4 +21,7 @@ public class PropertyOwnership extends BaseCreatorEntity {
     private LocalDate ownershipEnd;
     private String source;
     private Long sourceSaleTransactionId;
+    @Column(length = 500) private String terminationReason;
+    private Long terminatedBy;
+    private ZonedDateTime terminatedAt;
 }

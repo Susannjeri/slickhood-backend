@@ -54,7 +54,7 @@ public interface VisitorRepo extends JpaRepository<Visitor, Long> {
                                                  UNION
                                                  SELECT v3.id FROM pms_visitor v3 JOIN pms_property p3 ON v3.property_id = p3.id
                                                  WHERE EXISTS (
-                                                     SELECT 1 FROM pms_property_manager pm WHERE pm.property_id = p3.id AND pm.user_id = :userId)
+                                                     SELECT 1 FROM pms_property_manager pm WHERE pm.property_id = p3.id AND pm.user_id = :userId AND pm.active = 1)
                                              ) AS allowed_ids ON v.id = allowed_ids.id
              WHERE v.active = 1
              ORDER BY id DESC
@@ -73,7 +73,7 @@ public interface VisitorRepo extends JpaRepository<Visitor, Long> {
                                                  UNION
                                                  SELECT v3.id FROM pms_visitor v3 JOIN pms_property p3 ON v3.property_id = p3.id
                                                  WHERE EXISTS (
-                                                     SELECT 1 FROM pms_property_manager pm WHERE pm.property_id = p3.id AND pm.user_id = :userId)
+                                                     SELECT 1 FROM pms_property_manager pm WHERE pm.property_id = p3.id AND pm.user_id = :userId AND pm.active = 1)
                                              ) AS allowed_ids ON v.id = allowed_ids.id
             WHERE v.active = 1 AND v.phone_number like CONCAT('%', :phoneNumber, '%')
             ORDER BY id DESC

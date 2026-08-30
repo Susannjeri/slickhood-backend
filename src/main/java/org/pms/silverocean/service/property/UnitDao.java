@@ -291,6 +291,10 @@ public class UnitDao {
         return unitRepo.getAllByUnitIdAndUserIdIsTenant(userId);
     }
 
+    public List<PropertyIdUnitRefPropertyNameProjection> findByUserIdIsResident(long userId) {
+        return unitRepo.getAllByUserIdIsResident(userId);
+    }
+
     public Page<Unit> findAll(Optional<String> ref, Optional<Long> propertyId, Optional<PMSLeaseMode> leaseMode, Long userId, PMSRole activeRole, Pageable pageable) {
         List<Specification<Unit>> specs = createGetUnitSpecification(ref, propertyId, userId, activeRole, leaseMode);
         return specs.isEmpty() ? unitRepo.findAll(pageable) : unitRepo.findAll(Specification.allOf(specs), pageable);

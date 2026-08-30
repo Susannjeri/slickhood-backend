@@ -17,6 +17,11 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.springframework.stereotype.Service;
 import org.pms.silverocean.service.payment.invoice.InvoiceService;
+import org.pms.silverocean.service.I18NService;
+import org.pms.silverocean.service.notification.NotificationDTO;
+import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.notification.common.NotificationType;
+import org.pms.silverocean.common.PMSUtils;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -31,11 +36,15 @@ public class EstateService {
     private final UserDao userDao;
     private final EstateServiceChargeRepo chargeRepo;
     private final InvoiceService invoiceService;
+    private final NotificationService notificationService;
+    private final I18NService i18n;
 
     public EstateService(PropertyOwnershipRepo ownershipRepo, PropertyRepo propertyRepo, UnitRepo unitRepo, UserDao userDao,
-                         EstateServiceChargeRepo chargeRepo, InvoiceService invoiceService) {
+                         EstateServiceChargeRepo chargeRepo, InvoiceService invoiceService,
+                         NotificationService notificationService, I18NService i18n) {
         this.ownershipRepo = ownershipRepo; this.propertyRepo = propertyRepo; this.unitRepo = unitRepo; this.userDao = userDao;
         this.chargeRepo = chargeRepo; this.invoiceService = invoiceService;
+        this.notificationService = notificationService; this.i18n = i18n;
     }
 
     @Transactional
@@ -79,7 +88,13 @@ public class EstateService {
             }
             existing.setActive(false);
             existing.setOwnershipEnd(ownershipStart.minusDays(1));
+            existing.setTerminationReason("Ownership transferred: " + source);
+            existing.setTerminatedBy(createdBy);
+            existing.setTerminatedAt(java.time.ZonedDateTime.now(PMSUtils.getZoneId()));
             ownershipRepo.save(existing);
+            String propertyName = propertyRepo.findById(unit.getPropertyId()).map(Property::getName)
+                    .orElse("property " + unit.getPropertyId());
+            notifyOwnershipEnded(existing, propertyName, existing.getOwnershipEnd(), existing.getTerminationReason());
         });
         PropertyOwnership ownership = new PropertyOwnership();
         ownership.setPropertyId(unit.getPropertyId());
@@ -104,12 +119,33 @@ public class EstateService {
     }
 
     @Transactional
-    public PropertyOwnership end(long id, LocalDate endDate) {
+    public PropertyOwnership end(long id, OwnershipTerminationRequest request) {
         PropertyOwnership ownership = ownershipRepo.findById(id).filter(PropertyOwnership::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.OWNERSHIP_NOT_FOUND));
-        requireManagedProperty(ownership.getPropertyId(), userDao.getUserId());
-        if (endDate.isBefore(ownership.getOwnershipStart())) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
-        ownership.setOwnershipEnd(endDate); ownership.setActive(false); return ownershipRepo.save(ownership);
+        long actorId = userDao.getUserId();
+        Property property = requireManagedProperty(ownership.getPropertyId(), actorId);
+        if (request.endDate().isBefore(ownership.getOwnershipStart()) || request.endDate().isAfter(LocalDate.now())) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
+        ownership.setOwnershipEnd(request.endDate());
+        ownership.setTerminationReason(request.reason().trim());
+        ownership.setTerminatedBy(actorId);
+        ownership.setTerminatedAt(java.time.ZonedDateTime.now(PMSUtils.getZoneId()));
+        ownership.setActive(false);
+        PropertyOwnership ended = ownershipRepo.save(ownership);
+        notifyOwnershipEnded(ownership, property.getName(), request.endDate(), request.reason().trim());
+        return ended;
+    }
+
+    private void notifyOwnershipEnded(PropertyOwnership ownership, String propertyName, LocalDate endDate, String reason) {
+        userDao.findById(ownership.getHomeownerUserId()).filter(Users::isActive)
+                .filter(homeowner -> homeowner.getEmail() != null && !homeowner.getEmail().isBlank())
+                .ifPresent(homeowner -> {
+                    String location = propertyName + (ownership.getUnitId() == null ? "" : " / unit " + ownership.getUnitId());
+                    String body = String.format(i18n.getLocalizedMessage(NotificationType.OWNERSHIP_ENDED_EMAIL.getBody()),
+                            homeowner.getFullName(), location, endDate, reason);
+                    notificationService.queueNotification(new NotificationDTO(body, homeowner.getEmail(), NotificationType.OWNERSHIP_ENDED_EMAIL));
+                });
     }
 
     public PropertyOwnership transferFromSale(long propertyId, Long unitId, long buyerId, long saleId) {

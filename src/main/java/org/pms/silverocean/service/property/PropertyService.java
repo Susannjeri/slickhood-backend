@@ -757,6 +757,10 @@ public class PropertyService {
         return unitDao.findByUserIDIsTenant(userDao.getUserId());
     }
 
+    public List<PropertyIdUnitRefPropertyNameProjection> listUnitsByResident() {
+        return unitDao.findByUserIdIsResident(userDao.getUserId());
+    }
+
     public ResponseDTO listUnits(Pageable pageable, Optional<String> unitRef, Optional<Long> propertyId, Optional<Long> unitId, Optional<PMSLeaseMode> leaseMode) {
         if (unitId != null && unitId.isPresent()) {
             return getPropertyUnitByIdAndOwnerOrStaffOrTenant(unitId.get());

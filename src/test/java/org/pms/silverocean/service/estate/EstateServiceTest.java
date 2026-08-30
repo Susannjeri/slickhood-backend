@@ -19,6 +19,8 @@ import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.payment.invoice.InvoiceService;
+import org.pms.silverocean.service.I18NService;
+import org.pms.silverocean.service.notification.NotificationService;
 
 import java.time.LocalDate;
 import java.util.Optional;
@@ -39,6 +41,8 @@ class EstateServiceTest {
     @Mock UserDao users;
     @Mock EstateServiceChargeRepo charges;
     @Mock InvoiceService invoices;
+    @Mock NotificationService notifications;
+    @Mock I18NService i18n;
 
     private EstateService service;
     private Unit unit;
@@ -46,7 +50,7 @@ class EstateServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new EstateService(ownerships, properties, units, users, charges, invoices);
+        service = new EstateService(ownerships, properties, units, users, charges, invoices, notifications, i18n);
         unit = new Unit();
         unit.setId(77L);
         unit.setPropertyId(11L);
@@ -136,5 +140,22 @@ class EstateServiceTest {
         verify(invoices, never()).createPropertyInvoice(org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyMap(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void ownershipCannotBeEndedInTheFuture() {
+        PropertyOwnership ownership = new PropertyOwnership();
+        ownership.setId(88L); ownership.setPropertyId(11L); ownership.setHomeownerUserId(200L);
+        ownership.setOwnershipStart(LocalDate.now().minusYears(1)); ownership.setActive(true);
+        when(ownerships.findById(88L)).thenReturn(Optional.of(ownership));
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(org.pms.silverocean.service.auth.roles.enums.PMSRole.LANDLORD);
+        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 999L)).thenReturn(Optional.of(new Property()));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.end(88L,
+                new OwnershipTerminationRequest(LocalDate.now().plusDays(1), "Sale completed")));
+
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
+        verify(ownerships, never()).save(ownership);
     }
 }

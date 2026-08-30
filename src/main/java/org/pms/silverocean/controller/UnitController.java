@@ -199,6 +199,13 @@ public class UnitController extends BasePropertyController {
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.UNIT_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.UNIT_LIST), unitList));
     }
 
+    @GetMapping("/list/by/resident")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_UNIT)")
+    public ResponseEntity<ResponseDTO> getUnitListByResident() {
+        List<PropertyIdUnitRefPropertyNameProjection> unitList = propertyService.listUnitsByResident();
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.UNIT_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.UNIT_LIST), unitList));
+    }
+
     @GetMapping("/list/key/value")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_UNIT_LIST)")
     public ResponseEntity<ResponseDTO> getUnitListKeyValue(@RequestParam Optional<String> search, @RequestParam Long propertyId, Pageable pageable) {
