@@ -29,6 +29,7 @@ import org.pms.silverocean.service.invites.InviteType;
 import org.pms.silverocean.service.subscription.SubscriptionProvisioningService;
 import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.kyc.KycService;
+import org.pms.silverocean.service.teamaccess.TeamAccessService;
 
 import java.util.Optional;
 
@@ -79,6 +80,9 @@ class RoleServiceTest {
 
     @Mock
     private KycService kycService;
+
+    @Mock
+    private TeamAccessService teamAccessService;
 
     @InjectMocks
     private RoleService roleService;

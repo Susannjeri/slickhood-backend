@@ -90,7 +90,9 @@ public class CommonPropertySpecification {
                 case TENANT -> tenantPredicate;
                 case HOMEOWNER -> homeownerPredicate;
                 case BUYER -> buyerPredicate;
-                case PROPERTY_MANAGER, ESTATE_MANAGER, SALES_AGENT, FINANCE, GUARD -> staffPredicate;
+                case PROPERTY_MANAGER, WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER,
+                     ESTATE_OPERATIONS_MANAGER, SECURITY_SUPERVISOR, SALES_COORDINATOR,
+                     LISTING_AGENT, WORKSPACE_VIEWER, ESTATE_MANAGER, SALES_AGENT, GUARD -> staffPredicate;
                 default -> cb.disjunction();
             };
         };

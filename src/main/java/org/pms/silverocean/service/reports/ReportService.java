@@ -47,30 +47,30 @@ public class ReportService {
 
     private static final List<ReportModels.Definition> DEFINITIONS = List.of(
             definition("INVOICE_COLLECTIONS", "Invoice collections & arrears", "Billed, collected, outstanding and overdue invoices.", "FINANCE",
-                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.HOMEOWNER, PMSRole.SALES_AGENT, PMSRole.BUYER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
+                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.HOMEOWNER, PMSRole.SALES_AGENT, PMSRole.BUYER, PMSRole.WORKSPACE_ADMIN, PMSRole.PROPERTY_ACCOUNTANT, PMSRole.WORKSPACE_VIEWER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
             definition("PAYMENT_RECONCILIATION", "Payment reconciliation", "Payment-channel success, pending and exception activity matched to invoices.", "FINANCE",
-                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.HOMEOWNER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
+                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.HOMEOWNER, PMSRole.WORKSPACE_ADMIN, PMSRole.PROPERTY_ACCOUNTANT, PMSRole.WORKSPACE_VIEWER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
             definition("ACCOUNT_STATEMENT", "Account statement", "Immutable debit and credit entries for invoices and receipts.", "FINANCE",
-                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.HOMEOWNER, PMSRole.SALES_AGENT, PMSRole.BUYER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
+                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.HOMEOWNER, PMSRole.SALES_AGENT, PMSRole.BUYER, PMSRole.WORKSPACE_ADMIN, PMSRole.PROPERTY_ACCOUNTANT, PMSRole.WORKSPACE_VIEWER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
             definition("LEASE_EXPIRY", "Lease expiry & renewal", "Signed and draft leases approaching expiry, including renewal and notice settings.", "PROPERTY",
-                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
+                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.WORKSPACE_ADMIN, PMSRole.LEASING_OFFICER, PMSRole.WORKSPACE_VIEWER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
             definition("OCCUPANCY_RENT_ROLL", "Occupancy & rent roll", "Current unit occupancy, asking rent, availability and advertising status.", "PROPERTY",
-                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.HOMEOWNER, PMSRole.ESTATE_MANAGER, PMSRole.SUPER_ADMIN),
+                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.HOMEOWNER, PMSRole.ESTATE_MANAGER, PMSRole.WORKSPACE_ADMIN, PMSRole.LEASING_OFFICER, PMSRole.ESTATE_OPERATIONS_MANAGER, PMSRole.WORKSPACE_VIEWER, PMSRole.SUPER_ADMIN),
             definition("VISITOR_ACTIVITY", "Visitor & gate activity", "Walk-ins, drive-ins and deliveries with gate status and dwell time.", "SECURITY",
-                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.HOMEOWNER, PMSRole.ESTATE_MANAGER, PMSRole.GUARD, PMSRole.SUPER_ADMIN),
+                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.HOMEOWNER, PMSRole.ESTATE_MANAGER, PMSRole.WORKSPACE_ADMIN, PMSRole.ESTATE_OPERATIONS_MANAGER, PMSRole.SECURITY_SUPERVISOR, PMSRole.GUARD, PMSRole.WORKSPACE_VIEWER, PMSRole.SUPER_ADMIN),
             definition("SALES_PIPELINE", "Property sales pipeline", "Offers, due diligence, completion and pipeline value.", "SALES",
-                    PMSRole.LANDLORD, PMSRole.PROPERTY_MANAGER, PMSRole.SALES_AGENT, PMSRole.BUYER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
+                    PMSRole.LANDLORD, PMSRole.PROPERTY_MANAGER, PMSRole.SALES_AGENT, PMSRole.BUYER, PMSRole.WORKSPACE_ADMIN, PMSRole.PROPERTY_ACCOUNTANT, PMSRole.SALES_COORDINATOR, PMSRole.LISTING_AGENT, PMSRole.WORKSPACE_VIEWER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
             definition("ESTATE_CHARGES", "Estate service-charge report", "Service-charge billing, settlement and overdue exposure.", "ESTATE",
-                    PMSRole.LANDLORD, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.HOMEOWNER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
+                    PMSRole.LANDLORD, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.HOMEOWNER, PMSRole.WORKSPACE_ADMIN, PMSRole.PROPERTY_ACCOUNTANT, PMSRole.ESTATE_OPERATIONS_MANAGER, PMSRole.WORKSPACE_VIEWER, PMSRole.FINANCE, PMSRole.SUPER_ADMIN),
             definition("SERVICE_BOOKINGS", "Service marketplace operations", "Bookings, completion, cancellations and quoted value.", "MARKETPLACE",
-                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.HOMEOWNER, PMSRole.ESTATE_MANAGER, PMSRole.SERVICE_PROVIDER, PMSRole.SUPER_ADMIN),
+                    PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.HOMEOWNER, PMSRole.ESTATE_MANAGER, PMSRole.WORKSPACE_ADMIN, PMSRole.ESTATE_OPERATIONS_MANAGER, PMSRole.SERVICE_PROVIDER, PMSRole.SUPER_ADMIN),
             definition("SOKO_ORDERS", "Soko orders & delivery", "Orders, payments, dispatch, delivery-code completion and order value.", "SOKO", PMSRole.values())
             ,definition("SUBSCRIPTION_LIFECYCLE", "Subscription lifecycle", "Trials, active plans, renewals and expiries by role and plan.", "SUBSCRIPTION", PMSRole.values())
             ,definition("AFFILIATE_EARNINGS", "Affiliate earnings", "Commission qualification, approval and payout allocation.", "AFFILIATE", PMSRole.AFFILIATE, PMSRole.FINANCE, PMSRole.SUPER_ADMIN)
             ,definition("KYC_OPERATIONS", "KYC operations", "Consent, phone verification, submission and review status without document contents.", "COMPLIANCE", PMSRole.values())
             ,definition("NOTIFICATION_DELIVERY", "Notification delivery", "Channel delivery, retry and failure performance.", "OPERATIONS", PMSRole.SUPER_ADMIN)
-            ,definition("SMART_GATE_HEALTH", "Smart-gate health", "Registered gate devices, enablement and last-seen health.", "SECURITY", PMSRole.LANDLORD, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.GUARD, PMSRole.SUPER_ADMIN)
-            ,definition("MAINTENANCE_OPERATIONS", "Maintenance operations", "Open, in-progress, completed and emergency work orders.", "PROPERTY", PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.HOMEOWNER, PMSRole.SUPER_ADMIN)
+            ,definition("SMART_GATE_HEALTH", "Smart-gate health", "Registered gate devices, enablement and last-seen health.", "SECURITY", PMSRole.LANDLORD, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.WORKSPACE_ADMIN, PMSRole.ESTATE_OPERATIONS_MANAGER, PMSRole.SECURITY_SUPERVISOR, PMSRole.GUARD, PMSRole.WORKSPACE_VIEWER, PMSRole.SUPER_ADMIN)
+            ,definition("MAINTENANCE_OPERATIONS", "Maintenance operations", "Open, in-progress, completed and emergency work orders.", "PROPERTY", PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.PROPERTY_MANAGER, PMSRole.ESTATE_MANAGER, PMSRole.HOMEOWNER, PMSRole.WORKSPACE_ADMIN, PMSRole.ESTATE_OPERATIONS_MANAGER, PMSRole.WORKSPACE_VIEWER, PMSRole.SUPER_ADMIN)
     );
 
     public List<ReportModels.Definition> catalog() {

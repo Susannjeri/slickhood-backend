@@ -23,6 +23,7 @@ import org.pms.silverocean.service.invites.InviteDao;
 import org.pms.silverocean.service.invites.InviteType;
 import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.kyc.KycService;
+import org.pms.silverocean.service.teamaccess.TeamAccessService;
 import org.pms.silverocean.service.wrappers.IdNameDescDTO;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -51,8 +52,9 @@ public class RoleService {
 
     private final AuditLogService auditLogService;
     private final KycService kycService;
+    private final TeamAccessService teamAccessService;
 
-    public RoleService(UserRoleRepo userRoleRepo, PermissionRepo permissionRepo, RoleRepo roleRepo, PropertyManagerService propertyManagerService, UserDao userDao, RolePermissionRepo rolePermissionRepo, I18NService i18NService, AuditLogService auditLogService, InviteDao inviteDao, KycService kycService) {
+    public RoleService(UserRoleRepo userRoleRepo, PermissionRepo permissionRepo, RoleRepo roleRepo, PropertyManagerService propertyManagerService, UserDao userDao, RolePermissionRepo rolePermissionRepo, I18NService i18NService, AuditLogService auditLogService, InviteDao inviteDao, KycService kycService, TeamAccessService teamAccessService) {
         this.userRoleRepo = userRoleRepo;
         this.permissionRepo = permissionRepo;
         this.roleRepo = roleRepo;
@@ -63,6 +65,7 @@ public class RoleService {
         this.auditLogService = auditLogService;
         this.inviteDao = inviteDao;
         this.kycService = kycService;
+        this.teamAccessService = teamAccessService;
     }
 
     public ResponseDTO selfAssignRole(long roleId) {
@@ -137,6 +140,10 @@ public class RoleService {
 
     @Transactional
     public void saveUserAndAssignRoleFromInvite(String inviteToken, Long roleId, Users user) {
+        if (teamAccessService.isTeamToken(inviteToken)) {
+            teamAccessService.registerInvitedUser(inviteToken, user);
+            return;
+        }
         Invite invite = inviteDao.getInviteByToken(inviteToken, true)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.EXPIRED_INVITE_LINK));
 
@@ -169,6 +176,10 @@ public class RoleService {
 
 
     public ResponseDTO assignRoleFromInvite(String inviteToken, Users user) {
+        if (teamAccessService.isTeamToken(inviteToken)) {
+            teamAccessService.accept(inviteToken);
+            return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY));
+        }
         Invite invite = inviteDao.getInviteByToken(inviteToken, true).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_OR_EXPIRED_TOKEN));
         return assignRoleFromInvite(invite, null, user);
     }

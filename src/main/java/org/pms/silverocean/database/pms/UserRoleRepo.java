@@ -34,4 +34,6 @@ public interface UserRoleRepo extends JpaRepository<UserRole, Long> {
     @Query("SELECT COUNT(ur) FROM UserRole ur JOIN Role r ON ur.roleId=r.id WHERE ur.roleId=:roleId AND ur.userId=:userId")
     int findByUserIdAndRoleId(Long userId, Long roleId);
 
+    Optional<UserRole> findFirstByUserIdAndRoleId(Long userId, Long roleId);
+
 }

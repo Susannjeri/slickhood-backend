@@ -83,6 +83,9 @@ public class DashBoardService {
             case SUPPORT, SALES_MARKETING, FINANCE -> buildInternalStaffDto(activeRole).thenApply(dto -> (ReportDto) dto);
             case TENANT -> buildTenantDto().thenApply(dto -> (ReportDto) dto);
             case PROPERTY_MANAGER -> buildPropertyManagerDto().thenApply(dto -> (ReportDto) dto);
+            case WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER, ESTATE_OPERATIONS_MANAGER,
+                 SECURITY_SUPERVISOR, SALES_COORDINATOR, LISTING_AGENT, WORKSPACE_VIEWER ->
+                    buildInternalStaffDto(activeRole).thenApply(dto -> (ReportDto) dto);
             case ESTATE_MANAGER -> buildEstateManagerDto().thenApply(dto -> (ReportDto) dto);
             case HOMEOWNER -> buildHomeownerDto().thenApply(dto -> (ReportDto) dto);
             case SALES_AGENT -> buildSalesAgentDto().thenApply(dto -> (ReportDto) dto);

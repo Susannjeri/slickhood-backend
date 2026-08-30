@@ -24,6 +24,7 @@ public enum NotificationType {
     FINANCE_INVITE_EMAIL("email.finance.invite.subject", "email.finance.invite.body", false, NotificationChannel.EMAIL),
     ASSET_MANAGER_INVITE_SMS("sms.asset.manager.invite", false, NotificationChannel.SMS),
     ASSET_MANAGER_INVITE_EMAIL("email.asset.manager.invite.subject", "email.asset.manager.invite.body", false, NotificationChannel.EMAIL),
+    WORKSPACE_INVITE_EMAIL("email.workspace.invite.subject", "email.workspace.invite.body", false, NotificationChannel.EMAIL),
     LEASE_MESSAGE_EMAIL("email.lease.message.subject", "email.lease.message.body", false, NotificationChannel.EMAIL),
     INVOICE_EMAIL("email.invoice.subject", "email.invoice.body", false, NotificationChannel.EMAIL),
     VISITOR_BOOKING_CONFIRMATION_SMS("sms.visitor.booking.confirmation", false, NotificationChannel.SMS),

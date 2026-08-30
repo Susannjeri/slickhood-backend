@@ -15,6 +15,7 @@ import java.util.List;
 public interface PropertyRepo extends JpaRepository<Property, Long>,  JpaSpecificationExecutor<Property> {
     Optional<Property> findByNameAndAddressAndCreatedBy(String name, String address, long createdBy);
     Optional<Property> findByIdAndCreatedByAndActiveTrue(long id, long createdBy);
+    List<Property> findAllByCreatedByAndActiveTrue(long createdBy);
 
     @Query(nativeQuery = true,value = "SELECT * FROM pms_property p WHERE p.has_units IS FALSE AND p.active AND DATEDIFF(NOW(), p.created_on) > :days")
     Page<Property> findAllByHasUnitsFalseAndActiveTrueAndDaysElasped(int days, Pageable pageable);

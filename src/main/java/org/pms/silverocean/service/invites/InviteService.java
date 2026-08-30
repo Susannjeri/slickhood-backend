@@ -12,6 +12,7 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.RoleService;
+import org.pms.silverocean.service.teamaccess.TeamAccessService;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.config.enums.PMSConfigs;
@@ -53,9 +54,10 @@ public class InviteService {
 
     private final I18NService i18NService;
     private final RoleService roleService;
+    private final TeamAccessService teamAccessService;
 
 
-    public InviteService(InviteDao inviteDao, PropertyService propertyService, UserDao userDao, ConfigService configService, RoleRepo roleRepo, NotificationService notificationService, I18NService i18NService, RoleService roleService) {
+    public InviteService(InviteDao inviteDao, PropertyService propertyService, UserDao userDao, ConfigService configService, RoleRepo roleRepo, NotificationService notificationService, I18NService i18NService, RoleService roleService, TeamAccessService teamAccessService) {
         this.inviteDao = inviteDao;
         this.propertyService = propertyService;
         this.userDao = userDao;
@@ -64,6 +66,7 @@ public class InviteService {
         this.notificationService = notificationService;
         this.i18NService = i18NService;
         this.roleService = roleService;
+        this.teamAccessService = teamAccessService;
     }
 
     public String createInviteLink(InviteType inviteType, Long entityId) {
@@ -179,6 +182,18 @@ public class InviteService {
     }
 
     public ResponseDTO validateToken(String token) {
+        if (teamAccessService.isTeamToken(token)) {
+            if (userDao.getUserId() != null) {
+                teamAccessService.accept(token);
+                return new ResponseDTO(true, ResponseCode.HOME_PAGE.getCode(),
+                        i18NService.getLocalizedMessage(ResponseCode.HOME_PAGE),
+                        List.of(configService.getConfigByName(PMSConfigs.HOME_PAGE_URL).get().stringValue()));
+            }
+            teamAccessService.inspect(token);
+            return new ResponseDTO(true, ResponseCode.ASSIGNED_ROLE_REGISTRATION_REQUIRED.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.ASSIGNED_ROLE_REGISTRATION_REQUIRED),
+                    formatInviteLink(configService.getConfigByName(PMSConfigs.REGISTRATION_PAGE_URL).get().stringValue(), token));
+        }
         Invite invite = inviteDao.getInviteByToken(token, true).filter(
                 inviteFromDb -> LocalDateTime.now().isBefore(inviteFromDb.getExpiryDate())
         ).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVITE_LINK));

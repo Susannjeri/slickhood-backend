@@ -79,6 +79,16 @@ public class LandlordPlanCatalogSeedService {
         createIfMissing(prefix + "_SILVER_ANNUAL", "Silver", category, role, BillingCycle.YEARLY, "37800", 50L, false, areaFeature);
         createIfMissing(prefix + "_GOLD_ANNUAL", "Gold", category, role, BillingCycle.YEARLY, "75600", 100L, false, areaFeature);
         createIfMissing(prefix + "_PLATINUM_ANNUAL_CUSTOM", "Platinum", category, role, BillingCycle.YEARLY, "0", -1L, true, areaFeature);
+        if (role == PMSRole.LANDLORD || role == PMSRole.ESTATE_MANAGER || role == PMSRole.SALES_AGENT) {
+            ensureQuotaIfMissing(prefix + "_BRONZE", "TEAM_SEATS", 2L);
+            ensureQuotaIfMissing(prefix + "_SILVER", "TEAM_SEATS", 5L);
+            ensureQuotaIfMissing(prefix + "_GOLD", "TEAM_SEATS", 15L);
+            ensureQuotaIfMissing(prefix + "_PLATINUM_CUSTOM", "TEAM_SEATS", -1L);
+            ensureQuotaIfMissing(prefix + "_BRONZE_ANNUAL", "TEAM_SEATS", 2L);
+            ensureQuotaIfMissing(prefix + "_SILVER_ANNUAL", "TEAM_SEATS", 5L);
+            ensureQuotaIfMissing(prefix + "_GOLD_ANNUAL", "TEAM_SEATS", 15L);
+            ensureQuotaIfMissing(prefix + "_PLATINUM_ANNUAL_CUSTOM", "TEAM_SEATS", -1L);
+        }
     }
 
     private void createIfMissing(String code, String name, PlanCategory category, PMSRole role, BillingCycle cycle, String price,
@@ -143,5 +153,13 @@ public class LandlordPlanCatalogSeedService {
         quota.setCreatedBy(0L);
         quota.setActive(true);
         quotaRepo.save(quota);
+    }
+
+    private void ensureQuotaIfMissing(String planCode, String key, long value) {
+        planRepo.findByCode(planCode).ifPresent(plan -> {
+            if (quotaRepo.findTopBySubscriptionPlanAndMetricKeyOrderByIdDesc(plan, key).isEmpty()) {
+                upsertQuota(plan, key, value);
+            }
+        });
     }
 }
