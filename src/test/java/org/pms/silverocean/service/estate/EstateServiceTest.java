@@ -14,6 +14,7 @@ import org.pms.silverocean.database.pms.UnitRepo;
 import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.database.pms.entities.PropertyOwnership;
 import org.pms.silverocean.database.pms.entities.Unit;
+import org.pms.silverocean.database.pms.entities.PMSInvoice;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import java.math.BigDecimal;
 
 @ExtendWith(MockitoExtension.class)
 class EstateServiceTest {
@@ -110,5 +112,29 @@ class EstateServiceTest {
                 () -> service.create(new OwnershipRequest(11L, unit.getId(), homeowner.getId(), existingStart, "TRANSFER")));
 
         assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
+    }
+
+    @Test
+    void serviceChargeRejectsCurrencyThatDoesNotMatchTheUnit() {
+        PropertyOwnership ownership = new PropertyOwnership();
+        ownership.setId(88L);
+        ownership.setPropertyId(11L);
+        ownership.setUnitId(unit.getId());
+        ownership.setHomeownerUserId(homeowner.getId());
+        ownership.setActive(true);
+        unit.setCurrency("KES");
+        when(ownerships.findById(88L)).thenReturn(Optional.of(ownership));
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(org.pms.silverocean.service.auth.roles.enums.PMSRole.LANDLORD);
+        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 999L)).thenReturn(Optional.of(new Property()));
+        when(units.findById(unit.getId())).thenReturn(Optional.of(unit));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.createServiceCharge(
+                new ServiceChargeRequest(88L, new BigDecimal("1500.00"), "USD", LocalDate.now(), "Security")));
+
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
+        verify(invoices, never()).createPropertyInvoice(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyMap(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
     }
 }

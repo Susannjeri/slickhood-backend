@@ -20,6 +20,8 @@ import org.pms.silverocean.service.payment.invoice.InvoiceService;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Service
 public class EstateService {
@@ -121,6 +123,11 @@ public class EstateService {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.OWNERSHIP_NOT_FOUND));
         requireManagedProperty(ownership.getPropertyId(), userDao.getUserId());
         if (ownership.getUnitId() == null) throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
+        Unit unit = unitRepo.findById(ownership.getUnitId()).filter(Unit::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
+        if (unit.getCurrency() == null || !unit.getCurrency().equalsIgnoreCase(request.currency())) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
         PMSInvoice invoice = invoiceService.createPropertyInvoice(ownership.getUnitId(), ownership.getHomeownerUserId(),
                 Map.of(request.description(), request.amount().doubleValue()), "SERVICE_CHARGE", request.dueDate());
         EstateServiceCharge charge = new EstateServiceCharge();
@@ -132,13 +139,13 @@ public class EstateService {
         return chargeRepo.save(charge);
     }
 
-    public List<EstateServiceCharge> listServiceCharges() {
+    public Page<ServiceChargeView> listServiceCharges(Pageable pageable) {
         long userId = userDao.getUserId();
         return switch (userDao.getActiveRole()) {
-            case HOMEOWNER -> chargeRepo.findAllByHomeownerUserIdAndActiveTrueOrderByDueDateDesc(userId);
-            case ESTATE_MANAGER -> chargeRepo.findAllByManager(userId, PMSRole.ESTATE_MANAGER.name());
-            case SUPER_ADMIN -> chargeRepo.findAll();
-            default -> List.of();
+            case HOMEOWNER -> chargeRepo.findPageByHomeowner(userId, pageable);
+            case ESTATE_MANAGER -> chargeRepo.findPageByManager(userId, PMSRole.ESTATE_MANAGER.name(), pageable);
+            case SUPER_ADMIN -> chargeRepo.findAllActive(pageable);
+            default -> Page.empty(pageable);
         };
     }
 

@@ -9,6 +9,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
+import java.util.Collection;
 @Service
 public class NotificationDao {
     private final NotificationRepo notificationRepo;
@@ -31,6 +32,10 @@ public class NotificationDao {
 
     public Optional<Notification> findById(long id) {
         return notificationRepo.findById(id);
+    }
+
+    public Page<Notification> getNotificationsForRecipients(Pageable pageable, Collection<String> recipients) {
+        return notificationRepo.findAllForRecipients(pageable, recipients);
     }
 
 }

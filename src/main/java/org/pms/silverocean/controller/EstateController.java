@@ -11,6 +11,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.pms.silverocean.service.estate.ServiceChargeView;
 
 @RestController @RequestMapping("/estate")
 public class EstateController {
@@ -25,6 +28,11 @@ public class EstateController {
     @PostMapping("/service-charges") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_SERVICE_CHARGE)")
     public ResponseEntity<ResponseDTO> charge(@Valid @RequestBody ServiceChargeRequest request){return ok(ResponseCode.SERVICE_CHARGE_CREATED,service.createServiceCharge(request));}
     @GetMapping("/service-charges") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SERVICE_CHARGE)")
-    public ResponseEntity<ResponseDTO> charges(){return ok(ResponseCode.GENERAL_SUCCESS,service.listServiceCharges());}
+    public ResponseEntity<ResponseDTO> charges(Pageable pageable){
+        Page<ServiceChargeView> charges=service.listServiceCharges(pageable);
+        ResponseDTO body=new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),charges.getContent());
+        body.setSize(charges.getSize());body.setTotalPages(charges.getTotalPages());body.setTotalElements(charges.getTotalElements());
+        return ResponseEntity.ok(body);
+    }
     private ResponseEntity<ResponseDTO> ok(ResponseCode code,Object data){return ResponseEntity.ok(new ResponseDTO(true,code.getCode(),i18n.getLocalizedMessage(code),data));}
 }

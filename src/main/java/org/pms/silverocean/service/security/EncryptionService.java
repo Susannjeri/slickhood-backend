@@ -27,7 +27,6 @@ public class EncryptionService {
 
     private SecretKey secretKey;
     private final SecureRandom secureRandom = new SecureRandom();
-    private final Cipher cipher;
     // AES-GCM parameters
     private static final String CIPHER_ALGO = "AES/GCM/NoPadding";
     private static final int GCM_TAG_LENGTH_BITS = 128; // authentication tag length
@@ -37,7 +36,7 @@ public class EncryptionService {
 
     public EncryptionService(KeyDao keyDao) throws NoSuchPaddingException, NoSuchAlgorithmException {
         this.keyDao = keyDao;
-        cipher = Cipher.getInstance(CIPHER_ALGO);
+        Cipher.getInstance(CIPHER_ALGO);
     }
 
     @PostConstruct
@@ -56,6 +55,7 @@ public class EncryptionService {
             secureRandom.nextBytes(iv);
 
             GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv);
+            Cipher cipher = Cipher.getInstance(CIPHER_ALGO);
             cipher.init(Cipher.ENCRYPT_MODE, secretKey, spec);
 
             byte[] ciphertext = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
@@ -144,6 +144,7 @@ public class EncryptionService {
     private String decryptWithKey(AlgorithmParameterSpec spec, byte[] ciphertext, SecretKey secretKey)
             throws BadPaddingException, PMSCustomException, Exception {
         // Initialize cipher with the key
+        Cipher cipher = Cipher.getInstance(CIPHER_ALGO);
         cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
 
         // Perform decryption

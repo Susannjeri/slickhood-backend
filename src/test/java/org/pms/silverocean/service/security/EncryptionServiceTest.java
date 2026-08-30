@@ -8,6 +8,9 @@ import org.pms.silverocean.service.auth.totp.impl.OTPEncryptionService;
 import org.pms.silverocean.service.config.ConfigService;
 
 import java.util.Base64;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -58,6 +61,20 @@ class EncryptionServiceTest {
 //        assertThatThrownBy(() -> e)
 //                .isInstanceOf(PMSCustomException.class)
 //                .hasMessageContaining("CANNOT_DECRYPT_EMPTY_VALUE");
+    }
+
+    @Test
+    void concurrentNotificationEncryptionDoesNotShareCipherState() throws Exception {
+        try (var executor = Executors.newFixedThreadPool(8)) {
+            var tasks = IntStream.range(0, 100)
+                    .mapToObj(index -> executor.submit(() -> {
+                        String message = "notification-" + index;
+                        return encryptionService.decrypt(encryptionService.encrypt(message)).decryptedValue().equals(message);
+                    })).toList();
+            executor.shutdown();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+            for (var task : tasks) assertThat(task.get()).isTrue();
+        }
     }
 //
 //    @Test

@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.Collection;
+
 public interface NotificationRepo extends JpaRepository<Notification, Long>, JpaSpecificationExecutor<Notification> {
     @Query("SELECT n FROM Notification n WHERE n.createdOn>=:start AND n.createdOn<:end ORDER BY n.createdOn DESC")
     java.util.List<Notification> findForReport(java.time.ZonedDateTime start,java.time.ZonedDateTime end,Pageable pageable);
@@ -27,4 +29,7 @@ public interface NotificationRepo extends JpaRepository<Notification, Long>, Jpa
             " s.status as status, s.description as description, s.network as network, COALESCE(s.cost, 0.0) as cost, s.currency as currency," +
             " s.callBackIP as callbackIP, n.updatedOn as lastUpdateOn  FROM Notification n LEFT JOIN SMS s ON n.id=s.notificationId")
     Page<NotificationProjection> findAllNotifications(Pageable pageable);
+
+    @Query("SELECT n FROM Notification n WHERE n.active AND n.recipient IN :recipients ORDER BY n.createdOn DESC")
+    Page<Notification> findAllForRecipients(Pageable pageable, Collection<String> recipients);
 }

@@ -60,6 +60,7 @@ import static org.pms.silverocean.service.auth.roles.enums.Permission.VIEW_LEASE
 import static org.pms.silverocean.service.auth.roles.enums.Permission.VIEW_LEASE_MESSAGE;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.VIEW_LEASE_TEMPLATE;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.VIEW_NOTIFICATIONS;
+import static org.pms.silverocean.service.auth.roles.enums.Permission.VIEW_MY_NOTIFICATIONS;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.VIEW_PARAM;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.VIEW_PAYMENT_LIST;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.VIEW_PROPERTY;
@@ -219,7 +220,7 @@ public enum PMSPermission {
             VIEW_VISITOR_LIST, MANAGE_GATE_DEVICES, VIEW_GATE_EVENTS, VIEW_SP_CATEGORY_LIST, VIEW_SP_SERVICE, CREATE_SP_BOOKING, VIEW_SP_BOOKING)),
     HOMEOWNER(PMSRole.HOMEOWNER, Set.of(VIEW_PROPERTY, VIEW_UNIT, VIEW_PROPERTY_LIST, VIEW_UNIT_LIST,
             VIEW_ESTATE, VIEW_SERVICE_CHARGE, VIEW_COMMUNITY_FUNDS, VIEW_LEASE_DOCUMENT, ACKNOWLEDGE_LEASE_DOCUMENT, SIGN_LEASE_DOCUMENT,
-            VIEW_INVOICE_LIST, VIEW_INVOICE_PDF, VIEW_PAYMENT_LIST,
+            VIEW_INVOICE_LIST, VIEW_INVOICE_PDF, VIEW_PAYMENT_LIST, VIEW_MY_NOTIFICATIONS,
             VIEW_VISITOR_LIST, REGISTER_VISITOR, CANCEL_VISITOR, VIEW_SP_CATEGORY_LIST, VIEW_SP_SERVICE, CREATE_SP_BOOKING, VIEW_SP_BOOKING,
             VIEW_WEALTH, MANAGE_WEALTH_ASSETS, MANAGE_WEALTH_FINANCE, MANAGE_WEALTH_COMPLIANCE, MANAGE_WEALTH_VAULT, MANAGE_WEALTH_GOALS)),
     SALES_AGENT(PMSRole.SALES_AGENT, Set.of(VIEW_PROPERTY, VIEW_UNIT, VIEW_PROPERTY_LIST, VIEW_UNIT_LIST,
