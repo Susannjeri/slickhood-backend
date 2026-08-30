@@ -137,6 +137,7 @@ public class RoleService {
         Invite invite = inviteDao.getInviteByToken(inviteToken, true)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.EXPIRED_INVITE_LINK));
 
+        validateInviteRecipient(invite, user);
         user.setInviteId(invite.getId());
         if (invite.getRoleId() == null) {
             checkIfRoleIsValidAndSelfAssignable(roleId);
@@ -170,10 +171,7 @@ public class RoleService {
     }
 
     public ResponseDTO assignRoleFromInvite(Invite invite, Long roleId, Users user) {
-        if (invite.getRecipient() != null && !invite.getRecipient().isBlank()
-                && !invite.getRecipient().equalsIgnoreCase(user.getEmail())) {
-            throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
-        }
+        validateInviteRecipient(invite, user);
         String assignorEmail = userDao.findById(invite.getCreatedBy()).map(Users::getEmail).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
         ResponseDTO responseDTO = assignRole(invite.getRoleId() == null ? roleId : invite.getRoleId(), user.getEmail(), assignorEmail);
         if (responseDTO.isSuccess()) {
@@ -190,6 +188,13 @@ public class RoleService {
             });
         }
         return responseDTO;
+    }
+
+    private void validateInviteRecipient(Invite invite, Users user) {
+        if (invite.getRecipient() != null && !invite.getRecipient().isBlank()
+                && !invite.getRecipient().equalsIgnoreCase(user.getEmail())) {
+            throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+        }
     }
 
     private ResponseDTO assignRole(long roleId, String assigneeEmail, String assignorEmail) {

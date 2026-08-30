@@ -237,6 +237,21 @@ class RoleServiceTest {
     }
 
     @Test
+    void registrationWithForwardedStaffInvite_rejectsBeforeSavingUser() {
+        Invite invite = new Invite();
+        invite.setRecipient("intended@example.com");
+        when(inviteDao.getInviteByToken("staff-token", true)).thenReturn(Optional.of(invite));
+        Users forwardedLinkUser = new Users();
+        forwardedLinkUser.setEmail("different@example.com");
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class,
+                () -> roleService.saveUserAndAssignRoleFromInvite("staff-token", null, forwardedLinkUser));
+
+        assertEquals(ResponseCode.INVALID_USER_DETAILS, exception.getResponseCode());
+        verify(userDao, never()).save(any(Users.class));
+    }
+
+    @Test
     void assignRoleFromInvite_internalStaffInvite_isOneTimeAndNotPropertyScoped() {
         Role supportRole = new Role(PMSRole.SUPPORT.getName(), PMSRole.SUPPORT.getDescription(), false);
         supportRole.setId(9L);
