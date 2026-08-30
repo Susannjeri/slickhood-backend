@@ -330,6 +330,26 @@ public class KycService {
         if (!ocrProvider.enabled()) throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
         Users user = currentUser();
         KycCase kycCase = ownCase();
+        if (KycStatus.APPROVED.name().equals(kycCase.getStatus())) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        return reprocessDocuments(kycCase, user);
+    }
+
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public KycCaseView reprocessCase(long caseId) throws Exception {
+        if (!ocrProvider.enabled()) throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+        KycCase kycCase = caseRepo.findById(caseId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.KYC_CASE_NOT_FOUND));
+        if (KycStatus.APPROVED.name().equals(kycCase.getStatus())) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        Users user = userDao.findById(kycCase.getUserId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
+        return reprocessDocuments(kycCase, user);
+    }
+
+    private KycCaseView reprocessDocuments(KycCase kycCase, Users user) throws Exception {
         for (KycDocument document : currentDocuments(kycCase, user)) {
             KycDocumentType type = KycDocumentType.valueOf(document.getDocumentType());
             var stored = garageService.download(document.getFileRef());
@@ -367,27 +387,27 @@ public class KycService {
         if (complete && userDao.isValidIDAndTaxPin(user.getId(), user.getCountry(), identificationNumber, taxPin)) {
             user.setIdentificationNumber(identificationNumber.toUpperCase(Locale.ROOT));
             user.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
-            user.setVerified(true);
-            user.setAccountStatus(AccountStatus.ACTIVE.name());
-            kycCase.setStatus(KycStatus.APPROVED.name());
-            currentDocuments(kycCase, user).stream()
-                    .filter(document -> !DocumentStatus.REJECTED.name().equals(document.getStatus()))
-                    .forEach(document -> {
-                        document.setStatus(DocumentStatus.VERIFIED.name());
-                        documentRepo.save(document);
-                    });
+            user.setVerified(false);
+            user.setAccountStatus(AccountStatus.KYC_UNDER_REVIEW.name());
+            kycCase.setStatus(KycStatus.SUBMITTED.name());
+            if (kycCase.getSubmittedAt() == null) kycCase.setSubmittedAt(ZonedDateTime.now());
         } else {
             user.setVerified(false);
             user.setAccountStatus(AccountStatus.PENDING_KYC.name());
             kycCase.setStatus(KycStatus.IN_PROGRESS.name());
+            kycCase.setSubmittedAt(null);
         }
+        kycCase.setReviewNotes(complete ? null
+                : "Upload-stage checks found evidence that must be corrected before submission.");
+        kycCase.setReviewedAt(null);
+        kycCase.setReviewedBy(null);
         userDao.save(user);
         caseRepo.save(kycCase);
         return view(kycCase, user);
     }
 
     private boolean ocrAccepted(KycDocumentType type, OcrResult ocr, Map<String, String> fields) {
-        if (type == KycDocumentType.SELFIE) return true;
+        if (type == KycDocumentType.SELFIE) return !fields.containsKey("_validationWarnings");
         boolean confidenceAccepted = ocr.confidence() >= minOcrConfidence;
         boolean warningsAccepted = !rejectOcrValidationWarnings || !fields.containsKey("_validationWarnings");
         return confidenceAccepted && warningsAccepted;

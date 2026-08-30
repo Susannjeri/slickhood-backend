@@ -78,6 +78,12 @@ public class KycController {
         return ok(ResponseCode.KYC_DETAILS, service.reviewQueue());
     }
 
+    @PostMapping("/admin/{caseId}/reprocess")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).LIST_USERS)")
+    public ResponseEntity<ResponseDTO> reprocessCase(@PathVariable long caseId) throws Exception {
+        return ok(ResponseCode.KYC_DETAILS, service.reprocessCase(caseId));
+    }
+
     private ResponseEntity<ResponseDTO> ok(ResponseCode code, Object data) { return ResponseEntity.ok(response(code, data)); }
     private ResponseDTO response(ResponseCode code, Object data) {
         return new ResponseDTO(true, code.getCode(), i18NService.getLocalizedMessage(code), data);
