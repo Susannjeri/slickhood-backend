@@ -126,6 +126,9 @@ public class KycService {
                 || KycStatus.APPROVED.name().equals(kycCase.getStatus())) {
             throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
         }
+        if (requirements(user).stream().noneMatch(requirement -> requirement.acceptedTypes().contains(documentType))) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
         byte[] bytes = validateAndRead(file);
         String sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
         if (documentRepo.existsByUserIdAndSha256AndActiveTrue(user.getId(), sha256)) {
@@ -153,9 +156,14 @@ public class KycService {
         } catch (RuntimeException providerFailure) {
             throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
         }
-        Map<String,String> extractedFields = validateExtractedEvidence(ocr.fields(), user, kycCase);
+        List<KycDocument> superseded = activeDocuments(kycCase.getId()).stream()
+                .filter(existing -> sameEvidenceSlot(user, existing, documentType))
+                .toList();
+        Set<Long> supersededIds = superseded.stream().map(KycDocument::getId).collect(Collectors.toSet());
+        Map<String,String> extractedFields = validateExtractedEvidence(ocr.fields(), user, kycCase, supersededIds);
         document.setOcrProvider(ocr.provider()); document.setOcrConfidence(ocr.confidence());
         document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(extractedFields)));
+        superseded.stream().findFirst().map(KycDocument::getId).ifPresent(document::setSupersedesDocumentId);
         if (ocrAccepted(documentType, ocr, extractedFields)) {
             document.setStatus(DocumentStatus.OCR_COMPLETE.name());
         } else {
@@ -164,6 +172,10 @@ public class KycService {
         }
         garageService.uploadBytes(fileRef, bytes, file.getContentType());
         documentRepo.save(document);
+        superseded.forEach(previous -> {
+            previous.setActive(false);
+            documentRepo.save(previous);
+        });
         kycCase.setStatus(KycStatus.IN_PROGRESS.name()); caseRepo.save(kycCase);
         return KycDocumentView.from(document, extractedFields, null);
     }
@@ -197,12 +209,18 @@ public class KycService {
             throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
         }
         long reviewer = currentUser().getId();
+        List<KycDocument> currentDocuments = currentDocuments(kycCase, subject);
+        if (request.decision() == KycStatus.APPROVED
+                && (!missingRequirements(kycCase, subject).isEmpty() || !kycCase.isPhoneVerified())) {
+            throw new PMSCustomException(ResponseCode.KYC_MISSING_DOCUMENTS);
+        }
         kycCase.setStatus(request.decision().name()); kycCase.setReviewNotes(request.notes());
         kycCase.setReviewedBy(reviewer); kycCase.setReviewedAt(ZonedDateTime.now()); caseRepo.save(kycCase);
         if (request.decision() == KycStatus.APPROVED) {
             String identificationNumber = null;
             String taxPin = null;
-            for (KycDocument document : documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId())) {
+            for (KycDocument document : currentDocuments) {
+                if (DocumentStatus.REJECTED.name().equals(document.getStatus())) continue;
                 Map<String, String> fields = decrypt(document);
                 if (identificationNumber == null) identificationNumber = cleanVerifiedValue(fields.get("documentNumber"));
                 if (taxPin == null) taxPin = cleanVerifiedValue(fields.get("taxPin"));
@@ -217,7 +235,7 @@ public class KycService {
             subject.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
             subject.setVerified(true);
             subject.setAccountStatus(AccountStatus.ACTIVE.name());
-            documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).forEach(document -> {
+            currentDocuments.forEach(document -> {
                 if (!DocumentStatus.REJECTED.name().equals(document.getStatus())) {
                     document.setStatus(DocumentStatus.VERIFIED.name());
                 }
@@ -231,7 +249,7 @@ public class KycService {
             }
             subject.setVerified(false);
             subject.setAccountStatus(AccountStatus.KYC_REJECTED.name());
-            documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).forEach(document -> {
+            currentDocuments.forEach(document -> {
                 document.setStatus(DocumentStatus.REJECTED.name());
                 document.setRejectionReason(request.notes());
                 document.setReviewedBy(reviewer);
@@ -266,7 +284,7 @@ public class KycService {
         if (!ocrProvider.enabled()) throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
         Users user = currentUser();
         KycCase kycCase = ownCase();
-        for (KycDocument document : documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId())) {
+        for (KycDocument document : currentDocuments(kycCase, user)) {
             KycDocumentType type = KycDocumentType.valueOf(document.getDocumentType());
             var stored = garageService.download(document.getFileRef());
             String contentType = stored.contentType() == null ? document.getContentType() : stored.contentType();
@@ -276,7 +294,7 @@ public class KycService {
             } catch (RuntimeException providerFailure) {
                 throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
             }
-            Map<String, String> fields = validateExtractedEvidence(ocr.fields(), user, kycCase);
+            Map<String, String> fields = validateExtractedEvidence(ocr.fields(), user, kycCase, Set.of());
             document.setOcrProvider(ocr.provider());
             document.setOcrConfidence(ocr.confidence());
             document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(fields)));
@@ -292,7 +310,7 @@ public class KycService {
 
         String identificationNumber = null;
         String taxPin = null;
-        for (KycDocument document : documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId())) {
+        for (KycDocument document : currentDocuments(kycCase, user)) {
             if (DocumentStatus.REJECTED.name().equals(document.getStatus())) continue;
             Map<String, String> fields = decrypt(document);
             if (identificationNumber == null) identificationNumber = cleanVerifiedValue(fields.get("documentNumber"));
@@ -306,7 +324,7 @@ public class KycService {
             user.setVerified(true);
             user.setAccountStatus(AccountStatus.ACTIVE.name());
             kycCase.setStatus(KycStatus.APPROVED.name());
-            documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).stream()
+            currentDocuments(kycCase, user).stream()
                     .filter(document -> !DocumentStatus.REJECTED.name().equals(document.getStatus()))
                     .forEach(document -> {
                         document.setStatus(DocumentStatus.VERIFIED.name());
@@ -396,7 +414,7 @@ public class KycService {
     }
 
     private Set<String> missingRequirements(KycCase kycCase, Users user) {
-        Set<KycDocumentType> uploaded = documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).stream()
+        Set<KycDocumentType> uploaded = currentDocuments(kycCase, user).stream()
                 .filter(doc -> !DocumentStatus.REJECTED.name().equals(doc.getStatus()))
                 .map(doc -> KycDocumentType.valueOf(doc.getDocumentType())).collect(Collectors.toSet());
         return requirements(user).stream().filter(KycRequirement::required)
@@ -409,7 +427,7 @@ public class KycService {
     }
 
     private KycCaseView view(KycCase kycCase, Users user) {
-        List<KycDocumentView> docs = documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).stream()
+        List<KycDocumentView> docs = currentDocuments(kycCase, user).stream()
                 .map(doc -> KycDocumentView.from(doc, decrypt(doc), null)).toList();
         return new KycCaseView(kycCase.getId(), kycCase.getStatus(), user.getAccountStatus(),
                 currentConsentVersion, kycCase.getReviewNotes(), kycCase.isPhoneVerified(), user.getPhoneNumber(),
@@ -427,7 +445,8 @@ public class KycService {
         } catch (Exception ignored) { return Map.of(); }
     }
 
-    private Map<String,String> validateExtractedEvidence(Map<String,String> source, Users user, KycCase kycCase) {
+    private Map<String,String> validateExtractedEvidence(Map<String,String> source, Users user, KycCase kycCase,
+                                                         Set<Long> supersededIds) {
         Map<String,String> fields = new LinkedHashMap<>(source == null ? Map.of() : source);
         List<String> warnings = new ArrayList<>();
         if (fields.containsKey("_validationWarnings")) warnings.add(fields.get("_validationWarnings"));
@@ -441,7 +460,8 @@ public class KycService {
         }
         String number = fields.get("documentNumber");
         if (number != null) {
-            boolean conflicts = documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(kycCase.getId()).stream()
+            boolean conflicts = activeDocuments(kycCase.getId()).stream()
+                    .filter(existing -> !supersededIds.contains(existing.getId()))
                     .map(this::decrypt).map(existing -> existing.get("documentNumber"))
                     .filter(Objects::nonNull).anyMatch(existing -> !existing.equalsIgnoreCase(number));
             if (conflicts) warnings.add("Document number conflicts with another uploaded identity document");
@@ -451,6 +471,45 @@ public class KycService {
             fields.put("_validationWarnings", String.join("; ", new LinkedHashSet<>(warnings)));
         }
         return fields;
+    }
+
+    /**
+     * Returns exactly one current upload for each logical KYC requirement. Older
+     * attempts stay in the database as immutable audit evidence but never take
+     * part in a new submission or review decision.
+     */
+    private List<KycDocument> currentDocuments(KycCase kycCase, Users user) {
+        List<KycDocument> active = activeDocuments(kycCase.getId());
+        Set<KycRequirement> resolved = requirements(user);
+        LinkedHashMap<Long, KycDocument> selected = new LinkedHashMap<>();
+        for (KycRequirement requirement : resolved) {
+            active.stream()
+                    .filter(document -> requirement.acceptedTypes().contains(documentType(document)))
+                    .findFirst()
+                    .ifPresent(document -> selected.putIfAbsent(document.getId(), document));
+        }
+        // Defensive support for legacy/test cases whose role requirements are unavailable.
+        if (resolved.isEmpty()) {
+            LinkedHashSet<KycDocumentType> seen = new LinkedHashSet<>();
+            active.stream().filter(document -> seen.add(documentType(document)))
+                    .forEach(document -> selected.putIfAbsent(document.getId(), document));
+        }
+        return new ArrayList<>(selected.values());
+    }
+
+    private List<KycDocument> activeDocuments(long caseId) {
+        return documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(caseId);
+    }
+
+    private boolean sameEvidenceSlot(Users user, KycDocument existing, KycDocumentType replacement) {
+        KycDocumentType existingType = documentType(existing);
+        return requirements(user).stream().anyMatch(requirement ->
+                requirement.acceptedTypes().contains(existingType)
+                        && requirement.acceptedTypes().contains(replacement));
+    }
+
+    private KycDocumentType documentType(KycDocument document) {
+        return KycDocumentType.valueOf(document.getDocumentType());
     }
 
     private String normalizeName(String value) {

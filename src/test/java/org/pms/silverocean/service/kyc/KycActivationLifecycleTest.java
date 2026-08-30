@@ -55,6 +55,7 @@ class KycActivationLifecycleTest {
         });
         when(roles.findByUserId(any(Long.class))).thenReturn(Set.of());
         when(requirements.resolve(any())).thenReturn(Set.of());
+        when(requirements.resolve(any(), any())).thenReturn(Set.of());
         when(users.isValidIDAndTaxPin(anyLong(), any(), any(), any())).thenReturn(true);
         service = new KycService(cases, documents, roles, users, requirements,
                 quality, ocr, garage,
@@ -150,6 +151,9 @@ class KycActivationLifecycleTest {
         byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
         when(users.getUserObject()).thenReturn(subject);
         when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("IDENTITY", "Identity document", true,
+                        Set.of(KycDocumentType.NATIONAL_ID_FRONT, KycDocumentType.PASSPORT))));
         when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
         when(ocr.enabled()).thenReturn(true);
         when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT)).thenReturn(
@@ -177,6 +181,74 @@ class KycActivationLifecycleTest {
                 new MockMultipartFile("file", "id.jpg", "image/jpeg", image)))
                 .isInstanceOf(RuntimeException.class);
         verify(garage, never()).uploadBytes(any(), any(), any());
+    }
+
+    @Test void resubmissionViewShowsOnlyLatestEvidenceForEachRequirement() {
+        Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
+        KycRequirement identity = new KycRequirement("IDENTITY", "Identity document", true,
+                Set.of(KycDocumentType.NATIONAL_ID_FRONT, KycDocumentType.PASSPORT));
+        KycRequirement tax = new KycRequirement("TAX", "KRA PIN", true,
+                Set.of(KycDocumentType.KRA_PIN_CERTIFICATE));
+        KycDocument latestIdentity = document(103, 12);
+        latestIdentity.setCaseId(40); latestIdentity.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        latestIdentity.setStatus(DocumentStatus.OCR_COMPLETE.name());
+        KycDocument rejectedPassport = document(102, 12);
+        rejectedPassport.setCaseId(40); rejectedPassport.setDocumentType(KycDocumentType.PASSPORT.name());
+        rejectedPassport.setStatus(DocumentStatus.REJECTED.name());
+        KycDocument latestTax = document(101, 12);
+        latestTax.setCaseId(40); latestTax.setDocumentType(KycDocumentType.KRA_PIN_CERTIFICATE.name());
+        latestTax.setStatus(DocumentStatus.OCR_COMPLETE.name());
+        KycDocument historicalTax = document(100, 12);
+        historicalTax.setCaseId(40); historicalTax.setDocumentType(KycDocumentType.KRA_PIN_CERTIFICATE.name());
+        historicalTax.setStatus(DocumentStatus.REJECTED.name());
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(identity, tax));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L))
+                .thenReturn(List.of(latestIdentity, rejectedPassport, latestTax, historicalTax));
+
+        KycCaseView view = service.current();
+
+        assertThat(view.documents()).extracting(KycDocumentView::id)
+                .containsExactlyInAnyOrder(103L, 101L);
+        assertThat(view.documents()).noneMatch(document -> document.id() == 102L || document.id() == 100L);
+    }
+
+    @Test void cleanReplacementSupersedesRejectedAlternativesWithoutFalseIdentityConflict() throws Exception {
+        Users subject = customer(12);
+        subject.setFullName("Collectable Class");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        KycRequirement identity = new KycRequirement("IDENTITY", "Identity document", true,
+                Set.of(KycDocumentType.NATIONAL_ID_FRONT, KycDocumentType.PASSPORT));
+        KycDocument rejectedPassport = document(92, 12);
+        rejectedPassport.setCaseId(40); rejectedPassport.setDocumentType(KycDocumentType.PASSPORT.name());
+        rejectedPassport.setStatus(DocumentStatus.REJECTED.name()); rejectedPassport.setEncryptedExtractedData(new byte[]{2});
+        KycDocument rejectedId = document(91, 12);
+        rejectedId.setCaseId(40); rejectedId.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        rejectedId.setStatus(DocumentStatus.REJECTED.name()); rejectedId.setEncryptedExtractedData(new byte[]{1});
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(identity));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L))
+                .thenReturn(List.of(rejectedPassport, rejectedId));
+        when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"OLD-ID\"}"));
+        when(encryption.decrypt(new byte[]{2})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"OLD-PASSPORT\"}"));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT)).thenReturn(
+                new OcrResult("TEST_OCR", 96, java.util.Map.of(
+                        "documentNumber", "12345678", "fullName", "Collectable Class")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        KycDocumentView replacement = service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "clean-id.jpg", "image/jpeg", image));
+
+        assertThat(replacement.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
+        assertThat(replacement.extractedFields()).doesNotContainKey("_validationWarnings");
+        assertThat(rejectedPassport.isActive()).isFalse();
+        assertThat(rejectedId.isActive()).isFalse();
     }
 
     @Test void unrelatedCustomerCannotReadAnotherCustomersDocument() {
