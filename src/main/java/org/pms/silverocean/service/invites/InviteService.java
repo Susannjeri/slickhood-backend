@@ -42,7 +42,11 @@ import static org.pms.silverocean.common.PMSUtils.formatInviteLink;
 @Service
 public class InviteService {
     private static final Set<PMSRole> INTERNAL_STAFF_ROLES = Set.of(
-            PMSRole.SUPPORT, PMSRole.SALES_MARKETING, PMSRole.FINANCE
+            PMSRole.SUPPORT,
+            PMSRole.SALES_MARKETING,
+            PMSRole.FINANCE,
+            PMSRole.INSURANCE_ADVISER,
+            PMSRole.INSURANCE_MANAGER
     );
     private final InviteDao inviteDao;
     private final PropertyService propertyService;
@@ -110,7 +114,7 @@ public class InviteService {
         if (!userDao.hasRole(PMSRole.SUPER_ADMIN)) {
             throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
         }
-        if (!INTERNAL_STAFF_ROLES.contains(request.role())) {
+        if (!isInternalStaffRole(request.role())) {
             throw new PMSCustomException(ResponseCode.INVALID_ROLE);
         }
 
@@ -138,9 +142,15 @@ public class InviteService {
         return new StaffInviteDTO(recipient, displayName(request.role()), invite.getExpiryDate());
     }
 
+    static boolean isInternalStaffRole(PMSRole role) {
+        return INTERNAL_STAFF_ROLES.contains(role);
+    }
+
     private String displayName(PMSRole role) {
         return switch (role) {
             case SALES_MARKETING -> "Sales & Marketing";
+            case INSURANCE_ADVISER -> "Insurance Adviser";
+            case INSURANCE_MANAGER -> "Insurance Manager";
             default -> role.getName();
         };
     }
