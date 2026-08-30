@@ -13,10 +13,12 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.pms.silverocean.service.security.DecryptDTO;
+import org.pms.silverocean.service.users.ProfileType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -61,6 +63,7 @@ class KycActivationLifecycleTest {
                 quality, ocr, garage,
                 encryption, new ObjectMapper());
         ReflectionTestUtils.setField(service, "maxFileBytes", 10_485_760L);
+        ReflectionTestUtils.setField(service, "rejectImageQualityFailures", true);
         ReflectionTestUtils.setField(service, "minOcrConfidence", 75D);
         ReflectionTestUtils.setField(service, "rejectOcrValidationWarnings", true);
     }
@@ -237,6 +240,78 @@ class KycActivationLifecycleTest {
         assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
         assertThat(result.extractedFields()).containsEntry("_validationStatus", "REVIEW_REQUIRED");
         assertThat(result.extractedFields()).containsKey("_validationWarnings");
+    }
+
+    @Test void advisoryImageQualityModeKeepsReadableEvidenceForControlledReview() throws Exception {
+        Users subject = customer(12);
+        subject.setFullName("Collectable Class");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("IDENTITY", "Identity document", true,
+                        Set.of(KycDocumentType.NATIONAL_ID_FRONT))));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(
+                new ImageQualityResult(false, 800, 500, 18, "Image resolution is too low"));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT)).thenReturn(
+                new OcrResult("TEST_OCR", 92, Map.of("documentNumber", "12345678", "fullName", "Collectable Class")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+        ReflectionTestUtils.setField(service, "rejectImageQualityFailures", false);
+        ReflectionTestUtils.setField(service, "rejectOcrValidationWarnings", false);
+
+        KycDocumentView result = service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "test-id.jpg", "image/jpeg", image));
+
+        assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
+        assertThat(result.qualityStatus()).isEqualTo("REVIEW_REQUIRED");
+        assertThat(result.extractedFields().get("_validationWarnings")).contains("Image quality");
+    }
+
+    @Test void advisoryModeStillBlocksCorruptImagesBeforeOcr() {
+        Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("IDENTITY", "Identity document", true,
+                        Set.of(KycDocumentType.NATIONAL_ID_FRONT))));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(
+                new ImageQualityResult(false, 0, 0, 0, "Unreadable image"));
+        ReflectionTestUtils.setField(service, "rejectImageQualityFailures", false);
+
+        assertThatThrownBy(() -> service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "broken.jpg", "image/jpeg", image)))
+                .isInstanceOf(RuntimeException.class);
+        verify(ocr, never()).extract(any(), any(), any());
+        verify(garage, never()).uploadBytes(any(), any(), any());
+    }
+
+    @Test void companyRegistrationCertificateMatchesOrganizationNameNotRepresentativeName() throws Exception {
+        Users subject = customer(12);
+        subject.setFullName("Susan Wanjohi");
+        subject.setProfileType(ProfileType.COMPANY.name());
+        subject.setOrganizationName("Mitero Hope SHG");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("ORGANIZATION", "Organization document", true,
+                        Set.of(KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE))));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE)).thenReturn(
+                new OcrResult("TEST_OCR", 96, Map.of("fullName", "Mitero Hope SHG", "documentNumber", "PVT-123")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        KycDocumentView result = service.upload(KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE,
+                new MockMultipartFile("file", "registration.jpg", "image/jpeg", image));
+
+        assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
+        assertThat(result.extractedFields()).doesNotContainKey("_validationWarnings");
     }
 
     @Test void disabledOcrBlocksUploadWithoutStoringDocument() {
