@@ -27,6 +27,8 @@ public enum NotificationType {
     WORKSPACE_INVITE_EMAIL("email.workspace.invite.subject", "email.workspace.invite.body", false, NotificationChannel.EMAIL),
     LEASE_MESSAGE_EMAIL("email.lease.message.subject", "email.lease.message.body", false, NotificationChannel.EMAIL),
     INVOICE_EMAIL("email.invoice.subject", "email.invoice.body", false, NotificationChannel.EMAIL),
+    SERVICE_CHARGE_REMINDER_EMAIL("email.service.charge.reminder.subject", "email.service.charge.reminder.body", true, NotificationChannel.EMAIL),
+    SERVICE_CHARGE_OVERDUE_EMAIL("email.service.charge.overdue.subject", "email.service.charge.overdue.body", true, NotificationChannel.EMAIL),
     VISITOR_BOOKING_CONFIRMATION_SMS("sms.visitor.booking.confirmation", false, NotificationChannel.SMS),
     VISITOR_BOOKING_CONFIRMATION_EMAIL("email.visitor.booking.confirmation.subject","email.visitor.booking.confirmation.body", false, NotificationChannel.EMAIL),
     VISITOR_ARRIVAL_SMS("sms.visitor.arrival", false, NotificationChannel.SMS),

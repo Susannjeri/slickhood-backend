@@ -3,6 +3,9 @@ package org.pms.silverocean.database.pms;
 import org.pms.silverocean.database.pms.entities.EstateServiceCharge;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
+import java.time.LocalDate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.pms.silverocean.service.estate.ServiceChargeView;
@@ -44,4 +47,14 @@ public interface EstateServiceChargeRepo extends JpaRepository<EstateServiceChar
          "FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId JOIN Unit u ON u.id=c.unitId " +
          "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active ORDER BY c.dueDate DESC")
  Page<ServiceChargeView> findAllActive(Pageable pageable);
+
+ @Lock(LockModeType.PESSIMISTIC_WRITE)
+ @Query("SELECT c FROM EstateServiceCharge c JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND i.paid=false " +
+         "AND c.preDueReminderQueuedAt IS NULL AND c.dueDate>=:today AND c.dueDate<=:cutoff ORDER BY c.dueDate,c.id")
+ List<EstateServiceCharge> lockPreDueReminderCandidates(LocalDate today, LocalDate cutoff, Pageable pageable);
+
+ @Lock(LockModeType.PESSIMISTIC_WRITE)
+ @Query("SELECT c FROM EstateServiceCharge c JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND i.paid=false " +
+         "AND c.overdueNoticeQueuedAt IS NULL AND c.dueDate<:today ORDER BY c.dueDate,c.id")
+ List<EstateServiceCharge> lockOverdueNoticeCandidates(LocalDate today, Pageable pageable);
 }

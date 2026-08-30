@@ -108,6 +108,21 @@ class InvoiceServiceSubscriptionPaymentTest {
         verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PAYSTACK);
     }
 
+    @Test
+    void rejectsPropertyInvoiceInitializationByAUserWhoIsNotBilled() {
+        PMSInvoice invoice = subscriptionInvoice(7L, 99L);
+        invoice.setSubscriptionPlanCode(null);
+        invoice.setBillingType("SERVICE_CHARGE");
+        when(invoiceDao.getInvoiceByRef("INV-SUB")).thenReturn(Optional.of(invoice));
+        when(userDao.getUserId()).thenReturn(8L);
+
+        assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 12L));
+
+        verify(accountDao, never()).getAccountById(12L);
+        verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PAYSTACK);
+    }
+
     private static PMSInvoice subscriptionInvoice(long billedUserId, long payeeUserId) {
         PMSInvoice invoice = new PMSInvoice();
         invoice.setRef("INV-SUB");

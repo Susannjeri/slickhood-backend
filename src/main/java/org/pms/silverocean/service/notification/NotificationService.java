@@ -33,9 +33,14 @@ public class NotificationService {
 
     @Async
     public void sendNotification(NotificationDTO notificationDTO) {
+        queueNotification(notificationDTO);
+    }
+
+    public long queueNotification(NotificationDTO notificationDTO) {
         long notificationId = createNotification(notificationDTO.recipient(), notificationDTO.formattedMessage(), notificationDTO.notificationType());
         NotificationSender sender = getPlatform(notificationDTO.notificationType().getChannel());
         sender.send(notificationDTO, notificationId);
+        return notificationId;
     }
 
     public void sendEmailToSuperAdmin(NotificationType notificationType, String formattedMessage) {

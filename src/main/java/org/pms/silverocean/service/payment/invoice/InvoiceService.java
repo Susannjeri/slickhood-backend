@@ -287,6 +287,10 @@ public class InvoiceService {
 
     public PaymentResponse initInvoicePayment(String invoiceRef, PaymentChannel paymentChannel, String phoneNumber, long accountId) {
         PMSInvoice invoice = invoiceDao.getInvoiceByRef(invoiceRef).orElseThrow(() -> new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER));
+        Long currentUserId = userDao.getUserId();
+        if (!userDao.hasRole(PMSRole.SUPER_ADMIN) && (currentUserId == null || invoice.getBilledUserId() != currentUserId)) {
+            throw new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER);
+        }
         if (invoice.isPaid()) {
             return new PaymentResponse(false, ResponseCode.INVOICE_ALREADY_PAID);
         } else if (!invoice.isActive()) {
