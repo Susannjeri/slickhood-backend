@@ -8,6 +8,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.database.pms.SokoOrderItemRepo;
 import org.pms.silverocean.database.pms.SokoOrderRepo;
 import org.pms.silverocean.database.pms.SokoProductRepo;
+import org.pms.silverocean.database.pms.SokoProductImageRepo;
 import org.pms.silverocean.database.pms.SokoRiderRepo;
 import org.pms.silverocean.database.pms.SokoStoreRepo;
 import org.pms.silverocean.database.pms.entities.SokoOrder;
@@ -19,7 +20,9 @@ import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
+import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.visitor.VisitorService;
+import org.springframework.mock.web.MockMultipartFile;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -34,14 +37,37 @@ class SokoServiceTest {
     @Mock SokoStoreRepo stores; @Mock SokoProductRepo products; @Mock SokoOrderRepo orders;
     @Mock SokoOrderItemRepo items; @Mock InvoiceDao invoices; @Mock AccountDao accounts;
     @Mock SokoRiderRepo riders; @Mock UserDao users; @Mock VisitorService visitors;
+    @Mock SokoProductImageRepo productImages; @Mock GarageService garage;
     SokoService service;
 
-    @BeforeEach void setup(){service=new SokoService(stores,products,orders,items,riders,invoices,accounts,users,visitors);}
+    @BeforeEach void setup(){service=new SokoService(stores,products,productImages,orders,items,riders,invoices,accounts,users,visitors,garage);}
 
     @Test void createRiderRegistersAnAvailablePreferredRider(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);when(users.getUserId()).thenReturn(7L);when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(riders.save(any())).thenAnswer(i->i.getArgument(0));
         SokoRider rider=service.createRider(new SokoRequests.RiderUpsert(2L,"individual","Jane Rider","0712345678",null,"Motorbike","KDA 123A",null));
         assertEquals("AVAILABLE",rider.getAvailability());assertEquals("ACTIVE",rider.getStatus());assertEquals("INDIVIDUAL",rider.getRiderType());
+    }
+
+    @Test void productImageUploadUsesServerGeneratedStorageKey() throws Exception {
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);
+        SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setActive(true);
+        when(users.getUserId()).thenReturn(7L);when(products.findById(5L)).thenReturn(Optional.of(product));
+        when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));
+        when(productImages.findAllByProductIdAndActiveTrueOrderByDisplayOrderAsc(5L)).thenReturn(List.of());
+        byte[] png={(byte)0x89,'P','N','G',13,10,26,10,0};
+        service.replaceProductImages(5L,List.of(new MockMultipartFile("images","unsafe/../name.png","image/png",png)));
+        verify(garage).uploadBytes(matches("soko/products/5/[0-9a-f-]+/[0-9a-f-]+\\.png"),eq(png),eq("image/png"));
+        verify(productImages).saveAll(argThat(rows->{var iterator=rows.iterator();return iterator.hasNext()&&iterator.next().getDisplayOrder()==0&&!iterator.hasNext();}));
+    }
+
+    @Test void productImageUploadRejectsSpoofedContent() {
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);
+        SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setActive(true);
+        when(users.getUserId()).thenReturn(7L);when(products.findById(5L)).thenReturn(Optional.of(product));
+        when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));
+        var file=new MockMultipartFile("images","fake.jpg","image/jpeg","not-an-image".getBytes());
+        assertThrows(PMSCustomException.class,()->service.replaceProductImages(5L,List.of(file)));
+        verifyNoInteractions(garage);
     }
 
     @Test void dispatchAssignsPreferredRiderAndMarksThemBusy(){
