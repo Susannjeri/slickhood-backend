@@ -28,24 +28,28 @@ public record KycDocumentView(long id, String documentType, String originalFileN
                                            Double confidence, String status) {
         List<KycValidationIssue> issues = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
+        boolean blocking = DocumentStatus.REJECTED.name().equals(status);
         String warnings = fields == null ? null : fields.get("_validationWarnings");
         if (warnings != null && !warnings.isBlank()) {
-            for (String warning : warnings.split(";")) addWarning(issues, seen, warning.trim());
+            for (String warning : warnings.split(";")) {
+                addWarning(issues, seen, warning.trim(), blocking);
+            }
         }
         if (issues.isEmpty() && rejectionReason != null && !rejectionReason.isBlank()) {
             add(issues, seen, "document", "DOCUMENT_REJECTED", rejectionReason.trim(),
-                    "Replace this file with a clear, complete original document.");
+                    "Replace this file with a clear, complete original document.", blocking);
         }
         if (issues.isEmpty() && DocumentStatus.REJECTED.name().equals(status)
                 && confidence != null && confidence < 75.0) {
             add(issues, seen, "document", "LOW_OCR_CONFIDENCE",
                     "The document text could not be read confidently.",
-                    "Retake the image in good light, keep all corners visible and avoid glare or blur.");
+                    "Retake the image in good light, keep all corners visible and avoid glare or blur.", true);
         }
         return List.copyOf(issues);
     }
 
-    private static void addWarning(List<KycValidationIssue> issues, Set<String> seen, String warning) {
+    private static void addWarning(List<KycValidationIssue> issues, Set<String> seen, String warning,
+                                   boolean blocking) {
         if (warning.isBlank()) return;
         String normalized = warning.toLowerCase(Locale.ROOT);
         if (normalized.startsWith("could not confidently extract:")) {
@@ -55,19 +59,19 @@ public record KycDocumentView(long id, String documentType, String originalFileN
                 if (fieldName.contains("kra") || fieldName.contains("tax")) {
                     add(issues, seen, "taxPin", "TAX_PIN_UNREADABLE",
                             "The KRA PIN is missing, unreadable or has an invalid format.",
-                            "Upload the original KRA PIN certificate with the full PIN visible.");
+                            "Upload the original KRA PIN certificate with the full PIN visible.", blocking);
                 } else if (fieldName.contains("document number") || fieldName.contains("identity")) {
                     add(issues, seen, "documentNumber", "DOCUMENT_NUMBER_UNREADABLE",
                             "The identity document number is missing or unreadable.",
-                            "Upload the original identity document with the complete number in focus.");
+                            "Upload the original identity document with the complete number in focus.", blocking);
                 } else if (fieldName.contains("name")) {
                     add(issues, seen, "fullName", "NAME_UNREADABLE",
                             "The holder's name is missing or unreadable.",
-                            "Upload the original document with the full name clearly visible.");
+                            "Upload the original document with the full name clearly visible.", blocking);
                 } else {
                     add(issues, seen, "document", "FIELD_UNREADABLE",
                             "Required information could not be read: " + item.trim() + ".",
-                            "Upload a clearer, complete original document.");
+                            "Upload a clearer, complete original document.", blocking);
                 }
             }
             return;
@@ -75,23 +79,23 @@ public record KycDocumentView(long id, String documentType, String originalFileN
         if (normalized.contains("name on the document") && normalized.contains("account name")) {
             add(issues, seen, "fullName", "NAME_MISMATCH",
                     "The name on this document does not match the account holder's name.",
-                    "Upload the account holder's document, or correct the account profile before trying again.");
+                    "Upload the account holder's document, or correct the account profile before trying again.", blocking);
             return;
         }
         if (normalized.contains("document number conflicts")) {
             add(issues, seen, "documentNumber", "DOCUMENT_NUMBER_CONFLICT",
                     "This number conflicts with another identity document in the same KYC case.",
-                    "Use documents belonging to the same person and ensure both sides are from the same ID.");
+                    "Use documents belonging to the same person and ensure both sides are from the same ID.", blocking);
             return;
         }
         add(issues, seen, "document", "OCR_VALIDATION_FAILED", warning,
-                "Replace this file with a clear, complete original document.");
+                "Replace this file with a clear, complete original document.", blocking);
     }
 
     private static void add(List<KycValidationIssue> issues, Set<String> seen, String field, String code,
-                            String message, String guidance) {
+                            String message, String guidance, boolean blocking) {
         if (seen.add(field + "|" + code + "|" + message)) {
-            issues.add(new KycValidationIssue(field, code, message, guidance, true));
+            issues.add(new KycValidationIssue(field, code, message, guidance, blocking));
         }
     }
 }

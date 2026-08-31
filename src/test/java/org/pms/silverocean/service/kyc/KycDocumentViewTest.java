@@ -41,6 +41,22 @@ class KycDocumentViewTest {
         });
     }
 
+    @Test
+    void exposesAcceptedUploadWarningsAsReviewerAdvisories() {
+        KycDocument document = document(DocumentStatus.OCR_COMPLETE, 98.0);
+
+        KycDocumentView view = KycDocumentView.from(document, Map.of(
+                "fullName", "DIFFERENT TEST PERSON",
+                "_validationWarnings", "Name on the document does not match the account name"
+        ), null);
+
+        assertThat(view.validationIssues()).singleElement().satisfies(issue -> {
+            assertThat(issue.field()).isEqualTo("fullName");
+            assertThat(issue.code()).isEqualTo("NAME_MISMATCH");
+            assertThat(issue.blocking()).isFalse();
+        });
+    }
+
     private KycDocument document(DocumentStatus status, double confidence) {
         KycDocument document = new KycDocument();
         document.setId(1L);
