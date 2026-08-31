@@ -7,6 +7,7 @@ import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.wealth.WealthRequests.*;
 import org.pms.silverocean.service.wealth.WealthService;
+import org.pms.silverocean.service.wealth.WealthMarketDataService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -18,7 +19,7 @@ import java.time.LocalDate;
 
 @RestController @RequestMapping("/wealth") @RequiredArgsConstructor
 public class WealthController {
-    private final WealthService service; private final I18NService i18n;
+    private final WealthService service; private final WealthMarketDataService marketDataService; private final I18NService i18n;
     @GetMapping("/dashboard") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)")
     public ResponseEntity<ResponseDTO> dashboard(@RequestParam(defaultValue="5") int years,@RequestParam(defaultValue="5") BigDecimal valueGrowth,@RequestParam(defaultValue="3") BigDecimal incomeGrowth,@RequestParam(defaultValue="3") BigDecimal expenseGrowth){return ok(service.dashboard(years,valueGrowth,incomeGrowth,expenseGrowth));}
     @GetMapping("/assets") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> assets(){return ok(service.assets());}
@@ -26,6 +27,7 @@ public class WealthController {
     @PostMapping("/assets") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_ASSETS)") public ResponseEntity<ResponseDTO> create(@Valid @RequestBody AssetRequest r){return ok(service.createAsset(r));}
     @PutMapping("/assets/{id}") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_ASSETS)") public ResponseEntity<ResponseDTO> update(@PathVariable long id,@Valid @RequestBody AssetRequest r){return ok(service.updateAsset(id,r));}
     @DeleteMapping("/assets/{id}") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_ASSETS)") public ResponseEntity<ResponseDTO> archive(@PathVariable long id){service.archiveAsset(id);return ok(null);}
+    @PostMapping("/assets/{id}/market/refresh") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_ASSETS)") public ResponseEntity<ResponseDTO> refreshMarket(@PathVariable long id){return ok(marketDataService.refresh(id));}
     @PostMapping("/assets/{id}/valuations") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_FINANCE)") public ResponseEntity<ResponseDTO> valuation(@PathVariable long id,@Valid @RequestBody ValuationRequest r){return ok(service.addValuation(id,r));}
     @GetMapping("/assets/{id}/valuations") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> valuations(@PathVariable long id){return ok(service.valuations(id));}
     @PostMapping("/assets/{id}/cash-flows") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_FINANCE)") public ResponseEntity<ResponseDTO> cashFlow(@PathVariable long id,@Valid @RequestBody CashFlowRequest r){return ok(service.addCashFlow(id,r));}
@@ -45,6 +47,8 @@ public class WealthController {
     @PostMapping("/assets/{id}/vault") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_VAULT)") public ResponseEntity<ResponseDTO> upload(@PathVariable long id,@RequestParam String category,@RequestParam(required=false) LocalDate documentDate,@RequestParam(required=false) LocalDate expiryDate,@RequestParam(required=false) String notes,@RequestParam MultipartFile file) throws IOException{return ok(service.upload(id,category,documentDate,expiryDate,notes,file));}
     @GetMapping("/assets/{id}/vault") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> documents(@PathVariable long id){return ok(service.documents(id));}
     @GetMapping("/assets/{id}/ledger") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> ledger(@PathVariable long id){return ok(service.ledger(id));}
+    @PostMapping("/vault") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_VAULT)") public ResponseEntity<ResponseDTO> personalUpload(@RequestParam(required=false) Long assetId,@RequestParam String category,@RequestParam(required=false) LocalDate documentDate,@RequestParam(required=false) LocalDate expiryDate,@RequestParam(required=false) String notes,@RequestParam MultipartFile file) throws IOException{return ok(service.upload(assetId,category,documentDate,expiryDate,notes,file));}
+    @GetMapping("/vault") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> vault(){return ok(service.documents());}
     @GetMapping("/vault/{id}") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> document(@PathVariable long id){return ok(service.document(id));}
     @DeleteMapping("/vault/{id}") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_VAULT)") public ResponseEntity<ResponseDTO> archiveDocument(@PathVariable long id){service.archiveDocument(id);return ok(null);}
     private ResponseEntity<ResponseDTO> ok(Object data){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),data));}

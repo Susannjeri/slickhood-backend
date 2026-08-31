@@ -8,6 +8,7 @@ import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.ZonedDateTime;
 
 @Entity
 @Table(name = "pms_wealth_asset", indexes = {
@@ -27,4 +28,13 @@ public class WealthAsset extends BaseCreatorEntity {
     @Column(nullable = false, precision = 19, scale = 2) private BigDecimal currentValue;
     @Column(nullable = false) private LocalDate valuationDate;
     @Column(nullable = false, length = 30) private String status;
+    @Column(length=20) private String exchangeCode;
+    @Column(length=40) private String instrumentSymbol;
+    @Column(precision=28,scale=8) private BigDecimal quantity;
+    @Column(precision=19,scale=6) private BigDecimal averageUnitCost;
+    @Column(nullable=false,length=20) private String pricingMode="MANUAL";
+    @Column(precision=19,scale=6) private BigDecimal marketPrice;
+    @Column(length=40) private String quoteProvider;
+    @Column(length=30) private String quoteStatus;
+    private ZonedDateTime quoteAsOf;
 }

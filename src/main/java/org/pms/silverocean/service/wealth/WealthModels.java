@@ -27,7 +27,12 @@ public final class WealthModels {
     public record AssetLedger(List<WealthValuation> valuations,List<WealthCashFlow> cashFlows,
             List<WealthLiability> liabilities,List<WealthObligation> obligations,
             List<VaultDocumentView> documents) {}
+    public record MarketQuoteView(long assetId,String symbol,String exchange,String currency,BigDecimal unitPrice,
+            BigDecimal quantity,BigDecimal marketValue,BigDecimal changeAmount,BigDecimal changePercent,
+            String provider,String freshness,String asOf) {}
+    public record AdvisorProfile(int completenessScore,String headline,List<String> nextBestActions,
+            int marketPricedAssets,int staleValuations,boolean hasWill,boolean hasTrust) {}
     public record Dashboard(PortfolioSummary summary,List<AssetPerformance> assets,
             List<WealthObligation> obligations,List<WealthGoal> goals,List<GoalProgress> goalProgress,
-            List<Insight> insights,List<ProjectionYear> projection) {}
+            List<Insight> insights,List<ProjectionYear> projection,AdvisorProfile advisor) {}
 }

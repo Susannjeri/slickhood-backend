@@ -18,7 +18,12 @@ public final class WealthRequests {
             LocalDate acquisitionDate,
             @NotNull @PositiveOrZero BigDecimal currentValue,
             @NotNull LocalDate valuationDate,
-            @Size(max=30) String status) {}
+            @Size(max=30) String status,
+            @Size(max=20) String exchangeCode,
+            @Size(max=40) String instrumentSymbol,
+            @Positive BigDecimal quantity,
+            @PositiveOrZero BigDecimal averageUnitCost,
+            @Pattern(regexp="MANUAL|MARKET") String pricingMode) {}
 
     public record ValuationRequest(@NotNull @PositiveOrZero BigDecimal amount,
             @NotNull LocalDate valuationDate, @NotBlank @Size(max=60) String source,
