@@ -53,6 +53,7 @@ public class KycService {
     private final ObjectMapper objectMapper;
     @Value("${kyc.consent.version:2026-08}") private String currentConsentVersion;
     @Value("${kyc.max-file-bytes:10485760}") private long maxFileBytes;
+    @Value("${kyc.image.reject-quality-failures:true}") private boolean rejectImageQualityFailures = true;
     @Value("${kyc.ocr.min-confidence:75}") private double minOcrConfidence = 75;
     @Value("${kyc.ocr.reject-validation-warnings:true}") private boolean rejectOcrValidationWarnings = true;
 
@@ -137,7 +138,9 @@ public class KycService {
             throw new PMSCustomException(ResponseCode.KYC_DUPLICATE_DOCUMENT);
         }
         ImageQualityResult quality = qualityService.inspect(bytes, file.getContentType());
-        if (!quality.accepted()) throw new PMSCustomException(ResponseCode.KYC_DOCUMENT_QUALITY_FAILED, quality.reason());
+        if (!quality.accepted() && (rejectImageQualityFailures || uninspectable(quality))) {
+            throw new PMSCustomException(ResponseCode.KYC_DOCUMENT_QUALITY_FAILED, quality.reason());
+        }
 
         String extension = "application/pdf".equals(file.getContentType()) ? ".pdf" :
                 ("image/png".equals(file.getContentType()) ? ".png" : ".jpg");
@@ -147,7 +150,9 @@ public class KycService {
         document.setDocumentType(documentType.name()); document.setOriginalFileName(safeName(file.getOriginalFilename()));
         document.setContentType(file.getContentType()); document.setFileRef(fileRef); document.setFileSize(file.getSize());
         document.setSha256(sha256); document.setWidth(quality.width()); document.setHeight(quality.height());
-        document.setQualityScore(quality.sharpness()); document.setQualityStatus("PASSED"); document.setActive(true);
+        document.setQualityScore(quality.sharpness());
+        document.setQualityStatus(quality.accepted() ? "PASSED" : "REVIEW_REQUIRED");
+        document.setActive(true);
 
         if (!ocrProvider.enabled()) {
             throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
@@ -162,7 +167,11 @@ public class KycService {
                 .filter(existing -> sameEvidenceSlot(user, existing, documentType))
                 .toList();
         Set<Long> supersededIds = superseded.stream().map(KycDocument::getId).collect(Collectors.toSet());
-        Map<String,String> extractedFields = validateExtractedEvidence(ocr.fields(), user, kycCase, supersededIds);
+        Map<String,String> extractedFields = validateExtractedEvidence(
+                ocr.fields(), user, kycCase, supersededIds, documentType);
+        if (!quality.accepted()) {
+            addValidationWarning(extractedFields, "Image quality: " + quality.reason());
+        }
         document.setOcrProvider(ocr.provider()); document.setOcrConfidence(ocr.confidence());
         document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(extractedFields)));
         superseded.stream().findFirst().map(KycDocument::getId).ifPresent(document::setSupersedesDocumentId);
@@ -330,6 +339,26 @@ public class KycService {
         if (!ocrProvider.enabled()) throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
         Users user = currentUser();
         KycCase kycCase = ownCase();
+        if (KycStatus.APPROVED.name().equals(kycCase.getStatus())) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        return reprocessDocuments(kycCase, user);
+    }
+
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public KycCaseView reprocessCase(long caseId) throws Exception {
+        if (!ocrProvider.enabled()) throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+        KycCase kycCase = caseRepo.findById(caseId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.KYC_CASE_NOT_FOUND));
+        if (KycStatus.APPROVED.name().equals(kycCase.getStatus())) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        Users user = userDao.findById(kycCase.getUserId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
+        return reprocessDocuments(kycCase, user);
+    }
+
+    private KycCaseView reprocessDocuments(KycCase kycCase, Users user) throws Exception {
         for (KycDocument document : currentDocuments(kycCase, user)) {
             KycDocumentType type = KycDocumentType.valueOf(document.getDocumentType());
             var stored = garageService.download(document.getFileRef());
@@ -340,7 +369,7 @@ public class KycService {
             } catch (RuntimeException providerFailure) {
                 throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
             }
-            Map<String, String> fields = validateExtractedEvidence(ocr.fields(), user, kycCase, Set.of());
+            Map<String, String> fields = validateExtractedEvidence(ocr.fields(), user, kycCase, Set.of(), type);
             document.setOcrProvider(ocr.provider());
             document.setOcrConfidence(ocr.confidence());
             document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(fields)));
@@ -367,27 +396,27 @@ public class KycService {
         if (complete && userDao.isValidIDAndTaxPin(user.getId(), user.getCountry(), identificationNumber, taxPin)) {
             user.setIdentificationNumber(identificationNumber.toUpperCase(Locale.ROOT));
             user.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
-            user.setVerified(true);
-            user.setAccountStatus(AccountStatus.ACTIVE.name());
-            kycCase.setStatus(KycStatus.APPROVED.name());
-            currentDocuments(kycCase, user).stream()
-                    .filter(document -> !DocumentStatus.REJECTED.name().equals(document.getStatus()))
-                    .forEach(document -> {
-                        document.setStatus(DocumentStatus.VERIFIED.name());
-                        documentRepo.save(document);
-                    });
+            user.setVerified(false);
+            user.setAccountStatus(AccountStatus.KYC_UNDER_REVIEW.name());
+            kycCase.setStatus(KycStatus.SUBMITTED.name());
+            if (kycCase.getSubmittedAt() == null) kycCase.setSubmittedAt(ZonedDateTime.now());
         } else {
             user.setVerified(false);
             user.setAccountStatus(AccountStatus.PENDING_KYC.name());
             kycCase.setStatus(KycStatus.IN_PROGRESS.name());
+            kycCase.setSubmittedAt(null);
         }
+        kycCase.setReviewNotes(complete ? null
+                : "Upload-stage checks found evidence that must be corrected before submission.");
+        kycCase.setReviewedAt(null);
+        kycCase.setReviewedBy(null);
         userDao.save(user);
         caseRepo.save(kycCase);
         return view(kycCase, user);
     }
 
     private boolean ocrAccepted(KycDocumentType type, OcrResult ocr, Map<String, String> fields) {
-        if (type == KycDocumentType.SELFIE) return true;
+        if (type == KycDocumentType.SELFIE) return !fields.containsKey("_validationWarnings");
         boolean confidenceAccepted = ocr.confidence() >= minOcrConfidence;
         boolean warningsAccepted = !rejectOcrValidationWarnings || !fields.containsKey("_validationWarnings");
         return confidenceAccepted && warningsAccepted;
@@ -494,16 +523,16 @@ public class KycService {
     }
 
     private Map<String,String> validateExtractedEvidence(Map<String,String> source, Users user, KycCase kycCase,
-                                                         Set<Long> supersededIds) {
+                                                         Set<Long> supersededIds, KycDocumentType documentType) {
         Map<String,String> fields = new LinkedHashMap<>(source == null ? Map.of() : source);
         List<String> warnings = new ArrayList<>();
         if (fields.containsKey("_validationWarnings")) warnings.add(fields.get("_validationWarnings"));
         String detectedName = normalizeName(fields.get("fullName"));
-        String accountName = normalizeName(user.getFullName());
-        if (!detectedName.isBlank() && !accountName.isBlank()) {
+        String expectedName = normalizeName(expectedDocumentOwner(user, documentType));
+        if (!detectedName.isBlank() && !expectedName.isBlank()) {
             Set<String> detectedTokens = new HashSet<>(List.of(detectedName.split(" ")));
-            Set<String> accountTokens = new HashSet<>(List.of(accountName.split(" ")));
-            detectedTokens.retainAll(accountTokens);
+            Set<String> expectedTokens = new HashSet<>(List.of(expectedName.split(" ")));
+            detectedTokens.retainAll(expectedTokens);
             if (detectedTokens.isEmpty()) warnings.add("Name on the document does not match the account name");
         }
         String number = fields.get("documentNumber");
@@ -519,6 +548,30 @@ public class KycService {
             fields.put("_validationWarnings", String.join("; ", new LinkedHashSet<>(warnings)));
         }
         return fields;
+    }
+
+    private String expectedDocumentOwner(Users user, KycDocumentType documentType) {
+        boolean company = ProfileType.COMPANY.name().equalsIgnoreCase(user.getProfileType());
+        if (company && organizationDocument(documentType)) return user.getOrganizationName();
+        return user.getFullName();
+    }
+
+    private boolean organizationDocument(KycDocumentType documentType) {
+        return documentType == KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE
+                || documentType == KycDocumentType.CR12;
+    }
+
+    private void addValidationWarning(Map<String, String> fields, String warning) {
+        LinkedHashSet<String> warnings = new LinkedHashSet<>();
+        String existing = fields.get("_validationWarnings");
+        if (existing != null && !existing.isBlank()) warnings.addAll(List.of(existing.split("; ")));
+        warnings.add(warning);
+        fields.put("_validationStatus", "REVIEW_REQUIRED");
+        fields.put("_validationWarnings", String.join("; ", warnings));
+    }
+
+    private boolean uninspectable(ImageQualityResult quality) {
+        return quality.width() == 0 && quality.height() == 0;
     }
 
     /**
