@@ -154,12 +154,24 @@ public class EstateService {
 
     @Transactional
     public PropertyOwnership transferFromSale(long propertyId, Long unitId, long buyerId, long saleId) {
+        var completedTransfer = ownershipRepo.findBySourceSaleTransactionId(saleId);
+        if (completedTransfer.isPresent()) {
+            PropertyOwnership ownership = completedTransfer.get();
+            if (ownership.getPropertyId() != propertyId || !java.util.Objects.equals(ownership.getUnitId(), unitId)
+                    || ownership.getHomeownerUserId() != buyerId) {
+                throw new PMSCustomException(ResponseCode.DATA_INTEGRITY_VIOLATION);
+            }
+            return ownership;
+        }
         Users buyer = userDao.findById(buyerId).filter(Users::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
         if (unitId == null) throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
         Unit unit = unitRepo.findAndLockById(unitId)
                 .filter(candidate -> candidate.isActive() && candidate.getPropertyId() == propertyId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
+        ownershipRepo.findFirstByUnitIdAndActiveTrue(unitId)
+                .filter(existing -> existing.getHomeownerUserId() == buyerId)
+                .ifPresent(existing -> { throw new PMSCustomException(ResponseCode.DATA_INTEGRITY_VIOLATION); });
         PropertyOwnership ownership = createUnitOwnership(unit, buyer.getId(), LocalDate.now(),
                 "SALE_COMPLETION", userDao.getUserId());
         ownership.setSourceSaleTransactionId(saleId);

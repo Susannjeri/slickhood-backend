@@ -642,11 +642,11 @@ public class PropertyService {
     private ResponseDTO getPropertyByIdAndOwnerOrStaff(long propertyId) {
         PMSRole activeRole = userDao.getActiveRole();
         Optional<Property> accessible = switch (activeRole) {
-            case LANDLORD -> propertyDao.findByIdAndCreatedBy(propertyId, userDao.getUserId());
+            case LANDLORD, ESTATE_MANAGER, SALES_AGENT -> propertyDao.findByIdAndCreatedBy(propertyId, userDao.getUserId());
             case TENANT -> propertyDao.findByIdAndTenant(propertyId, userDao.getUserId());
             case PROPERTY_MANAGER, WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER,
                  ESTATE_OPERATIONS_MANAGER, SECURITY_SUPERVISOR, SALES_COORDINATOR,
-                 LISTING_AGENT, WORKSPACE_VIEWER, ESTATE_MANAGER, SALES_AGENT, GUARD -> propertyDao.findByIdAndManagerRole(propertyId, userDao.getUserId(), activeRole.name());
+                 LISTING_AGENT, WORKSPACE_VIEWER, GUARD -> propertyDao.findByIdAndManagerRole(propertyId, userDao.getUserId(), activeRole.name());
             case HOMEOWNER -> propertyDao.findByIdAndHomeowner(propertyId, userDao.getUserId());
             case BUYER -> propertyDao.findByIdAndBuyer(propertyId, userDao.getUserId());
             case SUPER_ADMIN -> propertyDao.findById(propertyId).filter(Property::isActive);
@@ -837,13 +837,13 @@ public class PropertyService {
     private ResponseDTO getPropertyUnitByIdAndOwnerOrStaffOrTenant(long unitId) {
         PMSRole activeRole = userDao.getActiveRole();
         Optional<DbUnitDTO> unitFromDb = switch (activeRole) {
-            case LANDLORD -> unitDao.findDTOByIdAndCreatedBy(unitId, userDao.getUserId());
+            case LANDLORD, ESTATE_MANAGER, SALES_AGENT -> unitDao.findDTOByIdAndCreatedBy(unitId, userDao.getUserId());
             case TENANT -> unitDao.findByIdAndTenant(unitId, userDao.getUserId());
             case HOMEOWNER -> unitDao.findByIdAndHomeowner(unitId, userDao.getUserId());
             case BUYER -> unitDao.findByIdAndBuyer(unitId, userDao.getUserId());
             case PROPERTY_MANAGER, WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER,
                  ESTATE_OPERATIONS_MANAGER, SECURITY_SUPERVISOR, SALES_COORDINATOR,
-                 LISTING_AGENT, WORKSPACE_VIEWER, ESTATE_MANAGER, SALES_AGENT, GUARD -> unitDao.findByIdAndManagerRole(unitId, userDao.getUserId(), activeRole.name());
+                 LISTING_AGENT, WORKSPACE_VIEWER, GUARD -> unitDao.findByIdAndManagerRole(unitId, userDao.getUserId(), activeRole.name());
             case SUPER_ADMIN -> unitDao.findById(unitId).filter(Unit::isActive).map(DbUnitDTO::new);
             default -> Optional.empty();
         };

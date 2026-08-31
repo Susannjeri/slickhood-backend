@@ -209,6 +209,20 @@ class EstateServiceTest {
         assertEquals(555L, ownership.getCreatedBy());
         verify(properties, never()).findByIdAndStaffOrOwner(11L, 555L);
     }
+
+    @Test
+    void repeatedCompletionForTheSameSaleIsIdempotent() {
+        PropertyOwnership completed = new PropertyOwnership();
+        completed.setPropertyId(11L); completed.setUnitId(unit.getId());
+        completed.setHomeownerUserId(homeowner.getId()); completed.setSourceSaleTransactionId(91L);
+        when(ownerships.findBySourceSaleTransactionId(91L)).thenReturn(Optional.of(completed));
+
+        PropertyOwnership result = service.transferFromSale(11L, unit.getId(), homeowner.getId(), 91L);
+
+        assertEquals(completed, result);
+        verify(units, never()).findAndLockById(unit.getId());
+        verify(ownerships, never()).save(any());
+    }
     @Test
     void landlordServiceChargesRemainPropertyScopedAndPaged() {
         PageRequest request = PageRequest.of(0, 25);

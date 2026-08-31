@@ -14,10 +14,12 @@ import org.pms.silverocean.database.pms.PermissionRepo;
 import org.pms.silverocean.database.pms.RolePermissionRepo;
 import org.pms.silverocean.database.pms.RoleRepo;
 import org.pms.silverocean.database.pms.UserRoleRepo;
+import org.pms.silverocean.database.pms.SaleTransactionRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.Role;
 import org.pms.silverocean.database.pms.entities.UserRole;
 import org.pms.silverocean.database.pms.entities.Users;
+import org.pms.silverocean.database.pms.entities.SaleTransaction;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.audit.AuditLogService;
@@ -87,6 +89,9 @@ class RoleServiceTest {
 
     @Mock
     private EstateService estateService;
+
+    @Mock
+    private SaleTransactionRepo saleTransactionRepo;
 
     @InjectMocks
     private RoleService roleService;
@@ -218,6 +223,33 @@ class RoleServiceTest {
         verify(estateService).createOwnershipFromInvite(77L, homeowner.getId(), assignor.getId());
         verify(propertyManagerService, never()).addStaffToProperty(anyLong(), anyLong(), anyLong(), any(PMSRole.class));
         assertFalse(invite.isActive());
+    }
+
+    @Test
+    void assignRoleFromInvite_buyerBindsOnlyTheEmailMatchedSale() {
+        Role buyerRole = new Role(PMSRole.BUYER.getName(), PMSRole.BUYER.getDescription(), false);
+        buyerRole.setId(13L); buyerRole.setActive(true);
+        Invite invite = new Invite();
+        invite.setId(42L); invite.setRoleId(13L); invite.setCreatedBy(999L); invite.setEntityId(88L);
+        invite.setType(InviteType.BUYER.name()); invite.setRecipient("buyer@example.com"); invite.setActive(true);
+        Users assignor = new Users(); assignor.setId(999L); assignor.setEmail("sales@example.com");
+        Users buyer = new Users(); buyer.setId(201L); buyer.setEmail("buyer@example.com");
+        SaleTransaction sale = new SaleTransaction(); sale.setId(88L); sale.setActive(true);
+        sale.setInvitedBuyerEmail("buyer@example.com");
+
+        when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
+        when(roleRepo.findByIdAndActive(13L)).thenReturn(Optional.of(buyerRole));
+        when(roleRepo.findById(13L)).thenReturn(Optional.of(buyerRole));
+        when(userDao.findByEmail(buyer.getEmail())).thenReturn(Optional.of(buyer));
+        when(userRoleRepo.findByUserIdAndRoleId(201L, 13L)).thenReturn(0);
+        when(saleTransactionRepo.findByIdForUpdate(88L)).thenReturn(Optional.of(sale));
+
+        ResponseDTO response = roleService.assignRoleFromInvite(invite, null, buyer);
+
+        assertTrue(response.isSuccess());
+        assertEquals(201L, sale.getBuyerUserId());
+        verify(saleTransactionRepo).save(sale);
+        verify(propertyManagerService, never()).addStaffToProperty(anyLong(), anyLong(), anyLong(), any(PMSRole.class));
     }
 
 
@@ -426,6 +458,18 @@ class RoleServiceTest {
 
         assertEquals(ResponseCode.INVALID_ROLE, exception.getResponseCode());
         verify(userRoleRepo, never()).save(any(UserRole.class));
+    }
+
+    @Test
+    void assignRoleFromInvite_expiredInviteCannotBeUsed() {
+        Invite invite = new Invite();
+        invite.setExpiryDate(java.time.LocalDateTime.now().minusMinutes(1));
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class,
+                () -> roleService.assignRoleFromInvite(invite, null, testUser));
+
+        assertEquals(ResponseCode.INVALID_OR_EXPIRED_TOKEN, exception.getResponseCode());
+        verify(userRoleRepo, never()).save(any());
     }
 
     @Test

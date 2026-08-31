@@ -30,6 +30,7 @@ public enum NotificationType {
     SERVICE_CHARGE_REMINDER_EMAIL("email.service.charge.reminder.subject", "email.service.charge.reminder.body", true, NotificationChannel.EMAIL),
     SERVICE_CHARGE_OVERDUE_EMAIL("email.service.charge.overdue.subject", "email.service.charge.overdue.body", true, NotificationChannel.EMAIL),
     OWNERSHIP_ENDED_EMAIL("email.ownership.ended.subject", "email.ownership.ended.body", true, NotificationChannel.EMAIL),
+    SALE_STATUS_EMAIL("email.sale.status.subject", "email.sale.status.body", true, NotificationChannel.EMAIL),
     VISITOR_BOOKING_CONFIRMATION_SMS("sms.visitor.booking.confirmation", false, NotificationChannel.SMS),
     VISITOR_BOOKING_CONFIRMATION_EMAIL("email.visitor.booking.confirmation.subject","email.visitor.booking.confirmation.body", false, NotificationChannel.EMAIL),
     VISITOR_ARRIVAL_SMS("sms.visitor.arrival", false, NotificationChannel.SMS),

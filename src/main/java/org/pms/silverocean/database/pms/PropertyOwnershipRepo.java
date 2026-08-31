@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface PropertyOwnershipRepo extends JpaRepository<PropertyOwnership, Long> {
+    Optional<PropertyOwnership> findBySourceSaleTransactionId(Long saleId);
     Optional<PropertyOwnership> findFirstByUnitIdAndActiveTrue(Long unitId);
     List<PropertyOwnership> findAllByHomeownerUserIdOrderByCreatedOnDesc(long userId);
     @Query("SELECT o FROM PropertyOwnership o JOIN Property p ON p.id=o.propertyId WHERE p.createdBy=:userId ORDER BY o.createdOn DESC")

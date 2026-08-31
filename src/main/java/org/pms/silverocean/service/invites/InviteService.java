@@ -74,6 +74,10 @@ public class InviteService {
     }
 
     public String createInviteLink(InviteType inviteType, Long entityId) {
+        if (inviteType == InviteType.BUYER || inviteType == InviteType.SALES_AGENT
+                || inviteType == InviteType.ESTATE_MANAGER) {
+            throw new PMSCustomException(ResponseCode.INVALID_INVITE_TYPE);
+        }
         Invite invite = new Invite();
         invite.setCreatedBy(userDao.getUserId());
         invite.setToken(PMSUtils.randomMask());
@@ -117,6 +121,23 @@ public class InviteService {
         return formatInviteLink(configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(), invite.getToken());
     }
 
+    public String createBuyerInvite(long saleId, String email) {
+        String recipient = normalizeAndValidateEmail(email);
+        Invite invite = new Invite();
+        invite.setCreatedBy(userDao.getUserId());
+        invite.setToken(PMSUtils.randomMask());
+        invite.setExpiryDate(LocalDateTime.now().plusDays(
+                configService.getConfigByName(PMSConfigs.INVITE_LINK_EXPIRY_DAYS).get().intValue()));
+        invite.setActive(true);
+        invite.setEntityId(saleId);
+        invite.setType(InviteType.BUYER.name());
+        invite.setRoleId(getRoleFromInviteType(InviteType.BUYER));
+        invite.setRecipient(recipient);
+        inviteDao.createInvite(invite);
+        sendInvite(invite.getId(), recipient, NotificationChannel.EMAIL);
+        return formatInviteLink(configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(), invite.getToken());
+    }
+
     public StaffInviteDTO createInternalStaffInvite(StaffInviteRequest request) {
         if (userDao.getActiveRole() != PMSRole.SUPER_ADMIN) {
             throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
@@ -125,13 +146,7 @@ public class InviteService {
             throw new PMSCustomException(ResponseCode.INVALID_ROLE);
         }
 
-        String recipient = request.email().trim().toLowerCase(Locale.ROOT);
-        try {
-            InternetAddress emailAddr = new InternetAddress(recipient);
-            emailAddr.validate();
-        } catch (AddressException e) {
-            throw new PMSCustomException(ResponseCode.INVALID_EMAIL);
-        }
+        String recipient = normalizeAndValidateEmail(request.email());
 
         Role role = roleRepo.findByName(request.role().getName())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_ROLE));
@@ -195,7 +210,7 @@ public class InviteService {
         if (notificationDTO == null) {
             throw new PMSCustomException(ResponseCode.EXPIRED_INVITE_LINK);
         }
-        notificationService.sendNotification(notificationDTO);
+        notificationService.queueNotification(notificationDTO);
     }
 
     public ResponseDTO validateToken(String token) {
@@ -218,7 +233,7 @@ public class InviteService {
         InviteType inviteType = InviteType.valueOf(invite.getType());
         ResponseDTO responseDTO = null;
         switch (inviteType) {
-            case GUARD, PROPERTY_MANAGER, ASSET_PORTFOLIO_MANAGER, FINANCE -> {
+            case GUARD, PROPERTY_MANAGER, ASSET_PORTFOLIO_MANAGER, FINANCE, HOMEOWNER, BUYER -> {
                 if (userDao.getUserId() != null) {
                     //assign user role and ADD user to property
                     responseDTO = roleService.assignRoleFromInvite(invite, null, userDao.getUserObject());
@@ -285,6 +300,8 @@ public class InviteService {
 
     public ResponseDTO getSupportedInviteTypes() {
         List<EnumWrapper> inviteTypes = EnumSet.allOf(InviteType.class).stream()
+                .filter(type -> type != InviteType.BUYER && type != InviteType.SALES_AGENT
+                        && type != InviteType.ESTATE_MANAGER)
                 .map(inviteType -> new EnumWrapper(inviteType.name(), i18NService.getLocalizedMessage(inviteType.getName()), null))
                 .collect(Collectors.toList());
         return new ResponseDTO(true, ResponseCode.INVITE_TYPES.getCode(),
@@ -298,6 +315,18 @@ public class InviteService {
         Role role = roleRepo.findByName(PMSRole.valueOf(inviteType.name()).getName())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVITE_TYPE));
         return role.getId();
+    }
+
+    private String normalizeAndValidateEmail(String email) {
+        if (email == null) throw new PMSCustomException(ResponseCode.INVALID_EMAIL);
+        String recipient = email.trim().toLowerCase(Locale.ROOT);
+        try {
+            InternetAddress emailAddr = new InternetAddress(recipient);
+            emailAddr.validate();
+        } catch (AddressException e) {
+            throw new PMSCustomException(ResponseCode.INVALID_EMAIL);
+        }
+        return recipient;
     }
 
 
