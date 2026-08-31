@@ -209,4 +209,30 @@ class EstateServiceTest {
         assertEquals(555L, ownership.getCreatedBy());
         verify(properties, never()).findByIdAndStaffOrOwner(11L, 555L);
     }
+    @Test
+    void landlordServiceChargesRemainPropertyScopedAndPaged() {
+        PageRequest request = PageRequest.of(0, 25);
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
+        when(charges.findPageByPropertyOwner(999L, 11L, request))
+                .thenReturn(new PageImpl<>(java.util.List.of(), request, 0));
+
+        service.listServiceCharges(request, 11L);
+
+        verify(charges).findPageByPropertyOwner(999L, 11L, request);
+    }
+
+    @Test
+    void delegatedFinanceViewerCannotEscapeAssignedPropertyScope() {
+        PageRequest request = PageRequest.of(0, 25);
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.PROPERTY_ACCOUNTANT);
+        when(users.hasPermission(Permission.VIEW_SERVICE_CHARGE)).thenReturn(true);
+        when(charges.findPageByPropertyStaff(999L, 11L, request))
+                .thenReturn(new PageImpl<>(java.util.List.of(), request, 0));
+
+        service.listServiceCharges(request, 11L);
+
+        verify(charges).findPageByPropertyStaff(999L, 11L, request);
+    }
 }

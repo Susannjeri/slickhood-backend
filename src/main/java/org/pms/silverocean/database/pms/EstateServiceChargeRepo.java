@@ -30,40 +30,43 @@ public interface EstateServiceChargeRepo extends JpaRepository<EstateServiceChar
          "c.homeownerUserId,c.invoiceId,i.ref,c.amount,c.currency,c.dueDate,c.description,i.paid,i.pendingAmount," +
          "CASE WHEN i.paid=true THEN 'PAID' WHEN c.dueDate<CURRENT_DATE THEN 'OVERDUE' ELSE 'DUE' END,c.createdOn) " +
          "FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId JOIN Unit u ON u.id=c.unitId " +
-         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND c.homeownerUserId=:userId ORDER BY c.dueDate DESC")
- Page<ServiceChargeView> findPageByHomeowner(long userId, Pageable pageable);
+         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND c.homeownerUserId=:userId " +
+         "AND (:propertyId IS NULL OR c.propertyId=:propertyId) ORDER BY c.dueDate DESC")
+ Page<ServiceChargeView> findPageByHomeowner(long userId, Long propertyId, Pageable pageable);
 
  @Query("SELECT new org.pms.silverocean.service.estate.ServiceChargeView(c.id,c.propertyId,p.name,c.unitId,u.ref," +
          "c.homeownerUserId,c.invoiceId,i.ref,c.amount,c.currency,c.dueDate,c.description,i.paid,i.pendingAmount," +
          "CASE WHEN i.paid=true THEN 'PAID' WHEN c.dueDate<CURRENT_DATE THEN 'OVERDUE' ELSE 'DUE' END,c.createdOn) " +
          "FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId JOIN Unit u ON u.id=c.unitId " +
-         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND EXISTS " +
+         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND (:propertyId IS NULL OR c.propertyId=:propertyId) AND EXISTS " +
          "(SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=c.propertyId AND pm.userId=:userId AND pm.roleName=:roleName AND pm.active) " +
          "ORDER BY c.dueDate DESC")
- Page<ServiceChargeView> findPageByManager(long userId, String roleName, Pageable pageable);
+ Page<ServiceChargeView> findPageByManager(long userId, String roleName, Long propertyId, Pageable pageable);
 
  @Query("SELECT new org.pms.silverocean.service.estate.ServiceChargeView(c.id,c.propertyId,p.name,c.unitId,u.ref," +
          "c.homeownerUserId,c.invoiceId,i.ref,c.amount,c.currency,c.dueDate,c.description,i.paid,i.pendingAmount," +
          "CASE WHEN i.paid=true THEN 'PAID' WHEN c.dueDate<CURRENT_DATE THEN 'OVERDUE' ELSE 'DUE' END,c.createdOn) " +
          "FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId JOIN Unit u ON u.id=c.unitId " +
-         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND p.createdBy=:userId ORDER BY c.dueDate DESC")
- Page<ServiceChargeView> findPageByPropertyOwner(long userId, Pageable pageable);
+         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND p.createdBy=:userId " +
+         "AND (:propertyId IS NULL OR c.propertyId=:propertyId) ORDER BY c.dueDate DESC")
+ Page<ServiceChargeView> findPageByPropertyOwner(long userId, Long propertyId, Pageable pageable);
 
  @Query("SELECT new org.pms.silverocean.service.estate.ServiceChargeView(c.id,c.propertyId,p.name,c.unitId,u.ref," +
          "c.homeownerUserId,c.invoiceId,i.ref,c.amount,c.currency,c.dueDate,c.description,i.paid,i.pendingAmount," +
          "CASE WHEN i.paid=true THEN 'PAID' WHEN c.dueDate<CURRENT_DATE THEN 'OVERDUE' ELSE 'DUE' END,c.createdOn) " +
          "FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId JOIN Unit u ON u.id=c.unitId " +
-         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND EXISTS " +
+         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND (:propertyId IS NULL OR c.propertyId=:propertyId) AND EXISTS " +
          "(SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=c.propertyId AND pm.userId=:userId AND pm.active) " +
          "ORDER BY c.dueDate DESC")
- Page<ServiceChargeView> findPageByPropertyStaff(long userId, Pageable pageable);
+ Page<ServiceChargeView> findPageByPropertyStaff(long userId, Long propertyId, Pageable pageable);
 
  @Query("SELECT new org.pms.silverocean.service.estate.ServiceChargeView(c.id,c.propertyId,p.name,c.unitId,u.ref," +
          "c.homeownerUserId,c.invoiceId,i.ref,c.amount,c.currency,c.dueDate,c.description,i.paid,i.pendingAmount," +
          "CASE WHEN i.paid=true THEN 'PAID' WHEN c.dueDate<CURRENT_DATE THEN 'OVERDUE' ELSE 'DUE' END,c.createdOn) " +
          "FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId JOIN Unit u ON u.id=c.unitId " +
-         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active ORDER BY c.dueDate DESC")
- Page<ServiceChargeView> findAllActive(Pageable pageable);
+         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active " +
+         "AND (:propertyId IS NULL OR c.propertyId=:propertyId) ORDER BY c.dueDate DESC")
+ Page<ServiceChargeView> findAllActive(Long propertyId, Pageable pageable);
 
  @Lock(LockModeType.PESSIMISTIC_WRITE)
  @Query("SELECT c FROM EstateServiceCharge c JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND i.paid=false " +

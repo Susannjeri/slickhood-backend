@@ -188,15 +188,15 @@ public class EstateService {
         return chargeRepo.save(charge);
     }
 
-    public Page<ServiceChargeView> listServiceCharges(Pageable pageable) {
+    public Page<ServiceChargeView> listServiceCharges(Pageable pageable, Long propertyId) {
         long userId = userDao.getUserId();
         Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize())));
         return switch (userDao.getActiveRole()) {
-            case HOMEOWNER -> chargeRepo.findPageByHomeowner(userId, bounded);
-            case LANDLORD -> chargeRepo.findPageByPropertyOwner(userId, bounded);
-            case SUPER_ADMIN -> chargeRepo.findAllActive(bounded);
+            case HOMEOWNER -> chargeRepo.findPageByHomeowner(userId, propertyId, bounded);
+            case LANDLORD -> chargeRepo.findPageByPropertyOwner(userId, propertyId, bounded);
+            case SUPER_ADMIN -> chargeRepo.findAllActive(propertyId, bounded);
             default -> userDao.hasPermission(Permission.VIEW_SERVICE_CHARGE)
-                    ? chargeRepo.findPageByPropertyStaff(userId, bounded)
+                    ? chargeRepo.findPageByPropertyStaff(userId, propertyId, bounded)
                     : Page.empty(bounded);
         };
     }

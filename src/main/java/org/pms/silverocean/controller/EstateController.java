@@ -36,8 +36,8 @@ public class EstateController {
     @PostMapping("/service-charges") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_SERVICE_CHARGE)")
     public ResponseEntity<ResponseDTO> charge(@Valid @RequestBody ServiceChargeRequest request){return ok(ResponseCode.SERVICE_CHARGE_CREATED,service.createServiceCharge(request));}
     @GetMapping("/service-charges") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SERVICE_CHARGE)")
-    public ResponseEntity<ResponseDTO> charges(Pageable pageable){
-        Page<ServiceChargeView> charges=service.listServiceCharges(pageable);
+    public ResponseEntity<ResponseDTO> charges(Pageable pageable,@RequestParam Optional<Long> propertyId){
+        Page<ServiceChargeView> charges=service.listServiceCharges(pageable,propertyId.orElse(null));
         ResponseDTO body=new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),charges.getContent());
         body.setSize(charges.getSize());body.setTotalPages(charges.getTotalPages());body.setTotalElements(charges.getTotalElements());
         return ResponseEntity.ok(body);
