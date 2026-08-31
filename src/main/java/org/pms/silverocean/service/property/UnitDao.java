@@ -331,4 +331,8 @@ public class UnitDao {
     public Optional<TenantNameEmailPhoneAndUnitRefProjection> getTenantAndUnitDetailsByUnitId(long unitId, long tenantUserId) {
         return unitRepo.getTenantAndUnitDetailsByUnitId(unitId, tenantUserId);
     }
+
+    public Optional<Long> findPropertyOwnerId(long unitId) {
+        return unitRepo.findPropertyOwnerId(unitId);
+    }
 }

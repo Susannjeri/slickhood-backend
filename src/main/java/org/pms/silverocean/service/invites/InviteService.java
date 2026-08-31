@@ -187,6 +187,20 @@ public class InviteService {
             throw new PMSCustomException(ResponseCode.EXPIRED_INVITE_LINK);
         }
         InviteType inviteType = InviteType.valueOf(invite.getType());
+        String boundRecipient = channel == NotificationChannel.EMAIL
+                ? normalizeAndValidateEmail(contact)
+                : PMSUtils.getLocalisedPhoneNumber(contact);
+        if (channel == NotificationChannel.SMS && PMSUtils.isPhoneInvalid(contact)) {
+            throw new PMSCustomException(ResponseCode.INVALID_PHONENUMBER);
+        }
+        if (invite.getRecipient() != null && !invite.getRecipient().isBlank()
+                && !invite.getRecipient().equalsIgnoreCase(boundRecipient)) {
+            throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+        }
+        if (invite.getRecipient() == null || invite.getRecipient().isBlank()) {
+            invite.setRecipient(boundRecipient);
+            inviteDao.updateInvite(invite);
+        }
         NotificationDTO notificationDTO = null;
         switch (channel) {
             case EMAIL -> {
@@ -194,7 +208,7 @@ public class InviteService {
                     InternetAddress emailAddr = new InternetAddress(contact);
                     emailAddr.validate();
                     String formattedMessage = String.format(i18NService.getLocalizedMessage(inviteType.getInviteEmail().getBody()), formatInviteLink(configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(), invite.getToken()));
-                    notificationDTO = new NotificationDTO(formattedMessage, contact, inviteType.getInviteEmail());
+                    notificationDTO = new NotificationDTO(formattedMessage, boundRecipient, inviteType.getInviteEmail());
                 } catch (AddressException e) {
                     throw new PMSCustomException(ResponseCode.INVALID_EMAIL);
                 }
@@ -204,7 +218,7 @@ public class InviteService {
                     throw new PMSCustomException(ResponseCode.INVALID_PHONENUMBER);
                 }
                 String formattedMessage = String.format(i18NService.getLocalizedMessage(inviteType.getInviteSMS().getBody()), formatInviteLink(configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(), invite.getToken()));
-                notificationDTO = new NotificationDTO(formattedMessage, contact, inviteType.getInviteSMS());
+                notificationDTO = new NotificationDTO(formattedMessage, boundRecipient, inviteType.getInviteSMS());
             }
         }
         if (notificationDTO == null) {

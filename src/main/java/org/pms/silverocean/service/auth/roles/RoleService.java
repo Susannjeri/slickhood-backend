@@ -206,7 +206,11 @@ public class RoleService {
         ResponseDTO responseDTO = assignRole(invite.getRoleId() == null ? roleId : invite.getRoleId(), user.getEmail(), assignorEmail);
         if (responseDTO.isSuccess()) {
             invite.setVisits(invite.getVisits() + 1);
-            if (InviteType.valueOf(invite.getType()).isExpiresAfterUse() || invite.getRoleId() != null) {
+            InviteType inviteType = InviteType.valueOf(invite.getType());
+            // Tenant onboarding still needs the token to create the lease after the role is attached.
+            // LeaseService consumes it atomically once the draft has been created.
+            if (inviteType != InviteType.TENANT
+                    && (inviteType.isExpiresAfterUse() || invite.getRoleId() != null)) {
                 invite.setActive(false);
             }
             inviteDao.updateInvite(invite);
@@ -221,8 +225,15 @@ public class RoleService {
     }
 
     private void validateInviteRecipient(Invite invite, Users user) {
-        if (invite.getRecipient() != null && !invite.getRecipient().isBlank()
-                && !invite.getRecipient().equalsIgnoreCase(user.getEmail())) {
+        if (invite.getRecipient() == null || invite.getRecipient().isBlank()) return;
+        boolean emailMatches = invite.getRecipient().equalsIgnoreCase(user.getEmail());
+        if (invite.getRecipient().contains("@")) {
+            if (!emailMatches) throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+            return;
+        }
+        String invitedPhone = org.pms.silverocean.common.PMSUtils.getLocalisedPhoneNumber(invite.getRecipient());
+        String userPhone = org.pms.silverocean.common.PMSUtils.getLocalisedPhoneNumber(user.getPhoneNumber());
+        if (invitedPhone == null || !invitedPhone.equals(userPhone)) {
             throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
         }
     }

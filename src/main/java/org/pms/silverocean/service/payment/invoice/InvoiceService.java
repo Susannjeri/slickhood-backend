@@ -122,7 +122,9 @@ public class InvoiceService {
         pmsInvoice.setBilledUserId(billedUserId);
         pmsInvoice.setCurrency(currency);
         pmsInvoice.setPropertyId(unit.getPropertyId());
-        pmsInvoice.setPayToUserId(payToUserId == null ? unit.getCreatedBy() : payToUserId);
+        pmsInvoice.setPayToUserId(payToUserId == null
+                ? unitDao.findPropertyOwnerId(unitId).orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND))
+                : payToUserId);
         pmsInvoice.setPaymentAccountId(paymentAccountId);
         pmsInvoice.setActive(true);
         pmsInvoice.setPendingAmount(totalAmount);

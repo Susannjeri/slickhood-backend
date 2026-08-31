@@ -22,6 +22,8 @@ import java.util.List;
 import java.util.Optional;
 
 public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExecutor<Unit> {
+    @Query("SELECT p.createdBy FROM Unit u JOIN Property p ON p.id=u.propertyId WHERE u.id=:unitId AND u.active AND p.active")
+    Optional<Long> findPropertyOwnerId(long unitId);
     @Query("SELECT DISTINCT u FROM Unit u JOIN Property p ON p.id=u.propertyId WHERE u.active AND p.active AND " +
             "(:privileged=true OR p.createdBy=:userId OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active) " +
             "OR EXISTS (SELECT 1 FROM UnitTenant ut WHERE ut.unitId=u.id AND ut.userId=:userId AND ut.active) " +
@@ -55,11 +57,11 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
     @Query("SELECT user.fullName as tenantName, user.email as tenantEmail, user.phoneNumber as tenantPhone, u.ref as unitRef FROM Unit u JOIN UnitTenant ut ON u.id=ut.unitId JOIN Users user ON ut.userId=user.id WHERE u.id=:unitId AND user.id=:tenantUserId")
     Optional<TenantNameEmailPhoneAndUnitRefProjection> getTenantAndUnitDetailsByUnitId(long unitId, long tenantUserId);
 
-    @Query("SELECT u FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND (u.createdBy=:userId OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active))")
+    @Query("SELECT u FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND (p.createdBy=:userId OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active))")
     Optional<Unit>  findByIdAndStaffOrOwner(Long id, long userId);
 
     @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND " +
-            "(u.createdBy=:userId " +
+            "(p.createdBy=:userId " +
             " OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active)" +
             " OR EXISTS (SELECT 1 FROM UnitTenant ut WHERE ut.unitId=u.id AND ut.userId=:userId AND ut.active)" +
             " OR EXISTS (SELECT 1 FROM PropertyOwnership po WHERE po.propertyId=p.id AND (po.unitId IS NULL OR po.unitId=u.id) AND po.homeownerUserId=:userId AND po.active))")
@@ -83,14 +85,14 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
     @Query("SELECT ut.id as id, us.id as userId, us.fullName as name, us.email as email, us.phoneNumber as phoneNumber, ut.createdOn as createdOn, " +
             "l.id as leaseId, ut.leaseAccepted as leaseAccepted, l.tenantSignedDate as tenantSignedDate, " +
             "(SELECT owner.fullName FROM Users owner where owner.id=l.signedByManagerId) as signedByManagerName, l.managerSignedDate as managerSignedDate FROM Users us JOIN UnitTenant ut ON us.id=ut.userId " +
-            "JOIN Unit u ON ut.unitId=u.id JOIN Property p ON u.propertyId=p.id JOIN Lease l ON l.tenantId=ut.id WHERE u.id=:unitId AND (u.createdBy=:userId OR  " +
+            "JOIN Unit u ON ut.unitId=u.id JOIN Property p ON u.propertyId=p.id JOIN Lease l ON l.tenantId=ut.id WHERE u.id=:unitId AND (p.createdBy=:userId OR  " +
             "EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active)) AND u.active AND ut.active")
     Page<UnitTenantProjection> findUnitTenantsByUnitIDAndUnitStaffAndActive(Pageable pageable, long unitId, long userId);
 
     @Query("SELECT u FROM Users u JOIN PropertyManager pm ON u.id=pm.userId JOIN Unit un ON pm.propertyId=un.propertyId WHERE un.id=:unitId AND un.active AND pm.active AND pm.roleName=:roleName")
     List<Users> findPropertyManagerByUnitID(long unitId, String roleName);
 
-    @Query("SELECT u FROM Users u JOIN Unit un ON un.createdBy=u.id AND un.id=:unitId")
+    @Query("SELECT owner FROM Unit un JOIN Property p ON p.id=un.propertyId JOIN Users owner ON owner.id=p.createdBy WHERE un.id=:unitId AND un.active AND p.active")
     Users getLandlordDetails(long unitId);
 
     @Query("SELECT u.id as unitId, u.propertyId as propertyId, u.ref as unitRef, p.name as propertyName  FROM UnitTenant ut JOIN Unit u ON ut.unitId = u.id JOIN Property p ON u.propertyId=p.id WHERE ut.unitId=:unitId AND ut.userId=:userId AND ut.active")

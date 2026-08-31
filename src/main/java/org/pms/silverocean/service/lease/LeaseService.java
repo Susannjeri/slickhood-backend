@@ -3,6 +3,7 @@ package org.pms.silverocean.service.lease;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.pms.silverocean.common.ResponseCode;
+import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.controller.wrappers.LeaseMessageRequest;
 import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.Lease;
@@ -22,10 +23,12 @@ import org.pms.silverocean.service.auth.wrappers.RoleWrapper;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.invites.InviteDao;
+import org.pms.silverocean.service.invites.InviteType;
 import org.pms.silverocean.service.lease.wrappers.LeaseContextDTO;
 import org.pms.silverocean.service.lease.wrappers.LeaseDTO;
 import org.pms.silverocean.service.lease.wrappers.LeaseMessageDTO;
 import org.pms.silverocean.service.lease.wrappers.LeaseTemplateDTO;
+import org.pms.silverocean.service.lease.wrappers.LeaseTerminationRequest;
 import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
 import org.pms.silverocean.service.lease.wrappers.TenancyProjection;
 import org.pms.silverocean.service.mustache.RenderService;
@@ -39,8 +42,10 @@ import org.pms.silverocean.service.property.wrappers.PropertyNameAddressAndTypeP
 import org.pms.silverocean.service.property.wrappers.UnitChargeProjection;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
@@ -106,6 +111,7 @@ public class LeaseService {
 
     @Transactional
     public void tenantEditLease(long leaseId, LocalDate moveInDate, LocalDate moveOutDate) {
+        validateLeaseDates(moveInDate, moveOutDate);
         Lease lease = leaseDao.getLeaseByIdAndTenantId(leaseId, userDao.getUserId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
         if (lease.isSigned()) {
@@ -120,6 +126,9 @@ public class LeaseService {
     public void deleteLease(long leaseId) {
         Lease lease = leaseDao.getLeaseByIdAndStaffOwnerOrTenantId(leaseId, userDao.getUserId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        if (lease.isSigned()) {
+            throw new PMSCustomException(ResponseCode.ERROR_LEASE_ALREADY_ACCEPTED);
+        }
         lease.setActive(false);
         leaseDao.saveLease(lease, Permission.DELETE_LEASE);
     }
@@ -143,7 +152,9 @@ public class LeaseService {
         leaseDao.saveLease(lease, Permission.EDIT_LEASE);
     }
 
+    @Transactional
     public void initializeLeaseDraft(String token, LocalDate moveInDate, LocalDate moveOutDate) {
+        validateLeaseDates(moveInDate, moveOutDate);
         Users user = userDao.getUserObject();
         if (!user.isCompletedProfile()) {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
@@ -154,7 +165,13 @@ public class LeaseService {
                     throw new PMSCustomException(ResponseCode.LEASE_ALREADY_EXISTS);
                 });
         Unit unit = unitDao.findByToken(token).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVITE_LINK));
-        Invite invite = inviteDao.getInviteByToken(token, true).orElseThrow();
+        Invite invite = inviteDao.getInviteByToken(token, true)
+                .filter(candidate -> InviteType.TENANT.name().equals(candidate.getType()))
+                .filter(candidate -> candidate.getExpiryDate() == null || LocalDateTime.now().isBefore(candidate.getExpiryDate()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_OR_EXPIRED_TOKEN));
+        if (!recipientMatches(invite.getRecipient(), user)) {
+            throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+        }
         LeaseTemplate leaseTemplate = leaseTemplateDao
                 .getTemplateById(unit.getTemplateId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_TEMPLATE_NOT_FOUND));
@@ -193,17 +210,21 @@ public class LeaseService {
             lease.setCharges(true);
             leaseDao.saveLease(lease, Permission.EDIT_LEASE_CHARGES);
         }
+        invite.setActive(false);
+        inviteDao.updateInvite(invite);
     }
 
     public Page<LeaseDTO> getLeaseList(Pageable pageable) {
-        return leaseDao.getLeaseList(pageable);
+        long userId = userDao.getUserId();
+        boolean privileged = userDao.hasRole(PMSRole.SUPER_ADMIN);
+        return leaseDao.getLeaseList(userId, privileged, bounded(pageable));
     }
 
     @Transactional
     public Page<LeaseMessageDTO> getLeaseMessageByLeaseId(Pageable pageable, long leaseId) {
         Lease lease = leaseDao.getLeaseByIdAndStaffOwnerOrTenantId(leaseId, userDao.getUserId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
-        return leaseMessageDao.getLeaseMessagesByLeaseId(pageable, leaseId).map(leaseMessage -> {
+        return leaseMessageDao.getLeaseMessagesByLeaseId(bounded(pageable), leaseId).map(leaseMessage -> {
             String decrypted = encryptionService.decrypt(leaseMessage.message().getBytes()).decryptedValue();
             return leaseMessage.withDecryptedMessage(decrypted);
         });
@@ -246,7 +267,7 @@ public class LeaseService {
 
         // 4. Batch Send Notifications
         recipientEmails.forEach(email ->
-                notificationService.sendNotification(new NotificationDTO(formattedMessage, email, NotificationType.LEASE_MESSAGE_EMAIL))
+                notificationService.queueNotification(new NotificationDTO(formattedMessage, email, NotificationType.LEASE_MESSAGE_EMAIL))
         );
         // 1. Persist the message
         LeaseMessage leaseMessage = new LeaseMessage();
@@ -260,6 +281,26 @@ public class LeaseService {
         if (unitTenant.getUserId() == userId) return PMSRole.TENANT;
         if (roleService.checkIfStaffInProperty(userId, unitTenant.getUnitId())) return PMSRole.PROPERTY_MANAGER;
         return PMSRole.LANDLORD;
+    }
+
+    private Pageable bounded(Pageable pageable) {
+        return PageRequest.of(Math.max(0, pageable.getPageNumber()),
+                Math.min(100, Math.max(1, pageable.getPageSize())), pageable.getSort());
+    }
+
+    private void validateLeaseDates(LocalDate moveInDate, LocalDate moveOutDate) {
+        if (moveInDate == null || moveOutDate == null || !moveOutDate.isAfter(moveInDate)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA_CONSTRAINT);
+        }
+    }
+
+    private boolean recipientMatches(String recipient, Users user) {
+        if (recipient == null || recipient.isBlank()) return true;
+        if (recipient.equalsIgnoreCase(user.getEmail())) return true;
+        if (recipient.contains("@")) return false;
+        String expectedPhone = PMSUtils.getLocalisedPhoneNumber(recipient);
+        String actualPhone = PMSUtils.getLocalisedPhoneNumber(user.getPhoneNumber());
+        return expectedPhone != null && expectedPhone.equals(actualPhone);
     }
 
     @Transactional
@@ -292,11 +333,12 @@ public class LeaseService {
 
         if (lease.getTenantSignedDate() != null && lease.getManagerSignedDate() != null) {
             lease.setSigned(true);
+            lease.setLifecycleStatus("ACTIVE");
             unitTenant.setLeaseAccepted(true);
             leaseDao.saveUnitTenant(unitTenant);
             unit.setOccupied(true);
             unitDao.update(unit);
-            lease.setNextPaymentDate(LocalDate.now());
+            lease.setNextPaymentDate(firstRentDueDate(lease));
             lease.setPaymentDue(true);
             if (lease.isCharges()) {
                 leaseDao.updateSignedLeaseCharges(leaseId);
@@ -304,6 +346,113 @@ public class LeaseService {
         }
         leaseDao.deleteUnsignedLeaseAndUnitTenantsByUnitIdAndLeaseId(unit.getId(), lease.getId());
         leaseDao.saveLease(lease, Permission.SIGN_LEASE);
+    }
+
+    @Transactional
+    public LeaseDTO requestTermination(long leaseId, LeaseTerminationRequest request) {
+        long userId = userDao.getUserId();
+        Lease lease = leaseDao.getLeaseByIdAndStaffOwnerOrTenantId(leaseId, userId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        if (!lease.isSigned() || "TERMINATED".equals(lease.getLifecycleStatus())) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA_CONSTRAINT);
+        }
+        int noticeMonths = Optional.ofNullable(lease.getNoticePeriodInMonths()).orElse(0);
+        LocalDate earliest = LocalDate.now(PMSUtils.getZoneId()).plusMonths(noticeMonths);
+        if (request.effectiveDate().isBefore(earliest)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA_CONSTRAINT);
+        }
+        lease.setLifecycleStatus("NOTICE_GIVEN");
+        lease.setTerminationEffectiveDate(request.effectiveDate());
+        lease.setTerminationReason(request.reason().trim());
+        lease.setTerminationRequestedBy(userId);
+        lease.setTerminationRequestedAt(LocalDateTime.now());
+        leaseDao.saveLease(lease, Permission.DELETE_LEASE);
+        notifyLeaseParties(lease, request);
+        return new LeaseDTO(lease, userDao.findById(leaseDao.getUnitTenantByTenantId(lease.getTenantId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND)).getUserId())
+                .map(Users::getFullName).orElse(null), null);
+    }
+
+    @Scheduled(cron = "${pms.lease.termination.cron:0 15 * * * *}")
+    @Transactional
+    public void finalizeDueTerminations() {
+        LocalDate today = LocalDate.now(PMSUtils.getZoneId());
+        for (Lease lease : leaseDao.getExpiryCandidates(today, PageRequest.of(0, 200))) {
+            if (lease.isSelfRenew() && lease.getLeaseDurationInMonths() != null && lease.getLeaseDurationInMonths() > 0) {
+                LocalDate renewedUntil = lease.getMoveOutDate();
+                do { renewedUntil = renewedUntil.plusMonths(lease.getLeaseDurationInMonths()); }
+                while (!renewedUntil.isAfter(today));
+                lease.setMoveOutDate(renewedUntil);
+                leaseDao.saveLease(lease, Permission.EDIT_LEASE);
+                notifyRenewal(lease);
+            } else {
+                LeaseTerminationRequest expiry = new LeaseTerminationRequest(today, "Lease term expired");
+                lease.setLifecycleStatus("NOTICE_GIVEN");
+                lease.setTerminationEffectiveDate(today);
+                lease.setTerminationReason(expiry.reason());
+                lease.setTerminationRequestedAt(LocalDateTime.now());
+                leaseDao.saveLease(lease, Permission.DELETE_LEASE);
+                notifyLeaseParties(lease, expiry);
+            }
+        }
+        for (Lease lease : leaseDao.getTerminationCandidates(today, PageRequest.of(0, 200))) {
+            UnitTenant tenancy = leaseDao.getUnitTenantByTenantId(lease.getTenantId()).orElse(null);
+            Unit unit = leaseDao.getUnitByTenantId(lease.getTenantId()).orElse(null);
+            lease.setLifecycleStatus("TERMINATED");
+            lease.setPaymentDue(false);
+            lease.setActive(false);
+            leaseDao.saveLease(lease, Permission.DELETE_LEASE);
+            if (tenancy != null) {
+                tenancy.setLeaseAccepted(false);
+                tenancy.setActive(false);
+                leaseDao.saveUnitTenant(tenancy);
+            }
+            if (unit != null) {
+                unit.setOccupied(false);
+                unitDao.update(unit);
+            }
+        }
+    }
+
+    private void notifyRenewal(Lease lease) {
+        UnitTenant tenancy = leaseDao.getUnitTenantByTenantId(lease.getTenantId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        Unit unit = leaseDao.getUnitByTenantId(lease.getTenantId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        long ownerId = unitDao.findPropertyOwnerId(unit.getId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
+        String body = String.format(i18NService.getLocalizedMessage(NotificationType.LEASE_RENEWAL_EMAIL.getBody()),
+                lease.getId(), lease.getMoveOutDate());
+        new HashSet<>(List.of(tenancy.getUserId(), ownerId)).forEach(id -> userDao.findById(id)
+                .map(Users::getEmail).filter(email -> email != null && !email.isBlank())
+                .ifPresent(email -> notificationService.queueNotification(
+                        new NotificationDTO(body, email, NotificationType.LEASE_RENEWAL_EMAIL))));
+    }
+
+    private LocalDate firstRentDueDate(Lease lease) {
+        LocalDate moveIn = Optional.ofNullable(lease.getMoveInDate()).orElse(LocalDate.now(PMSUtils.getZoneId()));
+        int requestedDay = Optional.ofNullable(lease.getRentDueDayOfMonth()).orElse(moveIn.getDayOfMonth());
+        LocalDate due = moveIn.withDayOfMonth(Math.min(requestedDay, moveIn.lengthOfMonth()));
+        if (due.isBefore(moveIn)) {
+            LocalDate next = moveIn.plusMonths(1);
+            due = next.withDayOfMonth(Math.min(requestedDay, next.lengthOfMonth()));
+        }
+        return due;
+    }
+
+    private void notifyLeaseParties(Lease lease, LeaseTerminationRequest request) {
+        UnitTenant tenancy = leaseDao.getUnitTenantByTenantId(lease.getTenantId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        Unit unit = leaseDao.getUnitByTenantId(lease.getTenantId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        String body = String.format(i18NService.getLocalizedMessage(NotificationType.LEASE_TERMINATION_EMAIL.getBody()),
+                lease.getId(), request.effectiveDate(), request.reason().trim());
+        long ownerId = unitDao.findPropertyOwnerId(unit.getId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
+        new HashSet<>(List.of(tenancy.getUserId(), ownerId)).forEach(id -> userDao.findById(id)
+                .map(Users::getEmail).filter(email -> email != null && !email.isBlank())
+                .ifPresent(email -> notificationService.queueNotification(
+                        new NotificationDTO(body, email, NotificationType.LEASE_TERMINATION_EMAIL))));
     }
 
     @Transactional

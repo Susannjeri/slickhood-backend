@@ -461,6 +461,45 @@ class RoleServiceTest {
     }
 
     @Test
+    void assignRoleFromInvite_phoneBoundInvite_rejectsForwardedLink() {
+        Invite invite = new Invite();
+        invite.setRecipient("+254700000001");
+        Users forwardedLinkUser = new Users();
+        forwardedLinkUser.setEmail("different@example.com");
+        forwardedLinkUser.setPhoneNumber("+254700000002");
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class,
+                () -> roleService.assignRoleFromInvite(invite, null, forwardedLinkUser));
+
+        assertEquals(ResponseCode.INVALID_USER_DETAILS, exception.getResponseCode());
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+    }
+
+    @Test
+    void tenantInviteRemainsActiveUntilLeaseDraftConsumesIt() {
+        Role tenantRole = new Role(PMSRole.TENANT.getName(), PMSRole.TENANT.getDescription(), false);
+        tenantRole.setId(17L); tenantRole.setActive(true);
+        Invite invite = new Invite();
+        invite.setId(70L); invite.setRoleId(17L); invite.setCreatedBy(999L); invite.setEntityId(88L);
+        invite.setType(InviteType.TENANT.name()); invite.setRecipient("tenant@example.com"); invite.setActive(true);
+        Users assignor = new Users(); assignor.setId(999L); assignor.setEmail("landlord@example.com");
+        Users tenant = new Users(); tenant.setId(202L); tenant.setEmail("tenant@example.com");
+
+        when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
+        when(roleRepo.findByIdAndActive(17L)).thenReturn(Optional.of(tenantRole));
+        when(roleRepo.findById(17L)).thenReturn(Optional.of(tenantRole));
+        when(userDao.findByEmail(tenant.getEmail())).thenReturn(Optional.of(tenant));
+        when(userRoleRepo.findByUserIdAndRoleId(202L, 17L)).thenReturn(0);
+
+        ResponseDTO response = roleService.assignRoleFromInvite(invite, null, tenant);
+
+        assertTrue(response.isSuccess());
+        assertTrue(invite.isActive());
+        verify(inviteDao).updateInvite(invite);
+        verify(propertyManagerService, never()).addStaffToProperty(anyLong(), anyLong(), anyLong(), any(PMSRole.class));
+    }
+
+    @Test
     void assignRoleFromInvite_expiredInviteCannotBeUsed() {
         Invite invite = new Invite();
         invite.setExpiryDate(java.time.LocalDateTime.now().minusMinutes(1));
