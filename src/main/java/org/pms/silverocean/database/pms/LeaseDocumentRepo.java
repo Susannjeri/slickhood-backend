@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import java.util.List;
 import java.util.Optional;
 import org.pms.silverocean.service.leasedocument.LeaseDocumentStatus;
+import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
 
 public interface LeaseDocumentRepo extends JpaRepository<LeaseDocument, Long> {
     @Query("SELECT d FROM LeaseDocument d WHERE d.id=:id AND d.active AND (d.issuerUserId=:userId OR d.recipientUserId=:userId)")
@@ -14,4 +15,9 @@ public interface LeaseDocumentRepo extends JpaRepository<LeaseDocument, Long> {
     List<LeaseDocument> findAllAccessible(long userId);
     long countByRecipientUserIdAndStatusAndActiveTrue(long userId, LeaseDocumentStatus status);
     Optional<LeaseDocument> findByIdAndPropertyIdAndUnitIdAndActiveTrue(long id, long propertyId, Long unitId);
+    boolean existsByLeaseIdAndDocumentTypeAndStatusAndActiveTrue(long leaseId, LeaseDocumentType type, LeaseDocumentStatus status);
+
+    @Query("SELECT CASE WHEN COUNT(d)>0 THEN true ELSE false END FROM LeaseDocument d WHERE d.leaseId=:leaseId " +
+            "AND d.documentType=:type AND d.active=true AND d.status NOT IN ('CANCELLED','EXPIRED')")
+    boolean existsOpen(long leaseId, LeaseDocumentType type);
 }

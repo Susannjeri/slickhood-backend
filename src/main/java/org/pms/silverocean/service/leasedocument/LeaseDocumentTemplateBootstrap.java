@@ -38,6 +38,7 @@ public class LeaseDocumentTemplateBootstrap implements ApplicationRunner {
 
     private String title(LeaseDocumentType type) {
         return Map.of(
+                LeaseDocumentType.RENTAL_LETTER_OF_OFFER, "Residential Tenancy Letter of Offer",
                 LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT, "Residential Tenancy Agreement",
                 LeaseDocumentType.COMMERCIAL_LEASE_AGREEMENT, "Commercial Lease Agreement",
                 LeaseDocumentType.LATE_RENT_NOTICE, "Late Rent Notice",
@@ -50,6 +51,7 @@ public class LeaseDocumentTemplateBootstrap implements ApplicationRunner {
 
     private String html(LeaseDocumentType type) {
         String detail = switch (type) {
+            case RENTAL_LETTER_OF_OFFER -> "This letter offers the identified premises to the prospective tenant on the recorded rent, deposit, commencement date and response deadline. Acceptance remains subject to the final tenancy agreement and any required checks.";
             case RESIDENTIAL_LEASE_AGREEMENT -> "This agreement records the residential tenancy, rent, term, deposit, maintenance, notice and house-rule obligations accepted by the parties.";
             case COMMERCIAL_LEASE_AGREEMENT -> "This agreement records the commercial premises, permitted use, rent, term, deposit, maintenance, access, insurance and notice obligations accepted by the parties.";
             case LATE_RENT_NOTICE -> "Our records show that rent is overdue. Please review the amount below and pay through the SlickHood checkout or contact the issuer to dispute the balance.";

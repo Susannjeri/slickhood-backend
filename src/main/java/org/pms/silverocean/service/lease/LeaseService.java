@@ -193,6 +193,7 @@ public class LeaseService {
         lease.setCreatedBy(user.getId());
         lease.setLastModifiedDate(LocalDateTime.now());
         lease.setActive(true);
+        lease.setGovernedDocumentRequired(true);
 
         leaseDao.createLease(lease);
 
@@ -310,6 +311,9 @@ public class LeaseService {
         if (lease.isSigned()) {
             return;
         }
+        if (lease.isGovernedDocumentRequired()) {
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        }
         UnitTenant unitTenant = leaseDao.getUnitTenantByTenantId(lease.getTenantId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
         Unit unit = unitDao.findByAndLockById(unitTenant.getUnitId()).orElseThrow(() -> new PMSCustomException(ResponseCode.GENERAL_FAILURE));
         long propertyId = unit.getPropertyId();
@@ -331,21 +335,43 @@ public class LeaseService {
             }
         });
 
-        if (lease.getTenantSignedDate() != null && lease.getManagerSignedDate() != null) {
-            lease.setSigned(true);
-            lease.setLifecycleStatus("ACTIVE");
-            unitTenant.setLeaseAccepted(true);
-            leaseDao.saveUnitTenant(unitTenant);
-            unit.setOccupied(true);
-            unitDao.update(unit);
-            lease.setNextPaymentDate(firstRentDueDate(lease));
-            lease.setPaymentDue(true);
-            if (lease.isCharges()) {
-                leaseDao.updateSignedLeaseCharges(leaseId);
-            }
-        }
+        activateWhenFullySigned(lease, unitTenant, unit);
         leaseDao.deleteUnsignedLeaseAndUnitTenantsByUnitIdAndLeaseId(unit.getId(), lease.getId());
         leaseDao.saveLease(lease, Permission.SIGN_LEASE);
+    }
+
+    @Transactional
+    public void activateFromGovernedAgreement(long leaseId, long issuerUserId, long recipientUserId,
+                                              LocalDateTime issuerSignedAt, LocalDateTime recipientSignedAt) {
+        Lease lease = leaseDao.getLeaseById(leaseId)
+                .filter(Lease::isActive).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        UnitTenant tenancy = leaseDao.getUnitTenantByTenantId(lease.getTenantId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        Unit unit = leaseDao.getUnitByTenantId(lease.getTenantId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
+        if (tenancy.getUserId() != recipientUserId || !roleService.checkIfStaffInProperty(issuerUserId, unit.getId())
+                && !unitDao.findPropertyOwnerId(unit.getId()).filter(id -> id == issuerUserId).isPresent()) {
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        }
+        lease.setTenantSignedDate(recipientSignedAt);
+        lease.setManagerSignedDate(issuerSignedAt);
+        lease.setSignedByManagerId(issuerUserId);
+        activateWhenFullySigned(lease, tenancy, unit);
+        leaseDao.deleteUnsignedLeaseAndUnitTenantsByUnitIdAndLeaseId(unit.getId(), lease.getId());
+        leaseDao.saveLease(lease, Permission.SIGN_LEASE);
+    }
+
+    private void activateWhenFullySigned(Lease lease, UnitTenant tenancy, Unit unit) {
+        if (lease.getTenantSignedDate() == null || lease.getManagerSignedDate() == null) return;
+        lease.setSigned(true);
+        lease.setLifecycleStatus("ACTIVE");
+        tenancy.setLeaseAccepted(true);
+        leaseDao.saveUnitTenant(tenancy);
+        unit.setOccupied(true);
+        unitDao.update(unit);
+        lease.setNextPaymentDate(firstRentDueDate(lease));
+        lease.setPaymentDue(true);
+        if (lease.isCharges()) leaseDao.updateSignedLeaseCharges(lease.getId());
     }
 
     @Transactional
