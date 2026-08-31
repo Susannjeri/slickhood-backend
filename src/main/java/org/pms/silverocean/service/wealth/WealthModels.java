@@ -30,6 +30,7 @@ public final class WealthModels {
     public record MarketQuoteView(long assetId,String symbol,String exchange,String currency,BigDecimal unitPrice,
             BigDecimal quantity,BigDecimal marketValue,BigDecimal changeAmount,BigDecimal changePercent,
             String provider,String freshness,String asOf) {}
+    public record MarketDataStatus(boolean configured,String lastRunAt,int lastProcessed,int lastFailures,String lastError) {}
     public record AdvisorProfile(int completenessScore,String headline,List<String> nextBestActions,
             int marketPricedAssets,int staleValuations,boolean hasWill,boolean hasTrust) {}
     public record Dashboard(PortfolioSummary summary,List<AssetPerformance> assets,

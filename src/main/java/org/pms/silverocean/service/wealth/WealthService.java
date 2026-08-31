@@ -10,6 +10,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.currencyexchange.CurrencyConversionService;
 import org.pms.silverocean.service.wrappers.IdNameDescDTO;
+import org.pms.silverocean.service.wealth.vault.VaultMalwareScanner;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -39,6 +40,7 @@ public class WealthService {
     private final WealthObligationRepo obligationRepo; private final WealthVaultDocumentRepo vaultRepo;
     private final WealthGoalRepo goalRepo; private final UserDao userDao; private final GarageService garageService;
     private final CurrencyConversionService currencyConversionService;
+    private final VaultMalwareScanner malwareScanner;
     private final UnitRepo unitRepo; private final PMSInvoiceRepo invoiceRepo; private final PropertyRepo propertyRepo;
     @Value("${wealth.base.currency:KES}") private String baseCurrency;
 
@@ -71,7 +73,7 @@ public class WealthService {
     @Transactional public VaultDocumentView upload(long assetId,String category,LocalDate documentDate,LocalDate expiryDate,String notes,MultipartFile file) throws IOException {return upload((Long)assetId,category,documentDate,expiryDate,notes,file);}
     @Transactional public VaultDocumentView upload(Long assetId,String category,LocalDate documentDate,LocalDate expiryDate,String notes,MultipartFile file) throws IOException {
         if(assetId!=null)asset(assetId);if(documentDate!=null&&expiryDate!=null&&expiryDate.isBefore(documentDate))throw invalid();String normalized=category==null?null:category.trim().toUpperCase();if(!VAULT_CATEGORIES.contains(normalized))throw invalid();
-        byte[] bytes=file==null?null:file.getBytes();validateFile(file,bytes);String original=Objects.requireNonNull(file.getOriginalFilename());String safe=java.nio.file.Path.of(original).getFileName().toString();if(!safe.equals(original))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        byte[] bytes=file==null?null:file.getBytes();validateFile(file,bytes);VaultMalwareScanner.Result scan=malwareScanner.scan(bytes);if(scan==VaultMalwareScanner.Result.INFECTED||(scan==VaultMalwareScanner.Result.UNAVAILABLE&&malwareScanner.required()))throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);String original=Objects.requireNonNull(file.getOriginalFilename());String safe=java.nio.file.Path.of(original).getFileName().toString();if(!safe.equals(original)||safe.length()>255)throw invalid();
         String extension=safe.contains(".")?safe.substring(safe.lastIndexOf('.')).toLowerCase(Locale.ROOT):"";long owner=userDao.getUserId();String ref="wealth/"+owner+"/vault/"+UUID.randomUUID()+extension;garageService.uploadBytes(ref,bytes,file.getContentType());
         WealthVaultDocument d=new WealthVaultDocument();d.setOwnerUserId(owner);d.setAssetId(assetId);d.setCategory(normalized);d.setDisplayName(safe);d.setFileRef(ref);d.setContentType(file.getContentType());d.setFileSize(file.getSize());d.setChecksumSha256(sha256(bytes));d.setDocumentDate(documentDate);d.setExpiryDate(expiryDate);d.setNotes(notes);stamp(d);d=vaultRepo.save(d);return new VaultDocumentView(d,garageService.getPresignedUrl(ref));
     }
