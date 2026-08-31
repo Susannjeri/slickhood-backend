@@ -24,7 +24,12 @@ public final class WealthModels {
     public record GoalProgress(long goalId,String name,String goalType,BigDecimal targetAmount,
             BigDecimal currentAmount,BigDecimal progressPercent,LocalDate targetDate,String status) {}
     public record VaultDocumentView(WealthVaultDocument document,String downloadUrl) {}
+    public record MarketQuoteView(long assetId,String symbol,String exchange,String currency,BigDecimal unitPrice,
+            BigDecimal quantity,BigDecimal marketValue,BigDecimal changeAmount,BigDecimal changePercent,
+            String provider,String freshness,String asOf) {}
+    public record AdvisorProfile(int completenessScore,String headline,List<String> nextBestActions,
+            int marketPricedAssets,int staleValuations,boolean hasWill,boolean hasTrust) {}
     public record Dashboard(PortfolioSummary summary,List<AssetPerformance> assets,
             List<WealthObligation> obligations,List<WealthGoal> goals,List<GoalProgress> goalProgress,
-            List<Insight> insights,List<ProjectionYear> projection) {}
+            List<Insight> insights,List<ProjectionYear> projection,AdvisorProfile advisor) {}
 }
