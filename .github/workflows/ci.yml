@@ -1,0 +1,45 @@
+name: Backend quality gate
+
+on:
+  pull_request:
+  push:
+    branches: ["main", "master"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+      - name: Reject destructive or duplicate Flyway migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Eir '\b(DROP[[:space:]]+(TABLE|COLUMN|DATABASE)|TRUNCATE[[:space:]]+TABLE|RENAME[[:space:]]+TABLE)\b' src/main/resources/db/migration; then
+            echo "Destructive migrations require an explicitly reviewed expand/contract release plan." >&2
+            exit 1
+          fi
+          duplicates="$(find src/main/resources/db/migration -type f -name 'V*__*.sql' -printf '%f\n' | sed -E 's/^V([^_]+)__.*/\1/' | sort | uniq -d)"
+          test -z "$duplicates" || { echo "Duplicate Flyway versions: $duplicates" >&2; exit 1; }
+      - name: Compile, test, and package
+        run: mvn -B clean verify --file pom.xml
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports-${{ github.run_id }}
+          path: target/surefire-reports/
+          if-no-files-found: error
+          retention-days: 14

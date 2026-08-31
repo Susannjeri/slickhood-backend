@@ -83,7 +83,7 @@ public class VisitorController extends OutputStreamErrorHandler {
     }
 
     @PostMapping("/register")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_VISITOR_LIST)")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).REGISTER_VISITOR)")
     public ResponseEntity<ResponseDTO> registerVisitor(@RequestBody @Valid CreateVisitorRequest request) {
         visitorService.preRegisterVisitor(request);
         return ResponseEntity.ok(new ResponseDTO(
@@ -94,7 +94,7 @@ public class VisitorController extends OutputStreamErrorHandler {
     }
 
     @GetMapping("/list")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).REGISTER_VISITOR)")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_VISITOR_LIST)")
     public ResponseEntity<ResponseDTO> listMyVisitors(Pageable pageable,
                                                       @RequestParam(required = false) Optional<String> phoneNumber) {
         List<VisitorDTO> visitors = visitorService.listMyVisitors(pageable, phoneNumber);
@@ -127,7 +127,7 @@ public class VisitorController extends OutputStreamErrorHandler {
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).UPDATE_VISITOR_STATUS)")
     public ResponseEntity<ResponseDTO> checkInOrCheckOutVisitor(@PathVariable long visitorId,
                                                                 @RequestBody @Valid UpdateVisitorStatusRequest request) {
-        visitorService.updateVisitorStatus(visitorId, request.status());
+        visitorService.updateVisitorStatus(visitorId, request);
         return ResponseEntity.ok(new ResponseDTO(
                 true,
                 ResponseCode.VISITOR_STATUS_UPDATED.getCode(),

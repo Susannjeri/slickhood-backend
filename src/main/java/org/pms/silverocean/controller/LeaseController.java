@@ -1,6 +1,7 @@
 package org.pms.silverocean.controller;
 
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.utils.OutputStreamErrorHandler;
@@ -13,6 +14,7 @@ import org.pms.silverocean.service.lease.wrappers.InitLeaseDTO;
 import org.pms.silverocean.service.lease.wrappers.LeaseDTO;
 import org.pms.silverocean.service.lease.wrappers.LeaseMessageDTO;
 import org.pms.silverocean.service.lease.wrappers.LeaseTemplateDTO;
+import org.pms.silverocean.service.lease.wrappers.LeaseTerminationRequest;
 import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -75,7 +77,7 @@ public class LeaseController extends OutputStreamErrorHandler {
         }
     }
 
-    @GetMapping("/sign")
+    @PostMapping("/sign")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SIGN_LEASE)")
     public ResponseEntity<ResponseDTO> acceptLease(@RequestParam long leaseId) {
         leaseService.signLease(leaseId);
@@ -83,9 +85,17 @@ public class LeaseController extends OutputStreamErrorHandler {
                 i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS)));
     }
 
+    /** @deprecated use POST /lease/sign; retained temporarily for older clients. */
+    @Deprecated
+    @GetMapping("/sign")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SIGN_LEASE)")
+    public ResponseEntity<ResponseDTO> acceptLeaseLegacy(@RequestParam long leaseId) {
+        return acceptLease(leaseId);
+    }
+
     @PostMapping("/message")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SEND_LEASE_MESSAGE)")
-    public ResponseEntity<ResponseDTO> sendMessage(@RequestBody LeaseMessageRequest leaseMessageRequest) {
+    public ResponseEntity<ResponseDTO> sendMessage(@Valid @RequestBody LeaseMessageRequest leaseMessageRequest) {
         leaseService.sendLeaseMessage(leaseMessageRequest);
         return ResponseEntity.ok(new ResponseDTO(true,  ResponseCode.GENERAL_SUCCESS.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS)));
@@ -117,7 +127,7 @@ public class LeaseController extends OutputStreamErrorHandler {
 
     @PostMapping("/tenant/create")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_NEW_LEASE)")
-    public ResponseEntity<ResponseDTO> initializeLeaseDraft(@RequestBody InitLeaseDTO initLeaseDTO) {
+    public ResponseEntity<ResponseDTO> initializeLeaseDraft(@Valid @RequestBody InitLeaseDTO initLeaseDTO) {
         leaseService.initializeLeaseDraft(initLeaseDTO.token(), initLeaseDTO.moveInDate(), initLeaseDTO.moveOutDate());
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.LEASE_INITIALIZED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.LEASE_INITIALIZED)));
@@ -125,7 +135,7 @@ public class LeaseController extends OutputStreamErrorHandler {
 
     @PutMapping("/tenant/edit/{leaseId}")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_LEASE)")
-    public ResponseEntity<ResponseDTO> tenantUpdateLeaseDraft(@PathVariable long leaseId, @RequestBody InitLeaseDTO initLeaseDTO) {
+    public ResponseEntity<ResponseDTO> tenantUpdateLeaseDraft(@PathVariable long leaseId, @Valid @RequestBody InitLeaseDTO initLeaseDTO) {
         leaseService.tenantEditLease(leaseId, initLeaseDTO.moveInDate(), initLeaseDTO.moveOutDate());
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS)));
@@ -133,7 +143,7 @@ public class LeaseController extends OutputStreamErrorHandler {
 
     @PutMapping("/owner/edit/{leaseId}")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_LEASE)")
-    public ResponseEntity<ResponseDTO> ownerUpdateLeaseDraft(@PathVariable long leaseId, @RequestBody LeaseTemplateDTO leaseDTO) {
+    public ResponseEntity<ResponseDTO> ownerUpdateLeaseDraft(@PathVariable long leaseId, @Valid @RequestBody LeaseTemplateDTO leaseDTO) {
         leaseService.ownerEditLease(leaseId, leaseDTO);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS)));
@@ -147,9 +157,18 @@ public class LeaseController extends OutputStreamErrorHandler {
                 i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS)));
     }
 
+    @PostMapping("/{leaseId}/termination")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).DELETE_LEASE)")
+    public ResponseEntity<ResponseDTO> requestTermination(@PathVariable long leaseId,
+                                                          @Valid @RequestBody LeaseTerminationRequest request) {
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),
+                leaseService.requestTermination(leaseId, request)));
+    }
+
     @PostMapping("/template")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_LEASE_TEMPLATE)")
-    public ResponseEntity<ResponseDTO> createLeaseTemplate(@RequestBody LeaseTemplateDTO leaseTemplateDTO) {
+    public ResponseEntity<ResponseDTO> createLeaseTemplate(@Valid @RequestBody LeaseTemplateDTO leaseTemplateDTO) {
         leaseService.createLeaseTemplate(leaseTemplateDTO);
         ResponseDTO body = new ResponseDTO(true, ResponseCode.LEASE_TEMPLATE_CREATED_SUCCESSFULLY.getCode(), i18NService.getLocalizedMessage(ResponseCode.LEASE_TEMPLATE_CREATED_SUCCESSFULLY));
         return ResponseEntity.ok(body);
@@ -165,7 +184,7 @@ public class LeaseController extends OutputStreamErrorHandler {
 
     @PutMapping("/template/{templateId}")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_LEASE_TEMPLATE)")
-    public ResponseEntity<ResponseDTO> editLeaseTemplate(@PathVariable long templateId, @RequestBody LeaseTemplateDTO leaseTemplateDTO) {
+    public ResponseEntity<ResponseDTO> editLeaseTemplate(@PathVariable long templateId, @Valid @RequestBody LeaseTemplateDTO leaseTemplateDTO) {
         leaseService.editLeaseTemplate(templateId, leaseTemplateDTO);
         ResponseDTO body = new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(), i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS));
         return ResponseEntity.ok(body);
@@ -181,6 +200,8 @@ public class LeaseController extends OutputStreamErrorHandler {
                 leaseService.renderLeaseTemplateToPdfByUnit(unitId.get(), buffer);
             } else if (token.isPresent()) {
                 leaseService.renderLeaseTemplateToPdfByInviteToken(token.get(), buffer);
+            } else {
+                throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
             }
             response.setContentType(MediaType.APPLICATION_PDF_VALUE);
             response.setHeader(HttpHeaders.CONTENT_DISPOSITION,

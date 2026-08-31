@@ -12,7 +12,7 @@ import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;
 @Table(name = "pms_property_account", indexes = {
         @Index(name = "idx_property_account_unique_active", columnList = "accountId, propertyId, active"),
         @Index(name = "idx_property_id_active", columnList = "propertyId, active"),
-        @Index(name = "idx_property_id_active", columnList = "createdBy"),
+        @Index(name = "idx_property_account_created_by", columnList = "createdBy"),
         @Index(name = "idx_property_accountId", columnList = "accountId"),
 })
 @Entity

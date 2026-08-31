@@ -58,6 +58,7 @@ public class Visitor extends BaseCreatorEntity implements Auditable {
     private ZonedDateTime validUntil;
     private ZonedDateTime approvedAt;
     private Long approvedBy;
+    private String decisionReason;
     private Long hostUserId;
     private ZonedDateTime checkedInAt;
     private ZonedDateTime checkedOutAt;
@@ -108,6 +109,7 @@ public class Visitor extends BaseCreatorEntity implements Auditable {
                 "  \"parkingLot\": \"" + parkingLot + "\",\n" +
                 "  \"chargeable\": " + chargeable + ",\n" +
                 "  \"status\": \"" + status + "\",\n" +
+                "  \"decisionReason\": \"" + (decisionReason == null ? "" : decisionReason.replace("\"", "'")) + "\",\n" +
                 "  \"checkInGuardName\": \"" + checkInGuardName + "\",\n" +
                 "  \"checkOutGuardName\": \"" + checkOutGuardName + "\",\n" +
                 "  \"category\": \"" + category + "\"\n" +

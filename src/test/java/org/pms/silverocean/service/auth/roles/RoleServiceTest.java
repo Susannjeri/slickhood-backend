@@ -14,10 +14,12 @@ import org.pms.silverocean.database.pms.PermissionRepo;
 import org.pms.silverocean.database.pms.RolePermissionRepo;
 import org.pms.silverocean.database.pms.RoleRepo;
 import org.pms.silverocean.database.pms.UserRoleRepo;
+import org.pms.silverocean.database.pms.SaleTransactionRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.Role;
 import org.pms.silverocean.database.pms.entities.UserRole;
 import org.pms.silverocean.database.pms.entities.Users;
+import org.pms.silverocean.database.pms.entities.SaleTransaction;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.audit.AuditLogService;
@@ -26,6 +28,7 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.auth.roles.PropertyManagerService;
 import org.pms.silverocean.service.invites.InviteDao;
 import org.pms.silverocean.service.invites.InviteType;
+import org.pms.silverocean.service.estate.EstateService;
 import org.pms.silverocean.service.subscription.SubscriptionProvisioningService;
 import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.kyc.KycService;
@@ -83,6 +86,12 @@ class RoleServiceTest {
 
     @Mock
     private TeamAccessService teamAccessService;
+
+    @Mock
+    private EstateService estateService;
+
+    @Mock
+    private SaleTransactionRepo saleTransactionRepo;
 
     @InjectMocks
     private RoleService roleService;
@@ -181,6 +190,66 @@ class RoleServiceTest {
         assertTrue(response.isSuccess());
         assertEquals(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), response.getCode());
         verify(userRoleRepo).save(any(UserRole.class));
+    }
+
+    @Test
+    void assignRoleFromInvite_homeowner_createsOwnershipWithoutStaffAccess() {
+        Role homeownerRole = new Role(PMSRole.HOMEOWNER.getName(), PMSRole.HOMEOWNER.getDescription(), false);
+        homeownerRole.setId(12L);
+        homeownerRole.setActive(true);
+        Invite invite = new Invite();
+        invite.setId(41L);
+        invite.setRoleId(homeownerRole.getId());
+        invite.setCreatedBy(999L);
+        invite.setEntityId(77L);
+        invite.setType(InviteType.HOMEOWNER.name());
+        invite.setActive(true);
+        Users assignor = new Users();
+        assignor.setId(999L);
+        assignor.setEmail("manager@example.com");
+        Users homeowner = new Users();
+        homeowner.setId(200L);
+        homeowner.setEmail("owner@example.com");
+
+        when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
+        when(roleRepo.findByIdAndActive(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
+        when(roleRepo.findById(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
+        when(userDao.findByEmail(homeowner.getEmail())).thenReturn(Optional.of(homeowner));
+        when(userRoleRepo.findByUserIdAndRoleId(homeowner.getId(), homeownerRole.getId())).thenReturn(0);
+
+        ResponseDTO response = roleService.assignRoleFromInvite(invite, null, homeowner);
+
+        assertTrue(response.isSuccess());
+        verify(estateService).createOwnershipFromInvite(77L, homeowner.getId(), assignor.getId());
+        verify(propertyManagerService, never()).addStaffToProperty(anyLong(), anyLong(), anyLong(), any(PMSRole.class));
+        assertFalse(invite.isActive());
+    }
+
+    @Test
+    void assignRoleFromInvite_buyerBindsOnlyTheEmailMatchedSale() {
+        Role buyerRole = new Role(PMSRole.BUYER.getName(), PMSRole.BUYER.getDescription(), false);
+        buyerRole.setId(13L); buyerRole.setActive(true);
+        Invite invite = new Invite();
+        invite.setId(42L); invite.setRoleId(13L); invite.setCreatedBy(999L); invite.setEntityId(88L);
+        invite.setType(InviteType.BUYER.name()); invite.setRecipient("buyer@example.com"); invite.setActive(true);
+        Users assignor = new Users(); assignor.setId(999L); assignor.setEmail("sales@example.com");
+        Users buyer = new Users(); buyer.setId(201L); buyer.setEmail("buyer@example.com");
+        SaleTransaction sale = new SaleTransaction(); sale.setId(88L); sale.setActive(true);
+        sale.setInvitedBuyerEmail("buyer@example.com");
+
+        when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
+        when(roleRepo.findByIdAndActive(13L)).thenReturn(Optional.of(buyerRole));
+        when(roleRepo.findById(13L)).thenReturn(Optional.of(buyerRole));
+        when(userDao.findByEmail(buyer.getEmail())).thenReturn(Optional.of(buyer));
+        when(userRoleRepo.findByUserIdAndRoleId(201L, 13L)).thenReturn(0);
+        when(saleTransactionRepo.findByIdForUpdate(88L)).thenReturn(Optional.of(sale));
+
+        ResponseDTO response = roleService.assignRoleFromInvite(invite, null, buyer);
+
+        assertTrue(response.isSuccess());
+        assertEquals(201L, sale.getBuyerUserId());
+        verify(saleTransactionRepo).save(sale);
+        verify(propertyManagerService, never()).addStaffToProperty(anyLong(), anyLong(), anyLong(), any(PMSRole.class));
     }
 
 
@@ -389,6 +458,98 @@ class RoleServiceTest {
 
         assertEquals(ResponseCode.INVALID_ROLE, exception.getResponseCode());
         verify(userRoleRepo, never()).save(any(UserRole.class));
+    }
+
+    @Test
+    void assignRoleFromInvite_phoneBoundInvite_rejectsForwardedLink() {
+        Invite invite = new Invite();
+        invite.setRecipient("+254700000001");
+        Users forwardedLinkUser = new Users();
+        forwardedLinkUser.setEmail("different@example.com");
+        forwardedLinkUser.setPhoneNumber("+254700000002");
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class,
+                () -> roleService.assignRoleFromInvite(invite, null, forwardedLinkUser));
+
+        assertEquals(ResponseCode.INVALID_USER_DETAILS, exception.getResponseCode());
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+    }
+
+    @Test
+    void tenantInviteRemainsActiveUntilLeaseDraftConsumesIt() {
+        Role tenantRole = new Role(PMSRole.TENANT.getName(), PMSRole.TENANT.getDescription(), false);
+        tenantRole.setId(17L); tenantRole.setActive(true);
+        Invite invite = new Invite();
+        invite.setId(70L); invite.setRoleId(17L); invite.setCreatedBy(999L); invite.setEntityId(88L);
+        invite.setType(InviteType.TENANT.name()); invite.setRecipient("tenant@example.com"); invite.setActive(true);
+        Users assignor = new Users(); assignor.setId(999L); assignor.setEmail("landlord@example.com");
+        Users tenant = new Users(); tenant.setId(202L); tenant.setEmail("tenant@example.com");
+
+        when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
+        when(roleRepo.findByIdAndActive(17L)).thenReturn(Optional.of(tenantRole));
+        when(roleRepo.findById(17L)).thenReturn(Optional.of(tenantRole));
+        when(userDao.findByEmail(tenant.getEmail())).thenReturn(Optional.of(tenant));
+        when(userRoleRepo.findByUserIdAndRoleId(202L, 17L)).thenReturn(0);
+
+        ResponseDTO response = roleService.assignRoleFromInvite(invite, null, tenant);
+
+        assertTrue(response.isSuccess());
+        assertTrue(invite.isActive());
+        verify(inviteDao).updateInvite(invite);
+        verify(propertyManagerService, never()).addStaffToProperty(anyLong(), anyLong(), anyLong(), any(PMSRole.class));
+    }
+
+    @Test
+    void assignRoleFromInvite_expiredInviteCannotBeUsed() {
+        Invite invite = new Invite();
+        invite.setExpiryDate(java.time.LocalDateTime.now().minusMinutes(1));
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class,
+                () -> roleService.assignRoleFromInvite(invite, null, testUser));
+
+        assertEquals(ResponseCode.INVALID_OR_EXPIRED_TOKEN, exception.getResponseCode());
+        verify(userRoleRepo, never()).save(any());
+    }
+
+    @Test
+    void selfAssignRole_superadminIsRejectedEvenIfDatabaseMarksItSelfAssignable() {
+        Role superadmin = new Role(PMSRole.SUPER_ADMIN.getName(), PMSRole.SUPER_ADMIN.getDescription(), true);
+        superadmin.setId(99L);
+        superadmin.setActive(true);
+        testUser.setAccountStatus(AccountStatus.ACTIVE.name());
+        when(userDao.getUserObject()).thenReturn(testUser);
+        when(roleRepo.findByIdAndActive(superadmin.getId())).thenReturn(Optional.of(superadmin));
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class,
+                () -> roleService.selfAssignRole(superadmin.getId()));
+
+        assertEquals(ResponseCode.INVALID_ROLE, exception.getResponseCode());
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+    }
+
+    @Test
+    void assignRoleFromInvite_superadminRoleIsNeverGranted() {
+        Role superadmin = new Role(PMSRole.SUPER_ADMIN.getName(), PMSRole.SUPER_ADMIN.getDescription(), false);
+        superadmin.setId(99L);
+        superadmin.setActive(true);
+        Invite invite = new Invite();
+        invite.setId(91L);
+        invite.setRoleId(superadmin.getId());
+        invite.setCreatedBy(100L);
+        invite.setType(InviteType.USER.name());
+        invite.setActive(true);
+        Users assignor = new Users();
+        assignor.setId(100L);
+        assignor.setEmail("owner@slickhood.com");
+        when(userDao.findById(assignor.getId())).thenReturn(Optional.of(assignor));
+        when(roleRepo.findByIdAndActive(superadmin.getId())).thenReturn(Optional.of(superadmin));
+
+        ResponseDTO response = roleService.assignRoleFromInvite(invite, null, testUser);
+
+        assertFalse(response.isSuccess());
+        assertEquals(ResponseCode.INVALID_ROLE.getCode(), response.getCode());
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+        verify(inviteDao, never()).updateInvite(any(Invite.class));
     }
 
     @Test

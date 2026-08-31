@@ -9,10 +9,13 @@ import org.pms.silverocean.database.pms.LateFeeRuleRepo;
 import org.pms.silverocean.database.pms.LeaseFinancialEventRepo;
 import org.pms.silverocean.database.pms.entities.*;
 import org.pms.silverocean.service.PMSCustomException;
+import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.lease.LeaseDao;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.payment.ledger.FinancialLedgerService;
+import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.property.UnitDao;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -30,11 +33,14 @@ class LeaseFinanceServiceTest {
     @Mock InvoiceDao invoices;
     @Mock FinancialLedgerService ledger;
     @Mock UserDao users;
+    @Mock NotificationService notifications;
+    @Mock I18NService i18n;
+    @Mock UnitDao units;
     LeaseFinanceService service;
     Lease lease;
 
     @BeforeEach void setup() {
-        service = new LeaseFinanceService(events, rules, leases, invoices, ledger, users);
+        service = new LeaseFinanceService(events, rules, leases, invoices, ledger, users, notifications, i18n, units);
         lease = new Lease(); lease.setId(5L); lease.setTenantId(6); lease.setCurrency("KES");
         when(users.getUserId()).thenReturn(1L);
         when(leases.getLeaseByIdAndStaffOwner(5L, 1L)).thenReturn(Optional.of(lease));
@@ -61,10 +67,12 @@ class LeaseFinanceServiceTest {
         when(invoices.getInvoiceByIdForUpdate(9L)).thenReturn(Optional.of(invoice));
         UnitTenant tenancy = new UnitTenant(); tenancy.setUserId(8);
         Unit unit = new Unit(); unit.setId(7L); unit.setCreatedBy(2L); unit.setPropertyId(4L); unit.setCurrency("KES");
+        when(units.findPropertyOwnerId(7L)).thenReturn(Optional.of(2L));
         when(leases.getUnitTenantByTenantId(6L)).thenReturn(Optional.of(tenancy));
         when(leases.getUnitByTenantId(6L)).thenReturn(Optional.of(unit));
         when(events.findByIdempotencyKey("late-1")).thenReturn(Optional.empty());
         when(events.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(i18n.getLocalizedMessage(anyString())).thenReturn("Late fee %s %s invoice %s lease %s");
         LeaseFinancialEvent result = service.assess(new LeaseFinanceModels.Assess("late-1", 5L, 9L));
         assertEquals(new BigDecimal("100.00"), result.getAmount());
         assertEquals("LATE_FEE_CHARGED", result.getEventType());

@@ -120,6 +120,18 @@ class InvoiceServiceSubscriptionPaymentTest {
         verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.MPESA);
     }
 
+    @Test
+    void rejectsPropertyInvoiceInitializationByAUserWhoIsNotBilled() {
+        when(userDao.getUserId()).thenReturn(8L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 8L)).thenReturn(Optional.empty());
+
+        assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 12L));
+
+        verify(accountDao, never()).getAccountById(12L);
+        verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PAYSTACK);
+    }
+
     private static PMSInvoice subscriptionInvoice(long billedUserId, long payeeUserId) {
         PMSInvoice invoice = new PMSInvoice();
         invoice.setRef("INV-SUB");

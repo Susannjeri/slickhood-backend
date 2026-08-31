@@ -7,6 +7,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.repository.query.Param;
+
+import java.util.Collection;
+import java.time.LocalDateTime;
+import java.util.List;
 
 public interface NotificationRepo extends JpaRepository<Notification, Long>, JpaSpecificationExecutor<Notification> {
     @Query("SELECT n FROM Notification n WHERE n.createdOn>=:start AND n.createdOn<:end ORDER BY n.createdOn DESC")
@@ -27,4 +33,25 @@ public interface NotificationRepo extends JpaRepository<Notification, Long>, Jpa
             " s.status as status, s.description as description, s.network as network, COALESCE(s.cost, 0.0) as cost, s.currency as currency," +
             " s.callBackIP as callbackIP, n.updatedOn as lastUpdateOn  FROM Notification n LEFT JOIN SMS s ON n.id=s.notificationId")
     Page<NotificationProjection> findAllNotifications(Pageable pageable);
+
+    @Query("SELECT n FROM Notification n WHERE n.active AND n.recipient IN :recipients ORDER BY n.createdOn DESC")
+    Page<Notification> findAllForRecipients(Pageable pageable, Collection<String> recipients);
+
+    @Query("SELECT n.id FROM Notification n WHERE n.active AND n.delivered=false AND n.retry=true " +
+            "AND n.channel=:channel AND n.retries<:maxRetries " +
+            "AND (n.updatedOn IS NULL OR n.updatedOn<=:eligibleBefore) ORDER BY n.updatedOn,n.id")
+    List<Long> findRetryCandidates(@Param("channel") String channel,
+                                   @Param("eligibleBefore") LocalDateTime eligibleBefore,
+                                   @Param("maxRetries") int maxRetries, Pageable pageable);
+
+    @Modifying
+    @Query("UPDATE Notification n SET n.retries=n.retries+1,n.updatedOn=:now WHERE n.id=:id AND n.active " +
+            "AND n.delivered=false AND n.retry=true AND n.retries<:maxRetries " +
+            "AND (n.updatedOn IS NULL OR n.updatedOn<=:eligibleBefore)")
+    int claimRetry(@Param("id") long id, @Param("eligibleBefore") LocalDateTime eligibleBefore,
+                   @Param("now") LocalDateTime now, @Param("maxRetries") int maxRetries);
+
+    @Modifying
+    @Query("UPDATE Notification n SET n.retry=false,n.updatedOn=:now WHERE n.id=:id AND n.delivered=false")
+    int stopRetry(@Param("id") long id, @Param("now") LocalDateTime now);
 }

@@ -4,6 +4,7 @@ import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.notification.NotificationProjection;
+import org.pms.silverocean.service.notification.MyNotificationDTO;
 import org.pms.silverocean.service.notification.NotificationReportService;
 import org.pms.silverocean.service.notification.sms.africastalking.wrappers.ATSMSDTO;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +50,18 @@ public class NotificationController {
         body.setSize(sentSMS.getSize());
         body.setTotalPages(sentSMS.getTotalPages());
         body.setTotalElements(sentSMS.getTotalElements());
+        return ResponseEntity.ok(body);
+    }
+
+    @GetMapping("/mine")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_MY_NOTIFICATIONS)")
+    public ResponseEntity<ResponseDTO> getMyNotifications(Pageable pageable) {
+        Page<MyNotificationDTO> notifications = notificationReportService.getMyNotifications(pageable);
+        ResponseDTO body = new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.NOTIFICATION_LIST), notifications.getContent());
+        body.setSize(notifications.getSize());
+        body.setTotalPages(notifications.getTotalPages());
+        body.setTotalElements(notifications.getTotalElements());
         return ResponseEntity.ok(body);
     }
 }

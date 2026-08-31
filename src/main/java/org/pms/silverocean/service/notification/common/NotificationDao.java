@@ -9,6 +9,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
+import java.util.Collection;
+import java.time.LocalDateTime;
+import java.util.List;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.transaction.annotation.Transactional;
 @Service
 public class NotificationDao {
     private final NotificationRepo notificationRepo;
@@ -31,6 +36,24 @@ public class NotificationDao {
 
     public Optional<Notification> findById(long id) {
         return notificationRepo.findById(id);
+    }
+
+    public Page<Notification> getNotificationsForRecipients(Pageable pageable, Collection<String> recipients) {
+        return notificationRepo.findAllForRecipients(pageable, recipients);
+    }
+
+    public List<Long> findRetryCandidates(String channel, LocalDateTime eligibleBefore, int maxRetries, int batchSize) {
+        return notificationRepo.findRetryCandidates(channel, eligibleBefore, maxRetries, PageRequest.of(0, batchSize));
+    }
+
+    @Transactional
+    public boolean claimRetry(long id, LocalDateTime eligibleBefore, LocalDateTime now, int maxRetries) {
+        return notificationRepo.claimRetry(id, eligibleBefore, now, maxRetries) == 1;
+    }
+
+    @Transactional
+    public void stopRetry(long id) {
+        notificationRepo.stopRetry(id, LocalDateTime.now());
     }
 
 }

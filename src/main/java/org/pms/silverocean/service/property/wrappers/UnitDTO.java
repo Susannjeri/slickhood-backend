@@ -2,6 +2,11 @@ package org.pms.silverocean.service.property.wrappers;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import org.pms.silverocean.config.ValidCurrency;
 import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
 import org.pms.silverocean.service.property.MeasurementUnitsDTO;
@@ -15,15 +20,15 @@ import java.util.stream.Collectors;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record UnitDTO(
-        Long propertyId,
-        String ref,
-        PMSUnitTypes unitType,
+        @NotNull @Positive Long propertyId,
+        @NotBlank @Size(max = 120) String ref,
+        @NotNull PMSUnitTypes unitType,
         PMSPropertyType propertyType,
-        Double size,
-        MeasurementUnitsDTO measurementUnits,
-        Set<UtilitiesDTO> utilities,
-        PMSLeaseMode leaseMode,
-        Double price,
+        @NotNull @Positive Double size,
+        @NotNull MeasurementUnitsDTO measurementUnits,
+        @NotEmpty Set<UtilitiesDTO> utilities,
+        @NotNull PMSLeaseMode leaseMode,
+        @NotNull @Positive Double price,
         @ValidCurrency(message = "Invalid 3 letter currency code")
         String currency,
         Boolean occupied,

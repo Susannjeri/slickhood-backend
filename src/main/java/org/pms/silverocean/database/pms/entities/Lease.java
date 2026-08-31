@@ -55,6 +55,12 @@ public class Lease extends BaseCreatorEntity implements Auditable {
 
     private boolean paymentDue;
     private LocalDate nextPaymentDate;
+    private String lifecycleStatus = "DRAFT";
+    private LocalDate terminationEffectiveDate;
+    private String terminationReason;
+    private Long terminationRequestedBy;
+    private LocalDateTime terminationRequestedAt;
+    private boolean governedDocumentRequired;
 
     @Override
     public String toAuditJSON() {

@@ -154,8 +154,16 @@ public class LeaseDao {
         leaseChargeRepo.updateSignedLeaseChargeNextPaymentDate(leaseId);
     }
 
-    public Page<LeaseDTO> getLeaseList(Pageable pageable) {
-        return leaseRepo.findAllLease(pageable);
+    public Page<LeaseDTO> getLeaseList(long userId, boolean privileged, Pageable pageable) {
+        return leaseRepo.findAccessibleLeases(userId, privileged, pageable);
+    }
+
+    public List<Lease> getTerminationCandidates(LocalDate today, Pageable pageable) {
+        return leaseRepo.findTerminationCandidates(today, pageable);
+    }
+
+    public List<Lease> getExpiryCandidates(LocalDate today, Pageable pageable) {
+        return leaseRepo.findExpiryCandidates(today, pageable);
     }
 
     public Slice<ProcessLeaseInvoiceDTO> getLeasePaymentsDueToday(Pageable pageable) {

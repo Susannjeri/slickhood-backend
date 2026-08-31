@@ -19,7 +19,8 @@ public class SaleTransaction extends BaseCreatorEntity {
     private long propertyId;
     private Long unitId;
     private long salesAgentUserId;
-    private long buyerUserId;
+    private Long buyerUserId;
+    @Column(length = 254) private String invitedBuyerEmail;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 30) private SaleStatus status;
     @Column(nullable = false, precision = 19, scale = 2) private BigDecimal askingPrice;
     @Column(precision = 19, scale = 2) private BigDecimal offerAmount;

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @page { size: A4; margin: 18mm; @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9px; color: #64748b; } }
+    body { font-family: Arial, sans-serif; color: #17212b; font-size: 11px; line-height: 1.5; }
+    h1 { color: #0f766e; font-size: 22px; margin: 8px 0 18px; text-align: center; }
+    h2 { font-size: 13px; margin: 18px 0 6px; page-break-after: avoid; }
+    p, li { text-align: justify; }
+    .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+    .brand img { max-width: 150px; max-height: 72px; object-fit: contain; }
+    .brand-name { font-size: 18px; font-weight: 700; }
+    .meta { background: #f1f5f9; padding: 12px; border-radius: 6px; display: table; width: 100%; box-sizing: border-box; }
+    .meta-row { display: table-row; }.meta-label,.meta-value { display: table-cell; padding: 2px 8px 2px 0; }.meta-label { font-weight: 700; width: 25%; }
+    .review,.important { padding: 10px; margin: 14px 0; page-break-inside: avoid; }.review { border: 1px solid #d97706; background: #fffbeb; }.important { border-left: 3px solid #0f766e; background: #f0fdfa; }
+    .signature-grid { margin-top: 36px; display: table; width: 100%; page-break-inside: avoid; }.signature-row { display: table-row; }.signature { display: table-cell; width: 50%; padding: 28px 24px 4px 0; border-top: 1px solid #334155; }
+    .snapshot { margin-top: 24px; color: #475569; font-size: 9px; }.powered { margin-top: 32px; border-top: 1px solid #e2e8f0; padding-top: 9px; text-align: center; color: #64748b; font-size: 10px; }
+  </style>
+</head>
+<body>
+  <div class="brand">{{#hasOwnerLogo}}<img src="{{ownerLogoDataUri}}" alt="Document owner logo">{{/hasOwnerLogo}}<div class="brand-name">{{documentOwnerName}}</div></div>
+  <h1>{{documentName}}</h1>
+  <div class="meta">
+    <div class="meta-row"><div class="meta-label">Property</div><div class="meta-value">{{propertyName}}, {{propertyAddress}}</div></div>
+    <div class="meta-row"><div class="meta-label">Unit</div><div class="meta-value">{{unitRef}}</div></div>
+    <div class="meta-row"><div class="meta-label">Issuer</div><div class="meta-value">{{issuerName}} · {{issuerEmail}} · {{issuerPhone}}</div></div>
+    <div class="meta-row"><div class="meta-label">Recipient</div><div class="meta-value">{{recipientName}} · {{recipientEmail}} · {{recipientPhone}}</div></div>
+    <div class="meta-row"><div class="meta-label">Effective date</div><div class="meta-value">{{effectiveDate}}</div></div>
+    <div class="meta-row"><div class="meta-label">Response due</div><div class="meta-value">{{responseDueDate}}</div></div>
+  </div>
+  {{#legalReviewRequired}}<div class="review"><strong>Controlled draft:</strong> this template version cannot be issued until its manual legal-review status is recorded.</div>{{/legalReviewRequired}}
+<!--DOCUMENT_BODY-->
+  <p class="snapshot">This is an immutable snapshot of template version {{templateVersion}}, generated on {{generatedDate}}. Any payment is made to the beneficiary identified by the document owner or the linked payment instruction. SlickHood is a workflow platform and is neither a contracting party nor the recipient of funds.</p>
+  <div class="signature-grid"><div class="signature-row"><div class="signature">Issuer signature / date</div><div class="signature">Recipient signature / date</div></div></div>
+  {{#saleDocument}}<div class="signature-grid"><div class="signature-row"><div class="signature">Issuer witness: name, ID, signature and date</div><div class="signature">Recipient witness: name, ID, signature and date</div></div></div>{{/saleDocument}}
+  <div class="powered">Powered by SlickHood</div>
+</body>
+</html>

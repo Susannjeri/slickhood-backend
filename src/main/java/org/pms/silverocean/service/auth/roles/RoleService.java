@@ -7,6 +7,7 @@ import org.pms.silverocean.database.pms.PermissionRepo;
 import org.pms.silverocean.database.pms.RolePermissionRepo;
 import org.pms.silverocean.database.pms.RoleRepo;
 import org.pms.silverocean.database.pms.UserRoleRepo;
+import org.pms.silverocean.database.pms.SaleTransactionRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.Permission;
 import org.pms.silverocean.database.pms.entities.Role;
@@ -21,6 +22,7 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.auth.wrappers.RoleWrapper;
 import org.pms.silverocean.service.invites.InviteDao;
 import org.pms.silverocean.service.invites.InviteType;
+import org.pms.silverocean.service.estate.EstateService;
 import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.kyc.KycService;
 import org.pms.silverocean.service.teamaccess.TeamAccessService;
@@ -53,8 +55,10 @@ public class RoleService {
     private final AuditLogService auditLogService;
     private final KycService kycService;
     private final TeamAccessService teamAccessService;
+    private final EstateService estateService;
+    private final SaleTransactionRepo saleTransactionRepo;
 
-    public RoleService(UserRoleRepo userRoleRepo, PermissionRepo permissionRepo, RoleRepo roleRepo, PropertyManagerService propertyManagerService, UserDao userDao, RolePermissionRepo rolePermissionRepo, I18NService i18NService, AuditLogService auditLogService, InviteDao inviteDao, KycService kycService, TeamAccessService teamAccessService) {
+    public RoleService(UserRoleRepo userRoleRepo, PermissionRepo permissionRepo, RoleRepo roleRepo, PropertyManagerService propertyManagerService, UserDao userDao, RolePermissionRepo rolePermissionRepo, I18NService i18NService, AuditLogService auditLogService, InviteDao inviteDao, KycService kycService, TeamAccessService teamAccessService, EstateService estateService, SaleTransactionRepo saleTransactionRepo) {
         this.userRoleRepo = userRoleRepo;
         this.permissionRepo = permissionRepo;
         this.roleRepo = roleRepo;
@@ -66,6 +70,8 @@ public class RoleService {
         this.inviteDao = inviteDao;
         this.kycService = kycService;
         this.teamAccessService = teamAccessService;
+        this.estateService = estateService;
+        this.saleTransactionRepo = saleTransactionRepo;
     }
 
     public ResponseDTO selfAssignRole(long roleId) {
@@ -99,12 +105,16 @@ public class RoleService {
         if (PMSRole.SUPER_ADMIN.equals(pmsRole)) {
             return Set.of();
         }
-        if (PMSRole.LANDLORD.equals(pmsRole)) {
+        if (Set.of(PMSRole.LANDLORD, PMSRole.ESTATE_MANAGER, PMSRole.SALES_AGENT).contains(pmsRole)) {
             return userRoleRepo.findLandlordsProperty(userId);
         }
 
         if (PMSRole.TENANT.equals(pmsRole)) {
             return userRoleRepo.findTenantProperty(userId);
+        }
+
+        if (PMSRole.HOMEOWNER.equals(pmsRole)) {
+            return userRoleRepo.findHomeownerProperty(userId);
         }
 
         return userRoleRepo.findStaffPropertyByUserIdAndRole(userId, pmsRole.name());
@@ -145,6 +155,7 @@ public class RoleService {
             return;
         }
         Invite invite = inviteDao.getInviteByToken(inviteToken, true)
+                .filter(this::notExpired)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.EXPIRED_INVITE_LINK));
 
         validateInviteRecipient(invite, user);
@@ -159,7 +170,8 @@ public class RoleService {
 
     private void checkIfRoleIsValidAndSelfAssignable(Long roleId) {
         Optional<Role> roleByID = roleRepo.findByIdAndActive(roleId);
-        if (roleByID.isEmpty() || !roleByID.get().isActive() || !roleByID.get().isSelfAssignable()) {
+        if (roleByID.isEmpty() || !roleByID.get().isActive() || !roleByID.get().isSelfAssignable()
+                || PMSRole.roleFromSavedName(roleByID.get().getName()).isPlatformOwnerOnly()) {
             log.error("Role with id {} not found", roleId);
             throw new PMSCustomException(ResponseCode.INVALID_ROLE);
         }
@@ -175,29 +187,37 @@ public class RoleService {
     }
 
 
+    @Transactional
     public ResponseDTO assignRoleFromInvite(String inviteToken, Users user) {
         if (teamAccessService.isTeamToken(inviteToken)) {
             teamAccessService.accept(inviteToken);
             return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY));
         }
-        Invite invite = inviteDao.getInviteByToken(inviteToken, true).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_OR_EXPIRED_TOKEN));
+        Invite invite = inviteDao.getInviteByToken(inviteToken, true).filter(this::notExpired)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_OR_EXPIRED_TOKEN));
         return assignRoleFromInvite(invite, null, user);
     }
 
+    @Transactional
     public ResponseDTO assignRoleFromInvite(Invite invite, Long roleId, Users user) {
+        if (!notExpired(invite)) throw new PMSCustomException(ResponseCode.INVALID_OR_EXPIRED_TOKEN);
         validateInviteRecipient(invite, user);
         String assignorEmail = userDao.findById(invite.getCreatedBy()).map(Users::getEmail).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
         ResponseDTO responseDTO = assignRole(invite.getRoleId() == null ? roleId : invite.getRoleId(), user.getEmail(), assignorEmail);
         if (responseDTO.isSuccess()) {
             invite.setVisits(invite.getVisits() + 1);
-            if (InviteType.valueOf(invite.getType()).isExpiresAfterUse() || invite.getRoleId() != null) {
+            InviteType inviteType = InviteType.valueOf(invite.getType());
+            // Tenant onboarding still needs the token to create the lease after the role is attached.
+            // LeaseService consumes it atomically once the draft has been created.
+            if (inviteType != InviteType.TENANT
+                    && (inviteType.isExpiresAfterUse() || invite.getRoleId() != null)) {
                 invite.setActive(false);
             }
             inviteDao.updateInvite(invite);
             roleRepo.findById(invite.getRoleId() == null ? roleId : invite.getRoleId()).ifPresent(role -> {
                 PMSRole pmsRole = PMSRole.roleFromSavedName(role.getName());
                 if (!pmsRole.isSelfAssignable() && invite.getEntityId() != null) {
-                    attachUserToEntity(invite.getId(), user.getId(), invite.getEntityId(), pmsRole);
+                    attachUserToEntity(invite, user.getId(), pmsRole);
                 }
             });
         }
@@ -205,10 +225,21 @@ public class RoleService {
     }
 
     private void validateInviteRecipient(Invite invite, Users user) {
-        if (invite.getRecipient() != null && !invite.getRecipient().isBlank()
-                && !invite.getRecipient().equalsIgnoreCase(user.getEmail())) {
+        if (invite.getRecipient() == null || invite.getRecipient().isBlank()) return;
+        boolean emailMatches = invite.getRecipient().equalsIgnoreCase(user.getEmail());
+        if (invite.getRecipient().contains("@")) {
+            if (!emailMatches) throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+            return;
+        }
+        String invitedPhone = org.pms.silverocean.common.PMSUtils.getLocalisedPhoneNumber(invite.getRecipient());
+        String userPhone = org.pms.silverocean.common.PMSUtils.getLocalisedPhoneNumber(user.getPhoneNumber());
+        if (invitedPhone == null || !invitedPhone.equals(userPhone)) {
             throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
         }
+    }
+
+    private boolean notExpired(Invite invite) {
+        return invite.getExpiryDate() == null || java.time.LocalDateTime.now().isBefore(invite.getExpiryDate());
     }
 
     private ResponseDTO assignRole(long roleId, String assigneeEmail, String assignorEmail) {
@@ -217,6 +248,10 @@ public class RoleService {
             return new ResponseDTO(false, ResponseCode.INVALID_ROLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_ROLE));
         }
         Role role = roleByID.get();
+        if (PMSRole.roleFromSavedName(role.getName()).isPlatformOwnerOnly()) {
+            log.warn("Blocked application-level assignment of platform-owner role {}", role.getId());
+            return new ResponseDTO(false, ResponseCode.INVALID_ROLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_ROLE));
+        }
         if (assignorEmail.equals(assigneeEmail) && !role.isSelfAssignable()) {
             return new ResponseDTO(false, ResponseCode.ROLE_NOT_SELF_ASSIGNABLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_NOT_SELF_ASSIGNABLE));
         }
@@ -233,9 +268,20 @@ public class RoleService {
         return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY));
     }
 
-    private void attachUserToEntity(long inviteId, long userId, long entityId, PMSRole pmsRole) {
-        if (!PMSRole.TENANT.equals(pmsRole)) {
-            propertyManagerService.addStaffToProperty(inviteId, userId, entityId, pmsRole);
+    private void attachUserToEntity(Invite invite, long userId, PMSRole pmsRole) {
+        if (PMSRole.HOMEOWNER.equals(pmsRole)) {
+            estateService.createOwnershipFromInvite(invite.getEntityId(), userId, invite.getCreatedBy());
+        } else if (PMSRole.BUYER.equals(pmsRole)) {
+            var sale = saleTransactionRepo.findByIdForUpdate(invite.getEntityId())
+                    .filter(candidate -> candidate.isActive()
+                            && candidate.getInvitedBuyerEmail() != null
+                            && candidate.getInvitedBuyerEmail().equalsIgnoreCase(invite.getRecipient())
+                            && (candidate.getBuyerUserId() == null || candidate.getBuyerUserId() == userId))
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
+            sale.setBuyerUserId(userId);
+            saleTransactionRepo.save(sale);
+        } else if (pmsRole.isCustomerEmployeeRole()) {
+            propertyManagerService.addStaffToProperty(invite.getId(), userId, invite.getEntityId(), pmsRole);
         }
     }
 
