@@ -21,6 +21,10 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.payment.invoice.InvoiceService;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.auth.roles.enums.Permission;
+import org.pms.silverocean.service.auth.roles.enums.PMSRole;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDate;
 import java.util.Optional;
@@ -31,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.any;
 import java.math.BigDecimal;
 
 @ExtendWith(MockitoExtension.class)
@@ -157,5 +162,51 @@ class EstateServiceTest {
 
         assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
         verify(ownerships, never()).save(ownership);
+    }
+
+    @Test
+    void delegatedEstateOperatorCanManageItsAssignedProperty() {
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_OPERATIONS_MANAGER);
+        when(users.hasPermission(Permission.MANAGE_ESTATE)).thenReturn(true);
+        when(properties.findByIdAndStaffOrOwner(11L, 999L)).thenReturn(Optional.of(new Property()));
+        when(users.findById(homeowner.getId())).thenReturn(Optional.of(homeowner));
+        when(units.findAndLockById(unit.getId())).thenReturn(Optional.of(unit));
+        when(ownerships.findFirstByUnitIdAndActiveTrue(unit.getId())).thenReturn(Optional.empty());
+
+        service.create(new OwnershipRequest(11L, unit.getId(), homeowner.getId(), LocalDate.now(), "ONBOARDING"));
+
+        verify(properties).findByIdAndStaffOrOwner(11L, 999L);
+        verify(ownerships).save(any(PropertyOwnership.class));
+    }
+
+    @Test
+    void delegatedViewerGetsAPropertyScopedPagedRegistry() {
+        PageRequest request = PageRequest.of(0, 25);
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.WORKSPACE_VIEWER);
+        when(users.hasPermission(Permission.VIEW_ESTATE)).thenReturn(true);
+        when(ownerships.findPageByPropertyStaff(999L, 11L, true, request))
+                .thenReturn(new PageImpl<>(java.util.List.of(), request, 0));
+
+        service.list(request, 11L, true);
+
+        verify(ownerships).findPageByPropertyStaff(999L, 11L, true, request);
+    }
+
+    @Test
+    void completedSaleCreatesOwnershipWithoutRequiringEstateRole() {
+        when(users.getUserId()).thenReturn(555L);
+        when(users.findById(homeowner.getId())).thenReturn(Optional.of(homeowner));
+        when(units.findAndLockById(unit.getId())).thenReturn(Optional.of(unit));
+        when(ownerships.findFirstByUnitIdAndActiveTrue(unit.getId())).thenReturn(Optional.empty());
+        when(ownerships.save(any(PropertyOwnership.class))).thenAnswer(call -> call.getArgument(0));
+
+        PropertyOwnership ownership = service.transferFromSale(11L, unit.getId(), homeowner.getId(), 91L);
+
+        assertEquals(91L, ownership.getSourceSaleTransactionId());
+        assertEquals("SALE_COMPLETION", ownership.getSource());
+        assertEquals(555L, ownership.getCreatedBy());
+        verify(properties, never()).findByIdAndStaffOrOwner(11L, 555L);
     }
 }

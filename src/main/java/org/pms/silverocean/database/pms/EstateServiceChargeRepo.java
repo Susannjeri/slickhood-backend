@@ -45,6 +45,22 @@ public interface EstateServiceChargeRepo extends JpaRepository<EstateServiceChar
          "c.homeownerUserId,c.invoiceId,i.ref,c.amount,c.currency,c.dueDate,c.description,i.paid,i.pendingAmount," +
          "CASE WHEN i.paid=true THEN 'PAID' WHEN c.dueDate<CURRENT_DATE THEN 'OVERDUE' ELSE 'DUE' END,c.createdOn) " +
          "FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId JOIN Unit u ON u.id=c.unitId " +
+         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND p.createdBy=:userId ORDER BY c.dueDate DESC")
+ Page<ServiceChargeView> findPageByPropertyOwner(long userId, Pageable pageable);
+
+ @Query("SELECT new org.pms.silverocean.service.estate.ServiceChargeView(c.id,c.propertyId,p.name,c.unitId,u.ref," +
+         "c.homeownerUserId,c.invoiceId,i.ref,c.amount,c.currency,c.dueDate,c.description,i.paid,i.pendingAmount," +
+         "CASE WHEN i.paid=true THEN 'PAID' WHEN c.dueDate<CURRENT_DATE THEN 'OVERDUE' ELSE 'DUE' END,c.createdOn) " +
+         "FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId JOIN Unit u ON u.id=c.unitId " +
+         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND EXISTS " +
+         "(SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=c.propertyId AND pm.userId=:userId AND pm.active) " +
+         "ORDER BY c.dueDate DESC")
+ Page<ServiceChargeView> findPageByPropertyStaff(long userId, Pageable pageable);
+
+ @Query("SELECT new org.pms.silverocean.service.estate.ServiceChargeView(c.id,c.propertyId,p.name,c.unitId,u.ref," +
+         "c.homeownerUserId,c.invoiceId,i.ref,c.amount,c.currency,c.dueDate,c.description,i.paid,i.pendingAmount," +
+         "CASE WHEN i.paid=true THEN 'PAID' WHEN c.dueDate<CURRENT_DATE THEN 'OVERDUE' ELSE 'DUE' END,c.createdOn) " +
+         "FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId JOIN Unit u ON u.id=c.unitId " +
          "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active ORDER BY c.dueDate DESC")
  Page<ServiceChargeView> findAllActive(Pageable pageable);
 

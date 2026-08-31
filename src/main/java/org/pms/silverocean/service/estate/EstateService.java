@@ -23,10 +23,11 @@ import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.common.PMSUtils;
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Map;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.pms.silverocean.service.auth.roles.enums.Permission;
 
 @Service
 public class EstateService {
@@ -107,14 +108,17 @@ public class EstateService {
         return ownershipRepo.save(ownership);
     }
 
-    public List<PropertyOwnership> list() {
+    @Transactional
+    public Page<OwnershipView> list(Pageable pageable, Long propertyId, Boolean active) {
         long userId = userDao.getUserId();
+        Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize())));
         return switch (userDao.getActiveRole()) {
-            case HOMEOWNER -> ownershipRepo.findAllByHomeownerUserIdOrderByCreatedOnDesc(userId);
-            case LANDLORD -> ownershipRepo.findAllByPropertyOwner(userId);
-            case ESTATE_MANAGER -> ownershipRepo.findAllByManager(userId, PMSRole.ESTATE_MANAGER.name());
-            case SUPER_ADMIN -> ownershipRepo.findAll();
-            default -> List.of();
+            case HOMEOWNER -> ownershipRepo.findPageByHomeowner(userId, propertyId, active, bounded);
+            case LANDLORD -> ownershipRepo.findPageByPropertyOwner(userId, propertyId, active, bounded);
+            case SUPER_ADMIN -> ownershipRepo.findAllOwnershipViews(propertyId, active, bounded);
+            default -> userDao.hasPermission(Permission.VIEW_ESTATE)
+                    ? ownershipRepo.findPageByPropertyStaff(userId, propertyId, active, bounded)
+                    : Page.empty(bounded);
         };
     }
 
@@ -148,9 +152,18 @@ public class EstateService {
                 });
     }
 
+    @Transactional
     public PropertyOwnership transferFromSale(long propertyId, Long unitId, long buyerId, long saleId) {
-        OwnershipRequest request = new OwnershipRequest(propertyId, unitId, buyerId, LocalDate.now(), "SALE_COMPLETION");
-        PropertyOwnership ownership = create(request); ownership.setSourceSaleTransactionId(saleId); return ownershipRepo.save(ownership);
+        Users buyer = userDao.findById(buyerId).filter(Users::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
+        if (unitId == null) throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
+        Unit unit = unitRepo.findAndLockById(unitId)
+                .filter(candidate -> candidate.isActive() && candidate.getPropertyId() == propertyId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
+        PropertyOwnership ownership = createUnitOwnership(unit, buyer.getId(), LocalDate.now(),
+                "SALE_COMPLETION", userDao.getUserId());
+        ownership.setSourceSaleTransactionId(saleId);
+        return ownershipRepo.save(ownership);
     }
 
     @Transactional
@@ -177,11 +190,14 @@ public class EstateService {
 
     public Page<ServiceChargeView> listServiceCharges(Pageable pageable) {
         long userId = userDao.getUserId();
+        Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize())));
         return switch (userDao.getActiveRole()) {
-            case HOMEOWNER -> chargeRepo.findPageByHomeowner(userId, pageable);
-            case ESTATE_MANAGER -> chargeRepo.findPageByManager(userId, PMSRole.ESTATE_MANAGER.name(), pageable);
-            case SUPER_ADMIN -> chargeRepo.findAllActive(pageable);
-            default -> Page.empty(pageable);
+            case HOMEOWNER -> chargeRepo.findPageByHomeowner(userId, bounded);
+            case LANDLORD -> chargeRepo.findPageByPropertyOwner(userId, bounded);
+            case SUPER_ADMIN -> chargeRepo.findAllActive(bounded);
+            default -> userDao.hasPermission(Permission.VIEW_SERVICE_CHARGE)
+                    ? chargeRepo.findPageByPropertyStaff(userId, bounded)
+                    : Page.empty(bounded);
         };
     }
 
@@ -191,8 +207,8 @@ public class EstateService {
                 ? propertyRepo.findById(propertyId).filter(Property::isActive)
                 : role == PMSRole.LANDLORD
                     ? propertyRepo.findByIdAndCreatedByAndActiveTrue(propertyId, userId)
-                    : role == PMSRole.ESTATE_MANAGER
-                        ? propertyRepo.findByIdAndManagerRole(propertyId, userId, role.name())
+                    : userDao.hasPermission(Permission.MANAGE_ESTATE)
+                        ? propertyRepo.findByIdAndStaffOrOwner(propertyId, userId)
                         : java.util.Optional.<Property>empty())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
     }
