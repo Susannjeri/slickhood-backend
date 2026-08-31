@@ -60,6 +60,13 @@ public enum NotificationType {
     SP_COMPLAINT_RECEIVED_EMAIL("email.sp.complaint.received.subject", "email.sp.complaint.received.body", false, NotificationChannel.EMAIL),
     SP_COMPLAINT_RESOLVED_EMAIL("email.sp.complaint.resolved.subject", "email.sp.complaint.resolved.body", false, NotificationChannel.EMAIL),
     SP_TRUSTED_LABEL_EMAIL("email.sp.trusted.label.subject", "email.sp.trusted.label.body", false, NotificationChannel.EMAIL),
+    INSURANCE_APPLICATION_EMAIL("email.insurance.application.subject", "email.insurance.application.body", true, NotificationChannel.EMAIL),
+    INSURANCE_QUOTE_EMAIL("email.insurance.quote.subject", "email.insurance.quote.body", true, NotificationChannel.EMAIL),
+    INSURANCE_PAYMENT_EMAIL("email.insurance.payment.subject", "email.insurance.payment.body", true, NotificationChannel.EMAIL),
+    INSURANCE_PAYMENT_REMINDER_EMAIL("email.insurance.payment.reminder.subject", "email.insurance.payment.reminder.body", true, NotificationChannel.EMAIL),
+    INSURANCE_POLICY_EMAIL("email.insurance.policy.subject", "email.insurance.policy.body", true, NotificationChannel.EMAIL),
+    INSURANCE_CLAIM_EMAIL("email.insurance.claim.subject", "email.insurance.claim.body", true, NotificationChannel.EMAIL),
+    INSURANCE_RENEWAL_EMAIL("email.insurance.renewal.subject", "email.insurance.renewal.body", true, NotificationChannel.EMAIL),
     ;
 
 
