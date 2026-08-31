@@ -15,7 +15,10 @@ import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.security.KeyDao;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -25,7 +28,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
+import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -37,6 +42,7 @@ import static org.mockito.Mockito.when;
  * creates and destroys a dedicated MySQL database. With no Docker runtime the suite is explicitly skipped.
  */
 @Testcontainers(disabledWithoutDocker = true)
+@Import(RentalPaymentMySqlIT.TestKeyConfiguration.class)
 @SpringBootTest(properties = {
         "spring.flyway.enabled=false",
         "spring.jpa.hibernate.ddl-auto=create-drop",
@@ -79,7 +85,19 @@ class RentalPaymentMySqlIT {
     @Autowired PMSPaymentRepo payments;
     @Autowired FinancialJournalRepo journals;
     @Autowired FinancialLedgerLineRepo ledgerLines;
-    @MockBean KeyDao keyDao;
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TestKeyConfiguration {
+        @Bean
+        @Primary
+        KeyDao integrationTestKeyDao() {
+            KeyDao keyDao = mock(KeyDao.class);
+            byte[] testKey = Base64.getEncoder().encode(new byte[32]);
+            when(keyDao.getActiveSecretKey()).thenReturn(testKey);
+            when(keyDao.getOldKeys()).thenReturn(Set.of());
+            return keyDao;
+        }
+    }
 
     @Test
     void realMysqlRepositoriesPersistAndReconcileTheRentalPaymentExactlyOnce() {
