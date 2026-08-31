@@ -21,6 +21,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -68,7 +70,9 @@ class LeaseDocumentServiceTest {
     @Test void rentalAgreementDoesNotRequireASalesLetterOfOffer() {
         when(documents.existsOpen(11L, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT)).thenReturn(false);
         LeaseDocumentTemplate template = new LeaseDocumentTemplate(); template.setId(21L); template.setVersion(3);
-        template.setDisplayName("Residential Lease Agreement"); template.setBodyHtml("<p>{{documentName}}</p>"); template.setActive(true);
+        template.setDisplayName("Residential Lease Agreement"); template.setBodyHtml("<p>{{documentName}}</p>");
+        template.setContentSha256(DocumentTemplateIntegrity.sha256(template.getBodyHtml()));
+        template.setLegalReviewRequired(true); template.setActive(true);
         when(templates.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT)).thenReturn(Optional.of(template));
         when(renderer.renderInline(any(), any())).thenReturn("<p>Residential Lease Agreement</p>");
         when(documents.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -78,11 +82,19 @@ class LeaseDocumentServiceTest {
                 lease.getMoveInDate(), null, new BigDecimal("45000.00"), "KES", null));
 
         assertEquals(LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT, result.documentType());
+        @SuppressWarnings("unchecked")
+        var modelCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(renderer).renderInline(any(), modelCaptor.capture());
+        assertEquals("2026-10-01", modelCaptor.getValue().get("moveInDate"));
+        assertEquals(false, modelCaptor.getValue().get("hasAdditionalTerms"));
+        assertEquals("Owner", modelCaptor.getValue().get("documentOwnerName"));
     }
 
     @Test void validPropertySaleLetterOfOfferCreatesSaleLinkedSnapshot() {
         LeaseDocumentTemplate template = new LeaseDocumentTemplate(); template.setId(21L); template.setVersion(3);
-        template.setDisplayName("Property Sale Letter of Offer"); template.setBodyHtml("<p>{{documentName}}</p>"); template.setActive(true);
+        template.setDisplayName("Property Sale Letter of Offer"); template.setBodyHtml("<p>{{documentName}}</p>");
+        template.setContentSha256(DocumentTemplateIntegrity.sha256(template.getBodyHtml()));
+        template.setLegalReviewRequired(true); template.setActive(true);
         SaleTransaction sale = new SaleTransaction(); sale.setId(91L); sale.setPropertyId(15L); sale.setUnitId(13L);
         sale.setBuyerUserId(14L); sale.setStatus(SaleStatus.OFFERED); sale.setOfferAmount(new BigDecimal("14500000"));
         sale.setCurrency("KES"); sale.setActive(true);
@@ -143,5 +155,45 @@ class LeaseDocumentServiceTest {
 
         verifyNoInteractions(email);
         verify(documents, never()).save(draft);
+    }
+
+    @Test void recordsManualApprovalAgainstTheExactTemplateContent() {
+        when(templates.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT))
+                .thenReturn(Optional.empty());
+        when(templates.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        String body = "<h1>{{documentName}}</h1><p>Approved wording</p>";
+
+        LeaseDocumentTemplate saved = service.createTemplateVersion(new TemplateVersionRequest(
+                LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT, "Residential Lease Agreement", body, false));
+
+        assertFalse(saved.isLegalReviewRequired());
+        assertEquals(16L, saved.getLegalReviewedBy());
+        assertNotNull(saved.getLegalReviewedAt());
+        assertEquals(DocumentTemplateIntegrity.sha256(body), saved.getContentSha256());
+    }
+
+    @Test void rejectsTemplateContentThatNoLongerMatchesItsApprovedHash() {
+        when(documents.existsOpen(11L, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT)).thenReturn(false);
+        LeaseDocumentTemplate template = new LeaseDocumentTemplate();
+        template.setDisplayName("Residential Lease Agreement"); template.setBodyHtml("<p>changed</p>");
+        template.setContentSha256(DocumentTemplateIntegrity.sha256("<p>approved</p>"));
+        template.setLegalReviewRequired(true); template.setActive(true);
+        when(templates.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT))
+                .thenReturn(Optional.of(template));
+
+        assertThrows(PMSCustomException.class, () -> service.generate(new GenerateLeaseDocumentRequest(
+                11L, null, null, null, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT,
+                lease.getMoveInDate(), null, new BigDecimal("45000.00"), "KES", null)));
+        verifyNoInteractions(renderer);
+    }
+
+    @Test void rejectsActiveOrExternalTemplateContentBeforePersistence() {
+        for (String body : List.of("<script>alert(1)</script>", "<img src='file:///etc/passwd'>",
+                "<div onclick='steal()'>x</div>", "<style>@import 'x';</style>",
+                "<iframe srcdoc='<p>x</p>'></iframe>")) {
+            assertThrows(PMSCustomException.class, () -> service.createTemplateVersion(new TemplateVersionRequest(
+                    LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT, "Unsafe", body, true)));
+        }
+        verifyNoInteractions(templates);
     }
 }

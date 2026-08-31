@@ -22,13 +22,16 @@ import org.springframework.data.domain.Pageable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Service
 public class LeaseDocumentService {
+    private static final Pattern HTML_EVENT_HANDLER = Pattern.compile("\\son[a-z]+\\s*=", Pattern.CASE_INSENSITIVE);
     private final LeaseDocumentRepo documentRepo;
     private final LeaseDocumentTemplateRepo templateRepo;
     private final LeaseDao leaseDao;
@@ -73,6 +76,10 @@ public class LeaseDocumentService {
         validateDocumentSequence(request, context);
         LeaseDocumentTemplate template = templateRepo.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(type)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.TEMPLATE_NOT_FOUND));
+        if (!DocumentTemplateIntegrity.sha256(template.getBodyHtml()).equals(template.getContentSha256())
+                || (!template.isLegalReviewRequired() && template.getLegalReviewedAt() == null)) {
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        }
 
         Map<String, Object> model = new LinkedHashMap<>();
         model.put("documentName", template.getDisplayName());
@@ -86,9 +93,20 @@ public class LeaseDocumentService {
         model.put("amount", request.amount() == null ? "Not applicable" : request.amount().toPlainString());
         model.put("currency", StringUtils.defaultIfBlank(request.currency(), context.property().getCurrency()));
         model.put("reason", StringUtils.defaultIfBlank(request.reason(), "As recorded in the related agreement and workflow."));
+        model.put("hasAdditionalTerms", StringUtils.isNotBlank(request.reason()));
         model.put("legalReviewRequired", template.isLegalReviewRequired());
         model.put("templateVersion", template.getVersion());
         model.put("saleDocument", type.isSaleDocument());
+        model.put("generatedDate", LocalDate.now().toString());
+        model.put("issuerEmail", StringUtils.defaultString(context.issuer().getEmail(), "Not recorded"));
+        model.put("issuerPhone", StringUtils.defaultString(context.issuer().getPhoneNumber(), "Not recorded"));
+        model.put("issuerIdentification", StringUtils.defaultString(context.issuer().getIdentificationNumber(), "Not recorded"));
+        model.put("recipientEmail", StringUtils.defaultString(context.recipient().getEmail(), "Not recorded"));
+        model.put("recipientPhone", StringUtils.defaultString(context.recipient().getPhoneNumber(), "Not recorded"));
+        model.put("recipientIdentification", StringUtils.defaultString(context.recipient().getIdentificationNumber(), "Not recorded"));
+        model.put("propertyType", StringUtils.defaultString(context.property().getType(), "Not recorded"));
+        if (context.lease() != null) addLeaseModel(model, context.lease());
+        if (context.sale() != null) addSaleModel(model, context.sale());
         Users documentOwner = userDao.findById(context.property().getCreatedBy()).orElse(context.issuer());
         String ownerLogo = brandingService.dataUri(documentOwner.getId());
         model.put("hasOwnerLogo", StringUtils.isNotBlank(ownerLogo));
@@ -200,7 +218,12 @@ public class LeaseDocumentService {
         template.setDisplayName(request.displayName());
         template.setVersion(version);
         template.setBodyHtml(request.bodyHtml());
+        template.setContentSha256(DocumentTemplateIntegrity.sha256(request.bodyHtml()));
         template.setLegalReviewRequired(request.legalReviewRequired());
+        if (!request.legalReviewRequired()) {
+            template.setLegalReviewedAt(LocalDateTime.now());
+            template.setLegalReviewedBy(userDao.getUserId());
+        }
         template.setCreatedBy(userDao.getUserId());
         template.setActive(true);
         return templateRepo.save(template);
@@ -331,9 +354,35 @@ public class LeaseDocumentService {
     private void validateTemplate(String body) {
         String lower = body.toLowerCase();
         if (lower.contains("<script") || lower.contains("javascript:") || lower.contains("http://")
-                || lower.contains("https://") || lower.contains("{{{")) {
+                || lower.contains("https://") || lower.contains("file:") || lower.contains("ftp:")
+                || lower.contains("<iframe") || lower.contains("<object") || lower.contains("<embed")
+                || lower.contains("<link") || lower.contains("@import") || lower.contains("url(")
+                || lower.contains("srcdoc") || lower.contains("data:text/html") || lower.contains("{{{")
+                || HTML_EVENT_HANDLER.matcher(body).find()) {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         }
+    }
+
+    private void addLeaseModel(Map<String, Object> model, Lease lease) {
+        model.put("leaseDate", value(lease.getLeaseDate()));
+        model.put("moveInDate", value(lease.getMoveInDate()));
+        model.put("moveOutDate", value(lease.getMoveOutDate()));
+        model.put("rentDueDay", value(lease.getRentDueDayOfMonth()));
+        model.put("leaseDurationMonths", value(lease.getLeaseDurationInMonths()));
+        model.put("noticePeriodMonths", value(lease.getNoticePeriodInMonths()));
+        model.put("depositReturnDays", value(lease.getDepositReturnDays()));
+        model.put("repairThreshold", value(lease.getRepairThreshold()));
+        model.put("entryNoticeDays", value(lease.getEntryNoticeDays()));
+        model.put("selfRenewing", lease.isSelfRenew());
+    }
+
+    private void addSaleModel(Map<String, Object> model, SaleTransaction sale) {
+        model.put("askingPrice", sale.getAskingPrice() == null ? "Not recorded" : sale.getAskingPrice().toPlainString());
+        model.put("offerAmount", sale.getOfferAmount() == null ? "Not recorded" : sale.getOfferAmount().toPlainString());
+    }
+
+    private String value(Object value) {
+        return value == null ? "Not recorded" : value.toString();
     }
 
     private record Context(Property property, Unit unit, Users issuer, Users recipient, Lease lease, SaleTransaction sale) {}
