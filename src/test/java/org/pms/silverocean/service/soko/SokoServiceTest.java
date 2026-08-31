@@ -78,10 +78,16 @@ class SokoServiceTest {
     }
 
     @Test void deliveryCodeCompletesOrderAndReleasesPreferredRider(){
-        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");order.setDeliveryCode("123456");order.setRiderId(3L);order.setActive(true);SokoRider rider=new SokoRider();rider.setId(3L);rider.setStoreId(2L);rider.setStatus("ACTIVE");rider.setAvailability("BUSY");rider.setActive(true);
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");order.setDeliveryCode("123456");order.setDeliveryProofReference("soko/delivery-proof/9/proof.jpg");order.setRiderId(3L);order.setActive(true);SokoRider rider=new SokoRider();rider.setId(3L);rider.setStoreId(2L);rider.setStatus("ACTIVE");rider.setAvailability("BUSY");rider.setActive(true);
         when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of());
         var result=service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("123456"));
         assertEquals("COMPLETED",result.order().getStatus());assertTrue(result.order().isDeliveryCodeVerified());assertEquals("AVAILABLE",rider.getAvailability());assertEquals(1,rider.getCompletedDeliveries());
+    }
+
+    @Test void deliveryProofUsesServerGeneratedKeyAndRejectsSpoofing() throws Exception {
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setStatus("DISPATCHED");order.setActive(true);
+        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of());
+        byte[] png={(byte)0x89,'P','N','G',13,10,26,10,0};service.uploadDeliveryProof(9L,new MockMultipartFile("proof","../../proof.png","image/png",png));verify(garage).uploadBytes(matches("soko/delivery-proof/9/[0-9a-f-]+\\.png"),eq(png),eq("image/png"));assertThrows(PMSCustomException.class,()->service.uploadDeliveryProof(9L,new MockMultipartFile("proof","fake.png","image/png","bad".getBytes())));
     }
 
     @Test void createStoreCreatesDraftOwnedByMerchant(){

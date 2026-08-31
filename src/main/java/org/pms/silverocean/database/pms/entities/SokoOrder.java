@@ -59,6 +59,10 @@ public class SokoOrder extends BaseCreatorEntity {
     private String settlementReference;
     private BigDecimal settledAmount;
     private String deliveryRecipientName;
+    @JsonIgnore
     private String deliveryProofReference;
     private ZonedDateTime deliveryProofAt;
+    private ZonedDateTime expectedArrivalAt;
+    private String deliveryProofContentType;
+    private Long deliveryProofSize;
 }
