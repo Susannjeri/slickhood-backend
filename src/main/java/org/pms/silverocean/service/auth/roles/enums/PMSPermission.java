@@ -130,6 +130,7 @@ import static org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_GAT
 import static org.pms.silverocean.service.auth.roles.enums.Permission.VIEW_GATE_EVENTS;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.REVIEW_INSURANCE_APPLICATIONS;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_INSURANCE_QUOTES;
+import static org.pms.silverocean.service.auth.roles.enums.Permission.APPROVE_INSURANCE_QUOTES;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_INSURANCE_CLAIMS;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_INSURANCE_RENEWALS;
 import static org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_INSURANCE_CATALOG;
@@ -235,7 +236,7 @@ public enum PMSPermission {
             VIEW_SALE_PIPELINE, ACCEPT_SALE_OFFER, VIEW_LEASE_DOCUMENT, ACKNOWLEDGE_LEASE_DOCUMENT, SIGN_LEASE_DOCUMENT)),
     INSURANCE_ADVISER(PMSRole.INSURANCE_ADVISER, Set.of(REVIEW_INSURANCE_APPLICATIONS, MANAGE_INSURANCE_QUOTES,
             MANAGE_INSURANCE_CLAIMS, MANAGE_INSURANCE_RENEWALS)),
-    INSURANCE_MANAGER(PMSRole.INSURANCE_MANAGER, Set.of(REVIEW_INSURANCE_APPLICATIONS, MANAGE_INSURANCE_QUOTES,
+    INSURANCE_MANAGER(PMSRole.INSURANCE_MANAGER, Set.of(REVIEW_INSURANCE_APPLICATIONS, MANAGE_INSURANCE_QUOTES, APPROVE_INSURANCE_QUOTES,
             MANAGE_INSURANCE_CLAIMS, MANAGE_INSURANCE_RENEWALS, MANAGE_INSURANCE_CATALOG,
             MANAGE_INSURANCE_PAYMENT_CONFIG, VERIFY_INSURANCE_PAYMENTS, ISSUE_INSURANCE_POLICIES,
             VIEW_INSURANCE_REPORTS, CREATE_ACCOUNT, EDIT_ACCOUNT, VIEW_ACCOUNT, DELETE_ACCOUNT,
