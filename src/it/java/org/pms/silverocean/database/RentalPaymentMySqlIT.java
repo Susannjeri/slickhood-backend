@@ -20,6 +20,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
@@ -100,6 +101,11 @@ class RentalPaymentMySqlIT {
             when(keyDao.getActiveSecretKey()).thenReturn(testKey);
             when(keyDao.getOldKeys()).thenReturn(Set.of());
             return keyDao;
+        }
+
+        @Bean
+        JavaMailSender integrationTestMailSender() {
+            return mock(JavaMailSender.class);
         }
     }
 
