@@ -20,6 +20,8 @@ import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.subscription.enums.SubscriptionEventType;
 import org.pms.silverocean.service.subscription.enums.SubscriptionStatus;
+import org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode;
+import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -59,14 +61,17 @@ public class SubscriptionManagementService {
     }
 
     @Transactional
-    public SubscriptionOverviewDTO overview(String roleValue) {
+    public SubscriptionOverviewDTO overview(String roleValue, String productValue) {
         long userId = currentUserId();
         PMSRole role = parseRole(roleValue);
-        SubscriptionCurrentDTO current = provisioningService.getCurrentSubscriptionForSessionRole(role.name());
+        SubscriptionProduct product = parseProduct(productValue);
+        SubscriptionCurrentDTO current = product == null
+                ? provisioningService.getCurrentSubscriptionForSessionRole(role.name())
+                : provisioningService.getCurrentSubscriptionForSessionProduct(product.name());
         if (current == null) {
             return new SubscriptionOverviewDTO(null, 0, 0, false, null);
         }
-        UserSubscription subscription = latest(userId, role);
+        UserSubscription subscription = latest(userId, role, product);
         boolean cancelling = subscriptionEventRepo
                 .findTopByUserSubscriptionAndEventTypeAndActiveTrueOrderByCreatedOnDesc(
                         subscription, SubscriptionEventType.CANCELLATION_REQUESTED)
@@ -93,21 +98,24 @@ public class SubscriptionManagementService {
     }
 
     @Transactional
-    public SubscriptionCurrentDTO updateAutoRenew(String roleValue, boolean enabled) {
+    public SubscriptionCurrentDTO updateAutoRenew(String roleValue, String productValue, boolean enabled) {
         long userId = currentUserId();
         PMSRole role = parseRole(roleValue);
-        UserSubscription subscription = active(userId, role);
+        SubscriptionProduct product = parseProduct(productValue);
+        UserSubscription subscription = active(userId, role, product);
         subscription.setAutoRenew(enabled);
         userSubscriptionRepo.save(subscription);
         saveEvent(subscription, SubscriptionEventType.AUTO_RENEW_UPDATED, "enabled:" + enabled, userId);
-        return provisioningService.getCurrentSubscriptionForSessionRole(role.name());
+        return product == null ? provisioningService.getCurrentSubscriptionForSessionRole(role.name())
+                : provisioningService.getCurrentSubscriptionForSessionProduct(product.name());
     }
 
     @Transactional
-    public SubscriptionOverviewDTO scheduleCancellation(String roleValue, String reason) {
+    public SubscriptionOverviewDTO scheduleCancellation(String roleValue, String productValue, String reason) {
         long userId = currentUserId();
         PMSRole role = parseRole(roleValue);
-        UserSubscription subscription = active(userId, role);
+        SubscriptionProduct product = parseProduct(productValue);
+        UserSubscription subscription = active(userId, role, product);
         if (subscription.getEndAt() == null) {
             SubscriptionPlan plan = plan(subscription.getPlanCode());
             subscription.setEndAt(SubscriptionTerms.endAt(plan.getBillingCycle(), ZonedDateTime.now()));
@@ -121,28 +129,31 @@ public class SubscriptionManagementService {
         deactivateEvents(subscription, SubscriptionEventType.PLAN_CHANGE_REQUESTED);
         subscription.setAutoRenew(false);
         userSubscriptionRepo.save(subscription);
-        return overview(role.name());
+        return overview(role.name(), productValue);
     }
 
     @Transactional
-    public SubscriptionOverviewDTO restoreCancellation(String roleValue) {
+    public SubscriptionOverviewDTO restoreCancellation(String roleValue, String productValue) {
         long userId = currentUserId();
         PMSRole role = parseRole(roleValue);
-        UserSubscription subscription = active(userId, role);
+        SubscriptionProduct product = parseProduct(productValue);
+        UserSubscription subscription = active(userId, role, product);
         deactivateEvents(subscription, SubscriptionEventType.CANCELLATION_REQUESTED);
         saveEvent(subscription, SubscriptionEventType.CANCELLATION_REVOKED, "restored", userId);
-        return overview(role.name());
+        return overview(role.name(), productValue);
     }
 
     @Transactional
-    public SubscriptionOverviewDTO schedulePlanChange(String roleValue, String targetPlanCode) {
+    public SubscriptionOverviewDTO schedulePlanChange(String roleValue, String productValue, String targetPlanCode) {
         long userId = currentUserId();
         PMSRole role = parseRole(roleValue);
-        UserSubscription subscription = active(userId, role);
+        SubscriptionProduct product = parseProduct(productValue);
+        UserSubscription subscription = active(userId, role, product);
         SubscriptionPlan currentPlan = plan(subscription.getPlanCode());
         SubscriptionPlan targetPlan = plan(targetPlanCode);
         if (targetPlan.getRoleFamily() != subscription.getRole()
-                || priceOrZero(targetPlan).compareTo(priceOrZero(currentPlan)) >= 0) {
+                || targetPlan.getProductKey() != currentPlan.getProductKey()
+                || tierRank(targetPlan) >= tierRank(currentPlan)) {
             throw new PMSCustomException(ResponseCode.GENERAL_FAILURE);
         }
         deactivateEvents(subscription, SubscriptionEventType.PLAN_CHANGE_REQUESTED);
@@ -151,26 +162,31 @@ public class SubscriptionManagementService {
                 "target:" + targetPlan.getCode(), userId);
         subscription.setAutoRenew(false);
         userSubscriptionRepo.save(subscription);
-        return overview(role.name());
+        return overview(role.name(), productValue);
     }
 
     @Transactional
-    public SubscriptionOverviewDTO revokePlanChange(String roleValue) {
+    public SubscriptionOverviewDTO revokePlanChange(String roleValue, String productValue) {
         long userId = currentUserId();
         PMSRole role = parseRole(roleValue);
-        UserSubscription subscription = active(userId, role);
+        SubscriptionProduct product = parseProduct(productValue);
+        UserSubscription subscription = active(userId, role, product);
         deactivateEvents(subscription, SubscriptionEventType.PLAN_CHANGE_REQUESTED);
         saveEvent(subscription, SubscriptionEventType.PLAN_CHANGE_REVOKED, "revoked", userId);
-        return overview(role.name());
+        return overview(role.name(), productValue);
     }
 
     @Transactional
-    public SubscriptionMutationResult renew(String roleValue, Long paymentAccountId) {
+    public SubscriptionMutationResult renew(String roleValue, String productValue, Long paymentAccountId) {
         long userId = currentUserId();
         PMSRole role = parseRole(roleValue);
-        UserSubscription subscription = latest(userId, role);
+        UserSubscription subscription = latest(userId, role, parseProduct(productValue));
         SubscriptionPlan plan = plan(subscription.getPlanCode());
-        boolean paid = plan.getPrice() != null && plan.getPrice().compareTo(BigDecimal.ZERO) > 0;
+        SubscriptionPurchaseMode mode = purchaseMode(plan);
+        if (mode == SubscriptionPurchaseMode.SALES_MANAGED) {
+            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_SALES_MANAGED_REQUIRED);
+        }
+        boolean paid = mode == SubscriptionPurchaseMode.SELF_SERVICE;
         if (paid) {
             if (paymentAccountId == null || paymentAccountId <= 0) {
                 throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PAYMENT_PAYEE_NOT_CONFIGURED);
@@ -179,17 +195,15 @@ public class SubscriptionManagementService {
                     userId, plan, subscription.getRole(), paymentAccountId));
         }
 
-        ZonedDateTime termStart = subscription.getEndAt() != null
-                && subscription.getEndAt().isAfter(ZonedDateTime.now())
-                ? subscription.getEndAt() : ZonedDateTime.now();
         subscription.setStatus(SubscriptionStatus.ACTIVE);
         subscription.setActive(true);
         subscription.setStartAt(subscription.getStartAt() == null ? ZonedDateTime.now() : subscription.getStartAt());
-        subscription.setEndAt(SubscriptionTerms.endAt(plan.getBillingCycle(), termStart));
+        subscription.setEndAt(null);
+        subscription.setTermVersion(subscription.getTermVersion() + 1);
         userSubscriptionRepo.save(subscription);
         saveEvent(subscription, SubscriptionEventType.RENEWAL, "free_renewal", userId);
         return SubscriptionMutationResult.freeAssigned(
-                provisioningService.getCurrentSubscriptionForSessionRole(role.name()));
+                provisioningService.getCurrentSubscriptionForSessionProduct(subscription.getProductKey().name()));
     }
 
     public void requestSalesContact(String planCode, String message) {
@@ -211,13 +225,22 @@ public class SubscriptionManagementService {
         return userId;
     }
 
-    private UserSubscription active(long userId, PMSRole role) {
+    private UserSubscription active(long userId, PMSRole role, SubscriptionProduct product) {
+        if (product != null) {
+            return userSubscriptionRepo.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
+                            userId, product, SubscriptionStatus.ACTIVE)
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_CURRENT_ABSENT));
+        }
         return userSubscriptionRepo.findTopByCreatedByAndRoleAndStatusAndActiveTrueOrderByStartAtDesc(
                         userId, role, SubscriptionStatus.ACTIVE)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_CURRENT_ABSENT));
     }
 
-    private UserSubscription latest(long userId, PMSRole role) {
+    private UserSubscription latest(long userId, PMSRole role, SubscriptionProduct product) {
+        if (product != null) {
+            return userSubscriptionRepo.findTopByCreatedByAndProductKeyOrderByStartAtDesc(userId, product)
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_CURRENT_ABSENT));
+        }
         return userSubscriptionRepo.findTopByCreatedByAndRoleOrderByStartAtDesc(userId, role)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_CURRENT_ABSENT));
     }
@@ -238,8 +261,26 @@ public class SubscriptionManagementService {
         }
     }
 
+    private SubscriptionProduct parseProduct(String productValue) {
+        if (StringUtils.isBlank(productValue)) return null;
+        try { return SubscriptionProduct.valueOf(productValue.trim().toUpperCase()); }
+        catch (IllegalArgumentException error) {
+            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_PRODUCT_MISMATCH);
+        }
+    }
+
     private static BigDecimal priceOrZero(SubscriptionPlan plan) {
         return plan.getPrice() == null ? BigDecimal.ZERO : plan.getPrice();
+    }
+
+    private SubscriptionPurchaseMode purchaseMode(SubscriptionPlan plan) {
+        if (plan.getPurchaseMode() != null) return plan.getPurchaseMode();
+        if (plan.getCode().contains("CUSTOM")) return SubscriptionPurchaseMode.SALES_MANAGED;
+        return priceOrZero(plan).signum() > 0 ? SubscriptionPurchaseMode.SELF_SERVICE : SubscriptionPurchaseMode.FREE;
+    }
+
+    private int tierRank(SubscriptionPlan plan) {
+        return plan.getTierRank() == null ? 0 : plan.getTierRank();
     }
 
     private void saveEvent(UserSubscription subscription, SubscriptionEventType type, String notes, long userId) {

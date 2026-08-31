@@ -53,7 +53,9 @@ class PropertyServiceAuthorizationTest {
                 mock(GarageService.class),
                 mock(ThreadPoolBeans.class),
                 mock(PaymentPlatformFactory.class),
-                mock(AccountDao.class));
+                mock(AccountDao.class),
+                mock(org.pms.silverocean.service.subscription.SubscriptionEntitlementService.class),
+                mock(UnitReportDao.class));
         when(userDao.getUserId()).thenReturn(7L);
     }
 

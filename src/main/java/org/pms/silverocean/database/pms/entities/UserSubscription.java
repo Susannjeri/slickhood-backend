@@ -13,6 +13,7 @@ import lombok.Setter;
 import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.subscription.enums.SubscriptionStatus;
+import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 
 import java.time.ZonedDateTime;
 
@@ -32,10 +33,14 @@ public class UserSubscription extends BaseCreatorEntity {
     private String planCode;
 
     @Enumerated(EnumType.STRING)
+    private SubscriptionProduct productKey;
+
+    @Enumerated(EnumType.STRING)
     private SubscriptionStatus status;
 
     private ZonedDateTime startAt;
     private ZonedDateTime endAt;
     private boolean autoRenew;
     private String sourcePaymentRef;
+    private long termVersion;
 }

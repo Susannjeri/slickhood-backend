@@ -14,14 +14,18 @@ public record KycDocumentView(long id, String documentType, String originalFileN
                               String status, String qualityStatus,
                               Double qualityScore, Double ocrConfidence, Map<String, String> extractedFields,
                               List<KycValidationIssue> validationIssues,
-                              String rejectionReason, ZonedDateTime uploadedAt, String downloadUrl) {
+                              String rejectionReason, ZonedDateTime uploadedAt, String downloadUrl,
+                              int versionNo, ZonedDateTime issuedAt, ZonedDateTime expiresAt,
+                              ZonedDateTime reverificationDueAt, String maintenanceReason) {
     static KycDocumentView from(KycDocument document, Map<String, String> extractedFields, String downloadUrl) {
         return new KycDocumentView(document.getId(), document.getDocumentType(), document.getOriginalFileName(),
                 document.getContentType(), document.getStatus(),
                 document.getQualityStatus(), document.getQualityScore(), document.getOcrConfidence(),
                 extractedFields, issues(extractedFields, document.getRejectionReason(),
                         document.getOcrConfidence(), document.getStatus()),
-                document.getRejectionReason(), document.getCreatedOn(), downloadUrl);
+                document.getRejectionReason(), document.getCreatedOn(), downloadUrl,
+                Math.max(1, document.getVersionNo()), document.getIssuedAt(), document.getExpiresAt(),
+                document.getReverificationDueAt(), document.getMaintenanceReason());
     }
 
     static List<KycValidationIssue> issues(Map<String, String> fields, String rejectionReason,

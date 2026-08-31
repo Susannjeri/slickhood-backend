@@ -5,6 +5,7 @@ import org.pms.silverocean.service.subscription.enums.PlanCategory;
 import org.pms.silverocean.service.subscription.enums.BillingCycle;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
+import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 import java.util.List;
@@ -22,4 +23,5 @@ public interface SubscriptionPlanRepo extends JpaRepository<SubscriptionPlan, Lo
     boolean existsByPlanCategory(PlanCategory planCategory);
 
     List<SubscriptionPlan> findByRoleFamilyAndActiveTrueOrderByPriceAsc(PMSRole roleFamily);
+    List<SubscriptionPlan> findByProductKeyAndActiveTrueOrderByTierRankAscPriceAsc(SubscriptionProduct productKey);
 }

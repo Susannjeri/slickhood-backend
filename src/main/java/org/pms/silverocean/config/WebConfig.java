@@ -12,6 +12,11 @@ import java.util.Locale;
 
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
+    private final SubscriptionEntitlementInterceptor subscriptionEntitlementInterceptor;
+
+    public WebConfig(SubscriptionEntitlementInterceptor subscriptionEntitlementInterceptor) {
+        this.subscriptionEntitlementInterceptor = subscriptionEntitlementInterceptor;
+    }
     @Bean
     public LocaleResolver localeResolver() {
         SessionLocaleResolver resolver = new SessionLocaleResolver();
@@ -29,5 +34,11 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(localeChangeInterceptor());
+        registry.addInterceptor(subscriptionEntitlementInterceptor)
+                .addPathPatterns(
+                        "/wealth/**", "/smart-gate/**", "/soko/**", "/sp/**", "/affiliate/**",
+                        "/property/**", "/lease/**", "/estate/**", "/sales/**",
+                        "/community-funds/**", "/maintenance/**", "/visitor/**",
+                        "/invoice/**", "/reports/**");
     }
 }

@@ -14,6 +14,8 @@ import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.subscription.enums.BillingCycle;
 import org.pms.silverocean.service.subscription.enums.PlanCategory;
+import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
+import org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode;
 
 import java.math.BigDecimal;
 
@@ -42,4 +44,12 @@ public class SubscriptionPlan extends BaseCreatorEntity {
 
     private BigDecimal price;
     private String currency;
+
+    @Enumerated(EnumType.STRING)
+    private SubscriptionProduct productKey;
+
+    @Enumerated(EnumType.STRING)
+    private SubscriptionPurchaseMode purchaseMode;
+
+    private Integer tierRank;
 }

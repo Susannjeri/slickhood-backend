@@ -10,6 +10,8 @@ import org.pms.silverocean.database.pms.entities.SubscriptionPlan;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.subscription.enums.PlanCategory;
+import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
+import org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -55,6 +57,9 @@ public class SubscriptionPlanService {
                 .billingCycle(request.billingCycle())
                 .price(request.price())
                 .currency(request.currency().trim().toUpperCase(Locale.ROOT))
+                .productKey(productFor(request.planCategory()))
+                .purchaseMode(modeFor(normalizedCode, request.price()))
+                .tierRank(rankFor(request.displayName()))
                 .build();
         subscriptionPlan.setCreatedBy(userDao.getUserId());
         subscriptionPlan.setActive(true);
@@ -81,6 +86,9 @@ public class SubscriptionPlanService {
         existingPlan.setBillingCycle(request.billingCycle());
         existingPlan.setPrice(request.price());
         existingPlan.setCurrency(request.currency().trim().toUpperCase(Locale.ROOT));
+        existingPlan.setProductKey(productFor(request.planCategory()));
+        existingPlan.setPurchaseMode(modeFor(normalizedCode, request.price()));
+        existingPlan.setTierRank(rankFor(request.displayName()));
         SubscriptionPlan savedPlan = subscriptionPlanRepo.save(existingPlan);
         replaceFeatures(savedPlan, request.features());
         replaceQuotas(savedPlan, request.quotas());
@@ -212,6 +220,9 @@ public class SubscriptionPlanService {
                 subscriptionPlan.getBillingCycle(),
                 subscriptionPlan.getPrice(),
                 subscriptionPlan.getCurrency(),
+                productOrDefault(subscriptionPlan),
+                modeOrDefault(subscriptionPlan),
+                subscriptionPlan.getTierRank() == null ? rankFor(subscriptionPlan.getDisplayName()) : subscriptionPlan.getTierRank(),
                 subscriptionPlan.isActive(),
                 features,
                 quotas
@@ -256,5 +267,41 @@ public class SubscriptionPlanService {
 
     private String normalizeCode(String code) {
         return code.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private SubscriptionProduct productFor(PlanCategory category) {
+        return switch (category) {
+            case LANDLORD -> SubscriptionProduct.LANDLORD;
+            case ESTATE_MANAGEMENT -> SubscriptionProduct.ESTATE_MANAGEMENT;
+            case PROPERTY_SALES -> SubscriptionProduct.PROPERTY_SALES;
+            case ASSET_PORTFOLIO_MANAGER -> SubscriptionProduct.MY_WEALTH;
+            case AFFILIATE -> SubscriptionProduct.AFFILIATE;
+            case SERVICE_PROVIDER -> SubscriptionProduct.SERVICES;
+        };
+    }
+
+    private SubscriptionProduct productOrDefault(SubscriptionPlan plan) {
+        return plan.getProductKey() == null ? productFor(plan.getPlanCategory()) : plan.getProductKey();
+    }
+
+    private SubscriptionPurchaseMode modeFor(String code, java.math.BigDecimal price) {
+        if (code.contains("CUSTOM")) return SubscriptionPurchaseMode.SALES_MANAGED;
+        return price != null && price.signum() > 0
+                ? SubscriptionPurchaseMode.SELF_SERVICE : SubscriptionPurchaseMode.FREE;
+    }
+
+    private SubscriptionPurchaseMode modeOrDefault(SubscriptionPlan plan) {
+        return plan.getPurchaseMode() == null ? modeFor(plan.getCode(), plan.getPrice()) : plan.getPurchaseMode();
+    }
+
+    private int rankFor(String displayName) {
+        if (displayName == null) return 0;
+        return switch (displayName.trim().toUpperCase(Locale.ROOT)) {
+            case "BRONZE" -> 10;
+            case "SILVER" -> 20;
+            case "GOLD" -> 30;
+            case "PLATINUM" -> 40;
+            default -> 0;
+        };
     }
 }

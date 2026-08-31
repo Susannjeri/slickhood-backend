@@ -54,6 +54,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -105,6 +106,8 @@ public class PropertyService {
     private final PaymentPlatformFactory paymentPlatformFactory;
 
     private final AccountDao accountDao;
+    private final org.pms.silverocean.service.subscription.SubscriptionEntitlementService subscriptionEntitlements;
+    private final UnitReportDao unitReportDao;
 
     @Value("${min.upload.image.width:300}")
     private int imageWidth;
@@ -181,6 +184,13 @@ public class PropertyService {
     }
 
     public ResponseDTO createProperty(PropertyDTO propertyDTO, MultipartFile image) {
+        var product = subscriptionEntitlements.sessionBusinessProduct();
+        subscriptionEntitlements.requireFeature(product, switch (product) {
+            case LANDLORD -> "PROPERTY_RENTALS";
+            case ESTATE_MANAGEMENT -> "ESTATE_MANAGEMENT";
+            case PROPERTY_SALES -> "PROPERTY_SALES";
+            default -> throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
+        });
         Users user = userDao.getUserObject();
         if (!user.isCompletedProfile()) {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
@@ -212,7 +222,12 @@ public class PropertyService {
                 i18NService.getLocalizedMessage(ResponseCode.PROPERTY_CREATION_FAILED_DUPLICATE));
     }
 
+    @Transactional
     public ResponseDTO createUnit(UnitDTO unitDTO, MultipartFile image) {
+        var product = subscriptionEntitlements.sessionBusinessProduct();
+        long subscriptionOwner = subscriptionEntitlements.subscriptionOwnerUserId();
+        subscriptionEntitlements.requireAvailableQuota(product, "UNITS",
+                () -> unitReportDao.countUnitsByOwner(subscriptionOwner), 1);
         Pair<ResponseDTO, Property> validationResult = validateUnitAndImage(unitDTO, image);
         if (validationResult.getLeft() != null) {
             return validationResult.getLeft();
@@ -276,11 +291,16 @@ public class PropertyService {
                 i18NService.getLocalizedMessage(ResponseCode.UNIT_CHARGES), unitCharges);
     }
 
+    @Transactional
     public ResponseDTO createDuplicateJob(long unitId, int count) {
         if (count > configService.getConfigByName(PMSConfigs.MAX_UNIT_DUPLICATE_COUNT).get().intValue()) {
             return new ResponseDTO(false, ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT));
         }
+        var product = subscriptionEntitlements.sessionBusinessProduct();
+        long subscriptionOwner = subscriptionEntitlements.subscriptionOwnerUserId();
+        subscriptionEntitlements.requireAvailableQuota(product, "UNITS",
+                () -> unitReportDao.countUnitsByOwner(subscriptionOwner), count);
         Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
         return unitFromDb.map(unit -> {
             BulkUnitJob bulkUnitJob = new BulkUnitJob();
@@ -395,6 +415,9 @@ public class PropertyService {
 //    }
 
     public ResponseDTO advertiseUnit(long unitId) {
+        var product = subscriptionEntitlements.sessionBusinessProduct();
+        subscriptionEntitlements.requireFeatureOrAddOn(product, "PROPERTY_LISTINGS",
+                org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LISTING_ADDON);
         Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),

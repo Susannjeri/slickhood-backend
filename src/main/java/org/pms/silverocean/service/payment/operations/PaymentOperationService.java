@@ -9,6 +9,7 @@ import org.pms.silverocean.database.pms.entities.PMSInvoice;
 import org.pms.silverocean.database.pms.entities.PMSPayment;
 import org.pms.silverocean.database.pms.entities.PaymentOperation;
 import org.pms.silverocean.service.PMSCustomException;
+import org.pms.silverocean.service.affiliate.AffiliateService;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.payment.PaymentDao;
@@ -25,7 +26,7 @@ import java.util.Locale;
 @Service @RequiredArgsConstructor
 public class PaymentOperationService {
     private final PaymentOperationRepo operations; private final PaymentDao payments; private final InvoiceDao invoices;
-    private final FinancialLedgerService ledger; private final UserDao users;
+    private final FinancialLedgerService ledger; private final UserDao users; private final AffiliateService affiliates;
 
     @Transactional public PaymentOperation append(PaymentOperationModels.Create request){
         requireFinance(); String key=request.idempotencyKey().trim();
@@ -44,7 +45,7 @@ public class PaymentOperationService {
         PaymentOperation operation=new PaymentOperation(key,request.caseReference().trim(),payment.getId(),invoice.getId(),request.type().name(),request.status().name(),amount,
                 StringUtils.defaultIfBlank(invoice.getCurrency(),"UNSPECIFIED").toUpperCase(Locale.ROOT),StringUtils.left(StringUtils.trimToNull(request.provider()),50),
                 StringUtils.left(providerRef,120),StringUtils.left(StringUtils.trimToNull(request.reason()),1000),ZonedDateTime.now(PMSUtils.getZoneId()),users.getUserId());
-        operation=operations.save(operation); if(request.status()==PaymentOperationModels.Status.CONFIRMED)ledger.recordPaymentOperation(invoice,operation); return operation;
+        operation=operations.save(operation); if(request.status()==PaymentOperationModels.Status.CONFIRMED){ledger.recordPaymentOperation(invoice,operation);if(List.of(PaymentOperationModels.Type.REFUND,PaymentOperationModels.Type.REVERSAL,PaymentOperationModels.Type.CHARGEBACK).contains(request.type()))affiliates.reverseCommission(invoice.getId(),request.type().name()+": "+StringUtils.defaultIfBlank(request.reason(),"confirmed finance operation"));} return operation;
     }
     private void validateTransition(String caseReference,long paymentId,PaymentOperationModels.Type type,PaymentOperationModels.Status status){
         List<PaymentOperation> history=operations.findAllByCaseReferenceOrderByOccurredAtAsc(caseReference.trim());

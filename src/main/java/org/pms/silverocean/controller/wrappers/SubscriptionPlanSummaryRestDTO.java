@@ -20,6 +20,9 @@ public record SubscriptionPlanSummaryRestDTO(
         String billingCycle,
         BigDecimal price,
         String currency,
+        String productKey,
+        String purchaseMode,
+        int tierRank,
         boolean active,
         List<PlanFeatureDTO> features,
         List<PlanQuotaDTO> quotas
@@ -34,6 +37,9 @@ public record SubscriptionPlanSummaryRestDTO(
                 plan.billingCycle().name(),
                 plan.price(),
                 plan.currency(),
+                plan.productKey().name(),
+                plan.purchaseMode().name(),
+                plan.tierRank(),
                 plan.active(),
                 plan.features(),
                 plan.quotas()

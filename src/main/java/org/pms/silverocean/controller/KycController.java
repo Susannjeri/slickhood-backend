@@ -7,6 +7,7 @@ import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.kyc.KycDocumentType;
 import org.pms.silverocean.service.kyc.KycDocumentContent;
+import org.pms.silverocean.service.kyc.KycDocumentMaintenanceRequest;
 import org.pms.silverocean.service.kyc.KycReviewRequest;
 import org.pms.silverocean.service.kyc.KycService;
 import org.pms.silverocean.service.kyc.StartKycRequest;
@@ -82,6 +83,13 @@ public class KycController {
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).LIST_USERS)")
     public ResponseEntity<ResponseDTO> reprocessCase(@PathVariable long caseId) throws Exception {
         return ok(ResponseCode.KYC_DETAILS, service.reprocessCase(caseId));
+    }
+
+    @PatchMapping("/admin/documents/{documentId}/maintenance")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).LIST_USERS)")
+    public ResponseEntity<ResponseDTO> maintainDocument(@PathVariable long documentId,
+                                                         @Valid @RequestBody KycDocumentMaintenanceRequest request) {
+        return ok(ResponseCode.KYC_DETAILS, service.maintainDocument(documentId, request));
     }
 
     private ResponseEntity<ResponseDTO> ok(ResponseCode code, Object data) { return ResponseEntity.ok(response(code, data)); }

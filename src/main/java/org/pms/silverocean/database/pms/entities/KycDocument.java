@@ -37,4 +37,9 @@ public class KycDocument extends BaseActiveEntity {
     private Long supersedesDocumentId;
     private ZonedDateTime reviewedAt;
     private Long reviewedBy;
+    private int versionNo;
+    private ZonedDateTime issuedAt;
+    private ZonedDateTime expiresAt;
+    private ZonedDateTime reverificationDueAt;
+    private String maintenanceReason;
 }

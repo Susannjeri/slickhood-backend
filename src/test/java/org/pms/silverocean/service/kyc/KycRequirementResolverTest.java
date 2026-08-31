@@ -7,6 +7,7 @@ import org.pms.silverocean.service.users.ProfileType;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class KycRequirementResolverTest {
@@ -16,6 +17,8 @@ class KycRequirementResolverTest {
         Set<KycRequirement> requirements = resolver.resolve(Set.of(PMSRole.LANDLORD, PMSRole.SERVICE_PROVIDER));
         assertTrue(requirements.stream().anyMatch(r -> r.code().equals("OWNERSHIP")));
         assertTrue(requirements.stream().anyMatch(r -> r.code().equals("GOOD_CONDUCT")));
+        assertFalse(requirements.stream().filter(r -> r.code().equals("GOOD_CONDUCT"))
+                .findFirst().orElseThrow().required());
         assertEquals(1, requirements.stream().filter(r -> r.code().equals("TAX")).count());
     }
 

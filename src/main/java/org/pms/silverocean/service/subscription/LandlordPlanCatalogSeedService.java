@@ -11,6 +11,8 @@ import org.pms.silverocean.database.pms.entities.SubscriptionPlan;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.subscription.enums.BillingCycle;
 import org.pms.silverocean.service.subscription.enums.PlanCategory;
+import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
+import org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,17 +23,8 @@ import java.util.List;
 @Component
 @Slf4j
 public class LandlordPlanCatalogSeedService {
-    private static final List<String> SHARED_FEATURES = List.of(
-            "LANDLORD_PAYMENT_SETUP", "TENANT_ONBOARDING", "BRANDED_INVOICES",
-            "MPESA_PAYMENTS", "CARD_PAYMENTS", "PER_PROPERTY_PAYMENT_ACCOUNT",
-            "AUTOMATED_RENT_REMINDERS", "LATE_FEE_RULES", "RECEIPTS_AND_STATEMENTS",
-            "ANALYTICS_AND_REPORTS", "MULTIPLE_USER_ROLES", "CUSTOM_PAYMENT_SPLIT_RULES",
-            "PRIORITY_SUPPORT", "DEDICATED_ONBOARDING", "WHITE_LABEL_BRANDING",
-            "SLA_UPTIME_GUARANTEE", "GATE_MANAGEMENT_INCLUDED_UNITS",
-            "UNIT_LISTING_INCLUDED_UNITS", "WEALTH_INCLUDED_UNITS",
-            "TENANT_SERVICE_PROVIDER_ACCESS", "CUSTOM_INTEGRATIONS_AT_COST",
-            "PHONE_AND_CHAT_SUPPORT_24_7", "DEDICATED_ACCOUNT_MANAGER"
-    );
+    private static final List<String> COMMON_FEATURES = List.of(
+            "MPESA_PAYMENTS", "CARD_PAYMENTS", "RECEIPTS_AND_STATEMENTS", "ANALYTICS_AND_REPORTS");
 
     private final SubscriptionPlanRepo planRepo;
     private final PlanFeatureRepo featureRepo;
@@ -59,6 +52,8 @@ public class LandlordPlanCatalogSeedService {
         seedFamily("ESTATE", PlanCategory.ESTATE_MANAGEMENT, PMSRole.ESTATE_MANAGER);
         seedFamily("SALE", PlanCategory.PROPERTY_SALES, PMSRole.SALES_AGENT);
         seedFamily("WEALTH", PlanCategory.ASSET_PORTFOLIO_MANAGER, PMSRole.ASSET_PORTFOLIO_MANAGER);
+        seedPermanentFreeProducts();
+        seedSalesManagedAddOns();
         deactivateLegacyStarterIfUntouched();
         log.info("Rental, estate, property-sale and Wealth Bronze/Silver/Gold/Platinum catalogs are available; existing admin edits were preserved.");
     }
@@ -71,14 +66,15 @@ public class LandlordPlanCatalogSeedService {
             case ASSET_PORTFOLIO_MANAGER -> "WEALTH_MANAGEMENT";
             default -> throw new IllegalArgumentException("Unsupported canonical package category: " + category);
         };
-        createIfMissing(prefix + "_BRONZE", "Bronze", category, role, BillingCycle.MONTHLY, "1000", 10L, false, areaFeature);
-        createIfMissing(prefix + "_SILVER", "Silver", category, role, BillingCycle.MONTHLY, "3500", 50L, false, areaFeature);
-        createIfMissing(prefix + "_GOLD", "Gold", category, role, BillingCycle.MONTHLY, "7000", 100L, false, areaFeature);
-        createIfMissing(prefix + "_PLATINUM_CUSTOM", "Platinum", category, role, BillingCycle.MONTHLY, "0", -1L, true, areaFeature);
-        createIfMissing(prefix + "_BRONZE_ANNUAL", "Bronze", category, role, BillingCycle.YEARLY, "10800", 10L, false, areaFeature);
-        createIfMissing(prefix + "_SILVER_ANNUAL", "Silver", category, role, BillingCycle.YEARLY, "37800", 50L, false, areaFeature);
-        createIfMissing(prefix + "_GOLD_ANNUAL", "Gold", category, role, BillingCycle.YEARLY, "75600", 100L, false, areaFeature);
-        createIfMissing(prefix + "_PLATINUM_ANNUAL_CUSTOM", "Platinum", category, role, BillingCycle.YEARLY, "0", -1L, true, areaFeature);
+        SubscriptionProduct product = productFor(category);
+        createIfMissing(prefix + "_BRONZE", "Bronze", category, role, BillingCycle.MONTHLY, "1000", 10L, 10, false, areaFeature, product);
+        createIfMissing(prefix + "_SILVER", "Silver", category, role, BillingCycle.MONTHLY, "3500", 50L, 20, false, areaFeature, product);
+        createIfMissing(prefix + "_GOLD", "Gold", category, role, BillingCycle.MONTHLY, "7000", 100L, 30, false, areaFeature, product);
+        createIfMissing(prefix + "_PLATINUM_CUSTOM", "Platinum", category, role, BillingCycle.MONTHLY, "0", -1L, 40, true, areaFeature, product);
+        createIfMissing(prefix + "_BRONZE_ANNUAL", "Bronze", category, role, BillingCycle.YEARLY, "10800", 10L, 10, false, areaFeature, product);
+        createIfMissing(prefix + "_SILVER_ANNUAL", "Silver", category, role, BillingCycle.YEARLY, "37800", 50L, 20, false, areaFeature, product);
+        createIfMissing(prefix + "_GOLD_ANNUAL", "Gold", category, role, BillingCycle.YEARLY, "75600", 100L, 30, false, areaFeature, product);
+        createIfMissing(prefix + "_PLATINUM_ANNUAL_CUSTOM", "Platinum", category, role, BillingCycle.YEARLY, "0", -1L, 40, true, areaFeature, product);
         if (role == PMSRole.LANDLORD || role == PMSRole.ESTATE_MANAGER || role == PMSRole.SALES_AGENT) {
             ensureQuotaIfMissing(prefix + "_BRONZE", "TEAM_SEATS", 2L);
             ensureQuotaIfMissing(prefix + "_SILVER", "TEAM_SEATS", 5L);
@@ -92,11 +88,9 @@ public class LandlordPlanCatalogSeedService {
     }
 
     private void createIfMissing(String code, String name, PlanCategory category, PMSRole role, BillingCycle cycle, String price,
-                                 long unitLimit, boolean customPricing, String areaFeature) {
-        if (planRepo.existsByCode(code)) {
-            return;
-        }
-        SubscriptionPlan plan = new SubscriptionPlan();
+                                 long unitLimit, int tierRank, boolean customPricing, String areaFeature,
+                                 SubscriptionProduct product) {
+        SubscriptionPlan plan = planRepo.findByCode(code).orElseGet(SubscriptionPlan::new);
         plan.setCode(code);
         plan.setDisplayName(name);
         plan.setPlanCategory(category);
@@ -104,14 +98,18 @@ public class LandlordPlanCatalogSeedService {
         plan.setBillingCycle(cycle);
         plan.setPrice(new BigDecimal(price));
         plan.setCurrency(currency);
+        plan.setProductKey(product);
+        plan.setPurchaseMode(customPricing ? SubscriptionPurchaseMode.SALES_MANAGED : SubscriptionPurchaseMode.SELF_SERVICE);
+        plan.setTierRank(tierRank);
         plan.setCreatedBy(0L);
         plan.setActive(true);
         plan = planRepo.save(plan);
 
-        for (String featureKey : SHARED_FEATURES) {
+        for (String featureKey : COMMON_FEATURES) {
             upsertFeature(plan, featureKey);
         }
         upsertFeature(plan, areaFeature);
+        for (String featureKey : areaFeatures(category)) upsertFeature(plan, featureKey);
         if (customPricing) {
             upsertFeature(plan, "API_ACCESS");
             upsertFeature(plan, "CUSTOM_PRICING");
@@ -119,6 +117,69 @@ public class LandlordPlanCatalogSeedService {
         upsertQuota(plan, "UNITS", unitLimit);
         upsertQuota(plan, "TRIAL_DAYS", trialDays);
         upsertQuota(plan, "ANNUAL_SAVING_PERCENT", customPricing ? -1L : 10L);
+    }
+
+    private List<String> areaFeatures(PlanCategory category) {
+        return switch (category) {
+            case LANDLORD -> List.of("PROPERTY_AND_UNIT_MANAGEMENT", "LEASE_MANAGEMENT", "TENANT_ONBOARDING",
+                    "RENT_INVOICING", "RENT_RECONCILIATION");
+            case ESTATE_MANAGEMENT -> List.of("ESTATE_AND_HOMEOWNER_MANAGEMENT", "SERVICE_CHARGE_BILLING",
+                    "COMMUNITY_FUNDS", "VISITOR_MANAGEMENT", "ESTATE_OPERATIONS");
+            case PROPERTY_SALES -> List.of("PROPERTY_LISTINGS", "BUYER_PIPELINE", "OFFERS_AND_DUE_DILIGENCE",
+                    "SALE_MILESTONES", "SALES_REPORTING");
+            case ASSET_PORTFOLIO_MANAGER -> List.of("ASSET_REGISTER", "LIABILITY_REGISTER", "NET_WORTH",
+                    "WEALTH_GOALS", "WEALTH_PERFORMANCE");
+            default -> List.of();
+        };
+    }
+
+    private SubscriptionProduct productFor(PlanCategory category) {
+        return switch (category) {
+            case LANDLORD -> SubscriptionProduct.LANDLORD;
+            case ESTATE_MANAGEMENT -> SubscriptionProduct.ESTATE_MANAGEMENT;
+            case PROPERTY_SALES -> SubscriptionProduct.PROPERTY_SALES;
+            case ASSET_PORTFOLIO_MANAGER -> SubscriptionProduct.MY_WEALTH;
+            case SERVICE_PROVIDER -> SubscriptionProduct.SERVICES;
+            case AFFILIATE -> SubscriptionProduct.AFFILIATE;
+        };
+    }
+
+    private void seedPermanentFreeProducts() {
+        createFreeProduct("SERVICES_FREE", "Services", PlanCategory.SERVICE_PROVIDER, PMSRole.SERVICE_PROVIDER,
+                SubscriptionProduct.SERVICES, "SERVICE_MARKETPLACE");
+        createFreeProduct("SOKO_FREE", "Soko", PlanCategory.SERVICE_PROVIDER, PMSRole.SERVICE_PROVIDER,
+                SubscriptionProduct.SOKO, "SOKO_MARKETPLACE");
+        createFreeProduct("AFFILIATE_FREE", "Affiliate", PlanCategory.AFFILIATE, PMSRole.AFFILIATE,
+                SubscriptionProduct.AFFILIATE, "AFFILIATE_PROGRAM");
+    }
+
+    private void createFreeProduct(String code, String name, PlanCategory category, PMSRole role,
+                                   SubscriptionProduct product, String feature) {
+        SubscriptionPlan plan = planRepo.findByCode(code).orElseGet(SubscriptionPlan::new);
+        plan.setCode(code); plan.setDisplayName(name); plan.setPlanCategory(category); plan.setRoleFamily(role);
+        plan.setBillingCycle(BillingCycle.MONTHLY); plan.setPrice(BigDecimal.ZERO); plan.setCurrency(currency);
+        plan.setProductKey(product); plan.setPurchaseMode(SubscriptionPurchaseMode.FREE); plan.setTierRank(0);
+        plan.setCreatedBy(0L); plan.setActive(true); plan = planRepo.save(plan);
+        upsertFeature(plan, feature);
+    }
+
+    private void seedSalesManagedAddOns() {
+        createAddOn("ADDON_GATE_MANAGEMENT", "Gate Management add-on", SubscriptionProduct.GATE_MANAGEMENT_ADDON,
+                "GATE_MANAGEMENT");
+        createAddOn("ADDON_LISTING", "Listing add-on", SubscriptionProduct.LISTING_ADDON,
+                "EXTERNAL_UNIT_LISTING");
+        createAddOn("ADDON_PORTFOLIO_MANAGEMENT", "Portfolio Management add-on",
+                SubscriptionProduct.PORTFOLIO_MANAGEMENT_ADDON, "EXTERNAL_PORTFOLIO_MANAGEMENT");
+    }
+
+    private void createAddOn(String code, String name, SubscriptionProduct product, String feature) {
+        SubscriptionPlan plan = planRepo.findByCode(code).orElseGet(SubscriptionPlan::new);
+        plan.setCode(code); plan.setDisplayName(name); plan.setPlanCategory(PlanCategory.LANDLORD);
+        plan.setRoleFamily(PMSRole.LANDLORD); plan.setBillingCycle(BillingCycle.MONTHLY);
+        plan.setPrice(BigDecimal.ZERO); plan.setCurrency(currency); plan.setProductKey(product);
+        plan.setPurchaseMode(SubscriptionPurchaseMode.SALES_MANAGED); plan.setTierRank(100);
+        plan.setCreatedBy(0L); plan.setActive(true); plan = planRepo.save(plan);
+        upsertFeature(plan, feature); upsertFeature(plan, "AT_COST");
     }
 
     private void deactivateLegacyStarterIfUntouched() {

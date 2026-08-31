@@ -17,6 +17,7 @@ import org.pms.silverocean.service.users.ProfileType;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -166,6 +167,9 @@ public class KycService {
         List<KycDocument> superseded = activeDocuments(kycCase.getId()).stream()
                 .filter(existing -> sameEvidenceSlot(user, existing, documentType))
                 .toList();
+        document.setVersionNo(superseded.stream().mapToInt(existing -> Math.max(1, existing.getVersionNo()))
+                .max().orElse(0) + 1);
+        document.setMaintenanceReason(superseded.isEmpty() ? "INITIAL_UPLOAD" : "CUSTOMER_REPLACEMENT");
         Set<Long> supersededIds = superseded.stream().map(KycDocument::getId).collect(Collectors.toSet());
         Map<String,String> extractedFields = validateExtractedEvidence(
                 ocr.fields(), user, kycCase, supersededIds, documentType);
@@ -326,6 +330,51 @@ public class KycService {
                     view(kycCase, subject)));
         }
         return queue;
+    }
+
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public KycDocumentView maintainDocument(long documentId, KycDocumentMaintenanceRequest request) {
+        KycDocument document = documentRepo.findById(documentId).filter(KycDocument::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND));
+        if (request.issuedAt() != null && request.expiresAt() != null
+                && !request.expiresAt().isAfter(request.issuedAt())) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        if (request.reverificationDueAt() != null && request.expiresAt() != null
+                && request.reverificationDueAt().isAfter(request.expiresAt())) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        document.setIssuedAt(request.issuedAt());
+        document.setExpiresAt(request.expiresAt());
+        document.setReverificationDueAt(request.reverificationDueAt() != null
+                ? request.reverificationDueAt() : request.expiresAt());
+        document.setMaintenanceReason(request.reason() == null ? null : request.reason().trim());
+        documentRepo.save(document);
+        return KycDocumentView.from(document, decrypt(document), null);
+    }
+
+    @Scheduled(cron = "${kyc.reverification.cron:0 15 1 * * *}")
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public void flagDocumentsDueForReverification() {
+        ZonedDateTime now = ZonedDateTime.now();
+        for (KycDocument document : documentRepo
+                .findByActiveTrueAndReverificationDueAtLessThanEqualAndStatusNot(now, DocumentStatus.REVIEW_REQUIRED.name())) {
+            document.setStatus(DocumentStatus.REVIEW_REQUIRED.name());
+            if (document.getMaintenanceReason() == null || document.getMaintenanceReason().isBlank()) {
+                document.setMaintenanceReason("Document expired or reached its re-verification date.");
+            }
+            documentRepo.save(document);
+            caseRepo.findById(document.getCaseId()).ifPresent(kycCase -> {
+                kycCase.setStatus(KycStatus.REVIEW_REQUIRED.name());
+                kycCase.setReviewNotes(document.getMaintenanceReason());
+                caseRepo.save(kycCase);
+            });
+            userDao.findById(document.getUserId()).ifPresent(user -> {
+                user.setVerified(false);
+                user.setAccountStatus(AccountStatus.PENDING_KYC.name());
+                userDao.save(user);
+            });
+        }
     }
 
     private String cleanVerifiedValue(String value) {
@@ -494,7 +543,7 @@ public class KycService {
         Set<KycDocumentType> uploaded = currentDocuments(kycCase, user).stream()
                 .filter(doc -> !DocumentStatus.REJECTED.name().equals(doc.getStatus()))
                 .map(doc -> KycDocumentType.valueOf(doc.getDocumentType())).collect(Collectors.toSet());
-        return requirements(user).stream().filter(KycRequirement::required)
+        return effectiveRequirements(user, uploaded).stream().filter(KycRequirement::required)
                 .filter(req -> req.acceptedTypes().stream().noneMatch(uploaded::contains))
                 .map(KycRequirement::code).collect(Collectors.toSet());
     }
@@ -503,13 +552,22 @@ public class KycService {
         return missingRequirements(kycCase, currentUser());
     }
 
+    private Set<KycRequirement> effectiveRequirements(Users user, Set<KycDocumentType> uploaded) {
+        Set<KycRequirement> resolved = requirements(user);
+        if (!uploaded.contains(KycDocumentType.PASSPORT)) return resolved;
+        return resolved.stream().filter(requirement -> !"IDENTITY_BACK".equals(requirement.code()))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
     private KycCaseView view(KycCase kycCase, Users user) {
         List<KycDocumentView> docs = currentDocuments(kycCase, user).stream()
                 .map(doc -> KycDocumentView.from(doc, decrypt(doc), null)).toList();
+        Set<KycDocumentType> uploadedTypes = docs.stream()
+                .map(doc -> KycDocumentType.valueOf(doc.documentType())).collect(Collectors.toSet());
         return new KycCaseView(kycCase.getId(), kycCase.getStatus(), user.getAccountStatus(),
                 currentConsentVersion, kycCase.getReviewNotes(), kycCase.isPhoneVerified(), user.getPhoneNumber(),
                 timestamp(user.getPhoneVerifiedAt()), kycCase.getRegistryStatus(), ocrProvider.enabled(),
-                requirements(user), missingRequirements(kycCase, user), docs);
+                effectiveRequirements(user, uploadedTypes), missingRequirements(kycCase, user), docs);
     }
 
     private String timestamp(ZonedDateTime value) { return value == null ? null : value.toString(); }

@@ -17,6 +17,8 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.subscription.enums.SubscriptionEventType;
 import org.pms.silverocean.service.subscription.enums.SubscriptionStatus;
+import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
+import org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode;
 import org.pms.silverocean.database.pms.UserRoleRepo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -103,7 +105,7 @@ public class SubscriptionProvisioningService {
         if (!role.equals(plan.getRoleFamily())) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_ROLE_MISMATCH);
         }
-        if (plan.getCode().contains("CUSTOM")) {
+        if (purchaseMode(plan) != SubscriptionPurchaseMode.SELF_SERVICE) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_TRIAL_NOT_AVAILABLE);
         }
 
@@ -111,11 +113,13 @@ public class SubscriptionProvisioningService {
         UserSubscription subscription = UserSubscription.builder()
                 .role(role)
                 .planCode(plan.getCode())
+                .productKey(product(plan))
                 .status(SubscriptionStatus.ACTIVE)
                 .startAt(startAt)
                 .endAt(startAt.plusDays(trialDays))
                 .autoRenew(false)
                 .sourcePaymentRef(null)
+                .termVersion(1L)
                 .build();
         subscription.setCreatedBy(userId);
         subscription.setActive(true);
@@ -176,12 +180,9 @@ public class SubscriptionProvisioningService {
                     .findTopByUserSubscriptionAndEventTypeAndActiveTrueOrderByCreatedOnDesc(
                             sub, SubscriptionEventType.CANCELLATION_REQUESTED)
                     .isPresent();
-            sub.setStatus(cancellationScheduled
-                    ? SubscriptionStatus.CANCELLED
-                    : daysExpired > graceDaysAfterExpiry
-                        ? SubscriptionStatus.SUSPENDED
-                        : SubscriptionStatus.EXPIRED);
-            sub.setActive(false);
+            sub.setStatus(cancellationScheduled ? SubscriptionStatus.CANCELLED
+                    : daysExpired > graceDaysAfterExpiry ? SubscriptionStatus.SUSPENDED : SubscriptionStatus.EXPIRED);
+            sub.setActive(!cancellationScheduled && daysExpired <= graceDaysAfterExpiry);
             userSubscriptionRepo.save(sub);
         }
         SubscriptionPlanResponseDTO plan = subscriptionPlanService.getPlanByCode(sub.getPlanCode());
@@ -203,6 +204,20 @@ public class SubscriptionProvisioningService {
         return refreshAndMap(latest.get());
     }
 
+    @Transactional
+    public SubscriptionCurrentDTO getCurrentSubscriptionForSessionProduct(String productValue) {
+        Long userId = userDao.getUserId();
+        if (userId == null) throw new PMSCustomException(ResponseCode.COULD_NOT_FIND_USER_SESSION);
+        SubscriptionProduct product;
+        try {
+            product = SubscriptionProduct.valueOf(productValue.trim().toUpperCase());
+        } catch (RuntimeException error) {
+            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_PRODUCT_MISMATCH);
+        }
+        return userSubscriptionRepo.findTopByCreatedByAndProductKeyOrderByStartAtDesc(userId, product)
+                .map(this::refreshAndMap).orElse(null);
+    }
+
     private SubscriptionCurrentDTO refreshAndMap(UserSubscription sub) {
         ZonedDateTime now = ZonedDateTime.now();
         if (sub.getStatus() == SubscriptionStatus.ACTIVE && sub.isActive()
@@ -212,10 +227,9 @@ public class SubscriptionProvisioningService {
                     .findTopByUserSubscriptionAndEventTypeAndActiveTrueOrderByCreatedOnDesc(
                             sub, SubscriptionEventType.CANCELLATION_REQUESTED)
                     .isPresent();
-            sub.setStatus(cancellationScheduled
-                    ? SubscriptionStatus.CANCELLED
+            sub.setStatus(cancellationScheduled ? SubscriptionStatus.CANCELLED
                     : daysExpired > graceDaysAfterExpiry ? SubscriptionStatus.SUSPENDED : SubscriptionStatus.EXPIRED);
-            sub.setActive(false);
+            sub.setActive(!cancellationScheduled && daysExpired <= graceDaysAfterExpiry);
             userSubscriptionRepo.save(sub);
         }
         SubscriptionPlanResponseDTO plan = subscriptionPlanService.getPlanByCode(sub.getPlanCode());
@@ -239,6 +253,19 @@ public class SubscriptionProvisioningService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<SubscriptionPlanSummaryRestDTO> listPlansSummariesForProduct(String productValue) {
+        SubscriptionProduct product;
+        try {
+            product = SubscriptionProduct.valueOf(productValue.trim().toUpperCase());
+        } catch (RuntimeException error) {
+            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_PRODUCT_MISMATCH);
+        }
+        return subscriptionPlanRepo.findByProductKeyAndActiveTrueOrderByTierRankAscPriceAsc(product).stream()
+                .map(p -> SubscriptionPlanSummaryRestDTO.from(subscriptionPlanService.getPlanByCode(p.getCode())))
+                .toList();
+    }
+
     private SubscriptionMutationResult subscribeOrUpgradeForUser(long actorUserId, long subscriberUserId, SubscribeOrUpgradeRequestDTO request) {
         PMSRole role = request.role();
         validateCatalogRole(role);
@@ -252,8 +279,14 @@ public class SubscriptionProvisioningService {
         if (!role.equals(plan.getRoleFamily())) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_ROLE_MISMATCH);
         }
+        if (purchaseMode(plan) == SubscriptionPurchaseMode.SALES_MANAGED) {
+            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_SALES_MANAGED_REQUIRED);
+        }
         validateSubscriptionPlanChangeRules(subscriberUserId, plan);
-        boolean hasPayment = plan.getPrice() != null && plan.getPrice().compareTo(BigDecimal.ZERO) > 0;
+        boolean hasPayment = purchaseMode(plan) == SubscriptionPurchaseMode.SELF_SERVICE;
+        if (hasPayment && (plan.getPrice() == null || plan.getPrice().signum() <= 0)) {
+            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_INVALID_PRICING_CONFIGURATION);
+        }
         if (hasPayment) {
             if (request.paymentAccountId() == null || request.paymentAccountId() <= 0) {
                 throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PAYMENT_PAYEE_NOT_CONFIGURED);
@@ -265,14 +298,14 @@ public class SubscriptionProvisioningService {
                     request.paymentAccountId());
             return SubscriptionMutationResult.pendingInvoice(checkout);
         }
-        Optional<UserSubscription> existing = findActiveSubscription(subscriberUserId, role);
+        Optional<UserSubscription> existing = findActiveSubscription(subscriberUserId, product(plan));
         SubscriptionEventType eventType = existing.isPresent()
                 ? SubscriptionEventType.UPGRADE
                 : SubscriptionEventType.ACTIVATION;
-        deactivateActiveSubscriptions(subscriberUserId, role);
+        deactivateActiveSubscriptions(subscriberUserId, product(plan));
         activateFreeSubscription(actorUserId, subscriberUserId, role, plan, eventType,
                 eventType == SubscriptionEventType.UPGRADE ? "upgrade_request" : "subscribe_request");
-        UserSubscription refreshed = findActiveSubscription(subscriberUserId, role).orElseThrow();
+        UserSubscription refreshed = findActiveSubscription(subscriberUserId, product(plan)).orElseThrow();
         return SubscriptionMutationResult.freeAssigned(SubscriptionCurrentDTO.from(
                 refreshed,
                 SubscriptionPlanSummaryRestDTO.from(subscriptionPlanService.getPlanByCode(refreshed.getPlanCode()))));
@@ -290,11 +323,14 @@ public class SubscriptionProvisioningService {
         UserSubscription sub = UserSubscription.builder()
                 .role(role)
                 .planCode(plan.getCode())
+                .productKey(product(plan))
                 .status(SubscriptionStatus.ACTIVE)
                 .startAt(startAt)
-                .endAt(SubscriptionTerms.endAt(plan.getBillingCycle(), startAt))
+                .endAt(purchaseMode(plan) == SubscriptionPurchaseMode.FREE
+                        ? null : SubscriptionTerms.endAt(plan.getBillingCycle(), startAt))
                 .autoRenew(false)
                 .sourcePaymentRef(null)
+                .termVersion(1L)
                 .build();
         sub.setCreatedBy(subscriberUserId);
         sub.setActive(true);
@@ -309,9 +345,9 @@ public class SubscriptionProvisioningService {
         subscriptionEventRepo.save(evt);
     }
 
-    private void deactivateActiveSubscriptions(long subscriberUserId, PMSRole role) {
-        List<UserSubscription> active = userSubscriptionRepo.findAllByCreatedByAndRoleAndStatusAndActiveTrue(
-                subscriberUserId, role, SubscriptionStatus.ACTIVE);
+    private void deactivateActiveSubscriptions(long subscriberUserId, SubscriptionProduct product) {
+        List<UserSubscription> active = userSubscriptionRepo.findAllByCreatedByAndProductKeyAndStatusAndActiveTrue(
+                subscriberUserId, product, SubscriptionStatus.ACTIVE);
         for (UserSubscription us : active) {
             us.setStatus(SubscriptionStatus.CANCELLED);
             us.setActive(false);
@@ -319,9 +355,9 @@ public class SubscriptionProvisioningService {
         }
     }
 
-    private Optional<UserSubscription> findActiveSubscription(long subscriberUserId, PMSRole role) {
-        return userSubscriptionRepo.findTopByCreatedByAndRoleAndStatusAndActiveTrueOrderByStartAtDesc(
-                subscriberUserId, role, SubscriptionStatus.ACTIVE);
+    private Optional<UserSubscription> findActiveSubscription(long subscriberUserId, SubscriptionProduct product) {
+        return userSubscriptionRepo.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
+                subscriberUserId, product, SubscriptionStatus.ACTIVE);
     }
 
     private void validateCatalogRole(PMSRole role) {
@@ -339,12 +375,12 @@ public class SubscriptionProvisioningService {
         ZonedDateTime now = ZonedDateTime.now();
         BigDecimal targetPrice = priceOrZero(targetPlan);
 
-        Optional<UserSubscription> activeOpt = findActiveSubscription(subscriberUserId, targetPlan.getRoleFamily());
+        Optional<UserSubscription> activeOpt = findActiveSubscription(subscriberUserId, product(targetPlan));
         if (activeOpt.isPresent()) {
             UserSubscription us = activeOpt.get();
             boolean expiredByTime = us.getEndAt() != null && us.getEndAt().isBefore(now);
             if (us.getStatus() == SubscriptionStatus.ACTIVE && us.isActive() && !expiredByTime) {
-                validateUpgradeWhileActiveNotExpired(us, targetPrice);
+                validateUpgradeWhileActiveNotExpired(us, targetPlan);
                 return;
             }
             ZonedDateTime referenceEnd = us.getEndAt() != null ? us.getEndAt() : us.getStartAt();
@@ -352,8 +388,8 @@ public class SubscriptionProvisioningService {
             return;
         }
 
-        Optional<UserSubscription> latest = userSubscriptionRepo.findTopByCreatedByAndRoleOrderByStartAtDesc(
-                subscriberUserId, targetPlan.getRoleFamily());
+        Optional<UserSubscription> latest = userSubscriptionRepo.findTopByCreatedByAndProductKeyOrderByStartAtDesc(
+                subscriberUserId, product(targetPlan));
         if (latest.isEmpty()) {
             return;
         }
@@ -362,32 +398,33 @@ public class SubscriptionProvisioningService {
         validatePostExpiryGraceWindow(referenceEnd, now, targetPrice);
     }
 
-    private void validateUpgradeWhileActiveNotExpired(UserSubscription currentSub, BigDecimal targetPrice) {
+    private void validateUpgradeWhileActiveNotExpired(UserSubscription currentSub, SubscriptionPlan targetPlan) {
         SubscriptionPlan currentPlan = subscriptionPlanRepo.findByCode(currentSub.getPlanCode()).orElse(null);
         BigDecimal currentPrice = priceOrZero(currentPlan);
+        BigDecimal targetPrice = priceOrZero(targetPlan);
+        if (currentPlan != null && product(currentPlan) != product(targetPlan)) {
+            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_PRODUCT_MISMATCH);
+        }
 
         if (currentPrice.compareTo(BigDecimal.ZERO) > 0 && targetPrice.compareTo(BigDecimal.ZERO) == 0) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PAID_ACTIVE_CANNOT_DOWNGRADE_TO_FREE);
         }
-        if (currentPrice.compareTo(BigDecimal.ZERO) > 0) {
-            if (targetPrice.compareTo(currentPrice) <= 0) {
-                throw new PMSCustomException(ResponseCode.SUBSCRIPTION_UPGRADE_NOT_HIGHER_TIER);
-            }
+        if (currentPlan != null && currentPlan.getCode().equalsIgnoreCase(targetPlan.getCode())) {
+            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_RENEWAL_REQUIRED);
+        }
+        if (tierRank(targetPlan) > tierRank(currentPlan)) {
             return;
         }
-        if (targetPrice.compareTo(currentPrice) <= 0) {
+        boolean sameTierDifferentCycle = tierRank(targetPlan) == tierRank(currentPlan)
+                && currentPlan != null && currentPlan.getBillingCycle() != targetPlan.getBillingCycle();
+        if (!sameTierDifferentCycle) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_UPGRADE_NOT_HIGHER_TIER);
         }
     }
 
     private void validatePostExpiryGraceWindow(ZonedDateTime referenceEnd, ZonedDateTime now, BigDecimal targetPrice) {
-        if (referenceEnd == null) {
-            return;
-        }
-        long daysSinceEnd = ChronoUnit.DAYS.between(referenceEnd.toLocalDate(), now.toLocalDate());
-        if (daysSinceEnd > graceDaysAfterExpiry && targetPrice.compareTo(BigDecimal.ZERO) > 0) {
-            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_GRACE_EXPIRED_FREE_PLANS_ONLY);
-        }
+        // An expired customer may always recover by purchasing a paid plan. Grace controls access,
+        // never the ability to pay and restore service.
     }
 
     private static BigDecimal priceOrZero(SubscriptionPlan plan) {
@@ -395,6 +432,29 @@ public class SubscriptionProvisioningService {
             return BigDecimal.ZERO;
         }
         return plan.getPrice();
+    }
+
+    private SubscriptionProduct product(SubscriptionPlan plan) {
+        if (plan.getProductKey() != null) return plan.getProductKey();
+        return switch (plan.getPlanCategory()) {
+            case LANDLORD -> SubscriptionProduct.LANDLORD;
+            case ESTATE_MANAGEMENT -> SubscriptionProduct.ESTATE_MANAGEMENT;
+            case PROPERTY_SALES -> SubscriptionProduct.PROPERTY_SALES;
+            case ASSET_PORTFOLIO_MANAGER -> SubscriptionProduct.MY_WEALTH;
+            case AFFILIATE -> SubscriptionProduct.AFFILIATE;
+            case SERVICE_PROVIDER -> SubscriptionProduct.SERVICES;
+        };
+    }
+
+    private SubscriptionPurchaseMode purchaseMode(SubscriptionPlan plan) {
+        if (plan.getPurchaseMode() != null) return plan.getPurchaseMode();
+        if (plan.getCode().contains("CUSTOM")) return SubscriptionPurchaseMode.SALES_MANAGED;
+        return priceOrZero(plan).signum() > 0 ? SubscriptionPurchaseMode.SELF_SERVICE : SubscriptionPurchaseMode.FREE;
+    }
+
+    private int tierRank(SubscriptionPlan plan) {
+        if (plan == null) return -1;
+        return plan.getTierRank() == null ? 0 : plan.getTierRank();
     }
 
     private String normalizePlanCode(String code) {

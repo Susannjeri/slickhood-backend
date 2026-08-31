@@ -91,6 +91,7 @@ class SubscriptionPaymentCompletionServiceTest {
                 .billingCycle(BillingCycle.MONTHLY)
                 .price(new BigDecimal("100"))
                 .currency("KES")
+                .productKey(org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD)
                 .build();
         plan.setActive(true);
 
@@ -107,11 +108,11 @@ class SubscriptionPaymentCompletionServiceTest {
         when(subscriptionPlanRepo.findByCodeAndActiveTrue("PRO")).thenReturn(Optional.of(plan));
         when(roleRepo.findByName(PMSRole.LANDLORD.getName())).thenReturn(Optional.of(dbRole));
         when(userRoleRepo.findByUserIdAndRoleId(7L, 2L)).thenReturn(1);
-        when(userSubscriptionRepo.findTopByCreatedByAndRoleAndStatusAndActiveTrueOrderByStartAtDesc(
-                7L, PMSRole.LANDLORD, SubscriptionStatus.ACTIVE))
+        when(userSubscriptionRepo.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
+                7L, org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD, SubscriptionStatus.ACTIVE))
                 .thenReturn(Optional.empty());
-        when(userSubscriptionRepo.findAllByCreatedByAndRoleAndStatusAndActiveTrue(
-                eq(7L), eq(PMSRole.LANDLORD), eq(SubscriptionStatus.ACTIVE)))
+        when(userSubscriptionRepo.findAllByCreatedByAndProductKeyAndStatusAndActiveTrue(
+                eq(7L), eq(org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD), eq(SubscriptionStatus.ACTIVE)))
                 .thenReturn(java.util.List.of());
 
         service.completePaidSubscriptionAfterPayment(11L, "MPESA999");
@@ -131,13 +132,15 @@ class SubscriptionPaymentCompletionServiceTest {
         SubscriptionPlan plan = SubscriptionPlan.builder()
                 .code("PRO").displayName("Pro").planCategory(PlanCategory.LANDLORD)
                 .roleFamily(PMSRole.LANDLORD).billingCycle(BillingCycle.MONTHLY)
-                .price(new BigDecimal("100")).currency("KES").build();
+                .price(new BigDecimal("100")).currency("KES")
+                .productKey(org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD).build();
         plan.setActive(true);
         Role role = Role.builder().name(PMSRole.LANDLORD.getName()).description("x").selfAssignable(false).build();
         role.setId(2L);
         role.setActive(true);
         UserSubscription existing = UserSubscription.builder()
-                .role(PMSRole.LANDLORD).planCode("PRO").status(SubscriptionStatus.ACTIVE)
+                .role(PMSRole.LANDLORD).productKey(org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD)
+                .planCode("PRO").status(SubscriptionStatus.ACTIVE)
                 .startAt(ZonedDateTime.now().minusDays(5)).endAt(ZonedDateTime.now().plusDays(25)).build();
         existing.setId(21L);
         existing.setCreatedBy(7L);
@@ -149,15 +152,15 @@ class SubscriptionPaymentCompletionServiceTest {
         when(subscriptionPlanRepo.findByCodeAndActiveTrue("PRO")).thenReturn(Optional.of(plan));
         when(roleRepo.findByName(PMSRole.LANDLORD.getName())).thenReturn(Optional.of(role));
         when(userRoleRepo.findByUserIdAndRoleId(7L, 2L)).thenReturn(1);
-        when(userSubscriptionRepo.findTopByCreatedByAndRoleAndStatusAndActiveTrueOrderByStartAtDesc(
-                7L, PMSRole.LANDLORD, SubscriptionStatus.ACTIVE))
+        when(userSubscriptionRepo.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
+                7L, org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD, SubscriptionStatus.ACTIVE))
                 .thenReturn(Optional.of(existing));
 
         service.completePaidSubscriptionAfterPayment(12L, "PAYSTACK-RENEW");
 
         assertEquals(previousEnd.plusMonths(1), existing.getEndAt());
         verify(userSubscriptionRepo).save(existing);
-        verify(userSubscriptionRepo, never()).findAllByCreatedByAndRoleAndStatusAndActiveTrue(
+        verify(userSubscriptionRepo, never()).findAllByCreatedByAndProductKeyAndStatusAndActiveTrue(
                 any(Long.class), any(), any());
         verify(completionRepo).save(any());
     }

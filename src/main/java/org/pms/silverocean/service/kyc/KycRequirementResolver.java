@@ -18,7 +18,7 @@ public class KycRequirementResolver {
         Map<String, KycRequirement> requirements = new LinkedHashMap<>();
         add(requirements, "IDENTITY_FRONT", "Government identity document", true,
                 Set.of(KycDocumentType.NATIONAL_ID_FRONT, KycDocumentType.PASSPORT, KycDocumentType.ALIEN_ID_FRONT));
-        add(requirements, "IDENTITY_BACK", "Back of identity document (not required for passports)", false,
+        add(requirements, "IDENTITY_BACK", "Back of identity document (not required for passports)", true,
                 Set.of(KycDocumentType.NATIONAL_ID_BACK, KycDocumentType.ALIEN_ID_BACK));
         add(requirements, "SELFIE", "Live selfie", true, Set.of(KycDocumentType.SELFIE));
 
@@ -40,7 +40,7 @@ public class KycRequirementResolver {
                     Set.of(KycDocumentType.APPOINTMENT_LETTER, KycDocumentType.PROFESSIONAL_CERTIFICATE));
         }
         if (roles.contains(PMSRole.SERVICE_PROVIDER)) {
-            add(requirements, "GOOD_CONDUCT", "Certificate of good conduct", true,
+            add(requirements, "GOOD_CONDUCT", "Certificate of good conduct (optional)", false,
                     Set.of(KycDocumentType.GOOD_CONDUCT_CERTIFICATE));
             add(requirements, "PROFESSIONAL", "Professional or business certificate", true,
                     Set.of(KycDocumentType.PROFESSIONAL_CERTIFICATE, KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE));

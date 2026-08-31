@@ -95,10 +95,32 @@ class SubscriptionTrialServiceTest {
         verify(subscriptionRepo).findTopByCreatedByAndRoleOrderByStartAtDesc(7L, PMSRole.LANDLORD);
     }
 
+    @Test
+    void salesManagedPlanCannotBeActivatedByPostingZeroPriceDirectly() {
+        Role role = Role.builder().name(PMSRole.LANDLORD.getName()).description("owner").selfAssignable(true).build();
+        role.setId(2L); role.setActive(true);
+        SubscriptionPlan plan = plan("LANDLORD_PLATINUM_CUSTOM", "Platinum", PMSRole.LANDLORD);
+        plan.setPrice(BigDecimal.ZERO);
+        plan.setPurchaseMode(org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode.SALES_MANAGED);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(planCodeResolver.isProvisioningRole(PMSRole.LANDLORD)).thenReturn(true);
+        when(roleRepo.findByName(PMSRole.LANDLORD.getName())).thenReturn(Optional.of(role));
+        when(userRoleRepo.findByUserIdAndRoleId(7L, 2L)).thenReturn(1);
+        when(planRepo.findByCode("LANDLORD_PLATINUM_CUSTOM")).thenReturn(Optional.of(plan));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> service.subscribeOrUpgradeForSessionUser("LANDLORD", "LANDLORD_PLATINUM_CUSTOM", null));
+
+        assertEquals(ResponseCode.SUBSCRIPTION_SALES_MANAGED_REQUIRED, error.getResponseCode());
+    }
+
     private SubscriptionPlan plan(String code, String name, PMSRole role) {
         SubscriptionPlan plan = SubscriptionPlan.builder().code(code).displayName(name)
                 .planCategory(PlanCategory.LANDLORD).roleFamily(role).billingCycle(BillingCycle.MONTHLY)
-                .price(new BigDecimal("3500")).currency("KES").build();
+                .price(new BigDecimal("3500")).currency("KES")
+                .productKey(org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD)
+                .purchaseMode(org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode.SELF_SERVICE)
+                .tierRank(10).build();
         plan.setActive(true);
         return plan;
     }
@@ -106,6 +128,7 @@ class SubscriptionTrialServiceTest {
     private SubscriptionPlanResponseDTO response(SubscriptionPlan plan) {
         return new SubscriptionPlanResponseDTO(UUID.randomUUID(), plan.getCode(), plan.getDisplayName(),
                 plan.getPlanCategory(), plan.getRoleFamily(), plan.getBillingCycle(), plan.getPrice(),
-                plan.getCurrency(), true, List.of(), List.of());
+                plan.getCurrency(), plan.getProductKey(), plan.getPurchaseMode(), plan.getTierRank(),
+                true, List.of(), List.of());
     }
 }

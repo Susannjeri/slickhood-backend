@@ -49,10 +49,13 @@ public class SubscriptionController {
 
     @GetMapping("/current")
     public ResponseEntity<ResponseDTO> getCurrentSubscription(
-            @RequestParam(value = "role", required = false) String role) {
-        SubscriptionCurrentDTO dto = role == null || role.isBlank()
-                ? subscriptionProvisioningService.getCurrentSubscription()
-                : subscriptionProvisioningService.getCurrentSubscriptionForSessionRole(role);
+            @RequestParam(value = "role", required = false) String role,
+            @RequestParam(value = "product", required = false) String product) {
+        SubscriptionCurrentDTO dto = product != null && !product.isBlank()
+                ? subscriptionProvisioningService.getCurrentSubscriptionForSessionProduct(product)
+                : role == null || role.isBlank()
+                    ? subscriptionProvisioningService.getCurrentSubscription()
+                    : subscriptionProvisioningService.getCurrentSubscriptionForSessionRole(role);
         if (dto == null) {
             return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SUBSCRIPTION_CURRENT_ABSENT.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.SUBSCRIPTION_CURRENT_ABSENT)));
@@ -65,8 +68,11 @@ public class SubscriptionController {
      * @param role PMS persona enum constant name (e.g. LANDLORD, SERVICE_PROVIDER, AFFILIATE, ASSET_PORTFOLIO_MANAGER)
      */
     @GetMapping("/plans")
-    public ResponseEntity<ResponseDTO> listCatalogForRole(@RequestParam("role") String role) {
-        var plans = subscriptionProvisioningService.listPlansSummariesForRoleParam(role);
+    public ResponseEntity<ResponseDTO> listCatalogForRole(@RequestParam(value = "role", required = false) String role,
+                                                          @RequestParam(value = "product", required = false) String product) {
+        var plans = product != null && !product.isBlank()
+                ? subscriptionProvisioningService.listPlansSummariesForProduct(product)
+                : subscriptionProvisioningService.listPlansSummariesForRoleParam(role);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SUBSCRIPTION_CATALOG_LIST.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SUBSCRIPTION_CATALOG_LIST), plans));
     }
@@ -93,8 +99,9 @@ public class SubscriptionController {
     }
 
     @GetMapping("/overview")
-    public ResponseEntity<ResponseDTO> overview(@RequestParam("role") String role) {
-        return ok(subscriptionManagementService.overview(role));
+    public ResponseEntity<ResponseDTO> overview(@RequestParam("role") String role,
+                                                 @RequestParam(value = "product", required = false) String product) {
+        return ok(subscriptionManagementService.overview(role, product));
     }
 
     @GetMapping("/billing-history")
@@ -110,37 +117,43 @@ public class SubscriptionController {
 
     @PostMapping("/auto-renew")
     public ResponseEntity<ResponseDTO> updateAutoRenew(@RequestParam("role") String role,
+                                                        @RequestParam(value = "product", required = false) String product,
                                                         @Valid @RequestBody SubscriptionAutoRenewDTO body) {
-        return ok(subscriptionManagementService.updateAutoRenew(role, body.enabled()));
+        return ok(subscriptionManagementService.updateAutoRenew(role, product, body.enabled()));
     }
 
     @PostMapping("/cancel")
     public ResponseEntity<ResponseDTO> cancel(@RequestParam("role") String role,
+                                               @RequestParam(value = "product", required = false) String product,
                                                @Valid @RequestBody SubscriptionCancelDTO body) {
-        return ok(subscriptionManagementService.scheduleCancellation(role, body.reason()));
+        return ok(subscriptionManagementService.scheduleCancellation(role, product, body.reason()));
     }
 
     @PostMapping("/cancel/restore")
-    public ResponseEntity<ResponseDTO> restoreCancellation(@RequestParam("role") String role) {
-        return ok(subscriptionManagementService.restoreCancellation(role));
+    public ResponseEntity<ResponseDTO> restoreCancellation(@RequestParam("role") String role,
+                                                            @RequestParam(value = "product", required = false) String product) {
+        return ok(subscriptionManagementService.restoreCancellation(role, product));
     }
 
     @PostMapping("/renew")
     public ResponseEntity<ResponseDTO> renew(@RequestParam("role") String role,
+                                              @RequestParam(value = "product", required = false) String product,
                                               @Valid @RequestBody SubscriptionRenewDTO body) {
-        var result = subscriptionManagementService.renew(role, body.paymentAccountId());
+        var result = subscriptionManagementService.renew(role, product, body.paymentAccountId());
         return ok(result.requiresPayment() ? result.pendingPayment() : result.assignedSubscription());
     }
 
     @PostMapping("/change-plan")
     public ResponseEntity<ResponseDTO> schedulePlanChange(@RequestParam("role") String role,
+                                                           @RequestParam(value = "product", required = false) String product,
                                                            @Valid @RequestBody SubscriptionPlanChangeDTO body) {
-        return ok(subscriptionManagementService.schedulePlanChange(role, body.planCode()));
+        return ok(subscriptionManagementService.schedulePlanChange(role, product, body.planCode()));
     }
 
     @PostMapping("/change-plan/revoke")
-    public ResponseEntity<ResponseDTO> revokePlanChange(@RequestParam("role") String role) {
-        return ok(subscriptionManagementService.revokePlanChange(role));
+    public ResponseEntity<ResponseDTO> revokePlanChange(@RequestParam("role") String role,
+                                                         @RequestParam(value = "product", required = false) String product) {
+        return ok(subscriptionManagementService.revokePlanChange(role, product));
     }
 
     @PostMapping("/contact-sales")

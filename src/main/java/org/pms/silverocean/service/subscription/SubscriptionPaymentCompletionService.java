@@ -14,6 +14,8 @@ import org.pms.silverocean.database.pms.entities.SubscriptionPlan;
 import org.pms.silverocean.database.pms.entities.UserSubscription;
 import org.pms.silverocean.service.subscription.enums.SubscriptionEventType;
 import org.pms.silverocean.service.subscription.enums.SubscriptionStatus;
+import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
+import org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode;
 import org.pms.silverocean.service.payment.contract.PaidInvoiceReader;
 import org.pms.silverocean.service.payment.contract.PaidInvoiceView;
 import org.springframework.stereotype.Service;
@@ -81,6 +83,9 @@ public class SubscriptionPaymentCompletionService {
             throw new IllegalStateException("Paid subscription plan is unknown or inactive: "+normalizedPlanCode);
         }
         SubscriptionPlan plan = planOpt.get();
+        if (plan.getPurchaseMode() != null && plan.getPurchaseMode() != SubscriptionPurchaseMode.SELF_SERVICE) {
+            throw new IllegalStateException("Paid invoice references a non-self-service plan: "+normalizedPlanCode);
+        }
         if (plan.getPrice() == null || plan.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
             log.warn("Invoice {} marked subscription but plan {} is not priced; skipping activation", invoice.getRef(), normalizedPlanCode);
             throw new IllegalStateException("Paid invoice references an unpriced plan: "+normalizedPlanCode);
@@ -97,7 +102,8 @@ public class SubscriptionPaymentCompletionService {
             throw new IllegalStateException("Subscriber no longer holds required role: "+plan.getRoleFamily());
         }
 
-        Optional<UserSubscription> existingActive = findActiveSubscription(subscriberId, plan.getRoleFamily());
+        SubscriptionProduct product = product(plan);
+        Optional<UserSubscription> existingActive = findActiveSubscription(subscriberId, product);
         boolean renewal = existingActive
                 .filter(existing -> existing.getPlanCode().equalsIgnoreCase(plan.getCode()))
                 .isPresent();
@@ -113,23 +119,26 @@ public class SubscriptionPaymentCompletionService {
                     : java.time.ZonedDateTime.now();
             existing.setEndAt(SubscriptionTerms.endAt(plan.getBillingCycle(), termStart));
             existing.setSourcePaymentRef(normalizeProviderRef(providerReference));
+            existing.setTermVersion(existing.getTermVersion() + 1);
             userSubscriptionRepo.save(existing);
             saveEvent(existing, eventType, invoice, subscriberId);
             saveCompletionMarker(invoice, subscriberId, plan, providerReference);
             return;
         }
 
-        deactivateActiveSubscriptions(subscriberId, plan.getRoleFamily());
+        deactivateActiveSubscriptions(subscriberId, product);
 
         java.time.ZonedDateTime startAt = java.time.ZonedDateTime.now();
         UserSubscription sub = UserSubscription.builder()
                 .role(plan.getRoleFamily())
                 .planCode(plan.getCode())
+                .productKey(product)
                 .status(SubscriptionStatus.ACTIVE)
                 .startAt(startAt)
                 .endAt(SubscriptionTerms.endAt(plan.getBillingCycle(), startAt))
                 .autoRenew(false)
                 .sourcePaymentRef(normalizeProviderRef(providerReference))
+                .termVersion(1L)
                 .build();
         sub.setCreatedBy(subscriberId);
         sub.setActive(true);
@@ -170,20 +179,30 @@ public class SubscriptionPaymentCompletionService {
         return providerReference.trim();
     }
 
-    private Optional<UserSubscription> findActiveSubscription(long subscriberUserId,
-                                                               org.pms.silverocean.service.auth.roles.enums.PMSRole role) {
-        return userSubscriptionRepo.findTopByCreatedByAndRoleAndStatusAndActiveTrueOrderByStartAtDesc(
-                subscriberUserId, role, SubscriptionStatus.ACTIVE);
+    private Optional<UserSubscription> findActiveSubscription(long subscriberUserId, SubscriptionProduct product) {
+        return userSubscriptionRepo.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
+                subscriberUserId, product, SubscriptionStatus.ACTIVE);
     }
 
-    private void deactivateActiveSubscriptions(long subscriberUserId,
-                                                org.pms.silverocean.service.auth.roles.enums.PMSRole role) {
-        List<UserSubscription> active = userSubscriptionRepo.findAllByCreatedByAndRoleAndStatusAndActiveTrue(
-                subscriberUserId, role, SubscriptionStatus.ACTIVE);
+    private void deactivateActiveSubscriptions(long subscriberUserId, SubscriptionProduct product) {
+        List<UserSubscription> active = userSubscriptionRepo.findAllByCreatedByAndProductKeyAndStatusAndActiveTrue(
+                subscriberUserId, product, SubscriptionStatus.ACTIVE);
         for (UserSubscription us : active) {
             us.setStatus(SubscriptionStatus.CANCELLED);
             us.setActive(false);
             userSubscriptionRepo.save(us);
         }
+    }
+
+    private SubscriptionProduct product(SubscriptionPlan plan) {
+        if (plan.getProductKey() != null) return plan.getProductKey();
+        return switch (plan.getPlanCategory()) {
+            case LANDLORD -> SubscriptionProduct.LANDLORD;
+            case ESTATE_MANAGEMENT -> SubscriptionProduct.ESTATE_MANAGEMENT;
+            case PROPERTY_SALES -> SubscriptionProduct.PROPERTY_SALES;
+            case ASSET_PORTFOLIO_MANAGER -> SubscriptionProduct.MY_WEALTH;
+            case AFFILIATE -> SubscriptionProduct.AFFILIATE;
+            case SERVICE_PROVIDER -> SubscriptionProduct.SERVICES;
+        };
     }
 }
