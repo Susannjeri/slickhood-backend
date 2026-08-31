@@ -117,14 +117,14 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
     @Query("SELECT u.id as unitId, u.ref as unitRef, p.id as propertyId, p.name as propertyName, " +
             "host.id as hostUserId, host.fullName as hostName FROM Unit u JOIN Property p ON u.propertyId=p.id " +
             "JOIN PropertyManager pm ON pm.propertyId=p.id JOIN UnitTenant ut ON ut.unitId=u.id " +
-            "JOIN Users host ON host.id=ut.userId WHERE pm.userId=:guardUserId AND pm.roleName='GUARD' " +
+            "JOIN Users host ON host.id=ut.userId WHERE pm.userId=:guardUserId AND pm.roleName IN ('GUARD','SECURITY_SUPERVISOR') " +
             "AND pm.active AND p.active AND u.active AND ut.active AND host.active ORDER BY p.name,u.ref,host.fullName")
     List<GuardHostOptionProjection> findGuardHostOptions(long guardUserId);
 
     @Query("SELECT u.id as unitId, u.ref as unitRef, p.id as propertyId, p.name as propertyName, " +
             "host.id as hostUserId, host.fullName as hostName FROM Unit u JOIN Property p ON u.propertyId=p.id " +
             "JOIN PropertyManager pm ON pm.propertyId=p.id JOIN PropertyOwnership ownership ON ownership.unitId=u.id " +
-            "JOIN Users host ON host.id=ownership.homeownerUserId WHERE pm.userId=:guardUserId AND pm.roleName='GUARD' " +
+            "JOIN Users host ON host.id=ownership.homeownerUserId WHERE pm.userId=:guardUserId AND pm.roleName IN ('GUARD','SECURITY_SUPERVISOR') " +
             "AND pm.active AND p.active AND u.active AND ownership.active AND host.active ORDER BY p.name,u.ref,host.fullName")
     List<GuardHostOptionProjection> findGuardHomeownerOptions(long guardUserId);
 

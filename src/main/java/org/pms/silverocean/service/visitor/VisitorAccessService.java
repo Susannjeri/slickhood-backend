@@ -27,7 +27,6 @@ import org.pms.silverocean.service.config.ConfigDTO;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.auth.dao.UserDao;
-import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.property.wrappers.DbUnitDTO;
 import org.pms.silverocean.service.visitor.enums.AccessDirection;
 import org.pms.silverocean.service.visitor.enums.AccessOutcome;
@@ -101,7 +100,7 @@ public class VisitorAccessService {
     @Transactional
     public VisitorDTO registerUnplanned(RegisterVisitRequest request) {
         Users guard = requireUser();
-        DbUnitDTO unit = unitRepo.findDTOByIdAndManagerRole(request.unitId(), guard.getId(), PMSRole.GUARD.name())
+        DbUnitDTO unit = unitRepo.findByIdAndStaffOrOwnerOrTenant(request.unitId(), guard.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
         if (request.hostUserId() == null || (unitRepo.findByIdAndStaffOrOwnerOrTenant(request.unitId(), request.hostUserId()).isEmpty()
                 && unitRepo.findDTOByIdAndHomeowner(request.unitId(), request.hostUserId()).isEmpty())) {

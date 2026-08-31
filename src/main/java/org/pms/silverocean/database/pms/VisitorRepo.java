@@ -66,7 +66,7 @@ public interface VisitorRepo extends JpaRepository<Visitor, Long> {
             """, nativeQuery = true)
     List<Visitor> findByTenantOrLandlordOrGuardOrPropertyManagerAndPhoneNumber(@Param("limit") int limit, @Param("offset") long offset, long userId, String phoneNumber);
 
-    @Query("SELECT v FROM Visitor v WHERE v.id=:visitorId AND v.active=true AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId = v.propertyId AND pm.userId = :guardUserId AND pm.roleName=:guardRoleName AND pm.active=true)")
+    @Query("SELECT v FROM Visitor v WHERE v.id=:visitorId AND v.active=true AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=v.propertyId AND pm.userId=:guardUserId AND (pm.roleName=:guardRoleName OR pm.roleName='SECURITY_SUPERVISOR') AND pm.active=true)")
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<Visitor> findByIdAndGuard(long visitorId, long guardUserId, String guardRoleName);
 
