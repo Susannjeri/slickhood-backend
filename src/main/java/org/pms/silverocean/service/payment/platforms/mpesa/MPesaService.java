@@ -251,14 +251,18 @@ public class MPesaService extends PaymentPlatform {
             log.info("Acknowledging duplicate M-Pesa confirmation for transaction {}", payment.getThirdPartyTransId());
             return new MPesaPaymentResponseDTO(MPesaResultCodes.VALID);
         }
-        payment.setStatus(MPesaResultCodes.COMPLETED.getCode());
-        payment.setStatusDesc(MPesaResultCodes.COMPLETED.getDesc());
         payment.setInProgress(false);
-        updatePaymentService.getInvoicePayToIDUsingInvoiceRef(mpesaPaymentDTO.billRefNumber())
-                .ifPresent(invoice -> {
-                    payment.setPayToUserId(invoice.getPayToUserId());
-                    updatePaymentService.setInvoiceToPaid(invoice, payment.getThirdPartyTransId(), payment.getAmount());
-                });
+        Optional<PMSInvoice> invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(mpesaPaymentDTO.billRefNumber());
+        if (invoice.isPresent() && invoice.get().isActive() && payment.getAmount() != null && payment.getAmount() > 0) {
+            payment.setStatus(MPesaResultCodes.COMPLETED.getCode());
+            payment.setStatusDesc(MPesaResultCodes.COMPLETED.getDesc());
+            payment.setPayToUserId(invoice.get().getPayToUserId());
+            updatePaymentService.setInvoiceToPaid(invoice.get(), payment.getThirdPartyTransId(), payment.getAmount());
+        } else {
+            payment.setStatus(MPesaResultCodes.INVALID_ACCOUNT_NUMBER.getCode());
+            payment.setStatusDesc(MPesaResultCodes.INVALID_ACCOUNT_NUMBER.getDesc());
+            log.warn("M-Pesa confirmation rejected for unknown/inactive invoice reference {}", mpesaPaymentDTO.billRefNumber());
+        }
         paymentDao.savePMSPayment(payment);
         eventService.saveEvent(mpesaPaymentDTO, payment.getId());
         return new MPesaPaymentResponseDTO(MPesaResultCodes.VALID);
@@ -276,7 +280,8 @@ public class MPesaService extends PaymentPlatform {
         if (paymentInvoice.isPresent() && paymentInvoice.get().isActive()) {
             PMSInvoice pmsInvoice = paymentInvoice.get();
             validatePayment.setPayToUserId(pmsInvoice.getPayToUserId());
-            if (pmsInvoice.isPaid() || Double.parseDouble(mpesaPaymentDTO.transAmount()) > pmsInvoice.getPendingAmount()) {
+            double amount = Double.parseDouble(mpesaPaymentDTO.transAmount());
+            if (pmsInvoice.isPaid() || amount <= 0 || amount > pmsInvoice.getPendingAmount()) {
                 validatePayment.setStatus(MPesaResultCodes.INVALID_AMOUNT.getCode());
                 validatePayment.setStatusDesc(MPesaResultCodes.INVALID_AMOUNT.getDesc());
                 mPesaPaymentResponseDTO = new MPesaPaymentResponseDTO(MPesaResultCodes.INVALID_AMOUNT);

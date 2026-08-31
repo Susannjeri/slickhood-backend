@@ -70,7 +70,7 @@ public class PesaLinkService extends PaymentPlatform {
     protected PaymentResponse initPayment(PMSInvoice pmsInvoice, long accountId) throws PaymentRequestException {
         pmsInvoice.setTransactionInProgress(false);
         updatePaymentService.updateInvoice(pmsInvoice);
-        return new PaymentResponse(true, ResponseCode.GENERAL_SUCCESS,
+        return new PaymentResponse(true, ResponseCode.PESALINK_INIT_PAYMENT,
                 String.format(i18NService.getLocalizedMessage(ResponseCode.PESALINK_INIT_PAYMENT), pmsInvoice.getRef()));
     }
 
@@ -115,14 +115,18 @@ public class PesaLinkService extends PaymentPlatform {
                 log.info("Acknowledging duplicate PesaLink IPN for transaction {}", payment.getThirdPartyTransId());
                 return new IPNCallbackResponseDTO(ipnCallbackDTO.rrn(), PesalinkStatus.SUCCESS.getStatus());
             }
-            payment.setStatus(PesalinkStatus.SUCCESS.getStatus());
-            payment.setStatusDesc(PesalinkStatus.SUCCESS.getDescription());
             payment.setInProgress(false);
-            updatePaymentService.getInvoicePayToIDUsingInvoiceRef(ipnCallbackDTO.billReference())
-                    .ifPresent(invoice -> {
-                        payment.setPayToUserId(invoice.getPayToUserId());
-                        updatePaymentService.setInvoiceToPaid(invoice, payment.getThirdPartyTransId(), payment.getAmount());
-                    });
+            Optional<PMSInvoice> invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(ipnCallbackDTO.billReference());
+            if (invoice.isPresent() && invoice.get().isActive() && payment.getAmount() != null && payment.getAmount() > 0) {
+                payment.setStatus(PesalinkStatus.SUCCESS.getStatus());
+                payment.setStatusDesc(PesalinkStatus.SUCCESS.getDescription());
+                payment.setPayToUserId(invoice.get().getPayToUserId());
+                updatePaymentService.setInvoiceToPaid(invoice.get(), payment.getThirdPartyTransId(), payment.getAmount());
+            } else {
+                payment.setStatus(PesalinkStatus.INVALID_BILL_REF.getStatus());
+                payment.setStatusDesc(PesalinkStatus.INVALID_BILL_REF.getDescription());
+                log.warn("PesaLink IPN rejected for unknown/inactive invoice reference {}", ipnCallbackDTO.billReference());
+            }
         } else {
             payment.setStatus(PesalinkStatus.INSECURE.getStatus());
             payment.setStatusDesc(PesalinkStatus.INSECURE.getDescription());
@@ -144,7 +148,8 @@ public class PesaLinkService extends PaymentPlatform {
         if (paymentInvoice.isPresent() && paymentInvoice.get().isActive()) {
             PMSInvoice pmsInvoice = paymentInvoice.get();
             validatePayment.setPayToUserId(pmsInvoice.getPayToUserId());
-            if (pmsInvoice.isPaid() || pesalinkValidatePaymentRequestDTO.amount().doubleValue() > pmsInvoice.getPendingAmount()) {
+            double amount = pesalinkValidatePaymentRequestDTO.amount().doubleValue();
+            if (pmsInvoice.isPaid() || amount <= 0 || amount > pmsInvoice.getPendingAmount()) {
                 validatePayment.setStatus(PesalinkStatus.INVALID_AMOUNT.getStatus());
                 validatePayment.setStatusDesc(PesalinkStatus.INVALID_AMOUNT.getDescription());
                 pesalinkValidatePaymentResponseDTO = new PesalinkValidatePaymentResponseDTO(pesalinkValidatePaymentRequestDTO, null, PesalinkStatus.INVALID_AMOUNT);

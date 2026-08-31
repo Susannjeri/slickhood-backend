@@ -1,6 +1,5 @@
 package org.pms.silverocean.service.teamaccess;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -26,9 +25,8 @@ class TeamRoleDefinitionServiceTest {
     @Mock AuditLogService audit;
     @InjectMocks TeamRoleDefinitionService service;
 
-    @BeforeEach void admin() { when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true); }
-
     @Test void superadminCanCreateParameterizedGuardTypeForEstateOnly() {
+        when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
         when(definitions.findByCodeIgnoreCase("DAY_GUARD")).thenReturn(Optional.empty());
         when(users.getUserId()).thenReturn(1L);
         when(definitions.save(any())).thenAnswer(invocation -> { TeamRoleDefinition value = invocation.getArgument(0); value.setId(77L); return value; });
@@ -40,6 +38,7 @@ class TeamRoleDefinitionServiceTest {
     }
 
     @Test void guardTemplateCannotBeExpandedIntoLandlordBusinessArea() {
+        when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
         PMSCustomException exception = assertThrows(PMSCustomException.class, () -> service.create(
                 new TeamAccessModels.RoleDefinitionRequest("LAND_GUARD", "Guard", null, TeamBusinessArea.LANDLORD, TeamMembershipRole.GUARD)));
         assertThat(exception.getResponseCode()).isEqualTo(ResponseCode.INVALID_ROLE);
@@ -47,10 +46,24 @@ class TeamRoleDefinitionServiceTest {
     }
 
     @Test void customerAdministratorCannotCreateUserTypes() {
-        when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(false);
+        when(users.getActiveRole()).thenReturn(PMSRole.WORKSPACE_ADMIN);
         PMSCustomException exception = assertThrows(PMSCustomException.class, () -> service.create(
                 new TeamAccessModels.RoleDefinitionRequest("VIEW_ONLY", "View only", null, TeamBusinessArea.LANDLORD, TeamMembershipRole.VIEWER)));
         assertThat(exception.getResponseCode()).isEqualTo(ResponseCode.FORBIDDEN_ACCESS);
         verify(definitions, never()).save(any());
+    }
+
+    @Test void dormantSuperadminRoleDoesNotAuthorizePlatformRoleChanges() {
+        when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class, service::list);
+
+        assertThat(exception.getResponseCode()).isEqualTo(ResponseCode.FORBIDDEN_ACCESS);
+        verifyNoInteractions(definitions);
+    }
+
+    @Test void everyCustomerTeamTemplateMapsToAnEmployeeRole() {
+        assertThat(TeamMembershipRole.values())
+                .allSatisfy(role -> assertThat(role.platformRole().isCustomerEmployeeRole()).isTrue());
     }
 }

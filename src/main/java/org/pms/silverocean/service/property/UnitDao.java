@@ -291,6 +291,10 @@ public class UnitDao {
         return unitRepo.getAllByUnitIdAndUserIdIsTenant(userId);
     }
 
+    public List<PropertyIdUnitRefPropertyNameProjection> findByUserIdIsResident(long userId) {
+        return unitRepo.getAllByUserIdIsResident(userId);
+    }
+
     public Page<Unit> findAll(Optional<String> ref, Optional<Long> propertyId, Optional<PMSLeaseMode> leaseMode, Long userId, PMSRole activeRole, Pageable pageable) {
         List<Specification<Unit>> specs = createGetUnitSpecification(ref, propertyId, userId, activeRole, leaseMode);
         return specs.isEmpty() ? unitRepo.findAll(pageable) : unitRepo.findAll(Specification.allOf(specs), pageable);
@@ -302,7 +306,11 @@ public class UnitDao {
     }
 
     public Optional<Utility> getUtilities(long id) {
-        return utilitiesCache.getUnchecked(id);
+        return utilitiesCache.getUnchecked(id).filter(Utility::isActive);
+    }
+
+    public Optional<ChargeType> getChargeType(long id) {
+        return chargeTypeCache.getUnchecked(id).filter(ChargeType::isActive);
     }
 
     public void deactivateAllUnitsWithinProperty(long propertyId) {
@@ -322,5 +330,9 @@ public class UnitDao {
 
     public Optional<TenantNameEmailPhoneAndUnitRefProjection> getTenantAndUnitDetailsByUnitId(long unitId, long tenantUserId) {
         return unitRepo.getTenantAndUnitDetailsByUnitId(unitId, tenantUserId);
+    }
+
+    public Optional<Long> findPropertyOwnerId(long unitId) {
+        return unitRepo.findPropertyOwnerId(unitId);
     }
 }

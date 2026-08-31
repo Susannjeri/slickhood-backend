@@ -122,7 +122,9 @@ public class InvoiceService {
         pmsInvoice.setBilledUserId(billedUserId);
         pmsInvoice.setCurrency(currency);
         pmsInvoice.setPropertyId(unit.getPropertyId());
-        pmsInvoice.setPayToUserId(payToUserId == null ? unit.getCreatedBy() : payToUserId);
+        pmsInvoice.setPayToUserId(payToUserId == null
+                ? unitDao.findPropertyOwnerId(unitId).orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND))
+                : payToUserId);
         pmsInvoice.setPaymentAccountId(paymentAccountId);
         pmsInvoice.setActive(true);
         pmsInvoice.setPendingAmount(totalAmount);
@@ -151,6 +153,9 @@ public class InvoiceService {
     private Map<String, Object> compilePDFData(PMSInvoice invoice) {
         Map<String, Object> invoiceData = new HashMap<>();
         invoiceData.put("invoiceRef", invoice.getRef());
+        invoiceData.put("billingType", resolveBillingType(invoice));
+        invoiceData.put("issuerName", resolveIssuerName(invoice));
+        invoiceData.put("issuerType", resolveIssuerType(invoice));
 
         if (StringUtils.isNotBlank(invoice.getSubscriptionPlanCode())) {
             Users billed = userDao.findById(invoice.getBilledUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
@@ -196,6 +201,7 @@ public class InvoiceService {
         invoiceData.put("currency", invoice.getCurrency());
         invoiceData.put("descriptionHtml", new String(invoice.getHtmlDescription()));
         invoiceData.put("totalAmount", invoice.getAmount());
+        invoiceData.put("pendingAmount", invoice.getPendingAmount());
 
         invoiceData.put("isPaid", invoice.isPaid());
         return invoiceData;
@@ -249,31 +255,71 @@ public class InvoiceService {
     private InvoiceDTO mapInvoiceEntityToDTO(PMSInvoice invoice) {
         if (StringUtils.isNotBlank(invoice.getSubscriptionPlanCode())) {
             Users billed = userDao.findById(invoice.getBilledUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
-            return new InvoiceDTO(invoice.getId(), invoice.getCreatedOn(),
-                    "Subscription plan: " + invoice.getSubscriptionPlanCode(), null,
-                    billed.getFullName(), invoice.getRef(),
-                    invoice.getCurrency(), invoice.getAmount(), invoice.isPaid(), invoice.getPaymentAccountId());
+            return buildInvoiceDTO(invoice, "Subscription plan: " + invoice.getSubscriptionPlanCode(),
+                    null, "Subscription", invoice.getSubscriptionPlanCode(), billed.getFullName());
         }
         if ("SOKO".equals(invoice.getBillingType()) || "SERVICE_MARKETPLACE".equals(invoice.getBillingType())) {
             Users billed = userDao.findById(invoice.getBilledUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
             String label = "SERVICE_MARKETPLACE".equals(invoice.getBillingType()) ? "Slickhood service booking" : "Slickhood Soko order";
-            return new InvoiceDTO(invoice.getId(), invoice.getCreatedOn(), label, null,
-                    billed.getFullName(), invoice.getRef(), invoice.getCurrency(), invoice.getAmount(), invoice.isPaid(), invoice.getPaymentAccountId());
+            return buildInvoiceDTO(invoice, label, null,
+                    "SERVICE_MARKETPLACE".equals(invoice.getBillingType()) ? "SlickHood Services" : "SlickHood Soko",
+                    invoice.getRef(), billed.getFullName());
         }
         PropertyNameAddressAndTypeProjection propertyDetails = unitDao.getPropertyDetailsFromUnitId(invoice.getUnitId()).orElseThrow();
         if ("SERVICE_CHARGE".equals(invoice.getBillingType()) || "SALE".equals(invoice.getBillingType()) || "COMMUNITY_FUND".equals(invoice.getBillingType())) {
             Unit unit = unitDao.findById(invoice.getUnitId()).orElseThrow();
             Users billed = userDao.findById(invoice.getBilledUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
-            return new InvoiceDTO(invoice.getId(), invoice.getCreatedOn(), String.format("%s: %s - Unit: %s",
-                    invoice.getBillingType().replace('_', ' '), propertyDetails.getName(), unit.getRef()), invoice.getPropertyId(),
-                    billed.getFullName(), invoice.getRef(), invoice.getCurrency(), invoice.getAmount(), invoice.isPaid(), invoice.getPaymentAccountId());
+            return buildInvoiceDTO(invoice, String.format("%s: %s - Unit: %s",
+                    invoice.getBillingType().replace('_', ' '), propertyDetails.getName(), unit.getRef()),
+                    invoice.getPropertyId(), propertyDetails.getName(), unit.getRef(), billed.getFullName());
         }
         TenantNameEmailPhoneAndUnitRefProjection tenantAndUnit = unitDao.getTenantAndUnitDetailsByUnitId(invoice.getUnitId(), invoice.getBilledUserId()).orElseThrow();
 
-        return new InvoiceDTO(invoice.getId(), invoice.getCreatedOn(), String.format("Property: %s - Unit: %s",
+        return buildInvoiceDTO(invoice, String.format("Property: %s - Unit: %s",
                 propertyDetails.getName(), tenantAndUnit.getUnitRef()), invoice.getPropertyId(),
-                tenantAndUnit.getTenantName(), invoice.getRef(),
-                invoice.getCurrency(), invoice.getAmount(), invoice.isPaid(), invoice.getPaymentAccountId());
+                propertyDetails.getName(), tenantAndUnit.getUnitRef(), tenantAndUnit.getTenantName());
+    }
+
+    private InvoiceDTO buildInvoiceDTO(PMSInvoice invoice, String propertyDetails, Long propertyId,
+                                       String propertyName, String unitRef, String tenantName) {
+        return new InvoiceDTO(invoice.getId(), invoice.getCreatedOn(), propertyDetails, propertyId,
+                propertyName, unitRef, tenantName, invoice.getRef(), invoice.getCurrency(), invoice.getAmount(),
+                invoice.getPendingAmount(), invoice.isPaid(), invoice.getPaymentAccountId(),
+                resolveBillingType(invoice), invoice.getDueDate(), resolveIssuerName(invoice),
+                resolveIssuerType(invoice), isSlickHoodInvoice(invoice) ? "/slicklogo.svg" : null);
+    }
+
+    private String resolveBillingType(PMSInvoice invoice) {
+        if (StringUtils.isNotBlank(invoice.getSubscriptionPlanCode())) return "SUBSCRIPTION";
+        return StringUtils.defaultIfBlank(invoice.getBillingType(), "RENTAL");
+    }
+
+    private String resolveIssuerType(PMSInvoice invoice) {
+        return switch (resolveBillingType(invoice)) {
+            case "SERVICE_CHARGE", "COMMUNITY_FUND" -> "ESTATE_MANAGEMENT";
+            case "SALE" -> "PROPERTY_SALE_MANAGEMENT";
+            case "SOKO" -> "SOKO";
+            case "SERVICE_MARKETPLACE" -> "SERVICES";
+            case "SUBSCRIPTION" -> "SLICKHOOD";
+            default -> "LANDLORD";
+        };
+    }
+
+    private boolean isSlickHoodInvoice(PMSInvoice invoice) {
+        return Set.of("SLICKHOOD", "SOKO", "SERVICES").contains(resolveIssuerType(invoice));
+    }
+
+    private String resolveIssuerName(PMSInvoice invoice) {
+        if (isSlickHoodInvoice(invoice)) {
+            return switch (resolveIssuerType(invoice)) {
+                case "SOKO" -> "SlickHood Soko";
+                case "SERVICES" -> "SlickHood Services";
+                default -> "SlickHood";
+            };
+        }
+        return userDao.findById(invoice.getPayToUserId())
+                .map(user -> StringUtils.defaultIfBlank(user.getOrganizationName(), user.getFullName()))
+                .orElse("SlickHood payment partner");
     }
 
     public AccountSummaryDTO getInvoicePaymentAccount(long invoiceId){
@@ -286,7 +332,14 @@ public class InvoiceService {
     }
 
     public PaymentResponse initInvoicePayment(String invoiceRef, PaymentChannel paymentChannel, String phoneNumber, long accountId) {
-        PMSInvoice invoice = invoiceDao.getInvoiceByRef(invoiceRef).orElseThrow(() -> new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER));
+        if (paymentChannel == PaymentChannel.FLUTTER_WAVE) {
+            throw new PaymentRequestException(ResponseCode.PAYMENT_INITIALIZATION_FAILED);
+        }
+        long userId = userDao.getUserId();
+        PMSInvoice invoice = userDao.hasRole(PMSRole.SUPER_ADMIN)
+                ? invoiceDao.getInvoiceByRef(invoiceRef).orElseThrow(() -> new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER))
+                : invoiceDao.getInvoiceForOwnerOrTenantView(invoiceRef, userId)
+                .orElseThrow(() -> new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER));
         if (invoice.isPaid()) {
             return new PaymentResponse(false, ResponseCode.INVOICE_ALREADY_PAID);
         } else if (!invoice.isActive()) {

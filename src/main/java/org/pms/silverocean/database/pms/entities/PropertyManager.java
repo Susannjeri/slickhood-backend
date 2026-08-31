@@ -15,6 +15,7 @@ import org.pms.silverocean.database.pms.entities.base.BaseActiveEntity;
         @Index(name = "idx_property_manager_userId_role_property", columnList = "userId, roleName, propertyId"),
         @Index(name = "idx_property_manager_userId_property", columnList = "propertyId, userId"),
         @Index(name = "idx_property_manager_userId_active_property", columnList = "userId, active, propertyId"),
+        @Index(name = "idx_property_manager_property_active", columnList = "propertyId, active"),
 })
 @Entity
 @Getter

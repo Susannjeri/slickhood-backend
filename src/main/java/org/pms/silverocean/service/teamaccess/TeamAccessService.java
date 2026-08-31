@@ -62,6 +62,8 @@ public class TeamAccessService {
     @Transactional
     public TeamAccessModels.InvitationView invite(TeamAccessModels.InviteRequest request) {
         AccessContext access = accessContext();
+        CustomerWorkspace lockedWorkspace = workspaces.findLockedByIdAndActiveTrue(access.workspace().getId()).orElseThrow(this::invalid);
+        access = new AccessContext(lockedWorkspace, access.owner(), access.privilegeLevel());
         TeamRoleDefinition definition = roleDefinitions.findByIdAndActiveTrue(request.roleDefinitionId()).orElseThrow(this::invalid);
         if (definition.getBusinessArea() != access.workspace().getBusinessArea()) throw new PMSCustomException(ResponseCode.INVALID_ROLE);
         TeamMembershipRole role = definition.getPermissionTemplate();
@@ -118,12 +120,12 @@ public class TeamAccessService {
     public WorkspaceMembership accept(String rawToken) {
         Users user = users.getUserObject();
         if (user==null) throw new PMSCustomException(ResponseCode.ASSIGNED_ROLE_REGISTRATION_REQUIRED);
-        return acceptForUser(invitation(rawToken), user);
+        return acceptForUser(invitationForUpdate(rawToken), user);
     }
 
     @Transactional
     public void registerInvitedUser(String rawToken, Users user) {
-        WorkspaceInvitation invitation = invitation(rawToken);
+        WorkspaceInvitation invitation = invitationForUpdate(rawToken);
         requireEmail(invitation, user.getEmail());
         Users saved = users.save(user);
         acceptForUser(invitation, saved);
@@ -159,11 +161,9 @@ public class TeamAccessService {
 
     @Transactional
     public void assignNewProperty(long ownerUserId, long propertyId) {
-        for (CustomerWorkspace workspace : workspaces.findAll()) {
-            if (workspace.isActive() && workspace.getOwnerUserId()==ownerUserId) {
-                memberships.findByWorkspaceIdAndStatusAndScopeTypeAndActiveTrue(workspace.getId(), TeamMembershipStatus.ACTIVE, TeamScopeType.ENTIRE_WORKSPACE)
-                        .forEach(member -> addAssignment(member, propertyId));
-            }
+        for (CustomerWorkspace workspace : workspaces.findAllByOwnerUserIdAndActiveTrue(ownerUserId)) {
+            memberships.findByWorkspaceIdAndStatusAndScopeTypeAndActiveTrue(workspace.getId(), TeamMembershipStatus.ACTIVE, TeamScopeType.ENTIRE_WORKSPACE)
+                    .forEach(member -> addAssignment(member, propertyId));
         }
     }
 
@@ -182,10 +182,7 @@ public class TeamAccessService {
     }
 
     private void syncKycStatus(WorkspaceMembership member) {
-        if (member.getStatus()==TeamMembershipStatus.ACTIVE) {
-            if (member.getScopeType()==TeamScopeType.ENTIRE_WORKSPACE) workspaces.findById(member.getWorkspaceId()).ifPresent(w->refreshAssignments(w,member));
-            return;
-        }
+        if (member.getStatus()==TeamMembershipStatus.ACTIVE) return;
         if (!(member.getStatus()==TeamMembershipStatus.ACCEPTED || member.getStatus()==TeamMembershipStatus.KYC_PENDING)) return;
         Users user=users.findById(member.getUserId()).orElse(null); if(user==null)return;
         if(AccountStatus.ACTIVE.name().equals(user.getAccountStatus())) { member.setStatus(TeamMembershipStatus.ACTIVE); member.setActivatedAt(LocalDateTime.now()); memberships.save(member); CustomerWorkspace workspace=workspaces.findById(member.getWorkspaceId()).orElseThrow(this::invalid); refreshAssignments(workspace,member); updateInvitationStatus(member,TeamMembershipStatus.ACTIVE); audit.createAuditLog(member,"workspace_membership_activate"); }
@@ -193,7 +190,7 @@ public class TeamAccessService {
     }
 
     private TeamAccessModels.MemberView changeMemberStatus(long id,TeamMembershipStatus status){AccessContext access=accessContext();WorkspaceMembership member=ownedMember(access,id);requireCanManage(access,member);if(status==TeamMembershipStatus.SUSPENDED)member.setSuspendedAt(LocalDateTime.now());else member.setRevokedAt(LocalDateTime.now());member.setStatus(status);memberships.save(member);deactivateAssignments(member);removePlatformRoleIfUnused(member);updateInvitationStatus(member,status);audit.createAuditLog(member,status==TeamMembershipStatus.SUSPENDED?"workspace_member_suspend":"workspace_member_revoke");return memberView(member);}
-    private void updateInvitationStatus(WorkspaceMembership member,TeamMembershipStatus status){invitations.findByWorkspaceIdAndActiveTrueOrderByCreatedOnDesc(member.getWorkspaceId()).stream().filter(i->Objects.equals(i.getMembershipId(),member.getId())).findFirst().ifPresent(i->{i.setStatus(status);invitations.save(i);});}
+    private void updateInvitationStatus(WorkspaceMembership member,TeamMembershipStatus status){invitations.findFirstByWorkspaceIdAndMembershipIdAndActiveTrue(member.getWorkspaceId(),member.getId()).ifPresent(i->{i.setStatus(status);invitations.save(i);});}
     private void refreshAssignments(CustomerWorkspace workspace,WorkspaceMembership member){deactivateAssignments(member);List<Long>ids=member.getScopeType()==TeamScopeType.ENTIRE_WORKSPACE?properties.findAllByCreatedByAndActiveTrue(workspace.getOwnerUserId()).stream().map(Property::getId).toList():readIds(member.getResourceIdsJson());ids.forEach(id->addAssignment(member,id));}
     private void addAssignment(WorkspaceMembership member,long propertyId){String role=member.getMembershipRole().platformRole().name();if(propertyManagers.findByUserIdAndPropertyIdAndRoleNameAndActiveTrue(member.getUserId(),propertyId,role).isPresent())return;PropertyManager pm=new PropertyManager();pm.setInviteId(-member.getId());pm.setUserId(member.getUserId());pm.setPropertyId(propertyId);pm.setRoleName(role);pm.setActive(true);propertyManagers.save(pm);audit.createAuditLog(pm,"workspace_scope_grant");}
     private void deactivateAssignments(WorkspaceMembership member){propertyManagers.findByInviteIdAndActiveTrue(-member.getId()).forEach(pm->{pm.setActive(false);propertyManagers.save(pm);audit.createAuditLog(pm,"workspace_scope_revoke");});}
@@ -206,6 +203,7 @@ public class TeamAccessService {
     private long seatLimit(CustomerWorkspace workspace){return subscriptions.findTopByCreatedByAndRoleAndStatusAndActiveTrueOrderByStartAtDesc(workspace.getOwnerUserId(),workspace.getBusinessArea().ownerRole(),SubscriptionStatus.ACTIVE).flatMap(s->plans.findByCode(s.getPlanCode())).flatMap(p->quotas.findTopBySubscriptionPlanAndMetricKeyOrderByIdDesc(p,"TEAM_SEATS")).map(PlanQuota::getLimitValue).orElse(1L);}
     private List<Long> validateScope(CustomerWorkspace workspace,TeamScopeType type,List<Long>requested){if(type==TeamScopeType.ENTIRE_WORKSPACE)return List.of();List<Long>ids=requested==null?List.of():requested.stream().distinct().toList();if(ids.isEmpty())throw invalid();List<Property>owned=properties.findAllById(ids).stream().filter(p->p.isActive()&&Objects.equals(p.getCreatedBy(),workspace.getOwnerUserId())).toList();if(owned.size()!=ids.size())throw new PMSCustomException(ResponseCode.PROPERTY_FORBIDDEN_ACCESS);return ids;}
     private WorkspaceInvitation invitation(String raw){WorkspaceInvitation i=invitations.findByTokenHashAndActiveTrue(hash(raw)).orElseThrow(this::invalid);expire(i);return i;}
+    private WorkspaceInvitation invitationForUpdate(String raw){WorkspaceInvitation i=invitations.findLockedByTokenHashAndActiveTrue(hash(raw)).orElseThrow(this::invalid);expire(i);return i;}
     private void expireInvitations(CustomerWorkspace w){invitations.findByWorkspaceIdAndActiveTrueOrderByCreatedOnDesc(w.getId()).forEach(this::expire);}
     private void expire(WorkspaceInvitation i){if(i.getStatus()==TeamMembershipStatus.PENDING&&LocalDateTime.now().isAfter(i.getExpiresAt())){i.setStatus(TeamMembershipStatus.EXPIRED);invitations.save(i);audit.createAuditLog(i,"workspace_invite_expire");}}
     private WorkspaceInvitation ownedInvitation(AccessContext a,long id){return invitations.findByIdAndWorkspaceIdAndActiveTrue(id,a.workspace().getId()).orElseThrow(this::invalid);}

@@ -13,7 +13,7 @@ import java.util.Optional;
 
 public interface UnitTenantRepo extends JpaRepository<UnitTenant, Long> {
 
-    @Query("SELECT ut.id as tenancyId, l.id as leaseId, ut.id as unitID, u.ref as unitRef, p.name as propertyName, ut.leaseAccepted as leaseAccepted, ut.createdOn as requestedOn " +
+    @Query("SELECT ut.id as tenancyId, l.id as leaseId, u.id as unitID, u.ref as unitRef, p.name as propertyName, ut.leaseAccepted as leaseAccepted, ut.createdOn as requestedOn " +
             " FROM UnitTenant ut JOIN Lease l ON ut.id=l.tenantId JOIN Unit u ON ut.unitId=u.id JOIN Property p ON u.propertyId=p.id WHERE p.active AND u.active AND l.active" +
             " AND ut.active AND ut.userId=:userId")
     List<TenancyProjection> findByUserIdAndActiveTrue(long userId);
@@ -37,7 +37,7 @@ public interface UnitTenantRepo extends JpaRepository<UnitTenant, Long> {
     @Query("SELECT u FROM UnitTenant ut JOIN Unit u ON ut.unitId=u.id WHERE ut.id=:tenantId")
     Optional<Unit> findUnitByTenantId(long tenantId);
 
-    @Query("SELECT coalesce(count(u), 0) FROM Unit u JOIN UnitTenant ut ON u.id=ut.unitId JOIN Lease l ON ut.id=l.tenantId WHERE ut.active AND u.active AND l.signed AND l.active AND u.createdBy=:userId")
+    @Query("SELECT coalesce(count(u), 0) FROM Unit u JOIN Property p ON p.id=u.propertyId JOIN UnitTenant ut ON u.id=ut.unitId JOIN Lease l ON ut.id=l.tenantId WHERE ut.active AND u.active AND p.active AND l.signed AND l.active AND p.createdBy=:userId")
     int countTenantsByLandlord(long userId);
 
     @Query("SELECT coalesce(count(ut), 0) FROM PropertyManager pm JOIN Unit u ON pm.propertyId=u.propertyId JOIN UnitTenant ut " +

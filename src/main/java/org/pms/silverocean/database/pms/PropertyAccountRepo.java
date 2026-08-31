@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.Query;
 import java.util.Optional;
 
 public interface PropertyAccountRepo extends JpaRepository<PropertyAccount, Long> {
+    long countByPropertyIdAndActiveTrue(long propertyId);
+
     @Query("SELECT pa FROM PropertyAccount pa WHERE pa.accountId=:accountId and pa.propertyId=:propertyId and pa.active")
     Optional<PropertyAccount> findPropertyAccountByIdAndProperty(long accountId, long propertyId);
 

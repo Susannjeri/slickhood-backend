@@ -8,6 +8,8 @@ import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.database.pms.entities.Visitor;
+import org.pms.silverocean.database.pms.VisitorAccessEventRepo;
+import org.pms.silverocean.database.pms.entities.VisitorAccessEvent;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -22,10 +24,15 @@ import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.wrappers.EnumWrapper;
 import org.pms.silverocean.service.visitor.enums.VisitorCategory;
 import org.pms.silverocean.service.visitor.enums.VisitorStatus;
+import org.pms.silverocean.service.visitor.enums.AccessDirection;
+import org.pms.silverocean.service.visitor.enums.AccessOutcome;
+import org.pms.silverocean.service.visitor.enums.VisitType;
 import org.pms.silverocean.service.visitor.projections.PropertyIdUnitRefPropertyNameProjection;
 import org.pms.silverocean.service.visitor.wrappers.CreateVisitorRequest;
 import org.pms.silverocean.service.visitor.wrappers.VisitorDTO;
+import org.pms.silverocean.service.visitor.wrappers.UpdateVisitorStatusRequest;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +43,8 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Locale;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 @Service
@@ -48,6 +57,7 @@ public class VisitorService {
     private final NotificationService notificationService;
     private final I18NService i18NService;
     private final ConfigService configService;
+    private final VisitorAccessEventRepo accessEventRepo;
 
     private Supplier<ConfigDTO> visitorNotificationChannel;
     private Supplier<ConfigDTO> visitorNotificationEnabled;
@@ -111,7 +121,7 @@ public class VisitorService {
                 .withZoneSameInstant(ZoneId.of("UTC"));
         visitorDao.findByUnitIdAndVisitorPhoneNumberAndVisitingTime(request.unitId(), phone, arrival)
                 .ifPresent(existing -> { throw new PMSCustomException(ResponseCode.VISITOR_REGISTERED); });
-        PropertyIdUnitRefPropertyNameProjection property = visitorDao.checkIfTenantInUnit(request.unitId(), hostUserId)
+        PropertyIdUnitRefPropertyNameProjection property = visitorDao.checkIfResidentInUnit(request.unitId(), hostUserId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
         Visitor visitor = Visitor.getNewVisitorInstance(request, host, phone, property);
         visitor.setPurpose("Soko delivery");
@@ -121,10 +131,15 @@ public class VisitorService {
 
     public List<VisitorDTO> listMyVisitors(Pageable pageable, Optional<String> phoneNumber) {
         long loggedInUserId = userDao.getUserId();
-        List<Visitor> visitors = phoneNumber
-                .map(phone -> phone.startsWith("0") ? phone.substring(1) : phone)
-                .map(s -> visitorDao.findByTenantOrGuardOrLandlordOrPropertyManagerAndPhoneNumber(pageable, loggedInUserId, s))
-                .orElseGet(() -> visitorDao.findByTenantOrGuardOrLandlordOrPropertyManager(pageable, loggedInUserId));
+        Pageable bounded = bounded(pageable);
+        List<Visitor> visitors;
+        if (phoneNumber.filter(StringUtils::isNotBlank).isPresent()) {
+            String normalizedPhone = PMSUtils.getLocalisedPhoneNumber(phoneNumber.get());
+            if (StringUtils.isBlank(normalizedPhone)) return List.of();
+            visitors = visitorDao.findByTenantOrGuardOrLandlordOrPropertyManagerAndPhoneNumber(bounded, loggedInUserId, normalizedPhone);
+        } else {
+            visitors = visitorDao.findByTenantOrGuardOrLandlordOrPropertyManager(bounded, loggedInUserId);
+        }
         return visitors.stream().map(VisitorDTO::new).toList();
     }
 
@@ -132,38 +147,61 @@ public class VisitorService {
         if (!visitorDao.canStaffOrOwnerAccessUnit(unitId, userDao.getUserId())) {
             throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
         }
+        Pageable bounded = bounded(pageable);
         Page<Visitor> visitors = status
-                .map(s -> visitorDao.findByUnitIdAndStatus(pageable, unitId, s.name()))
-                .orElseGet(() -> visitorDao.findByUnitId(pageable, unitId));
+                .map(s -> visitorDao.findByUnitIdAndStatus(bounded, unitId, s.name()))
+                .orElseGet(() -> visitorDao.findByUnitId(bounded, unitId));
         return visitors.map(VisitorDTO::new);
     }
 
     @Transactional
     public void updateVisitorStatus(long visitorId, VisitorStatus newStatus) {
+        updateVisitorStatus(visitorId, new UpdateVisitorStatusRequest(newStatus, null));
+    }
+
+    @Transactional
+    public void updateVisitorStatus(long visitorId, UpdateVisitorStatusRequest request) {
         Users loggedInUser = userDao.getUserObject();
+        if (loggedInUser == null) throw new PMSCustomException(ResponseCode.COULD_NOT_FIND_USER_SESSION);
         Visitor visitor = visitorDao.findByIdAndGuard(visitorId, loggedInUser.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.VISITOR_NOT_FOUND));
 
+        VisitorStatus newStatus = request.status();
         VisitorStatus currentStatus = VisitorStatus.valueOf(visitor.getStatus());
-        if (currentStatus == VisitorStatus.CHECKED_OUT || currentStatus == VisitorStatus.CANCELLED || currentStatus == VisitorStatus.EXPIRED || currentStatus == VisitorStatus.DENIED) {
+        if (currentStatus == VisitorStatus.CANCELLED || currentStatus == VisitorStatus.EXPIRED || currentStatus == VisitorStatus.DENIED || currentStatus == VisitorStatus.DELETED) {
             throw new PMSCustomException(ResponseCode.VISITOR_ALREADY_PROCESSED);
-        } else if(currentStatus == VisitorStatus.CHECKED_IN && newStatus != VisitorStatus.CHECKED_OUT) {
-            throw new PMSCustomException(ResponseCode.VISITOR_INVALID_STATUS);
-        } else if((currentStatus == VisitorStatus.PENDING || currentStatus == VisitorStatus.APPROVED || currentStatus == VisitorStatus.ARRIVED) && newStatus != VisitorStatus.CHECKED_IN) {
+        }
+        boolean entry = newStatus == VisitorStatus.CHECKED_IN && Set.of(
+                VisitorStatus.PENDING, VisitorStatus.APPROVED, VisitorStatus.ARRIVED, VisitorStatus.CHECKED_OUT).contains(currentStatus);
+        boolean exit = newStatus == VisitorStatus.CHECKED_OUT && currentStatus == VisitorStatus.CHECKED_IN;
+        if (!entry && !exit) {
             throw new PMSCustomException(ResponseCode.VISITOR_INVALID_STATUS);
         }
 
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("UTC"));
         if (VisitorStatus.CHECKED_IN == newStatus) {
+            if (visitor.getExpectedArrivalTime() == null) throw new PMSCustomException(ResponseCode.VISITOR_INVALID_STATUS);
+            ZonedDateTime validFrom = visitor.getValidFrom() == null ? visitor.getExpectedArrivalTime().minusHours(2) : visitor.getValidFrom();
+            ZonedDateTime validUntil = visitor.getValidUntil() == null ? visitor.getExpectedArrivalTime().plusHours(8) : visitor.getValidUntil();
+            if (now.isBefore(validFrom) || now.isAfter(validUntil) || visitor.getEntryCount() >= Math.max(1, visitor.getMaxEntries())) {
+                throw new PMSCustomException(ResponseCode.VISITOR_INVALID_STATUS);
+            }
+            if (VisitType.DRIVE_IN.name().equals(visitor.getVisitType()) &&
+                    !normalizePlate(visitor.getVehiclePlate()).equals(normalizePlate(request.vehiclePlate()))) {
+                throw new PMSCustomException(ResponseCode.VISITOR_INVALID_STATUS);
+            }
             visitor.setCheckInGuardName(loggedInUser.getFullName());
-            visitor.setCheckedInAt(ZonedDateTime.now(ZoneId.of("UTC")));
+            visitor.setCheckedInAt(now);
             visitor.setEntryCount(visitor.getEntryCount() + 1);
         } else if (VisitorStatus.CHECKED_OUT == newStatus) {
             visitor.setCheckOutGuardName(loggedInUser.getFullName());
-            visitor.setCheckedOutAt(ZonedDateTime.now(ZoneId.of("UTC")));
+            visitor.setCheckedOutAt(now);
         }
         visitor.setStatus(newStatus.name());
 
         visitorDao.save(visitor, Permission.UPDATE_VISITOR_STATUS);
+        recordStaffedGateEvent(visitor, loggedInUser.getId(), newStatus, request.vehiclePlate(), now);
+        notifyHostIfEnabled(visitor, newStatus, now);
     }
 
     @Transactional
@@ -173,7 +211,7 @@ public class VisitorService {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.VISITOR_NOT_FOUND));
 
         VisitorStatus currentStatus = VisitorStatus.valueOf(visitor.getStatus());
-        if (currentStatus == VisitorStatus.CHECKED_IN || currentStatus == VisitorStatus.CHECKED_OUT) {
+        if (!Set.of(VisitorStatus.PENDING, VisitorStatus.PENDING_APPROVAL, VisitorStatus.APPROVED, VisitorStatus.ARRIVED).contains(currentStatus)) {
             throw new PMSCustomException(ResponseCode.VISITOR_ALREADY_PROCESSED);
         }
 
@@ -187,8 +225,19 @@ public class VisitorService {
         Visitor visitor = visitorDao.findByIdAndCreatedBy(visitorId, createdBy)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.VISITOR_NOT_FOUND));
 
+        if (VisitorStatus.CHECKED_IN.name().equals(visitor.getStatus())) {
+            throw new PMSCustomException(ResponseCode.VISITOR_ALREADY_PROCESSED);
+        }
         visitor.setStatus(VisitorStatus.DELETED.name());
         visitor.setActive(false);
+        visitor.setCredentialHash(null);
+        visitor.setCredentialHint(null);
+        visitor.setVisitorName("Deleted visitor");
+        visitor.setPhoneNumber(null);
+        visitor.setVehiclePlate(null);
+        visitor.setPurpose(null);
+        visitor.setCompanyName(null);
+        visitor.setTrackingNumber(null);
         visitorDao.save(visitor, Permission.DELETE_VISITOR);
     }
 
@@ -252,6 +301,37 @@ public class VisitorService {
             visitorDao.save(visitor, VISITOR_EXPIRY_AUDIT_ACTION);
         });
         return expiredVisitors.size() == batchSize;
+    }
+
+    private Pageable bounded(Pageable pageable) {
+        return PageRequest.of(pageable.getPageNumber(), Math.min(Math.max(pageable.getPageSize(), 1), 100), pageable.getSort());
+    }
+
+    private String normalizePlate(String plate) {
+        return StringUtils.defaultString(plate).replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT);
+    }
+
+    private void recordStaffedGateEvent(Visitor visitor, long guardId, VisitorStatus status, String vehiclePlate, ZonedDateTime now) {
+        VisitorAccessEvent event = new VisitorAccessEvent();
+        event.setVisitorId(visitor.getId());
+        event.setPropertyId(visitor.getPropertyId());
+        event.setSource("STAFFED_GATE");
+        event.setDirection(status == VisitorStatus.CHECKED_IN ? AccessDirection.ENTRY.name() : AccessDirection.EXIT.name());
+        event.setOutcome(AccessOutcome.GRANTED.name());
+        event.setReasonCode("ACCESS_GRANTED");
+        event.setCorrelationId("staff-" + UUID.randomUUID());
+        event.setVehiclePlate(normalizePlate(vehiclePlate));
+        event.setOccurredAt(now);
+        event.setCreatedBy(guardId);
+        event.setActive(true);
+        accessEventRepo.save(event);
+    }
+
+    private void notifyHostIfEnabled(Visitor visitor, VisitorStatus status, ZonedDateTime occurredAt) {
+        if (visitorNotificationEnabled == null || !PMSUtils.booleanizeConfig(visitorNotificationEnabled.get()) || visitor.getHostUserId() == null) return;
+        userDao.findById(visitor.getHostUserId()).ifPresent(host -> sendNotification(
+                status == VisitorStatus.CHECKED_IN ? VisitorNotificationEvent.VISITOR_ARRIVAL : VisitorNotificationEvent.VISITOR_DEPARTURE,
+                host, visitor.getVisitorName(), occurredAt));
     }
 
 

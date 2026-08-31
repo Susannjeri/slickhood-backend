@@ -7,8 +7,9 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.maintenance.MaintenanceModels;
 import org.pms.silverocean.service.maintenance.MaintenanceService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-@RestController @RequestMapping("/maintenance") @RequiredArgsConstructor
+@RestController @RequestMapping("/maintenance") @RequiredArgsConstructor @PreAuthorize("isAuthenticated()")
 public class MaintenanceController {
  private final MaintenanceService service;private final I18NService i18n;
  @PostMapping public ResponseEntity<ResponseDTO> create(@Valid @RequestBody MaintenanceModels.Create request){return ok(service.create(request));}

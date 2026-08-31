@@ -79,4 +79,8 @@ public class InvoiceDao {
     public Optional<PMSInvoice> getInvoiceForOwnerOrTenantView(long invoiceId, long userId) {
         return pmsInvoiceRepo.findInvoiceForOwnerOrTenant(invoiceId, userId);
     }
+
+    public Optional<PMSInvoice> getInvoiceForOwnerOrTenantView(String invoiceRef, long userId) {
+        return pmsInvoiceRepo.findInvoiceForOwnerOrTenantByRef(invoiceRef, userId);
+    }
 }

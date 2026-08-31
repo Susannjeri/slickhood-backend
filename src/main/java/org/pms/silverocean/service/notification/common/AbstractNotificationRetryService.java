@@ -2,7 +2,6 @@ package org.pms.silverocean.service.notification.common;
 
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.pms.silverocean.database.pms.entities.Notification;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationSender;
@@ -38,6 +37,8 @@ public abstract class AbstractNotificationRetryService  implements NotificationS
     @PostConstruct
     public void init() {
         NotificationPoolConfigs configs = getPoolConfigs();
+        this.retryDelayInSeconds = configService.getConfigByName(configs.retryDelayConfig()).get().intValue();
+        this.maxRetries = configService.getConfigByName(configs.maxRetriesConfig()).get().intValue();
         this.retryFailedPool = threadPoolBeans.ioExecutorService(configs.poolName());
         this.senderPool = threadPoolBeans.ioExecutorService("SEND-NOTIFICATION-");
     }
@@ -65,10 +66,25 @@ public abstract class AbstractNotificationRetryService  implements NotificationS
                 });
     }
 
+    @Override
+    public void retry(NotificationDTO notificationDTO, long notificationId) {
+        scheduledRetryOperation(notificationDTO, notificationId);
+    }
+
+    @Override public int retryDelaySeconds() { return retryDelayInSeconds; }
+    @Override public int maxRetries() { return maxRetries; }
+
     private void triggerRetryIfAllowed(NotificationDTO dto, long id) {
         if (dto.notificationType().isRetry()) {
-            retryFailedPool.schedule(() -> scheduledRetryOperation(dto, id),
-                    retryDelayInSeconds, TimeUnit.SECONDS);
+            notificationDao.findById(id).ifPresent(notification -> {
+                if (notification.getRetries() >= maxRetries) {
+                    notificationDao.stopRetry(id);
+                    log.error("Notification {} exhausted its {} delivery retries", id, maxRetries);
+                } else {
+                    retryFailedPool.schedule(() -> scheduledRetryOperation(dto, id),
+                            retryDelayInSeconds, TimeUnit.SECONDS);
+                }
+            });
         }
     }
 
@@ -77,26 +93,14 @@ public abstract class AbstractNotificationRetryService  implements NotificationS
      * a new send attempt using the abstract send method.
      */
     protected void scheduledRetryOperation(NotificationDTO notificationDTO, long notificationId) {
-        notificationDao.findById(notificationId).ifPresent(notification -> {
-            NotificationPoolConfigs configs = getPoolConfigs();
-            if (notification.isRetry() && notification.getRetries() < maxRetries) {
-                updateNotificationRetries(notification);
+        LocalDateTime now = LocalDateTime.now();
+        if (notificationDao.claimRetry(notificationId, now.minusSeconds(retryDelayInSeconds), now, maxRetries)) {
+            notificationDao.findById(notificationId).ifPresent(notification -> {
+                NotificationPoolConfigs configs = getPoolConfigs();
                 log.info("Retrying {} for notification {}", configs.poolName(), notificationId);
-                // Call the service's specific 'send' implementation
                 send(notificationDTO, notification.getId());
-            } else {
-                log.warn("Retry {} for notification {} cancelled after max retries {}", configs.poolName(), notificationId, maxRetries);
-            }
-        });
-    }
-
-    /**
-     * Common logic to increment notification retry count and save.
-     */
-    protected void updateNotificationRetries(Notification notification) {
-        notification.setRetries(notification.getRetries() + 1);
-        notification.setUpdatedOn(LocalDateTime.now());
-        notificationDao.save(notification);
+            });
+        }
     }
 
     protected abstract boolean isRetryableStatusCode(int statusCode);

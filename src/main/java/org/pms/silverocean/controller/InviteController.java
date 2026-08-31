@@ -1,5 +1,6 @@
 package org.pms.silverocean.controller;
 
+import jakarta.validation.Valid;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.InviteLinkDTO;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
@@ -43,7 +44,7 @@ public class InviteController {
 
     @PostMapping("/new")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_INVITE)")
-    public ResponseEntity<ResponseDTO> createInviteLink(@RequestBody InviteLinkDTO inviteLinkDTO) throws URISyntaxException {
+    public ResponseEntity<ResponseDTO> createInviteLink(@Valid @RequestBody InviteLinkDTO inviteLinkDTO) throws URISyntaxException {
         String link = inviteService.createInviteLink(inviteLinkDTO.inviteType(), inviteLinkDTO.entityId());
         return ResponseEntity.created(new URI(link)).body(new ResponseDTO(true, ResponseCode.INVITE_CREATED_SUCCESSFULLY.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.INVITE_CREATED_SUCCESSFULLY), link));
@@ -51,7 +52,7 @@ public class InviteController {
 
     @PostMapping("/share")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SHARE_INVITE)")
-    public ResponseEntity<ResponseDTO> shareInviteLink(@RequestBody ShareInviteDTO shareInviteDTO) {
+    public ResponseEntity<ResponseDTO> shareInviteLink(@Valid @RequestBody ShareInviteDTO shareInviteDTO) {
         inviteService.sendInvite(shareInviteDTO.inviteId(), shareInviteDTO.recipient(), shareInviteDTO.notificationChannel());
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.LINK_SENT_TO_RECIPIENT.getCode(), i18NService.getLocalizedMessage(ResponseCode.LINK_SENT_TO_RECIPIENT)));
 

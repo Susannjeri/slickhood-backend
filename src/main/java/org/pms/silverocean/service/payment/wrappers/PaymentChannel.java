@@ -7,11 +7,16 @@ import java.util.List;
 
 @Getter
 public enum PaymentChannel {
-    MPESA("M-Pesa", "M-Pesa Pay-bill and STK Push Payments", List.of(
+    MPESA("M-Pesa Direct Paybill", "Direct Safaricom M-Pesa Paybill and STK Push payments", List.of(
             new AccountPropertyDefinition(PaymentPropertyKeys.PAYBILL,         "mpesa.paybill",         "mpesa.paybill.description",         false, true),
             new AccountPropertyDefinition(PaymentPropertyKeys.STK_PASSKEY,     "mpesa.stk.passkey",     "mpesa.stk.passkey.description",     true,  false),
             new AccountPropertyDefinition(PaymentPropertyKeys.CONSUMER_KEY,    "mpesa.consumer.key",    "mpesa.consumer.key.description",    true,  false),
             new AccountPropertyDefinition(PaymentPropertyKeys.CONSUMER_SECRET, "mpesa.consumer.secret", "mpesa.consumer.secret.description", true,  false)
+    )),
+    MPESA_BANK("M-Pesa via Bank Paybill", "M-Pesa collected through a bank Paybill and reconciled from the bank callback", List.of(
+            new AccountPropertyDefinition(PaymentPropertyKeys.BANK_PAYBILL, "mpesa.bank.paybill", "mpesa.bank.paybill.description", false, true),
+            new AccountPropertyDefinition(PaymentPropertyKeys.BANK_ACCOUNT, "mpesa.bank.account", "mpesa.bank.account.description", false, true),
+            new AccountPropertyDefinition(PaymentPropertyKeys.BANK_CODE, "mpesa.bank.code", "mpesa.bank.code.description", false, true)
     )),
     FLUTTER_WAVE("Card Payment", "Card Payment via FlutterWave APIs", List.of(
             new AccountPropertyDefinition(PaymentPropertyKeys.SECRET_KEY,     "flutterwave.secret.key",     "flutterwave.secret.key.description",     true, false),

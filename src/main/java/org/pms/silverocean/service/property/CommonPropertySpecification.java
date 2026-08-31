@@ -86,13 +86,13 @@ public class CommonPropertySpecification {
                     cb.equal(saleRoot.get("buyerUserId"), userId), cb.isTrue(saleRoot.get("active"))));
             Predicate buyerPredicate = root.get("id").in(buyerSubquery);
             return switch (activeRole) {
-                case LANDLORD -> createdByPredicate;
+                case LANDLORD, ESTATE_MANAGER, SALES_AGENT -> createdByPredicate;
                 case TENANT -> tenantPredicate;
                 case HOMEOWNER -> homeownerPredicate;
                 case BUYER -> buyerPredicate;
                 case PROPERTY_MANAGER, WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER,
                      ESTATE_OPERATIONS_MANAGER, SECURITY_SUPERVISOR, SALES_COORDINATOR,
-                     LISTING_AGENT, WORKSPACE_VIEWER, ESTATE_MANAGER, SALES_AGENT, GUARD -> staffPredicate;
+                     LISTING_AGENT, WORKSPACE_VIEWER, GUARD -> staffPredicate;
                 default -> cb.disjunction();
             };
         };

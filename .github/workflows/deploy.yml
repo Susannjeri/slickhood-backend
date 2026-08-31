@@ -1,19 +1,20 @@
 name: Build and Deploy PMS to RHEL
 
 on:
-  push:
-    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: slickhood-backend-production
   cancel-in-progress: false
 
-permissions:
-  contents: read
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
 
     steps:
       - name: Checkout Code
@@ -26,11 +27,25 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Run backend unit regression gate
-        run: mvn -B test --file pom.xml
+      - name: Build with Maven
+        run: mvn -B clean verify --file pom.xml
 
-      - name: Package the verified backend
-        run: mvn -B package -DskipTests --file pom.xml
+      - name: Reject destructive or duplicate Flyway migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          destructive="$(grep -Eirl '\b(DROP[[:space:]]+(TABLE|COLUMN|DATABASE)|TRUNCATE[[:space:]]+TABLE|RENAME[[:space:]]+TABLE)\b' src/main/resources/db/migration || true)"
+          unexpected="$(printf '%s\n' "$destructive" | sed '/^$/d' | grep -Fvx -f .github/destructive-migration-allowlist.txt || true)"
+          if [ -n "$unexpected" ]; then
+            printf '%s\n' "$unexpected" >&2
+            echo "Destructive migrations require an explicitly reviewed expand/contract release plan." >&2
+            exit 1
+          fi
+          duplicates="$(find src/main/resources/db/migration -type f -name 'V*__*.sql' -printf '%f\n' | sed -E 's/^V([^_]+)__.*/\1/' | sort | uniq -d)"
+          test -z "$duplicates" || { echo "Duplicate Flyway versions: $duplicates" >&2; exit 1; }
+
+      - name: Create release checksum
+        run: cd target && sha256sum -- *.jar > release.sha256
 
       - name: Copy JAR to EC2
         uses: appleboy/scp-action@v0.1.7
@@ -38,7 +53,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "target/*.jar"
+          source: "target/*.jar,target/release.sha256"
           target: /tmp/slickhood-backend-release
           strip_components: 1
 
@@ -48,8 +63,9 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 10m
           script: |
-            set -e
+            set -eu
             stamp="$(date -u +%Y%m%dT%H%M%SZ)"
             live=/home/silverocean/backend/silverocean-0.0.1-SNAPSHOT.jar
             candidate=/tmp/slickhood-backend-release/silverocean-0.0.1-SNAPSHOT.jar
@@ -70,6 +86,8 @@ jobs:
               exit "$status"
             }
             trap cleanup EXIT
+            cd /tmp/slickhood-backend-release
+            sha256sum -c release.sha256
             test -f "$candidate"
             sudo mkdir -p /home/silverocean/backups
             sudo cp "$live" "$rollback"

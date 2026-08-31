@@ -6,11 +6,16 @@ import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.estate.EstateService;
 import org.pms.silverocean.service.estate.OwnershipRequest;
+import org.pms.silverocean.service.estate.OwnershipTerminationRequest;
 import org.pms.silverocean.service.estate.ServiceChargeRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-import java.time.LocalDate;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.pms.silverocean.service.estate.ServiceChargeView;
+import org.pms.silverocean.service.estate.OwnershipView;
+import java.util.Optional;
 
 @RestController @RequestMapping("/estate")
 public class EstateController {
@@ -19,12 +24,23 @@ public class EstateController {
     @PostMapping("/ownership") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_ESTATE)")
     public ResponseEntity<ResponseDTO> create(@Valid @RequestBody OwnershipRequest request){return ok(ResponseCode.OWNERSHIP_CREATED,service.create(request));}
     @GetMapping("/ownership") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_ESTATE)")
-    public ResponseEntity<ResponseDTO> list(){return ok(ResponseCode.GENERAL_SUCCESS,service.list());}
+    public ResponseEntity<ResponseDTO> list(Pageable pageable, @RequestParam Optional<Long> propertyId,
+                                            @RequestParam Optional<Boolean> active){
+        Page<OwnershipView> ownerships=service.list(pageable,propertyId.orElse(null),active.orElse(null));
+        ResponseDTO body=new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),ownerships.getContent());
+        body.setSize(ownerships.getSize());body.setTotalPages(ownerships.getTotalPages());body.setTotalElements(ownerships.getTotalElements());
+        return ResponseEntity.ok(body);
+    }
     @PostMapping("/ownership/{id}/end") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_ESTATE)")
-    public ResponseEntity<ResponseDTO> end(@PathVariable long id,@RequestParam LocalDate endDate){return ok(ResponseCode.OWNERSHIP_ENDED,service.end(id,endDate));}
+    public ResponseEntity<ResponseDTO> end(@PathVariable long id,@Valid @RequestBody OwnershipTerminationRequest request){return ok(ResponseCode.OWNERSHIP_ENDED,service.end(id,request));}
     @PostMapping("/service-charges") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_SERVICE_CHARGE)")
     public ResponseEntity<ResponseDTO> charge(@Valid @RequestBody ServiceChargeRequest request){return ok(ResponseCode.SERVICE_CHARGE_CREATED,service.createServiceCharge(request));}
     @GetMapping("/service-charges") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SERVICE_CHARGE)")
-    public ResponseEntity<ResponseDTO> charges(){return ok(ResponseCode.GENERAL_SUCCESS,service.listServiceCharges());}
+    public ResponseEntity<ResponseDTO> charges(Pageable pageable,@RequestParam Optional<Long> propertyId){
+        Page<ServiceChargeView> charges=service.listServiceCharges(pageable,propertyId.orElse(null));
+        ResponseDTO body=new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),charges.getContent());
+        body.setSize(charges.getSize());body.setTotalPages(charges.getTotalPages());body.setTotalElements(charges.getTotalElements());
+        return ResponseEntity.ok(body);
+    }
     private ResponseEntity<ResponseDTO> ok(ResponseCode code,Object data){return ResponseEntity.ok(new ResponseDTO(true,code.getCode(),i18n.getLocalizedMessage(code),data));}
 }

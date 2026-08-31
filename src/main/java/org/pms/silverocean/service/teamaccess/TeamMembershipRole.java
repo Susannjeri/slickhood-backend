@@ -18,7 +18,12 @@ public enum TeamMembershipRole {
     VIEWER("Viewer", 10, PMSRole.WORKSPACE_VIEWER, Set.of(TeamBusinessArea.LANDLORD, TeamBusinessArea.ESTATE_MANAGEMENT, TeamBusinessArea.PROPERTY_SALE_MANAGEMENT));
 
     private final String displayName; private final int privilegeLevel; private final PMSRole platformRole; private final Set<TeamBusinessArea> allowedAreas;
-    TeamMembershipRole(String displayName, int privilegeLevel, PMSRole platformRole, Set<TeamBusinessArea> allowedAreas) { this.displayName=displayName; this.privilegeLevel=privilegeLevel; this.platformRole=platformRole; this.allowedAreas=allowedAreas; }
+    TeamMembershipRole(String displayName, int privilegeLevel, PMSRole platformRole, Set<TeamBusinessArea> allowedAreas) {
+        if (!platformRole.isCustomerEmployeeRole()) {
+            throw new IllegalArgumentException("Customer team roles must map only to delegated employee roles");
+        }
+        this.displayName=displayName; this.privilegeLevel=privilegeLevel; this.platformRole=platformRole; this.allowedAreas=allowedAreas;
+    }
     public String displayName() { return displayName; }
     public int privilegeLevel() { return privilegeLevel; }
     public PMSRole platformRole() { return platformRole; }

@@ -8,6 +8,7 @@ import java.util.Optional;
 
 public interface LeaseDocumentTemplateRepo extends JpaRepository<LeaseDocumentTemplate, Long> {
     Optional<LeaseDocumentTemplate> findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType documentType);
+    Optional<LeaseDocumentTemplate> findFirstByDocumentTypeOrderByVersionDesc(LeaseDocumentType documentType);
     List<LeaseDocumentTemplate> findAllByActiveTrueOrderByDocumentTypeAscVersionDesc();
     boolean existsByDocumentTypeAndActiveTrue(LeaseDocumentType documentType);
 }

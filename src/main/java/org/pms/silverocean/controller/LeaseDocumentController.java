@@ -16,6 +16,9 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.web.PageableDefault;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -39,8 +42,8 @@ public class LeaseDocumentController extends OutputStreamErrorHandler {
 
     @GetMapping
     @PreAuthorize("hasAuthority(" + PERMISSION + ".VIEW_LEASE_DOCUMENT)")
-    public ResponseEntity<ResponseDTO> list() {
-        return ok(ResponseCode.GENERAL_SUCCESS, service.list());
+    public ResponseEntity<ResponseDTO> list(@PageableDefault(size = 25, sort = "createdOn", direction = org.springframework.data.domain.Sort.Direction.DESC) Pageable pageable) {
+        return page(service.list(pageable));
     }
 
     @GetMapping("/{id}/pdf")
@@ -91,5 +94,14 @@ public class LeaseDocumentController extends OutputStreamErrorHandler {
 
     private ResponseEntity<ResponseDTO> ok(ResponseCode code, Object data) {
         return ResponseEntity.ok(new ResponseDTO(true, code.getCode(), i18NService.getLocalizedMessage(code), data));
+    }
+
+    private ResponseEntity<ResponseDTO> page(Page<?> values) {
+        ResponseDTO body = new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), values.getContent());
+        body.setSize(values.getSize());
+        body.setTotalPages(values.getTotalPages());
+        body.setTotalElements(values.getTotalElements());
+        return ResponseEntity.ok(body);
     }
 }

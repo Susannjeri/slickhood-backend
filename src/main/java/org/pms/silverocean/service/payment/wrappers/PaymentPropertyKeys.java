@@ -11,6 +11,9 @@ public class PaymentPropertyKeys {
     public static final String CONSUMER_KEY = "consumer_key";
     public static final String CONSUMER_SECRET = "consumer_secret";
 
+    // M-Pesa routed through a bank Paybill
+    public static final String BANK_PAYBILL = "bank_paybill";
+
     // FlutterWave
     public static final String SECRET_KEY = "secret_key";
     public static final String PUBLIC_KEY = "public_key";

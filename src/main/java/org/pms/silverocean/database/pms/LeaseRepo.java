@@ -35,8 +35,10 @@ public interface LeaseRepo extends JpaRepository<Lease, Long> {
     Optional<Lease> findByIdAndTenant(long leaseId, long userId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT l FROM Lease l LEFT JOIN UnitTenant ut ON l.tenantId=ut.id JOIN Unit u ON u.id=ut.unitId LEFT JOIN" +
-            " PropertyManager pm ON pm.propertyId=u.propertyId WHERE (ut.userId=:tenantOrStaffId OR pm.userId=:tenantOrStaffId OR u.createdBy=:tenantOrStaffId) AND l.id=:leaseId AND l.active AND ut.active")
+    @Query("SELECT DISTINCT l FROM Lease l JOIN UnitTenant ut ON l.tenantId=ut.id JOIN Unit u ON u.id=ut.unitId " +
+            "JOIN Property p ON p.id=u.propertyId LEFT JOIN PropertyManager pm ON pm.propertyId=p.id AND pm.active=true " +
+            "WHERE (ut.userId=:tenantOrStaffId OR pm.userId=:tenantOrStaffId OR p.createdBy=:tenantOrStaffId) " +
+            "AND l.id=:leaseId AND l.active AND ut.active AND u.active AND p.active")
     Optional<Lease> findByIdAndTenantOrStaff(long leaseId, long tenantOrStaffId);
 
 
@@ -47,13 +49,13 @@ public interface LeaseRepo extends JpaRepository<Lease, Long> {
                     p.name,
                    p.createdBy,
                      CASE
-                        WHEN ut.userId = u.id THEN 'TENANT'
+                        WHEN ut.userId = :currentUserId THEN 'TENANT'
                         WHEN EXISTS (
                             SELECT 1 FROM PropertyManager pm
                             JOIN Property p ON p.id = pm.propertyId
                             JOIN Unit un ON un.propertyId = p.id
                             WHERE un.id = ut.unitId
-                            AND pm.userId = u.id
+                            AND pm.userId = :currentUserId
                             AND pm.active = true AND p.active = true AND un.active = true
                         ) THEN 'PROPERTY_MANAGER'
                         ELSE 'LANDLORD'
@@ -63,7 +65,7 @@ public interface LeaseRepo extends JpaRepository<Lease, Long> {
                 JOIN UnitTenant ut ON ut.id = l.tenantId
                 JOIN Unit u ON u.id = ut.unitId
                 JOIN Property p ON p.id = u.propertyId
-                WHERE l.id = :leaseId
+                WHERE l.id = :leaseId AND l.active = true AND ut.active = true AND u.active = true AND p.active = true
                 AND (ut.userId = :currentUserId OR EXISTS (
                     SELECT 1 FROM PropertyManager pm
                     WHERE pm.propertyId = p.id AND pm.userId = :currentUserId AND pm.active = true
@@ -72,8 +74,9 @@ public interface LeaseRepo extends JpaRepository<Lease, Long> {
     Optional<LeaseContextDTO> getLeaseProcessingContext(@Param("leaseId") long leaseId, @Param("currentUserId") long currentUserId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT l FROM Lease l JOIN UnitTenant ut ON l.tenantId=ut.id JOIN Unit u ON u.id=ut.unitId LEFT JOIN" +
-            " PropertyManager pm ON pm.propertyId=u.propertyId WHERE (pm.userId=:staffId OR u.createdBy=:staffId) AND l.id=:leaseId AND l.active AND ut.active")
+    @Query("SELECT DISTINCT l FROM Lease l JOIN UnitTenant ut ON l.tenantId=ut.id JOIN Unit u ON u.id=ut.unitId " +
+            "JOIN Property p ON p.id=u.propertyId LEFT JOIN PropertyManager pm ON pm.propertyId=p.id AND pm.active=true " +
+            "WHERE (pm.userId=:staffId OR p.createdBy=:staffId) AND l.id=:leaseId AND l.active AND ut.active AND u.active AND p.active")
     Optional<Lease> findByIdAndStaff(long leaseId, long staffId);
 
     @Query("SELECT l FROM Lease l JOIN UnitTenant ut ON l.tenantId=ut.id JOIN Unit u ON u.id=ut.unitId JOIN Property p ON p.id=u.propertyId WHERE l.id=:leaseId AND l.active AND ut.active AND p.createdBy=:ownerId")
@@ -99,7 +102,21 @@ public interface LeaseRepo extends JpaRepository<Lease, Long> {
     void deactivatePaymentDue(Set<Long> ids);
 
 
-    @Query("SELECT new org.pms.silverocean.service.lease.wrappers.LeaseDTO(l, u.fullName, owner.fullName) FROM Lease l " +
-            "JOIN UnitTenant ut ON l.tenantId=ut.id JOIN Users u ON ut.userId=u.id JOIN Users owner ON l.signedByManagerId=owner.id")
-    Page<LeaseDTO> findAllLease(Pageable pageable);
+    @Query("SELECT DISTINCT new org.pms.silverocean.service.lease.wrappers.LeaseDTO(l, tenant.fullName, owner.fullName) FROM Lease l " +
+            "JOIN UnitTenant ut ON l.tenantId=ut.id JOIN Users tenant ON ut.userId=tenant.id " +
+            "JOIN Unit unit ON unit.id=ut.unitId JOIN Property property ON property.id=unit.propertyId LEFT JOIN Users owner ON l.signedByManagerId=owner.id " +
+            "LEFT JOIN PropertyManager pm ON pm.propertyId=unit.propertyId AND pm.active=true " +
+            "WHERE l.active=true AND ut.active=true AND unit.active=true AND " +
+            "property.active=true AND (:privileged=true OR ut.userId=:userId OR property.createdBy=:userId OR pm.userId=:userId)")
+    Page<LeaseDTO> findAccessibleLeases(long userId, boolean privileged, Pageable pageable);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT l FROM Lease l WHERE l.active=true AND l.lifecycleStatus='NOTICE_GIVEN' " +
+            "AND l.terminationEffectiveDate<=:today ORDER BY l.terminationEffectiveDate,l.id")
+    List<Lease> findTerminationCandidates(LocalDate today, Pageable pageable);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT l FROM Lease l WHERE l.active=true AND l.signed=true AND l.lifecycleStatus='ACTIVE' " +
+            "AND l.moveOutDate<=:today ORDER BY l.moveOutDate,l.id")
+    List<Lease> findExpiryCandidates(LocalDate today, Pageable pageable);
 }

@@ -41,8 +41,11 @@ import org.pms.silverocean.service.property.wrappers.DuplicateUnitJobDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyAccountDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyManagerDetailsDTO;
+import org.pms.silverocean.service.property.wrappers.PropertyUnitTypeCatalogDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyViewDTO;
+import org.pms.silverocean.service.property.wrappers.TypeCatalogOption;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import org.pms.silverocean.service.property.wrappers.UnitTypeCatalogDTO;
 import org.pms.silverocean.service.property.wrappers.UnitTenantProjection;
 import org.pms.silverocean.service.property.wrappers.UtilitiesDTO;
 import org.pms.silverocean.service.threadpooling.PMSThreadPoolExecutorService;
@@ -59,7 +62,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -68,6 +72,7 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -80,6 +85,31 @@ import java.util.stream.Collectors;
 public class PropertyService {
     public static final String SLIDERIMAGES = "sliderimages";
     private static final String IMAGE_UPLOAD_EXECUTOR = "upload-images";
+    private static final List<PMSPropertyType> COMMON_PROPERTY_TYPES = List.of(
+            PMSPropertyType.APARTMENT_BLOCK,
+            PMSPropertyType.STANDALONE_HOUSE,
+            PMSPropertyType.AIRBNB_UNIT,
+            PMSPropertyType.TOWNHOUSE,
+            PMSPropertyType.MAISONETTE,
+            PMSPropertyType.BUNGALOW,
+            PMSPropertyType.SERVICED_APARTMENT,
+            PMSPropertyType.OFFICE_BLOCK_CBD,
+            PMSPropertyType.RETAIL_SHOP,
+            PMSPropertyType.GATED_ESTATE
+    );
+    private static final List<PMSUnitTypes> COMMON_UNIT_TYPES = List.of(
+            PMSUnitTypes.STUDIO,
+            PMSUnitTypes.BEDSITTER,
+            PMSUnitTypes.ONE_BEDROOM,
+            PMSUnitTypes.TWO_BEDROOM,
+            PMSUnitTypes.THREE_BEDROOM,
+            PMSUnitTypes.FOUR_BEDROOM,
+            PMSUnitTypes.FIVE_BEDROOM_PLUS,
+            PMSUnitTypes.ENTIRE_UNIT,
+            PMSUnitTypes.SINGLE_ROOM,
+            PMSUnitTypes.OFFICE_UNIT,
+            PMSUnitTypes.SHOP
+    );
     private final PropertyDao propertyDao;
 
     private final UnitDao unitDao;
@@ -113,6 +143,10 @@ public class PropertyService {
     private int imageWidth;
     @Value("${min.upload.image.height:200}")
     private int imageHeight;
+    @Value("${max.upload.image.bytes:10485760}")
+    private long maxImageBytes;
+    @Value("${max.upload.image.pixels:40000000}")
+    private long maxImagePixels;
 
     @Value("${silverocean.dir}")
     private String appDir;
@@ -133,23 +167,62 @@ public class PropertyService {
     }
 
     public ResponseDTO getSupportedPropertyTypes(String filter) {
-        Set<EnumWrapper> propertyTypes = PMSPropertyType.search(filter, i18NService).stream()
-                .map(type -> new EnumWrapper(type.name(), i18NService.getLocalizedMessage(type.getDisplayNamePlaceHolder()), i18NService.getLocalizedMessage(type.getDescriptionPlaceHolder())))
-                .collect(Collectors.toSet());
+        List<TypeCatalogOption> propertyTypes = PMSPropertyType.search(filter, i18NService).stream()
+                .map(this::propertyTypeOption)
+                .sorted(java.util.Comparator.comparingInt(TypeCatalogOption::displayOrder))
+                .toList();
         return new ResponseDTO(true, ResponseCode.PROPERTY_TYPES.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.PROPERTY_TYPES), propertyTypes);
     }
 
     public ResponseDTO getUnitTypes(PMSPropertyType propertyType) {
-        Set<EnumWrapper> unitTypes = unitTypeDao.getByPropertyType(propertyType).stream()
-                .map(pmsUnitType -> {
-                    return new EnumWrapper(pmsUnitType.name(),
-                            i18NService.getLocalizedMessage(pmsUnitType.getName()),
-                            i18NService.getLocalizedMessage(pmsUnitType.getDescription()));
-                })
-                .collect(Collectors.toSet());
+        List<TypeCatalogOption> unitTypes = unitTypeDao.getByPropertyType(propertyType).stream()
+                .map(this::unitTypeOption)
+                .sorted(java.util.Comparator.comparingInt(TypeCatalogOption::displayOrder))
+                .toList();
         return new ResponseDTO(true, ResponseCode.UNIT_TYPES.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.UNIT_TYPES), unitTypes);
+    }
+
+    public ResponseDTO getUnitTypeCatalog() {
+        List<TypeCatalogOption> allUnitTypes = EnumSet.allOf(PMSUnitTypes.class).stream()
+                .map(this::unitTypeOption)
+                .sorted(java.util.Comparator.comparingInt(TypeCatalogOption::displayOrder))
+                .toList();
+        var configuredCatalog = unitTypeDao.getConfiguredCatalog();
+        List<PropertyUnitTypeCatalogDTO> properties = EnumSet.allOf(PMSPropertyType.class).stream()
+                .map(propertyType -> new PropertyUnitTypeCatalogDTO(
+                        propertyTypeOption(propertyType),
+                        configuredCatalog.getOrDefault(propertyType, Set.of()).stream()
+                                .map(Enum::name).collect(Collectors.toSet())))
+                .sorted(java.util.Comparator.comparingInt(item -> item.propertyType().displayOrder()))
+                .toList();
+        return new ResponseDTO(true, ResponseCode.UNIT_TYPES.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.UNIT_TYPES),
+                new UnitTypeCatalogDTO(properties, allUnitTypes));
+    }
+
+    @Transactional
+    public ResponseDTO updateUnitTypeCatalog(PMSPropertyType propertyType, Set<PMSUnitTypes> unitTypes) {
+        unitTypeDao.replaceMappings(propertyType, unitTypes);
+        return getUnitTypes(propertyType);
+    }
+
+    private TypeCatalogOption propertyTypeOption(PMSPropertyType type) {
+        int commonIndex = COMMON_PROPERTY_TYPES.indexOf(type);
+        int categoryOrder = type.getCategory().ordinal();
+        int order = commonIndex >= 0 ? commonIndex : 100 + (categoryOrder * 100) + type.ordinal();
+        return new TypeCatalogOption(type.name(), i18NService.getLocalizedMessage(type.getDisplayNamePlaceHolder()),
+                i18NService.getLocalizedMessage(type.getDescriptionPlaceHolder()),
+                type.getCategory().name(), order, commonIndex >= 0);
+    }
+
+    private TypeCatalogOption unitTypeOption(PMSUnitTypes type) {
+        int commonIndex = COMMON_UNIT_TYPES.indexOf(type);
+        int order = commonIndex >= 0 ? commonIndex : 100 + type.ordinal();
+        return new TypeCatalogOption(type.name(), i18NService.getLocalizedMessage(type.getName()),
+                i18NService.getLocalizedMessage(type.getDescription()),
+                commonIndex >= 0 ? "COMMON" : "SPECIALISED", order, commonIndex >= 0);
     }
 
     public ResponseDTO getSupportedUtilities() {
@@ -183,6 +256,7 @@ public class PropertyService {
         return new ResponseDTO(true, ResponseCode.MEASUREMENT_UNITS.getCode(), i18NService.getLocalizedMessage(ResponseCode.MEASUREMENT_UNITS), measurementUnits);
     }
 
+    @Transactional
     public ResponseDTO createProperty(PropertyDTO propertyDTO, MultipartFile image) {
         var product = subscriptionEntitlements.sessionBusinessProduct();
         subscriptionEntitlements.requireFeature(product, switch (product) {
@@ -195,31 +269,25 @@ public class PropertyService {
         if (!user.isCompletedProfile()) {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
         }
-        try {
-            Optional<ResponseDTO> imageValidationError = validateImage(image);
-            if (imageValidationError.isPresent()) {
-                return imageValidationError.get();
-            }
-
-            Property property = new Property(propertyDTO);
-            property.setActive(true);
-            property.setCreatedBy(user.getId());
-
-            propertyDao.save(property);
-            property.setRef(PROPERTY_ID_PREFIX + Long.toHexString(property.getId()));
-            savePropertyImage(property, image, false);
-
-            return new ResponseDTO(true, ResponseCode.PROPERTY_CREATION_SUCCESS.getCode(),
-                    i18NService.getLocalizedMessage(ResponseCode.PROPERTY_CREATION_SUCCESS), Set.of(property.getId()));
-        } catch (PMSCustomException e) {
-            log.error(e.getMessage(), e);
-        } catch (IOException e) {
-            log.error("Error reading uploaded image", e);
-            return new ResponseDTO(false,
-                    ResponseCode.INVALID_IMAGE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_IMAGE));
+        Optional<ResponseDTO> imageValidationError = validateImage(image);
+        if (imageValidationError.isPresent()) {
+            return imageValidationError.get();
         }
-        return new ResponseDTO(false, ResponseCode.PROPERTY_CREATION_FAILED_DUPLICATE.getCode(),
-                i18NService.getLocalizedMessage(ResponseCode.PROPERTY_CREATION_FAILED_DUPLICATE));
+
+        Property property = new Property(propertyDTO);
+        property.setActive(true);
+        property.setCreatedBy(user.getId());
+
+        propertyDao.save(property);
+        property.setRef(PROPERTY_ID_PREFIX + Long.toHexString(property.getId()));
+        try {
+            savePropertyImage(property, image);
+        } catch (IOException e) {
+            throw new PMSCustomException(ResponseCode.INVALID_IMAGE, e);
+        }
+
+        return new ResponseDTO(true, ResponseCode.PROPERTY_CREATION_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.PROPERTY_CREATION_SUCCESS), Set.of(property.getId()));
     }
 
     @Transactional
@@ -240,7 +308,7 @@ public class PropertyService {
         }
         try {
             unitDao.save(unit);
-            saveUnitImage(unit, image, false);
+            saveUnitImage(unit, image);
             if (!property.isHasUnits()) {
                 property.setHasUnits(true);
                 propertyDao.update(property);
@@ -248,7 +316,10 @@ public class PropertyService {
             return new ResponseDTO(true, ResponseCode.UNIT_CREATION_SUCCESS.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_SUCCESS), Set.of(unit.getId()));
         } catch (PMSCustomException e) {
-            log.error(e.getMessage(), e);
+            if (e.getResponseCode() != ResponseCode.UNIT_CREATION_FAILED_DUPLICATE) {
+                throw e;
+            }
+            log.info("Duplicate unit reference rejected for property {}", unitDTO.propertyId());
         } catch (IOException e) {
             log.error("Error reading uploaded image", e);
             return new ResponseDTO(false,
@@ -258,11 +329,17 @@ public class PropertyService {
                 i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_FAILED_DUPLICATE));
     }
 
+    @Transactional
     public ResponseDTO updateUnitCharges(@RequestBody UnitChargesDTO unitChargesDTO) {
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitChargesDTO.unitId(), userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitChargesDTO.unitId(), userDao.getUserId());
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
+        }
+        long distinctChargeTypes = unitChargesDTO.charges().stream().map(dto -> dto.chargeId()).distinct().count();
+        boolean invalidChargeType = unitChargesDTO.charges().stream().anyMatch(dto -> unitDao.getChargeType(dto.chargeId()).isEmpty());
+        if (distinctChargeTypes != unitChargesDTO.charges().size() || invalidChargeType) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         }
         Set<UnitCharge> newUnitCharges = unitChargesDTO.charges().stream().map(dto -> {
             UnitCharge unitCharge = new UnitCharge(dto);
@@ -293,7 +370,7 @@ public class PropertyService {
 
     @Transactional
     public ResponseDTO createDuplicateJob(long unitId, int count) {
-        if (count > configService.getConfigByName(PMSConfigs.MAX_UNIT_DUPLICATE_COUNT).get().intValue()) {
+        if (count < 1 || count > configService.getConfigByName(PMSConfigs.MAX_UNIT_DUPLICATE_COUNT).get().intValue()) {
             return new ResponseDTO(false, ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT));
         }
@@ -301,7 +378,7 @@ public class PropertyService {
         long subscriptionOwner = subscriptionEntitlements.subscriptionOwnerUserId();
         subscriptionEntitlements.requireAvailableQuota(product, "UNITS",
                 () -> unitReportDao.countUnitsByOwner(subscriptionOwner), count);
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
         return unitFromDb.map(unit -> {
             BulkUnitJob bulkUnitJob = new BulkUnitJob();
             bulkUnitJob.setUnitId(unit.getId());
@@ -335,8 +412,9 @@ public class PropertyService {
         return new ResponseDTO(true, ResponseCode.CREATE_SIMILAR_UNITS_JOB_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.CREATE_SIMILAR_UNITS_JOB_LIST), count);
     }
 
+    @Transactional
     public ResponseDTO deleteUnit(long unitId) {
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
         return unitFromDb.map(unit -> {
             if (unit.isOccupied()) {
                 unitDao.logDeleteUnitFailure(unit, i18NService.getLocalizedMessage(ResponseCode.UNIT_IS_OCCUPIED));
@@ -347,7 +425,7 @@ public class PropertyService {
             garageService.deletePath(unit.getImagePath(), true);
             int countRemainingUnits = unitDao.countActiveByPropertyId(unit.getPropertyId());
             if (countRemainingUnits < 1) {
-                Property property = propertyDao.findByIdAndCreatedBy(unit.getPropertyId(), unit.getCreatedBy()).orElse(null);
+                Property property = propertyDao.findByIdAndStaffOrOwner(unit.getPropertyId(), userDao.getUserId()).orElse(null);
                 if (property != null) {
                     property.setHasUnits(false);
                     propertyDao.update(property);
@@ -359,8 +437,9 @@ public class PropertyService {
                 i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND)));
     }
 
+    @Transactional
     public ResponseDTO editUnit(long unitId, UnitDTO unitDTO, MultipartFile image) {
-        Optional<Property> targetProperty = propertyDao.findByIdAndCreatedBy(unitDTO.propertyId(), userDao.getUserId());
+        Optional<Property> targetProperty = propertyDao.findByIdAndStaffOrOwner(unitDTO.propertyId(), userDao.getUserId());
         if (targetProperty.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY));
@@ -373,9 +452,15 @@ public class PropertyService {
             }
         }
         Property property = targetProperty.get();
+        if (!isLeaseModeCompatible(property, unitDTO.leaseMode())
+                || !unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()), unitDTO.unitType())
+                || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
+            return new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA));
+        }
 
         //get unit from db
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
@@ -383,7 +468,7 @@ public class PropertyService {
         Unit unit = unitFromDb.get();
         unit.updateFromDto(unitDTO);
         try {
-            saveUnitImage(unit, image, true);
+            saveUnitImage(unit, image);
             unitDao.update(unit);
             if (property != null && !property.isHasUnits()) {
                 property.setHasUnits(true);
@@ -414,11 +499,12 @@ public class PropertyService {
 //                i18NService.getLocalizedMessage(ResponseCode.UNIT_OCCUPATION_STATUS_UPDATED), Set.of(unitId));
 //    }
 
+    @Transactional
     public ResponseDTO advertiseUnit(long unitId) {
         var product = subscriptionEntitlements.sessionBusinessProduct();
         subscriptionEntitlements.requireFeatureOrAddOn(product, "PROPERTY_LISTINGS",
                 org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LISTING_ADDON);
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
@@ -447,30 +533,50 @@ public class PropertyService {
     }
 
     public ResponseDTO uploadUnitSliderImages(long unitId, List<MultipartFile> images) {
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
         }
+        if (images == null || images.isEmpty() || images.size() > 10) {
+            return new ResponseDTO(false, ResponseCode.INVALID_IMAGE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_IMAGE));
+        }
+        List<PendingUnitImage> pendingImages = new ArrayList<>(images.size());
+        long totalBytes = 0;
+        for (int index = 0; index < images.size(); index++) {
+            MultipartFile image = images.get(index);
+            Optional<ResponseDTO> validationResponse = validateImage(image);
+            if (validationResponse.isPresent()) {
+                return validationResponse.get();
+            }
+            totalBytes += image.getSize();
+            if (totalBytes > 50L * 1024 * 1024) {
+                return new ResponseDTO(false, ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED.getCode(),
+                        i18NService.getLocalizedMessage(ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED));
+            }
+            try {
+                String contentType = Objects.toString(image.getContentType(), "image/jpeg").toLowerCase(Locale.ROOT);
+                String extension = imageExtension(contentType);
+                pendingImages.add(new PendingUnitImage("unit-slider-" + (index + 1) + "." + extension, contentType, image.getBytes()));
+            } catch (IOException e) {
+                throw new PMSCustomException(ResponseCode.INVALID_IMAGE, e);
+            }
+        }
         Unit unit = unitFromDb.get();
-        threadPoolExecutorService.submit(() -> processImageUploadsAsync(unit.getCreatedBy(), unit.getPropertyId(), unit.getId(), images));
+        threadPoolExecutorService.submit(() -> processImageUploadsAsync(unit.getCreatedBy(), unit.getPropertyId(), unit.getId(), pendingImages));
         return new ResponseDTO(true, ResponseCode.IMAGES_UPLOADED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.IMAGES_UPLOADED), Set.of(unitId));
     }
 
-    public void processImageUploadsAsync(Long createdBy, Long propertyId, Long unitId, List<MultipartFile> images) {
+    private void processImageUploadsAsync(Long createdBy, Long propertyId, Long unitId, List<PendingUnitImage> images) {
         Path filePath = Paths.get(String.format("%d/%d/%d/%s/", createdBy, propertyId, unitId, SLIDERIMAGES));
 
         try {
             garageService.deletePath(filePath.toString(), true);
 
-            for (MultipartFile image : images) {
-                Optional<ResponseDTO> validationResponse = validateImage(image);
-                if (validationResponse.isEmpty()) {
-                    garageService.uploadFile(filePath.toString(), image);
-                } else {
-                    log.warn("Skipping invalid image: {}", image.getOriginalFilename());
-                }
+            for (PendingUnitImage image : images) {
+                String key = filePath.resolve(image.fileName()).toString().replace('\\', '/');
+                garageService.uploadBytes(key, image.content(), image.contentType());
             }
             log.info("Successfully completed async upload for Unit: {}", unitId);
         } catch (Exception ex) {
@@ -478,6 +584,7 @@ public class PropertyService {
         }
     }
 
+    @Transactional
     public ResponseDTO updateProperty(long propertyId, PropertyDTO propertyDTO, MultipartFile image) {
         Optional<Property> propertyFromDb = propertyDao.findByIdAndCreatedBy(propertyId, userDao.getUserId());
         if (propertyFromDb.isEmpty()) {
@@ -493,55 +600,108 @@ public class PropertyService {
                 if (imageValidationError.isPresent()) {
                     return imageValidationError.get();
                 }
-                savePropertyImage(property, image, true);
+                savePropertyImage(property, image);
             }
             propertyDao.update(property);
             return new ResponseDTO(true, ResponseCode.PROPERTY_UPDATED_SUCCESS.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.PROPERTY_UPDATED_SUCCESS), Set.of(propertyId));
         } catch (IOException e) {
-            log.error("Error reading uploaded image", e);
-            return new ResponseDTO(false,
-                    ResponseCode.INVALID_IMAGE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_IMAGE));
+            throw new PMSCustomException(ResponseCode.INVALID_IMAGE, e);
         }
     }
 
     private Pair<ResponseDTO, Property> validateUnitAndImage(UnitDTO unitDTO, MultipartFile image) {
-        Optional<Property> propertyOptional = propertyDao.findByIdAndCreatedBy(unitDTO.propertyId(), userDao.getUserId());
+        Optional<Property> propertyOptional = propertyDao.findByIdAndStaffOrOwner(unitDTO.propertyId(), userDao.getUserId());
         if (propertyOptional.isEmpty()) {
             return Pair.of(new ResponseDTO(false, ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY)), null);
+        }
+        Property property = propertyOptional.get();
+        if (!isLeaseModeCompatible(property, unitDTO.leaseMode())
+                || !unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()), unitDTO.unitType())
+                || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
+            return Pair.of(new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA)), null);
         }
         Optional<ResponseDTO> imageValidationError = validateImage(image);
         if (imageValidationError.isPresent()) {
             return Pair.of(imageValidationError.get(), null);
         }
-        return Pair.of(null, propertyOptional.get());
+        return Pair.of(null, property);
+    }
+
+    private boolean isLeaseModeCompatible(Property property, PMSLeaseMode leaseMode) {
+        return switch (property.getManagementMode()) {
+            case RENTAL -> leaseMode == PMSLeaseMode.RENT;
+            case SALE -> leaseMode == PMSLeaseMode.SALE;
+            case SERVICE_CHARGE -> leaseMode == PMSLeaseMode.SERVICE_CHARGE;
+        };
     }
 
     private Optional<ResponseDTO> validateImage(MultipartFile image) {
-        try {
-            BufferedImage bufferedImage = ImageIO.read(image.getInputStream());
-            if (bufferedImage == null) {
-                return Optional.of(new ResponseDTO(false,
-                        ResponseCode.INVALID_IMAGE.getCode(),
-                        i18NService.getLocalizedMessage(ResponseCode.INVALID_IMAGE)));
-            }
-
-            int width = bufferedImage.getWidth();
-            int height = bufferedImage.getHeight();
-            if (width < imageWidth || height < imageHeight) {
-                return Optional.of(new ResponseDTO(false,
-                        ResponseCode.IMAGE_TOO_SMALL.getCode(),
-                        String.format(i18NService.getLocalizedMessage(ResponseCode.IMAGE_TOO_SMALL), imageWidth, imageHeight)));
-            }
-
-            return Optional.empty(); // means "valid"
-        } catch (IOException e) {
-            log.error("Error reading uploaded image", e);
-            return Optional.of(new ResponseDTO(false,
-                    ResponseCode.INVALID_IMAGE.getCode(),
-                    i18NService.getLocalizedMessage(ResponseCode.INVALID_IMAGE)));
+        if (image == null || image.isEmpty()) {
+            return imageError(ResponseCode.INVALID_IMAGE);
         }
+        if (image.getSize() > maxImageBytes) {
+            return imageError(ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED);
+        }
+        String declaredContentType = Objects.toString(image.getContentType(), "").toLowerCase(Locale.ROOT);
+        if (!Set.of("image/jpeg", "image/png", "image/webp").contains(declaredContentType)) {
+            return imageError(ResponseCode.INVALID_IMAGE);
+        }
+
+        try {
+            try (ImageInputStream stream = ImageIO.createImageInputStream(image.getInputStream())) {
+                if (stream == null) {
+                    return imageError(ResponseCode.INVALID_IMAGE);
+                }
+                var readers = ImageIO.getImageReaders(stream);
+                if (!readers.hasNext()) {
+                    return imageError(ResponseCode.INVALID_IMAGE);
+                }
+
+                ImageReader reader = readers.next();
+                try {
+                    reader.setInput(stream, true, true);
+                    String format = reader.getFormatName().toLowerCase(Locale.ROOT);
+                    if (!Set.of("jpeg", "jpg", "png", "webp").contains(format)) {
+                        return imageError(ResponseCode.INVALID_IMAGE);
+                    }
+                    boolean contentTypeMatches = switch (format) {
+                        case "jpeg", "jpg" -> "image/jpeg".equals(declaredContentType);
+                        case "png" -> "image/png".equals(declaredContentType);
+                        case "webp" -> "image/webp".equals(declaredContentType);
+                        default -> false;
+                    };
+                    if (!contentTypeMatches) {
+                        return imageError(ResponseCode.INVALID_IMAGE);
+                    }
+
+                    int width = reader.getWidth(0);
+                    int height = reader.getHeight(0);
+                    long pixels = Math.multiplyExact((long) width, (long) height);
+                    if (pixels > maxImagePixels) {
+                        return imageError(ResponseCode.INVALID_IMAGE);
+                    }
+                    if (width < imageWidth || height < imageHeight) {
+                        return Optional.of(new ResponseDTO(false,
+                                ResponseCode.IMAGE_TOO_SMALL.getCode(),
+                                String.format(i18NService.getLocalizedMessage(ResponseCode.IMAGE_TOO_SMALL), imageWidth, imageHeight)));
+                    }
+                } finally {
+                    reader.dispose();
+                }
+            }
+            return Optional.empty();
+        } catch (IOException | ArithmeticException e) {
+            log.error("Error reading uploaded image", e);
+            return imageError(ResponseCode.INVALID_IMAGE);
+        }
+    }
+
+    private Optional<ResponseDTO> imageError(ResponseCode responseCode) {
+        return Optional.of(new ResponseDTO(false, responseCode.getCode(),
+                i18NService.getLocalizedMessage(responseCode)));
     }
 
 
@@ -573,11 +733,11 @@ public class PropertyService {
     private ResponseDTO getPropertyByIdAndOwnerOrStaff(long propertyId) {
         PMSRole activeRole = userDao.getActiveRole();
         Optional<Property> accessible = switch (activeRole) {
-            case LANDLORD -> propertyDao.findByIdAndCreatedBy(propertyId, userDao.getUserId());
+            case LANDLORD, ESTATE_MANAGER, SALES_AGENT -> propertyDao.findByIdAndCreatedBy(propertyId, userDao.getUserId());
             case TENANT -> propertyDao.findByIdAndTenant(propertyId, userDao.getUserId());
             case PROPERTY_MANAGER, WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER,
                  ESTATE_OPERATIONS_MANAGER, SECURITY_SUPERVISOR, SALES_COORDINATOR,
-                 LISTING_AGENT, WORKSPACE_VIEWER, ESTATE_MANAGER, SALES_AGENT, GUARD -> propertyDao.findByIdAndManagerRole(propertyId, userDao.getUserId(), activeRole.name());
+                 LISTING_AGENT, WORKSPACE_VIEWER, GUARD -> propertyDao.findByIdAndManagerRole(propertyId, userDao.getUserId(), activeRole.name());
             case HOMEOWNER -> propertyDao.findByIdAndHomeowner(propertyId, userDao.getUserId());
             case BUYER -> propertyDao.findByIdAndBuyer(propertyId, userDao.getUserId());
             case SUPER_ADMIN -> propertyDao.findById(propertyId).filter(Property::isActive);
@@ -739,6 +899,10 @@ public class PropertyService {
         return unitDao.findByUserIDIsTenant(userDao.getUserId());
     }
 
+    public List<PropertyIdUnitRefPropertyNameProjection> listUnitsByResident() {
+        return unitDao.findByUserIdIsResident(userDao.getUserId());
+    }
+
     public ResponseDTO listUnits(Pageable pageable, Optional<String> unitRef, Optional<Long> propertyId, Optional<Long> unitId, Optional<PMSLeaseMode> leaseMode) {
         if (unitId != null && unitId.isPresent()) {
             return getPropertyUnitByIdAndOwnerOrStaffOrTenant(unitId.get());
@@ -764,13 +928,13 @@ public class PropertyService {
     private ResponseDTO getPropertyUnitByIdAndOwnerOrStaffOrTenant(long unitId) {
         PMSRole activeRole = userDao.getActiveRole();
         Optional<DbUnitDTO> unitFromDb = switch (activeRole) {
-            case LANDLORD -> unitDao.findDTOByIdAndCreatedBy(unitId, userDao.getUserId());
+            case LANDLORD, ESTATE_MANAGER, SALES_AGENT -> unitDao.findDTOByIdAndCreatedBy(unitId, userDao.getUserId());
             case TENANT -> unitDao.findByIdAndTenant(unitId, userDao.getUserId());
             case HOMEOWNER -> unitDao.findByIdAndHomeowner(unitId, userDao.getUserId());
             case BUYER -> unitDao.findByIdAndBuyer(unitId, userDao.getUserId());
             case PROPERTY_MANAGER, WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER,
                  ESTATE_OPERATIONS_MANAGER, SECURITY_SUPERVISOR, SALES_COORDINATOR,
-                 LISTING_AGENT, WORKSPACE_VIEWER, ESTATE_MANAGER, SALES_AGENT, GUARD -> unitDao.findByIdAndManagerRole(unitId, userDao.getUserId(), activeRole.name());
+                 LISTING_AGENT, WORKSPACE_VIEWER, GUARD -> unitDao.findByIdAndManagerRole(unitId, userDao.getUserId(), activeRole.name());
             case SUPER_ADMIN -> unitDao.findById(unitId).filter(Unit::isActive).map(DbUnitDTO::new);
             default -> Optional.empty();
         };
@@ -806,35 +970,39 @@ public class PropertyService {
                 .toList();
     }
 
-    private void savePropertyImage(Property property, MultipartFile image, boolean clearExisting) throws IOException { //unit/erwrwe234242342/sfssf.jpg
+    private void savePropertyImage(Property property, MultipartFile image) throws IOException {
         Path filePath = Paths.get(String.format("%d/%d/", property.getCreatedBy(), property.getId()));
-        if (clearExisting) {
-            garageService.deletePath(filePath.toString(), false);
-        }
-        garageService.uploadFile(filePath.toString(), image);
-        property.setThumbnail(image.getOriginalFilename());
+        String contentType = Objects.toString(image.getContentType(), "image/jpeg").toLowerCase(Locale.ROOT);
+        String extension = imageExtension(contentType);
+        String fileName = "property-cover." + extension;
+        garageService.uploadBytes(filePath.resolve(fileName).toString().replace('\\', '/'), image.getBytes(), contentType);
+        property.setThumbnail(fileName);
         property.setImagePath(filePath.toString());
         propertyDao.update(property);
     }
 
-    private void saveUnitImage(Unit unit, MultipartFile image, boolean clearExisting) throws IOException {
+    private String imageExtension(String contentType) {
+        return switch (contentType) {
+            case "image/png" -> "png";
+            case "image/webp" -> "webp";
+            default -> "jpg";
+        };
+    }
+
+    private void saveUnitImage(Unit unit, MultipartFile image) throws IOException {
         if (image == null || image.getSize() == 0) {
             return;
         }
         Path filePath = Paths.get(String.format("%d/%d/%d/", unit.getCreatedBy(), unit.getPropertyId(), unit.getId()));
-        if (clearExisting) {
-            garageService.deletePath(filePath.toString(), false);
-        }
-
-        try {
-            garageService.uploadFile(filePath.toString(), image);
-        } catch (IOException ex) {
-            throw new PMSCustomException(ResponseCode.GENERAL_FAILURE, ex);
-        }
-        unit.setThumbnail(image.getOriginalFilename());
+        String contentType = Objects.toString(image.getContentType(), "image/jpeg").toLowerCase(Locale.ROOT);
+        String fileName = "unit-cover." + imageExtension(contentType);
+        garageService.uploadBytes(filePath.resolve(fileName).toString().replace('\\', '/'), image.getBytes(), contentType);
+        unit.setThumbnail(fileName);
         unit.setImagePath(filePath.toString());
         unitDao.update(unit);
     }
+
+    private record PendingUnitImage(String fileName, String contentType, byte[] content) {}
 
     private DuplicateUnitJobDTO runDuplicateJob(long unitJob) {
         Optional<BulkUnitJob> activeJobById = unitDao.findActiveJobById(unitJob);
@@ -842,7 +1010,7 @@ public class PropertyService {
             BulkUnitJob bulkUnitJob = activeJobById.get();
 
             log.info("Running Duplicate Job Id: {}", bulkUnitJob.getId());
-            Optional<Unit> byIdAndCreatedBy = unitDao.findByIdAndCreatedBy(bulkUnitJob.getUnitId(), bulkUnitJob.getCreatedBy());
+            Optional<Unit> byIdAndCreatedBy = unitDao.findByIdAndStaffOrOwner(bulkUnitJob.getUnitId(), bulkUnitJob.getCreatedBy());
             int count = bulkUnitJob.getCount();
             if (byIdAndCreatedBy.isPresent()) {
                 Unit unitFromDb = byIdAndCreatedBy.get();
@@ -851,7 +1019,7 @@ public class PropertyService {
                 try {
                     while (count-- > 0) {
                         Unit newUnit = duplicateUnitInstance(unitFromDb);
-                        newUnit.setRef(unitFromDb.getRef() + bulkUnitJob.getId() + count);
+                        newUnit.setRef(unitFromDb.getRef() + "-COPY-" + bulkUnitJob.getId() + "-" + (count + 1));
                         units.add(newUnit);
                     }
 
@@ -861,17 +1029,21 @@ public class PropertyService {
                 } catch (Exception e) {
                     log.error(e.getMessage(), e);
                 } finally {
-                    unitDao.batchUpdate(units);
                     bulkUnitJob.setDescription(i18NService.getLocalizedMessage(jobStatusDescription.getDescription()));
                     bulkUnitJob.setCompleted(true);
                     log.info("Bulk job completed, updating status in db for job id {}", bulkUnitJob.getId());
                     unitDao.updateBulkUnitJob(bulkUnitJob);
                 }
                 return new DuplicateUnitJobDTO(ResponseCode.DUPLICATE_UNIT_JOB_SUCCESS.equals(jobStatusDescription), bulkUnitJob.getEmail());
+            } else {
+                bulkUnitJob.setDescription(i18NService.getLocalizedMessage(ResponseCode.DUPLICATE_UNIT_JOB_FAILED.getDescription()));
+                bulkUnitJob.setCompleted(true);
+                unitDao.updateBulkUnitJob(bulkUnitJob);
+                return new DuplicateUnitJobDTO(false, bulkUnitJob.getEmail());
             }
 
         }
-        return new DuplicateUnitJobDTO(true, null);
+        return new DuplicateUnitJobDTO(false, null);
     }
 
     private Unit duplicateUnitInstance(Unit baseUnit) {

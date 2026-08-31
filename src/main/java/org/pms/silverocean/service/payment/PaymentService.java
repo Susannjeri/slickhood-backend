@@ -16,6 +16,7 @@ import org.pms.silverocean.service.payment.wrappers.PaymentDTO;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class PaymentService {
@@ -48,6 +49,7 @@ public class PaymentService {
                 .map(payment -> new PaymentDTO(payment, i18NService.getLocalizedMessage(payment.getStatusDesc())));
     }
 
+    @Transactional
     public void recordManualPayment(ManualPaymentDTO manualPaymentDTO) {
         Users userObject = userDao.getUserObject();
         PMSInvoice invoice = invoiceDao.getInvoiceByRefForOwnerOrPropertyManager(manualPaymentDTO.invoiceRef(), userObject.getId())
@@ -58,7 +60,7 @@ public class PaymentService {
             throw new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER);
         } else if (invoice.isTransactionInProgress()) {
             throw new PMSCustomException(ResponseCode.TRANSACTION_IN_PROGRESS);
-        } else if (manualPaymentDTO.amount() > invoice.getPendingAmount()) {
+        } else if (manualPaymentDTO.amount() <= 0 || manualPaymentDTO.amount() > invoice.getPendingAmount()) {
             throw new PMSCustomException(ResponseCode.INVALID_AMOUNT);
         }
 

@@ -56,6 +56,20 @@ public class UnitController extends BasePropertyController {
         return ResponseEntity.ok(propertyService.getUnitTypes(propertyType));
     }
 
+    @GetMapping("/type/catalog")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ResponseDTO> getUnitTypeCatalog() {
+        return ResponseEntity.ok(propertyService.getUnitTypeCatalog());
+    }
+
+    @PutMapping("/type/catalog/{propertyType}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ResponseDTO> updateUnitTypeCatalog(
+            @PathVariable PMSPropertyType propertyType,
+            @RequestBody Set<PMSUnitTypes> unitTypes) {
+        return ResponseEntity.ok(propertyService.updateUnitTypeCatalog(propertyType, unitTypes));
+    }
+
 
     @PostMapping("/create")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_UNIT)")
@@ -68,10 +82,10 @@ public class UnitController extends BasePropertyController {
                                                   @RequestParam("utilities") Set<Long> utilities,
                                                   @RequestParam("leaseMode") PMSLeaseMode leaseMode,
                                                   @RequestParam("price") double price,
-                                                  @RequestParam("templateId") Long templateId,
+                                                  @RequestParam("templateId") Optional<Long> templateId,
                                                   @RequestParam("image") MultipartFile image) {
 
-        UnitDTO unitDTO = new UnitDTO(propertyId, ref, unitType, size, new MeasurementUnitsDTO(measurementUnits.getId(), measurementUnits.getName()), utilities, leaseMode, price, currency.orElse(null), templateId);
+        UnitDTO unitDTO = new UnitDTO(propertyId, ref, unitType, size, new MeasurementUnitsDTO(measurementUnits.getId(), measurementUnits.getName()), utilities, leaseMode, price, currency.orElse(null), templateId.orElse(null));
         return handleUnit(unitDTO, propertyService::createUnit, image, HttpStatus.CREATED);
     }
 
@@ -88,9 +102,9 @@ public class UnitController extends BasePropertyController {
                                                 @RequestParam("utilities") Set<Long> utilities,
                                                 @RequestParam("leaseMode") PMSLeaseMode leaseMode,
                                                 @RequestParam("price") double price,
-                                                @RequestParam("templateId") Long templateId,
+                                                @RequestParam("templateId") Optional<Long> templateId,
                                                 @RequestParam("image") Optional<MultipartFile> image) {
-        return handleUnit(new UnitDTO(propertyId, ref, unitType, size, new MeasurementUnitsDTO(measurementUnits.getId(), measurementUnits.getName()), utilities, leaseMode, price, currency.orElse(null), templateId),
+        return handleUnit(new UnitDTO(propertyId, ref, unitType, size, new MeasurementUnitsDTO(measurementUnits.getId(), measurementUnits.getName()), utilities, leaseMode, price, currency.orElse(null), templateId.orElse(null)),
                 (dto, img) -> propertyService.editUnit(unitId, dto, img), image.orElse(null), HttpStatus.OK);
     }
 
@@ -196,6 +210,13 @@ public class UnitController extends BasePropertyController {
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_UNIT)")
     public ResponseEntity<ResponseDTO> getUnitListByTenant() {
         List<PropertyIdUnitRefPropertyNameProjection> unitList = propertyService.listUnitsByTenant();
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.UNIT_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.UNIT_LIST), unitList));
+    }
+
+    @GetMapping("/list/by/resident")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_UNIT)")
+    public ResponseEntity<ResponseDTO> getUnitListByResident() {
+        List<PropertyIdUnitRefPropertyNameProjection> unitList = propertyService.listUnitsByResident();
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.UNIT_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.UNIT_LIST), unitList));
     }
 

@@ -12,10 +12,9 @@ import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.payment.ledger.FinancialLedgerService;
 import org.pms.silverocean.service.payment.platforms.mpesa.TransactionCategory;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
-import org.pms.silverocean.service.security.KeyDao;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -37,15 +36,11 @@ import static org.mockito.Mockito.when;
  * creates and destroys a dedicated MySQL database. With no Docker runtime the suite is explicitly skipped.
  */
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(properties = {
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@DataJpaTest(properties = {
         "spring.flyway.enabled=false",
         "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect",
-        "helpdesk.ai.enabled=false",
-        "lease.documents.legal-review-required=true",
-        "garage.s3.access.key=test-access-key",
-        "garage.s3.secret.key=test-secret-key",
-        "garage.bootstrap.enabled=false"
+        "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect"
 })
 @Transactional
 class RentalPaymentMySqlIT {
@@ -79,7 +74,6 @@ class RentalPaymentMySqlIT {
     @Autowired PMSPaymentRepo payments;
     @Autowired FinancialJournalRepo journals;
     @Autowired FinancialLedgerLineRepo ledgerLines;
-    @MockBean KeyDao keyDao;
 
     @Test
     void realMysqlRepositoriesPersistAndReconcileTheRentalPaymentExactlyOnce() {
@@ -107,6 +101,12 @@ class RentalPaymentMySqlIT {
         unit.setCreatedBy(landlord.getId());
         unit.setActive(true);
         unit = units.saveAndFlush(unit);
+
+        // MySQL rejects SELECT DISTINCT entity queries ordered by a joined column
+        // unless the ordering expression is selected. This exercises the exact
+        // property/unit report query used by the production unit-list endpoint.
+        List<Unit> reportUnits = units.findForReport(landlord.getId(), false, PageRequest.of(0, 20));
+        assertEquals(List.of(unit.getId()), reportUnits.stream().map(Unit::getId).toList());
 
         UnitTenant tenancy = new UnitTenant();
         tenancy.setUnitId(unit.getId());
@@ -186,7 +186,7 @@ class RentalPaymentMySqlIT {
         assertEquals(List.of(payment.getId()), reconciliation.stream().map(PMSPayment::getId).toList());
         List<FinancialLedgerLine> statement = ledgerLines.findForStatement(landlord.getId(), false,
                 ZonedDateTime.now().minusDays(1), ZonedDateTime.now().plusDays(1), PageRequest.of(0, 20));
-        assertEquals(4, statement.size());
+        assertEquals(2, statement.size(), "the landlord statement contains one line from each balanced journal");
         assertEquals(statement.stream().map(FinancialLedgerLine::getDebit).reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add),
                 statement.stream().map(FinancialLedgerLine::getCredit).reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add));
 
