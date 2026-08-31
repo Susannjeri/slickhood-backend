@@ -11,7 +11,8 @@ import java.time.ZonedDateTime;
 @Entity
 @Table(name = "pms_property_ownership", indexes = {
         @Index(name = "idx_ownership_homeowner", columnList = "homeownerUserId, active"),
-        @Index(name = "idx_ownership_property_unit", columnList = "propertyId, unitId, active")})
+        @Index(name = "idx_ownership_property_unit", columnList = "propertyId, unitId, active"),
+        @Index(name = "idx_ownership_property_active", columnList = "propertyId, active")})
 @Getter @Setter @NoArgsConstructor
 public class PropertyOwnership extends BaseCreatorEntity {
     private long propertyId;

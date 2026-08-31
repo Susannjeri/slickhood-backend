@@ -14,6 +14,7 @@ public interface PropertyOwnershipRepo extends JpaRepository<PropertyOwnership, 
     @Query("SELECT o FROM PropertyOwnership o JOIN PropertyManager pm ON pm.propertyId=o.propertyId WHERE pm.userId=:userId AND pm.roleName=:roleName AND pm.active ORDER BY o.createdOn DESC")
     List<PropertyOwnership> findAllByManager(long userId, String roleName);
     long countByHomeownerUserIdAndActiveTrue(long userId);
+    long countByPropertyIdAndActiveTrue(long propertyId);
     List<PropertyOwnership> findAllByPropertyIdAndActiveTrue(long propertyId);
     @Query("SELECT COUNT(o) FROM PropertyOwnership o JOIN PropertyManager pm ON pm.propertyId=o.propertyId WHERE o.active AND pm.active AND pm.userId=:userId AND pm.roleName=:roleName")
     long countActiveByManager(long userId, String roleName);

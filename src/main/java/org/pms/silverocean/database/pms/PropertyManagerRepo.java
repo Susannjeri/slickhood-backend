@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface PropertyManagerRepo extends JpaRepository<PropertyManager, Long> {
+    long countByPropertyIdAndActiveTrue(long propertyId);
     Optional<PropertyManager> findByUserIdAndPropertyIdAndRoleNameAndActiveTrue(long userId, long propertyId, String roleName);
     List<PropertyManager> findByInviteIdAndActiveTrue(long inviteId);
     @Query("SELECT pm.roleName FROM PropertyManager pm WHERE pm.userId=:userId AND pm.propertyId=:propertyId")

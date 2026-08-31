@@ -22,7 +22,8 @@ import java.util.stream.Collectors;
 
 @Table(name = "pms_unit", indexes = {
         @Index(name = "idx_unit_created_by", columnList = "createdBy, active"),
-        @Index(name = "idx_unit_property_id", columnList = "propertyId")
+        @Index(name = "idx_unit_property_id", columnList = "propertyId"),
+        @Index(name = "idx_unit_property_active", columnList = "propertyId, active")
 })
 @Entity
 @Getter
