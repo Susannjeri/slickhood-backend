@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 import org.mockito.ArgumentCaptor;
 
 @ExtendWith(MockitoExtension.class)
@@ -66,6 +67,43 @@ class UserAuthenticationServiceTest {
         assertFalse(response.isSuccess());
         assertEquals(ResponseCode.LOGIN_FAILURE_INVALID_USER.getCode(), response.getCode());
         verify(loginAttemptService).loginFailed("missing@example.com");
+    }
+
+    @Test
+    void loginNormalizesEmailBeforeRateLimitAndLookup() {
+        EmailPasswordDTO request = new EmailPasswordDTO();
+        request.setEmail("  Owner@Example.COM ");
+        request.setPassword("Password1!");
+        when(userDao.findByEmail("owner@example.com")).thenReturn(Optional.empty());
+
+        var response = service.login(request);
+
+        assertFalse(response.isSuccess());
+        assertEquals("owner@example.com", request.getEmail());
+        verify(loginAttemptService).assertLoginAllowed("owner@example.com");
+        verify(loginAttemptService).loginFailed("owner@example.com");
+    }
+
+    @Test
+    void activeUserLoginIssuesJwtAndPersistsRefreshSession() {
+        EmailPasswordDTO request = new EmailPasswordDTO();
+        request.setEmail("owner@example.com");
+        request.setPassword("Password1!");
+        Users active = Users.builder().email("owner@example.com").password("encoded").build();
+        active.setActive(true);
+        when(userDao.findByEmail("owner@example.com")).thenReturn(Optional.of(active));
+        when(passwordEncoder.matches("Password1!", "encoded")).thenReturn(true);
+        when(jwtService.generateJWT("owner@example.com")).thenReturn("signed-jwt");
+
+        var response = service.login(request);
+
+        assertTrue(response.isSuccess());
+        assertEquals(ResponseCode.LOGIN_SUCCESS.getCode(), response.getCode());
+        verify(userDao).save(active);
+        verify(loginAttemptService).loginSuccess("owner@example.com");
+        assertTrue(active.getLastLogin() != null);
+        assertTrue(active.getRefreshToken() != null && !active.getRefreshToken().isBlank());
+        verifyNoInteractions(geoLocationService);
     }
 
     @Test

@@ -167,18 +167,20 @@ public class UserAuthenticationService {
     }
 
     public ResponseDTO login(EmailPasswordDTO emailPasswordDTO) {
-        loginAttemptService.assertLoginAllowed(emailPasswordDTO.getEmail());
+        String normalizedEmail = StringUtils.trimToEmpty(emailPasswordDTO.getEmail()).toLowerCase(Locale.ROOT);
+        emailPasswordDTO.setEmail(normalizedEmail);
+        loginAttemptService.assertLoginAllowed(normalizedEmail);
         Optional<Users> checkIfUserExists;
         try {
-            checkIfUserExists = userDao.findByEmail(emailPasswordDTO.getEmail());
+            checkIfUserExists = userDao.findByEmail(normalizedEmail);
         } catch (Exception e) {
             log.error("Failed running SQL to find user", e);
-            loginAttemptService.loginFailed(emailPasswordDTO.getEmail());
+            loginAttemptService.loginFailed(normalizedEmail);
             return new ResponseDTO(false, ResponseCode.LOAD_USER_ERROR.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOAD_USER_ERROR));
         }
 
         if (checkIfUserExists.isEmpty()) {
-            loginAttemptService.loginFailed(emailPasswordDTO.getEmail());
+            loginAttemptService.loginFailed(normalizedEmail);
             return new ResponseDTO(false, ResponseCode.LOGIN_FAILURE_INVALID_USER.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_FAILURE_INVALID_USER));
         }
         Users users = checkIfUserExists.get();
@@ -188,7 +190,7 @@ public class UserAuthenticationService {
                     return new ResponseDTO(false, ResponseCode.LOGIN_FAILURE_INACTIVE_USER.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_FAILURE_INACTIVE_USER));
                 } else {
                     try {
-                        String message = totpService.generateOTPCode(emailPasswordDTO.getEmail());
+                        String message = totpService.generateOTPCode(normalizedEmail);
                         return new ResponseDTO(true, ResponseCode.EMAIL_OTP_GENERATED.getCode(), i18NService.getLocalizedMessage(ResponseCode.EMAIL_OTP_GENERATED), message);
                     } catch (Exception e) {
                         return new ResponseDTO(false, ResponseCode.LOGIN_FAILURE_VERIFICATION_REQUIRED.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_FAILURE_VERIFICATION_REQUIRED));
@@ -202,12 +204,12 @@ public class UserAuthenticationService {
             users.setLastLogin(ZonedDateTime.now());
             users.setRefreshToken(PMSUtils.hashToken(refreshToken));
             userDao.save(users);
-            loginAttemptService.loginSuccess(emailPasswordDTO.getEmail());
+            loginAttemptService.loginSuccess(normalizedEmail);
             return new ResponseDTO(true, ResponseCode.LOGIN_SUCCESS.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_SUCCESS),
                     new LoginResponseDTO(!PMSUtils.isByteArrayEmpty(users.getTotpSecret()),
                     users.isMfaSetup(), jwtService.generateJWT(users.getEmail()), refreshToken));
         }
-        loginAttemptService.loginFailed(emailPasswordDTO.getEmail());
+        loginAttemptService.loginFailed(normalizedEmail);
         return new ResponseDTO(false, ResponseCode.LOGIN_FAILURE_INCORRECT_PASSWORD.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_FAILURE_INCORRECT_PASSWORD));
     }
 

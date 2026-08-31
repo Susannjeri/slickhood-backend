@@ -4,6 +4,13 @@ on:
   push:
     branches: [ "main", "master" ]
 
+concurrency:
+  group: slickhood-backend-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -41,3 +48,11 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             sudo systemctl restart pms.service
+            for attempt in 1 2 3 4 5 6; do
+              if curl --insecure --fail --silent --show-error https://127.0.0.1:8989/actuator/health | grep -q '"status":"UP"'; then
+                exit 0
+              fi
+              sleep 5
+            done
+            sudo systemctl status pms.service --no-pager
+            exit 1
