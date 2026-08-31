@@ -186,7 +186,7 @@ class RentalPaymentMySqlIT {
         assertEquals(List.of(payment.getId()), reconciliation.stream().map(PMSPayment::getId).toList());
         List<FinancialLedgerLine> statement = ledgerLines.findForStatement(landlord.getId(), false,
                 ZonedDateTime.now().minusDays(1), ZonedDateTime.now().plusDays(1), PageRequest.of(0, 20));
-        assertEquals(4, statement.size());
+        assertEquals(2, statement.size(), "the landlord statement contains one line from each balanced journal");
         assertEquals(statement.stream().map(FinancialLedgerLine::getDebit).reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add),
                 statement.stream().map(FinancialLedgerLine::getCredit).reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add));
 
