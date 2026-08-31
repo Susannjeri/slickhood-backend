@@ -51,7 +51,11 @@ import static org.mockito.Mockito.when;
         "lease.documents.legal-review-required=true",
         "garage.s3.access.key=test-access-key",
         "garage.s3.secret.key=test-secret-key",
-        "garage.bootstrap.enabled=false"
+        "garage.bootstrap.enabled=false",
+        "server.ssl.key-store=test-keystore-not-used-by-mock",
+        "server.ssl.key-store-password=test-password-not-used-by-mock",
+        "server.ssl.key-store-type=PKCS12",
+        "server.ssl.key-store.key-alias=test-alias-not-used-by-mock"
 })
 @Transactional
 class RentalPaymentMySqlIT {
