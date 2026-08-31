@@ -1,12 +1,20 @@
 name: Build and Deploy PMS to RHEL
 
 on:
-  push:
-    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-production
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
 
     steps:
       - name: Checkout Code
@@ -20,7 +28,21 @@ jobs:
           cache: maven
 
       - name: Build with Maven
-        run: mvn -B verify --file pom.xml
+        run: mvn -B clean verify --file pom.xml
+
+      - name: Reject destructive or duplicate Flyway migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Eir '\b(DROP[[:space:]]+(TABLE|COLUMN|DATABASE)|TRUNCATE[[:space:]]+TABLE|RENAME[[:space:]]+TABLE)\b' src/main/resources/db/migration; then
+            echo "Destructive migrations require an explicitly reviewed expand/contract release plan." >&2
+            exit 1
+          fi
+          duplicates="$(find src/main/resources/db/migration -type f -name 'V*__*.sql' -printf '%f\n' | sed -E 's/^V([^_]+)__.*/\1/' | sort | uniq -d)"
+          test -z "$duplicates" || { echo "Duplicate Flyway versions: $duplicates" >&2; exit 1; }
+
+      - name: Create release checksum
+        run: cd target && sha256sum -- *.jar > release.sha256
 
       - name: Copy JAR to EC2
         uses: appleboy/scp-action@v0.1.7
@@ -28,9 +50,8 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "target/*.jar"
-          # Correctly using the secret here
-          target: ${{ secrets.TARGET_DIR }}
+          source: "target/*.jar,target/release.sha256"
+          target: ${{ secrets.TARGET_DIR }}/incoming/${{ github.sha }}
           strip_components: 1
 
       - name: Restart PMS Service
@@ -39,5 +60,36 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 10m
           script: |
+            set -eu
+            target_dir='${{ secrets.TARGET_DIR }}'
+            staged_dir="$target_dir/incoming/${{ github.sha }}"
+            health_url='${{ secrets.BACKEND_HEALTHCHECK_URL }}'
+            test -n "$target_dir" && test -n "$health_url"
+            cd "$staged_dir"
+            sha256sum -c release.sha256
+            set -- ./*.jar
+            test "$#" -eq 1
+            staged_jar="$1"
+            set -- "$target_dir"/*.jar
+            test "$#" -eq 1
+            current_jar="$1"
+            backup_dir="$target_dir/rollback/${{ github.sha }}"
+            mkdir -p "$backup_dir"
+            cp "$current_jar" "$backup_dir/app.jar"
+            cp "$staged_jar" "$current_jar.next"
+            mv "$current_jar.next" "$current_jar"
             sudo systemctl restart pms.service
+            healthy=false
+            for attempt in $(seq 1 20); do
+              if curl --fail --silent --show-error "$health_url" >/dev/null; then healthy=true; break; fi
+              sleep 2
+            done
+            if test "$healthy" != true; then
+              cp "$backup_dir/app.jar" "$current_jar.next"
+              mv "$current_jar.next" "$current_jar"
+              sudo systemctl restart pms.service
+              echo "Health check failed; previous backend artifact restored." >&2
+              exit 1
+            fi
