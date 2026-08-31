@@ -12,7 +12,6 @@ import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
-import org.pms.silverocean.service.auth.roles.RoleService;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.account.enums.AccountCategory;
@@ -52,14 +51,12 @@ public class InvoiceService {
     private final RenderService renderService;
     private final EmailService emailService;
     private final I18NService i18NService;
-    private final RoleService roleService;
-
     private final PaymentPlatformFactory paymentPlatformFactory;
     private static final String INVOICE_TEMPLATE = "invoice";
 
     public InvoiceService(InvoiceDao invoiceDao, UnitDao unitDao, UserDao userDao, AccountDao accountDao,
                           RenderService renderService, @Qualifier("EMAIL") EmailService emailService,
-                          I18NService i18NService, RoleService roleService,
+                          I18NService i18NService,
                           PaymentPlatformFactory paymentPlatformFactory) {
         this.invoiceDao = invoiceDao;
         this.unitDao = unitDao;
@@ -68,7 +65,6 @@ public class InvoiceService {
         this.renderService = renderService;
         this.emailService = emailService;
         this.i18NService = i18NService;
-        this.roleService = roleService;
         this.paymentPlatformFactory = paymentPlatformFactory;
     }
 

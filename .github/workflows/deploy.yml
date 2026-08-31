@@ -71,17 +71,32 @@ jobs:
             candidate=/tmp/slickhood-backend-release/silverocean-0.0.1-SNAPSHOT.jar
             rollback="/home/silverocean/backups/backend-$stamp.jar"
             installed=false
+            wait_for_health() {
+              for attempt in $(seq 1 36); do
+                if curl --insecure --fail --silent --show-error https://127.0.0.1:8989/actuator/health | grep -q '"status":"UP"'; then
+                  return 0
+                fi
+                sleep 5
+              done
+              return 1
+            }
             restore_previous_release() {
-              if [ "$installed" = "true" ] && [ -f "$rollback" ]; then
+              if [ "$installed" = "true" ] && sudo test -f "$rollback"; then
                 sudo install -o silverocean -g silverocean -m 0644 "$rollback" "$live"
-                sudo systemctl restart pms.service || true
+                sudo systemctl restart pms.service
+                if ! wait_for_health; then
+                  echo "Rollback release failed to become healthy" >&2
+                  sudo systemctl status pms.service --no-pager || true
+                  return 1
+                fi
+                echo "Previous release restored and healthy"
               fi
             }
             cleanup() {
               status=$?
               trap - EXIT
               if [ "$status" -ne 0 ]; then
-                restore_previous_release
+                restore_previous_release || status=1
               fi
               exit "$status"
             }
@@ -94,12 +109,9 @@ jobs:
             sudo install -o silverocean -g silverocean -m 0644 "$candidate" "$live"
             installed=true
             sudo systemctl restart pms.service
-            for attempt in 1 2 3 4 5 6; do
-              if curl --insecure --fail --silent --show-error https://127.0.0.1:8989/actuator/health | grep -q '"status":"UP"'; then
-                installed=false
-                exit 0
-              fi
-              sleep 5
-            done
+            if wait_for_health; then
+              installed=false
+              exit 0
+            fi
             sudo systemctl status pms.service --no-pager || true
             exit 1
