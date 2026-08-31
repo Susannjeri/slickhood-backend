@@ -6,6 +6,7 @@ import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.SokoOrderItemRepo;
 import org.pms.silverocean.database.pms.SokoOrderRepo;
 import org.pms.silverocean.database.pms.SokoProductRepo;
+import org.pms.silverocean.database.pms.SokoProductImageRepo;
 import org.pms.silverocean.database.pms.SokoRiderRepo;
 import org.pms.silverocean.database.pms.SokoStoreRepo;
 import org.pms.silverocean.database.pms.entities.PMSInvoice;
@@ -13,6 +14,7 @@ import org.pms.silverocean.database.pms.entities.PaymentAccount;
 import org.pms.silverocean.database.pms.entities.SokoOrder;
 import org.pms.silverocean.database.pms.entities.SokoOrderItem;
 import org.pms.silverocean.database.pms.entities.SokoProduct;
+import org.pms.silverocean.database.pms.entities.SokoProductImage;
 import org.pms.silverocean.database.pms.entities.SokoRider;
 import org.pms.silverocean.database.pms.entities.SokoStore;
 import org.pms.silverocean.service.PMSCustomException;
@@ -21,6 +23,7 @@ import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
+import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.soko.SokoModels.CatalogProduct;
 import org.pms.silverocean.service.soko.SokoModels.OrderDetail;
 import org.pms.silverocean.service.soko.SokoModels.StoreDetail;
@@ -33,9 +36,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
+import java.io.IOException;
 import java.security.SecureRandom;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -46,6 +52,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -54,6 +61,7 @@ public class SokoService {
     private static final SecureRandom SECURE_RANDOM=new SecureRandom();
     private final SokoStoreRepo storeRepo;
     private final SokoProductRepo productRepo;
+    private final SokoProductImageRepo productImageRepo;
     private final SokoOrderRepo orderRepo;
     private final SokoOrderItemRepo itemRepo;
     private final SokoRiderRepo riderRepo;
@@ -61,17 +69,20 @@ public class SokoService {
     private final AccountDao accountDao;
     private final UserDao userDao;
     private final VisitorService visitorService;
+    private final GarageService garageService;
     @Value("${soko.stock-reservation-minutes:20}") private long reservationMinutes;
 
     public Page<CatalogProduct> catalog(Pageable pageable, Long storeId, String category, String query, Double latitude, Double longitude, Double radiusKm) {
         String cleanCategory=StringUtils.trimToNull(category), cleanQuery=StringUtils.trimToNull(query);
         GeoBounds bounds=GeoBounds.of(latitude,longitude,radiusKm);
         Page<SokoProduct> page=productRepo.searchCatalog(pageable,storeId,cleanCategory,cleanQuery,latitude,longitude,bounds.minLat(),bounds.maxLat(),bounds.minLng(),bounds.maxLng());
+        List<Long> productIds=page.stream().map(SokoProduct::getId).toList();
+        Map<Long,List<String>> images=imageUrlsByProduct(productIds);
         Map<Long,SokoStore> stores=storeRepo.findAllById(page.stream().map(SokoProduct::getStoreId).distinct().toList())
                 .stream().collect(Collectors.toMap(SokoStore::getId, Function.identity()));
         return page.map(p->{
             SokoStore s=stores.get(p.getStoreId());
-            return new CatalogProduct(p,s==null?"Soko merchant":s.getName(),s!=null&&s.isDeliveryEnabled(),s!=null&&s.isPickupEnabled(),s==null?null:distanceKm(latitude,longitude,s.getLatitude(),s.getLongitude()));
+            return new CatalogProduct(p,s==null?"Soko merchant":s.getName(),s!=null&&s.isDeliveryEnabled(),s!=null&&s.isPickupEnabled(),s==null?null:distanceKm(latitude,longitude,s.getLatitude(),s.getLongitude()),images.getOrDefault(p.getId(),legacyImage(p)));
         });
     }
 
@@ -112,10 +123,50 @@ public class SokoService {
 
     @Transactional
     public SokoProduct publishProduct(long id){
-        SokoProduct p=productRepo.findById(id).orElseThrow(this::notFound); ownedStore(p.getStoreId()); p.setStatus(p.getStockQuantity()>0?PUBLISHED:OUT_OF_STOCK); return productRepo.save(p);
+        SokoProduct p=productRepo.findById(id).orElseThrow(this::notFound); ownedStore(p.getStoreId());
+        if(StringUtils.isBlank(p.getImageUrl())&&productImageRepo.findAllByProductIdAndActiveTrueOrderByDisplayOrderAsc(id).isEmpty())throw new PMSCustomException(ResponseCode.INVALID_IMAGE);
+        p.setStatus(p.getStockQuantity()>0?PUBLISHED:OUT_OF_STOCK); return productRepo.save(p);
     }
 
     public List<SokoProduct> myProducts(long storeId){ownedStore(storeId);return productRepo.findAllByStoreIdAndActiveTrueOrderByName(storeId);}
+
+    @Transactional
+    public SokoModels.ProductImages replaceProductImages(long productId, List<MultipartFile> images) throws IOException {
+        SokoProduct product=productRepo.findById(productId).orElseThrow(this::notFound);
+        ownedStore(product.getStoreId());
+        if(images==null||images.isEmpty()||images.size()>5)throw new PMSCustomException(ResponseCode.INVALID_IMAGE);
+        List<PendingImage> pending=new ArrayList<>(images.size());
+        long total=0;
+        for(MultipartFile image:images){
+            byte[] bytes=validatedImageBytes(image);
+            total+=bytes.length;
+            if(total>25L*1024*1024)throw new PMSCustomException(ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED);
+            String type=image.getContentType().toLowerCase(Locale.ROOT);
+            pending.add(new PendingImage(bytes,type,imageExtension(type)));
+        }
+        String prefix="soko/products/"+productId+"/"+UUID.randomUUID()+"/";
+        List<SokoProductImage> existing=productImageRepo.findAllByProductIdAndActiveTrueOrderByDisplayOrderAsc(productId);
+        existing.forEach(i->i.setActive(false));
+        productImageRepo.saveAll(existing);
+        List<SokoProductImage> saved=new ArrayList<>();
+        for(int i=0;i<pending.size();i++){
+            PendingImage image=pending.get(i); String key=prefix+UUID.randomUUID()+"."+image.extension();
+            garageService.uploadBytes(key,image.bytes(),image.contentType());
+            SokoProductImage row=new SokoProductImage();row.setProductId(productId);row.setFileRef(key);row.setContentType(image.contentType());row.setFileSize(image.bytes().length);row.setDisplayOrder(i);row.setCreatedBy(userDao.getUserId());row.setActive(true);saved.add(row);
+        }
+        productImageRepo.saveAll(saved);
+        product.setImageUrl(null);
+        productRepo.save(product);
+        return productImages(productId);
+    }
+
+    public SokoModels.ProductImages productImages(long productId){
+        SokoProduct product=productRepo.findById(productId).orElseThrow(this::notFound);
+        if(!PUBLISHED.equals(product.getStatus()))ownedStore(product.getStoreId());
+        List<String> urls=productImageRepo.findAllByProductIdAndActiveTrueOrderByDisplayOrderAsc(productId).stream().map(i->garageService.getPresignedUrlForStoredObject(i.getFileRef())).filter(StringUtils::isNotBlank).toList();
+        if(urls.isEmpty())urls=legacyImage(product);
+        return new SokoModels.ProductImages(productId,urls);
+    }
 
     @Transactional
     public SokoRider createRider(SokoRequests.RiderUpsert request){
@@ -187,7 +238,13 @@ public class SokoService {
     @Scheduled(fixedDelayString="${soko.reservation-expiry-scan-ms:300000}") @Transactional public void expireReservations(){for(SokoOrder o:orderRepo.findExpiredReservations(now())){restoreStock(o);o.setStatus("EXPIRED");o.setCancelledAt(now());o.setCancellationReason("Payment reservation expired");orderRepo.save(o);}}
 
     private void applyStore(SokoStore s,SokoRequests.StoreUpsert r){s.setName(r.name().trim());s.setDescription(StringUtils.trimToNull(r.description()));s.setPhoneNumber(StringUtils.trimToNull(r.phoneNumber()));s.setAddress(StringUtils.trimToNull(r.address()));s.setLatitude(r.latitude());s.setLongitude(r.longitude());s.setServiceRadiusKm(r.serviceRadiusKm()==null?BigDecimal.valueOf(25):r.serviceRadiusKm());s.setPickupEnabled(r.pickupEnabled());s.setDeliveryEnabled(r.deliveryEnabled());s.setDeliveryFee(zero(r.deliveryFee()));s.setCurrency(r.currency().trim().toUpperCase(Locale.ROOT));s.setPaymentAccountId(r.paymentAccountId());if(!s.isPickupEnabled()&&!s.isDeliveryEnabled())throw invalid();if((s.getLatitude()==null)!=(s.getLongitude()==null))throw invalid();}
-    private void applyProduct(SokoProduct p,SokoRequests.ProductUpsert r,SokoStore store){p.setName(r.name().trim());p.setDescription(StringUtils.trimToNull(r.description()));p.setCategory(r.category().trim());p.setUnit(r.unit().trim());p.setPrice(r.price());p.setCurrency(store.getCurrency());p.setStockQuantity(r.stockQuantity());p.setImageUrl(StringUtils.trimToNull(r.imageUrl()));if(OUT_OF_STOCK.equals(p.getStatus())&&p.getStockQuantity()>0)p.setStatus(DRAFT);}
+    private void applyProduct(SokoProduct p,SokoRequests.ProductUpsert r,SokoStore store){p.setName(r.name().trim());p.setDescription(StringUtils.trimToNull(r.description()));p.setCategory(r.category().trim());p.setUnit(r.unit().trim());p.setPrice(r.price());p.setCurrency(store.getCurrency());p.setStockQuantity(r.stockQuantity());p.setImageUrl(safeLegacyImageUrl(r.imageUrl()));if(OUT_OF_STOCK.equals(p.getStatus())&&p.getStockQuantity()>0)p.setStatus(DRAFT);}
+    private Map<Long,List<String>> imageUrlsByProduct(List<Long> ids){if(ids.isEmpty())return Map.of();return productImageRepo.findAllByProductIdInAndActiveTrueOrderByProductIdAscDisplayOrderAsc(ids).stream().collect(Collectors.groupingBy(SokoProductImage::getProductId,Collectors.mapping(i->garageService.getPresignedUrlForStoredObject(i.getFileRef()),Collectors.toList())));}
+    private List<String> legacyImage(SokoProduct product){return StringUtils.isBlank(product.getImageUrl())?List.of():List.of(product.getImageUrl());}
+    private String safeLegacyImageUrl(String value){String clean=StringUtils.trimToNull(value);if(clean==null)return null;try{URI uri=URI.create(clean);if(!"https".equalsIgnoreCase(uri.getScheme())||StringUtils.isBlank(uri.getHost()))throw invalid();return clean;}catch(IllegalArgumentException ex){throw invalid();}}
+    private byte[] validatedImageBytes(MultipartFile image)throws IOException{if(image==null||image.isEmpty())throw new PMSCustomException(ResponseCode.INVALID_IMAGE);if(image.getSize()>8L*1024*1024)throw new PMSCustomException(ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED);String type=StringUtils.defaultString(image.getContentType()).toLowerCase(Locale.ROOT);if(!Set.of("image/jpeg","image/png","image/webp").contains(type))throw new PMSCustomException(ResponseCode.INVALID_IMAGE);byte[] b=image.getBytes();boolean valid=switch(type){case "image/jpeg"->b.length>3&&(b[0]&255)==0xff&&(b[1]&255)==0xd8;case "image/png"->b.length>8&&(b[0]&255)==0x89&&b[1]=='P'&&b[2]=='N'&&b[3]=='G';case "image/webp"->b.length>12&&b[0]=='R'&&b[1]=='I'&&b[2]=='F'&&b[3]=='F'&&b[8]=='W'&&b[9]=='E'&&b[10]=='B'&&b[11]=='P';default->false;};if(!valid)throw new PMSCustomException(ResponseCode.INVALID_IMAGE);return b;}
+    private String imageExtension(String type){return switch(type){case "image/png"->"png";case "image/webp"->"webp";default->"jpg";};}
+    private record PendingImage(byte[] bytes,String contentType,String extension){}
     private void applyRider(SokoRider rider,SokoRequests.RiderUpsert r){String type=r.riderType().trim().toUpperCase(Locale.ROOT);if(!List.of("INDIVIDUAL","DELIVERY_COMPANY").contains(type))throw invalid();rider.setRiderType(type);rider.setDisplayName(r.displayName().trim());rider.setPhoneNumber(r.phoneNumber().trim());rider.setEmail(StringUtils.trimToNull(r.email()));rider.setVehicleType(StringUtils.trimToNull(r.vehicleType()));rider.setVehiclePlate(StringUtils.trimToNull(r.vehiclePlate()));rider.setNotes(StringUtils.trimToNull(r.notes()));}
     private void validatePublishable(SokoStore s){if(s.getPaymentAccountId()==null)throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);PaymentAccount a=accountDao.getAccountByIdAndCreatedBy(s.getPaymentAccountId(),s.getOwnerUserId());if(!a.isVerified()||!a.isActive()||a.getCategory()==AccountCategory.SLICKHOOD)throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);}
     private void validateDelivery(SokoStore s,SokoRequests.Checkout r){if("DELIVERY".equalsIgnoreCase(r.deliveryMethod())){if(!s.isDeliveryEnabled()||StringUtils.isBlank(r.deliveryAddress()))throw invalid();}else if("PICKUP".equalsIgnoreCase(r.deliveryMethod())){if(!s.isPickupEnabled())throw invalid();}else throw invalid();}

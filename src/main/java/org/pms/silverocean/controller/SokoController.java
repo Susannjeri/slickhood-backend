@@ -9,6 +9,11 @@ import org.pms.silverocean.service.soko.SokoRequests;
 import org.pms.silverocean.service.soko.SokoService;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.util.List;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -29,6 +34,8 @@ public class SokoController {
     @PutMapping("/product/{id}") public ResponseEntity<ResponseDTO> updateProduct(@PathVariable long id,@RequestBody @Valid SokoRequests.ProductUpsert r){return ok(service.updateProduct(id,r));}
     @PutMapping("/product/{id}/publish") public ResponseEntity<ResponseDTO> publishProduct(@PathVariable long id){return ok(service.publishProduct(id));}
     @GetMapping("/product/my") public ResponseEntity<ResponseDTO> myProducts(@RequestParam long storeId){return ok(service.myProducts(storeId));}
+    @PutMapping(value="/product/{id}/images",consumes=MediaType.MULTIPART_FORM_DATA_VALUE) public ResponseEntity<ResponseDTO> productImages(@PathVariable long id,@RequestPart("images") List<MultipartFile> images)throws IOException{return ok(service.replaceProductImages(id,images));}
+    @GetMapping("/product/{id}/images") public ResponseEntity<ResponseDTO> productImages(@PathVariable long id){return ok(service.productImages(id));}
     @PostMapping("/rider") public ResponseEntity<ResponseDTO> createRider(@RequestBody @Valid SokoRequests.RiderUpsert r){return ok(service.createRider(r));}
     @PutMapping("/rider/{id}") public ResponseEntity<ResponseDTO> updateRider(@PathVariable long id,@RequestBody @Valid SokoRequests.RiderUpsert r){return ok(service.updateRider(id,r));}
     @GetMapping("/rider/my") public ResponseEntity<ResponseDTO> myRiders(@RequestParam long storeId){return ok(service.myRiders(storeId));}
