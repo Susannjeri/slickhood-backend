@@ -53,6 +53,6 @@ public class TeamRoleDefinitionService {
 
     private void apply(TeamRoleDefinition d, TeamAccessModels.RoleDefinitionRequest r) { d.setDisplayName(r.displayName().trim()); d.setDescription(r.description()); d.setBusinessArea(r.businessArea()); d.setPermissionTemplate(r.permissionTemplate()); }
     private TeamAccessModels.RoleDefinitionView view(TeamRoleDefinition d) { return new TeamAccessModels.RoleDefinitionView(d.getId(),d.getCode(),d.getDisplayName(),d.getDescription(),d.getBusinessArea(),d.getPermissionTemplate(),d.isActive()); }
-    private void requireSuperadmin() { if (!users.hasRole(PMSRole.SUPER_ADMIN)) throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS); }
+    private void requireSuperadmin() { if (users.getActiveRole() != PMSRole.SUPER_ADMIN) throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS); }
     private PMSCustomException invalid() { return new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND); }
 }

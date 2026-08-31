@@ -6,6 +6,7 @@ import org.pms.silverocean.service.PMSCustomException;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 @Getter
 public enum PMSRole {
@@ -40,6 +41,27 @@ public enum PMSRole {
     private final boolean selfAssignable;
 
     private static final Map<String, PMSRole> nameToRole = new HashMap<>();
+    private static final Set<PMSRole> CUSTOMER_EMPLOYEE_ROLES = Set.of(
+            WORKSPACE_ADMIN,
+            PROPERTY_MANAGER,
+            PROPERTY_ACCOUNTANT,
+            LEASING_OFFICER,
+            ESTATE_OPERATIONS_MANAGER,
+            SECURITY_SUPERVISOR,
+            GUARD,
+            SALES_COORDINATOR,
+            LISTING_AGENT,
+            WORKSPACE_VIEWER
+    );
+
+    public boolean isPlatformOwnerOnly() {
+        return this == SUPER_ADMIN;
+    }
+
+    public boolean isCustomerEmployeeRole() {
+        return CUSTOMER_EMPLOYEE_ROLES.contains(this);
+    }
+
     public static PMSRole roleFromSavedName(String name) {
         if (!nameToRole.containsKey(name)) {
             throw new PMSCustomException(ResponseCode.INVALID_ROLE);

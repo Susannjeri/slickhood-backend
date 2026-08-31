@@ -118,7 +118,7 @@ public class InviteService {
     }
 
     public StaffInviteDTO createInternalStaffInvite(StaffInviteRequest request) {
-        if (!userDao.hasRole(PMSRole.SUPER_ADMIN)) {
+        if (userDao.getActiveRole() != PMSRole.SUPER_ADMIN) {
             throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
         }
         if (!isInternalStaffRole(request.role())) {

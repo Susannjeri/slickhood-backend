@@ -166,7 +166,8 @@ public class RoleService {
 
     private void checkIfRoleIsValidAndSelfAssignable(Long roleId) {
         Optional<Role> roleByID = roleRepo.findByIdAndActive(roleId);
-        if (roleByID.isEmpty() || !roleByID.get().isActive() || !roleByID.get().isSelfAssignable()) {
+        if (roleByID.isEmpty() || !roleByID.get().isActive() || !roleByID.get().isSelfAssignable()
+                || PMSRole.roleFromSavedName(roleByID.get().getName()).isPlatformOwnerOnly()) {
             log.error("Role with id {} not found", roleId);
             throw new PMSCustomException(ResponseCode.INVALID_ROLE);
         }
@@ -226,6 +227,10 @@ public class RoleService {
             return new ResponseDTO(false, ResponseCode.INVALID_ROLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_ROLE));
         }
         Role role = roleByID.get();
+        if (PMSRole.roleFromSavedName(role.getName()).isPlatformOwnerOnly()) {
+            log.warn("Blocked application-level assignment of platform-owner role {}", role.getId());
+            return new ResponseDTO(false, ResponseCode.INVALID_ROLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_ROLE));
+        }
         if (assignorEmail.equals(assigneeEmail) && !role.isSelfAssignable()) {
             return new ResponseDTO(false, ResponseCode.ROLE_NOT_SELF_ASSIGNABLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_NOT_SELF_ASSIGNABLE));
         }

@@ -429,6 +429,47 @@ class RoleServiceTest {
     }
 
     @Test
+    void selfAssignRole_superadminIsRejectedEvenIfDatabaseMarksItSelfAssignable() {
+        Role superadmin = new Role(PMSRole.SUPER_ADMIN.getName(), PMSRole.SUPER_ADMIN.getDescription(), true);
+        superadmin.setId(99L);
+        superadmin.setActive(true);
+        testUser.setAccountStatus(AccountStatus.ACTIVE.name());
+        when(userDao.getUserObject()).thenReturn(testUser);
+        when(roleRepo.findByIdAndActive(superadmin.getId())).thenReturn(Optional.of(superadmin));
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class,
+                () -> roleService.selfAssignRole(superadmin.getId()));
+
+        assertEquals(ResponseCode.INVALID_ROLE, exception.getResponseCode());
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+    }
+
+    @Test
+    void assignRoleFromInvite_superadminRoleIsNeverGranted() {
+        Role superadmin = new Role(PMSRole.SUPER_ADMIN.getName(), PMSRole.SUPER_ADMIN.getDescription(), false);
+        superadmin.setId(99L);
+        superadmin.setActive(true);
+        Invite invite = new Invite();
+        invite.setId(91L);
+        invite.setRoleId(superadmin.getId());
+        invite.setCreatedBy(100L);
+        invite.setType(InviteType.USER.name());
+        invite.setActive(true);
+        Users assignor = new Users();
+        assignor.setId(100L);
+        assignor.setEmail("owner@slickhood.com");
+        when(userDao.findById(assignor.getId())).thenReturn(Optional.of(assignor));
+        when(roleRepo.findByIdAndActive(superadmin.getId())).thenReturn(Optional.of(superadmin));
+
+        ResponseDTO response = roleService.assignRoleFromInvite(invite, null, testUser);
+
+        assertFalse(response.isSuccess());
+        assertEquals(ResponseCode.INVALID_ROLE.getCode(), response.getCode());
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+        verify(inviteDao, never()).updateInvite(any(Invite.class));
+    }
+
+    @Test
     void getOrCreateRole_roleDoesNotExist_roleIfMissingCreated() {
         // Arrange
         String roleName = PMSRole.SERVICE_PROVIDER.getName();
