@@ -47,6 +47,7 @@ import java.math.BigDecimal;
 
 @RestController
 @RequestMapping("/sp")
+@PreAuthorize("isAuthenticated()")
 @Validated
 @Slf4j
 public class ServiceProviderController extends OutputStreamErrorHandler {

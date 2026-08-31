@@ -8,17 +8,21 @@ import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import java.time.ZonedDateTime;
 
 public interface SokoOrderRepo extends JpaRepository<SokoOrder, Long> {
     List<SokoOrder> findAllByCustomerUserIdAndActiveTrueOrderByCreatedOnDesc(long customerUserId);
+    Page<SokoOrder> findAllByCustomerUserIdAndActiveTrue(long customerUserId,Pageable pageable);
     List<SokoOrder> findAllByStoreIdInAndActiveTrueOrderByCreatedOnDesc(List<Long> storeIds);
+    Page<SokoOrder> findAllByStoreIdInAndActiveTrue(List<Long> storeIds,Pageable pageable);
     Optional<SokoOrder> findByInvoiceRefAndActiveTrue(String invoiceRef);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from SokoOrder o where o.id=:id and o.active=true")
     Optional<SokoOrder> findByIdForUpdate(long id);
     @Query("select o from SokoOrder o where o.active=true and o.status='PENDING_PAYMENT' and o.stockReleased=false and o.reservationExpiresAt<:now")
-    List<SokoOrder> findExpiredReservations(ZonedDateTime now);
+    List<SokoOrder> findExpiredReservations(ZonedDateTime now,Pageable pageable);
 
     @Query("SELECT o FROM SokoOrder o JOIN SokoStore s ON s.id=o.storeId WHERE o.active AND o.createdOn >= :start AND o.createdOn < :end " +
             "AND (:privileged=true OR o.customerUserId=:userId OR s.ownerUserId=:userId) ORDER BY o.createdOn DESC")
