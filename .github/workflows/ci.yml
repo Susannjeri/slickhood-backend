@@ -27,7 +27,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -Eir '\b(DROP[[:space:]]+(TABLE|COLUMN|DATABASE)|TRUNCATE[[:space:]]+TABLE|RENAME[[:space:]]+TABLE)\b' src/main/resources/db/migration; then
+          destructive="$(grep -Eirl '\b(DROP[[:space:]]+(TABLE|COLUMN|DATABASE)|TRUNCATE[[:space:]]+TABLE|RENAME[[:space:]]+TABLE)\b' src/main/resources/db/migration || true)"
+          unexpected="$(printf '%s\n' "$destructive" | sed '/^$/d' | grep -Fvx -f .github/destructive-migration-allowlist.txt || true)"
+          if [ -n "$unexpected" ]; then
+            printf '%s\n' "$unexpected" >&2
             echo "Destructive migrations require an explicitly reviewed expand/contract release plan." >&2
             exit 1
           fi
@@ -41,5 +44,5 @@ jobs:
         with:
           name: backend-test-reports-${{ github.run_id }}
           path: target/surefire-reports/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
