@@ -12,7 +12,6 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.dao.UserDao;
-import org.pms.silverocean.service.auth.roles.RoleService;
 import org.pms.silverocean.service.mustache.RenderService;
 import org.pms.silverocean.service.notification.email.EmailService;
 import org.pms.silverocean.service.payment.PaymentPlatform;
@@ -39,7 +38,6 @@ class InvoiceServiceSubscriptionPaymentTest {
     @Mock private RenderService renderService;
     @Mock private EmailService emailService;
     @Mock private I18NService i18NService;
-    @Mock private RoleService roleService;
     @Mock private PaymentPlatformFactory paymentPlatformFactory;
     @Mock private PaymentPlatform paymentPlatform;
 
@@ -48,7 +46,7 @@ class InvoiceServiceSubscriptionPaymentTest {
     @BeforeEach
     void setUp() {
         service = new InvoiceService(invoiceDao, unitDao, userDao, accountDao, renderService,
-                emailService, i18NService, roleService, paymentPlatformFactory);
+                emailService, i18NService, paymentPlatformFactory);
     }
 
     @Test
