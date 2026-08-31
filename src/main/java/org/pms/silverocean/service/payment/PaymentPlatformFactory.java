@@ -29,7 +29,11 @@ public class PaymentPlatformFactory {
     }
 
     public Set<PaymentChannelDTO> getPaymentTypes() {
-       return platforms.values().stream().filter(PaymentPlatform::isActive)
+       return platforms.values().stream()
+               .filter(PaymentPlatform::isActive)
+               // Flutterwave remains readable for historic transactions and callbacks,
+               // but is retired from all new Kenyan checkout and account journeys.
+               .filter(platform -> platform.channelType() != PaymentChannel.FLUTTER_WAVE)
                .map(platforms ->
                        new PaymentChannelDTO(
                                platforms.channelType().name(), platforms.channelType().getName(),

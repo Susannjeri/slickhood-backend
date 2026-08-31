@@ -39,6 +39,9 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
     @Query("SELECT i FROM PMSInvoice i where i.id=:invoiceId AND (i.payToUserId=:userId OR i.billedUserId=:userId OR i.propertyId IN (SELECT p.propertyId FROM PropertyManager p WHERE p.userId=:userId AND p.active))")
     Optional<PMSInvoice> findInvoiceForOwnerOrTenant(long invoiceId, long userId);
 
+    @Query("SELECT i FROM PMSInvoice i where i.ref=:ref AND (i.payToUserId=:userId OR i.billedUserId=:userId OR i.propertyId IN (SELECT p.propertyId FROM PropertyManager p WHERE p.userId=:userId AND p.active))")
+    Optional<PMSInvoice> findInvoiceForOwnerOrTenantByRef(String ref, long userId);
+
     @Modifying
     @Query("UPDATE PMSInvoice i SET i.ref=:ref WHERE i.id=:id")
     void updateInvoiceRef(long id, String ref);

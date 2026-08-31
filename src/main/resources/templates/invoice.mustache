@@ -155,8 +155,11 @@
             <td>
                 <div class="invoice-title">Invoice</div>
                 <div style="font-size: 12pt; color: #7f8c8d;">Ref: {{invoiceRef}}</div>
+                <div style="font-size: 9pt; color: #ef4217; text-transform: uppercase;">{{issuerType}}</div>
             </td>
             <td style="text-align: right;">
+                <div class="label">Issued by</div>
+                <div class="value">{{issuerName}}</div>
                 <div class="value">{{propertyName}}</div>
                 <div style="font-size: 10pt;">{{propertyAddress}}</div>
             </td>
@@ -201,6 +204,10 @@
             <span>Total:</span>
             <span>{{currency}} {{totalAmount}}</span>
         </div>
+        <div class="total-row">
+            <span>Balance due:</span>
+            <span>{{currency}} {{pendingAmount}}</span>
+        </div>
 
         {{#isPaid}}
             <div class="stamp">Paid</div>
@@ -212,7 +219,7 @@
     <div class="footer-note">
         <span class="label">Payment Instructions:</span>
         <p>Please use <strong>{{invoiceRef}}</strong> as your payment reference.
-            Payments should be made to {{propertyName}}. Login to your SlickHood account and complete the Payment on the Payments Tab</p>
+            Payments should be made to <strong>{{issuerName}}</strong>. Login to your SlickHood account and complete payment using an approved payment account.</p>
         <p style="text-align: center; margin-top: 30px;">Thank you for your prompt payment!</p>
     </div>
 </div>

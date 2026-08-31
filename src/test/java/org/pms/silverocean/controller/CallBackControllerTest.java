@@ -43,7 +43,7 @@ class CallBackControllerTest {
 
     @Test
     void bankRouteNormalizesAndReconcilesUsingMpesaReceipt() throws Exception {
-        when(paymentPlatformFactory.getPlatform(PaymentChannel.MPESA)).thenReturn(paymentPlatform);
+        when(paymentPlatformFactory.getPlatform(PaymentChannel.MPESA_BANK)).thenReturn(paymentPlatform);
         when(paymentPlatform.handleCallBack(any())).thenReturn(new MPesaPaymentResponseDTO(MPesaResultCodes.VALID));
 
         mockMvc.perform(post("/callback/mpesa/bank/confirmation")

@@ -56,8 +56,8 @@ class InvoiceServiceSubscriptionPaymentTest {
         PMSInvoice invoice = subscriptionInvoice(7L, 99L);
         PaymentAccount account = paymentAccount(AccountCategory.SLICKHOOD, PaymentChannel.PAYSTACK, 99L);
         PaymentResponse expected = new PaymentResponse(true, ResponseCode.CARD_PAYMENT_INITIALIZED, "https://pay.example");
-        when(invoiceDao.getInvoiceByRef("INV-SUB")).thenReturn(Optional.of(invoice));
         when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
         when(accountDao.getAccountById(12L)).thenReturn(account);
         when(paymentPlatformFactory.getPlatform(PaymentChannel.PAYSTACK)).thenReturn(paymentPlatform);
         when(paymentPlatform.processPayment(invoice, null, 12L)).thenReturn(expected);
@@ -70,8 +70,8 @@ class InvoiceServiceSubscriptionPaymentTest {
     @Test
     void rejectsSubscriptionInitializationByAnotherSubscriber() {
         PMSInvoice invoice = subscriptionInvoice(7L, 99L);
-        when(invoiceDao.getInvoiceByRef("INV-SUB")).thenReturn(Optional.of(invoice));
         when(userDao.getUserId()).thenReturn(8L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 8L)).thenReturn(Optional.empty());
 
         assertThrows(PaymentRequestException.class,
                 () -> service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 12L));
@@ -84,8 +84,8 @@ class InvoiceServiceSubscriptionPaymentTest {
     void rejectsLandlordAccountForSubscriptionInitialization() {
         PMSInvoice invoice = subscriptionInvoice(7L, 99L);
         PaymentAccount landlordAccount = paymentAccount(AccountCategory.LANDLORD, PaymentChannel.PAYSTACK, 99L);
-        when(invoiceDao.getInvoiceByRef("INV-SUB")).thenReturn(Optional.of(invoice));
         when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
         when(accountDao.getAccountById(12L)).thenReturn(landlordAccount);
 
         assertThrows(PaymentRequestException.class,
@@ -98,14 +98,26 @@ class InvoiceServiceSubscriptionPaymentTest {
     void rejectsAccountWhoseChannelDoesNotMatchRequest() {
         PMSInvoice invoice = subscriptionInvoice(7L, 99L);
         PaymentAccount account = paymentAccount(AccountCategory.SLICKHOOD, PaymentChannel.MPESA, 99L);
-        when(invoiceDao.getInvoiceByRef("INV-SUB")).thenReturn(Optional.of(invoice));
         when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
         when(accountDao.getAccountById(12L)).thenReturn(account);
 
         assertThrows(PaymentRequestException.class,
                 () -> service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 12L));
 
         verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PAYSTACK);
+    }
+
+    @Test
+    void rejectsPaymentInitializationWhenInvoiceIsOutsideCurrentUsersScope() {
+        when(userDao.getUserId()).thenReturn(44L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-PRIVATE", 44L)).thenReturn(Optional.empty());
+
+        assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-PRIVATE", PaymentChannel.MPESA, null, 12L));
+
+        verify(accountDao, never()).getAccountById(12L);
+        verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.MPESA);
     }
 
     private static PMSInvoice subscriptionInvoice(long billedUserId, long payeeUserId) {

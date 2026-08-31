@@ -130,7 +130,13 @@ public class CallBackController {
             HttpServletRequest request, @RequestParam String token,
             @RequestParam(required = false) Long userId,
             @Valid @RequestBody MPesaBankCallbackDTO payment) {
-        return receiveMPesaConfirmationReq(request, token, userId, payment.toMPesaPaymentDTO());
+        if (!isValidMpesaToken(token, request)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        PaymentCallBackResponse response = paymentPlatformFactory.getPlatform(PaymentChannel.MPESA_BANK)
+                .handleCallBack(new MpesaCallbackDTO(payment.toMPesaPaymentDTO(), null, userId,
+                        PMSUtils.getIPAddress(request), MpesaCallBackType.CONFIRMATION));
+        return ResponseEntity.ok(response);
     }
 
     @RequestMapping("/sms")
