@@ -12,15 +12,10 @@ import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.payment.ledger.FinancialLedgerService;
 import org.pms.silverocean.service.payment.platforms.mpesa.TransactionCategory;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
-import org.pms.silverocean.service.security.KeyDao;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
@@ -29,9 +24,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
-import java.util.Base64;
 import java.util.List;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -43,20 +36,11 @@ import static org.mockito.Mockito.when;
  * creates and destroys a dedicated MySQL database. With no Docker runtime the suite is explicitly skipped.
  */
 @Testcontainers(disabledWithoutDocker = true)
-@Import(RentalPaymentMySqlIT.TestKeyConfiguration.class)
-@SpringBootTest(properties = {
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@DataJpaTest(properties = {
         "spring.flyway.enabled=false",
         "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect",
-        "helpdesk.ai.enabled=false",
-        "lease.documents.legal-review-required=true",
-        "garage.s3.access.key=test-access-key",
-        "garage.s3.secret.key=test-secret-key",
-        "garage.bootstrap.enabled=false",
-        "server.ssl.key-store=test-keystore-not-used-by-mock",
-        "server.ssl.key-store-password=test-password-not-used-by-mock",
-        "server.ssl.key-store-type=PKCS12",
-        "server.ssl.key-store.key-alias=test-alias-not-used-by-mock"
+        "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect"
 })
 @Transactional
 class RentalPaymentMySqlIT {
@@ -90,24 +74,6 @@ class RentalPaymentMySqlIT {
     @Autowired PMSPaymentRepo payments;
     @Autowired FinancialJournalRepo journals;
     @Autowired FinancialLedgerLineRepo ledgerLines;
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class TestKeyConfiguration {
-        @Bean
-        @Primary
-        KeyDao integrationTestKeyDao() {
-            KeyDao keyDao = mock(KeyDao.class);
-            byte[] testKey = Base64.getEncoder().encode(new byte[32]);
-            when(keyDao.getActiveSecretKey()).thenReturn(testKey);
-            when(keyDao.getOldKeys()).thenReturn(Set.of());
-            return keyDao;
-        }
-
-        @Bean
-        JavaMailSender integrationTestMailSender() {
-            return mock(JavaMailSender.class);
-        }
-    }
 
     @Test
     void realMysqlRepositoriesPersistAndReconcileTheRentalPaymentExactlyOnce() {
