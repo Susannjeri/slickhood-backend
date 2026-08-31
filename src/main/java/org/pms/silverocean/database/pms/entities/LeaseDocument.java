@@ -14,11 +14,13 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "pms_lease_document", indexes = {
         @Index(name = "idx_document_lease", columnList = "leaseId, active"),
+        @Index(name = "idx_document_sale", columnList = "saleId, documentType, status, active"),
         @Index(name = "idx_document_property", columnList = "propertyId, active"),
         @Index(name = "idx_document_parties", columnList = "issuerUserId, recipientUserId, active")})
 @Getter @Setter @NoArgsConstructor
 public class LeaseDocument extends BaseCreatorEntity {
     private Long leaseId;
+    private Long saleId;
     private Long propertyId;
     private Long unitId;
     @Column(nullable = false) private long templateId;

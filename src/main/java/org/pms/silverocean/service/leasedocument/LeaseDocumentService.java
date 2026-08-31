@@ -13,7 +13,12 @@ import org.pms.silverocean.service.lease.LeaseDao;
 import org.pms.silverocean.service.lease.LeaseService;
 import org.pms.silverocean.service.mustache.RenderService;
 import org.pms.silverocean.service.notification.email.EmailService;
+import org.pms.silverocean.service.sales.SaleStatus;
+import org.pms.silverocean.service.sales.SalesService;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -33,10 +38,16 @@ public class LeaseDocumentService {
     private final RenderService renderService;
     private final EmailService emailService;
     private final LeaseService leaseService;
+    private final SaleTransactionRepo saleRepo;
+    private final SalesService salesService;
+    private final DocumentBrandingService brandingService;
+    private final PropertyOwnershipRepo ownershipRepo;
 
     public LeaseDocumentService(LeaseDocumentRepo documentRepo, LeaseDocumentTemplateRepo templateRepo,
             LeaseDao leaseDao, PropertyRepo propertyRepo, UnitRepo unitRepo, UserDao userDao,
-            RenderService renderService, EmailService emailService, LeaseService leaseService) {
+            RenderService renderService, EmailService emailService, LeaseService leaseService,
+            SaleTransactionRepo saleRepo, SalesService salesService, DocumentBrandingService brandingService,
+            PropertyOwnershipRepo ownershipRepo) {
         this.documentRepo = documentRepo;
         this.templateRepo = templateRepo;
         this.leaseDao = leaseDao;
@@ -46,13 +57,19 @@ public class LeaseDocumentService {
         this.renderService = renderService;
         this.emailService = emailService;
         this.leaseService = leaseService;
+        this.saleRepo = saleRepo;
+        this.salesService = salesService;
+        this.brandingService = brandingService;
+        this.ownershipRepo = ownershipRepo;
     }
 
     @Transactional
     public LeaseDocumentDTO generate(GenerateLeaseDocumentRequest request) {
         long currentUserId = userDao.getUserId();
         LeaseDocumentType type = request.documentType();
-        Context context = type.requiresLease() ? leaseContext(request, currentUserId) : propertyContext(request, currentUserId);
+        if (type.isLegacy()) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        Context context = type.requiresLease() ? leaseContext(request, currentUserId)
+                : type.isSaleDocument() ? saleContext(request, currentUserId) : propertyContext(request, currentUserId);
         validateDocumentSequence(request, context);
         LeaseDocumentTemplate template = templateRepo.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(type)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.TEMPLATE_NOT_FOUND));
@@ -71,9 +88,16 @@ public class LeaseDocumentService {
         model.put("reason", StringUtils.defaultIfBlank(request.reason(), "As recorded in the related agreement and workflow."));
         model.put("legalReviewRequired", template.isLegalReviewRequired());
         model.put("templateVersion", template.getVersion());
+        model.put("saleDocument", type.isSaleDocument());
+        Users documentOwner = userDao.findById(context.property().getCreatedBy()).orElse(context.issuer());
+        String ownerLogo = brandingService.dataUri(documentOwner.getId());
+        model.put("hasOwnerLogo", StringUtils.isNotBlank(ownerLogo));
+        model.put("ownerLogoDataUri", ownerLogo);
+        model.put("documentOwnerName", StringUtils.defaultIfBlank(documentOwner.getOrganizationName(), documentOwner.getFullName()));
 
         LeaseDocument document = new LeaseDocument();
         document.setLeaseId(request.leaseId());
+        document.setSaleId(request.saleId());
         document.setPropertyId(context.property().getId());
         document.setUnitId(context.unit() == null ? null : context.unit().getId());
         document.setTemplateId(template.getId());
@@ -95,8 +119,9 @@ public class LeaseDocumentService {
         return new LeaseDocumentDTO(documentRepo.save(document));
     }
 
-    public List<LeaseDocumentDTO> list() {
-        return documentRepo.findAllAccessible(userDao.getUserId()).stream().map(LeaseDocumentDTO::new).toList();
+    public Page<LeaseDocumentDTO> list(Pageable pageable) {
+        Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize())), pageable.getSort());
+        return documentRepo.findAllAccessible(userDao.getUserId(), bounded).map(LeaseDocumentDTO::new);
     }
 
     public void renderPdf(long id, ByteArrayOutputStream output) throws IOException {
@@ -158,6 +183,10 @@ public class LeaseDocumentService {
             leaseService.activateFromGovernedAgreement(saved.getLeaseId(), saved.getIssuerUserId(), saved.getRecipientUserId(),
                     saved.getIssuerSignedAt(), saved.getRecipientSignedAt());
         }
+        if (saved.getStatus() == LeaseDocumentStatus.SIGNED
+                && saved.getDocumentType() == LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER) {
+            salesService.acceptSignedOffer(saved.getSaleId(), saved.getId(), saved.getAmount());
+        }
         return new LeaseDocumentDTO(saved);
     }
 
@@ -210,8 +239,8 @@ public class LeaseDocumentService {
         Users tenant = userDao.findById(tenancy.getUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
         Users owner = userDao.findById(property.getCreatedBy()).orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
         return request.documentType().isTenantInitiated()
-                ? new Context(property, unit, tenant, owner, lease)
-                : new Context(property, unit, userDao.getUserObject(), tenant, lease);
+                ? new Context(property, unit, tenant, owner, lease, null)
+                : new Context(property, unit, userDao.getUserObject(), tenant, lease, null);
     }
 
     private Context propertyContext(GenerateLeaseDocumentRequest request, long userId) {
@@ -224,11 +253,40 @@ public class LeaseDocumentService {
                 : propertyRepo.findByIdAndManagerRole(request.propertyId(), userId, role.name()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
         Users recipient = userDao.findById(request.recipientUserId())
+                .filter(Users::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
-        return new Context(property, null, userDao.getUserObject(), recipient, null);
+        if (request.documentType() == LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT
+                && !ownershipRepo.existsByPropertyIdAndHomeownerUserIdAndActiveTrue(property.getId(), recipient.getId())) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
+        return new Context(property, null, userDao.getUserObject(), recipient, null, null);
+    }
+
+    private Context saleContext(GenerateLeaseDocumentRequest request, long userId) {
+        if (request.saleId() == null) throw new PMSCustomException(ResponseCode.SALE_NOT_FOUND);
+        PMSRole role = userDao.getActiveRole();
+        SaleTransaction sale = (role == PMSRole.BUYER
+                ? saleRepo.findByIdAndBuyerUserIdAndActiveTrue(request.saleId(), userId)
+                : role == PMSRole.SUPER_ADMIN
+                    ? saleRepo.findById(request.saleId()).filter(SaleTransaction::isActive)
+                    : saleRepo.findByIdAndPropertyAccess(request.saleId(), userId))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
+        if (role == PMSRole.BUYER) throw new PMSCustomException(ResponseCode.INVALID_ROLE);
+        if (sale.getBuyerUserId() == null) throw new PMSCustomException(ResponseCode.LOAD_USER_ERROR);
+        Property property = propertyRepo.findById(sale.getPropertyId()).filter(Property::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
+        Unit unit = unitRepo.findById(sale.getUnitId()).filter(Unit::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
+        Users buyer = userDao.findById(sale.getBuyerUserId()).filter(Users::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
+        return new Context(property, unit, userDao.getUserObject(), buyer, null, sale);
     }
 
     private void validateDocumentSequence(GenerateLeaseDocumentRequest request, Context context) {
+        if (context.sale() != null) {
+            validateSaleDocument(request, context.sale());
+            return;
+        }
         if (context.lease() == null) return;
         LeaseDocumentType type = request.documentType();
         long leaseId = context.lease().getId();
@@ -238,20 +296,8 @@ public class LeaseDocumentService {
         if (documentRepo.existsOpen(leaseId, type)) {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         }
-        if (type == LeaseDocumentType.RENTAL_LETTER_OF_OFFER) {
-            if (context.lease().isSigned() || request.responseDueDate() == null
-                    || !request.responseDueDate().isAfter(java.time.LocalDate.now())
-                    || request.amount() == null || request.amount().signum() <= 0
-                    || request.amount().compareTo(java.math.BigDecimal.valueOf(context.lease().getPrice())) != 0
-                    || !StringUtils.defaultIfBlank(request.currency(), context.lease().getCurrency())
-                    .equalsIgnoreCase(context.lease().getCurrency())) {
-                throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA_CONSTRAINT);
-            }
-        }
         if (type.isTenancyAgreement()) {
-            if (!documentRepo.existsByLeaseIdAndDocumentTypeAndStatusAndActiveTrue(
-                    leaseId, LeaseDocumentType.RENTAL_LETTER_OF_OFFER, LeaseDocumentStatus.SIGNED)
-                    || request.effectiveDate() == null
+            if (request.effectiveDate() == null
                     || !request.effectiveDate().equals(context.lease().getMoveInDate())
                     || request.amount() == null
                     || request.amount().compareTo(java.math.BigDecimal.valueOf(context.lease().getPrice())) != 0
@@ -259,6 +305,26 @@ public class LeaseDocumentService {
                     .equalsIgnoreCase(context.lease().getCurrency())) {
                 throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
             }
+        }
+    }
+
+    private void validateSaleDocument(GenerateLeaseDocumentRequest request, SaleTransaction sale) {
+        LeaseDocumentType type = request.documentType();
+        if (documentRepo.existsOpenForSale(sale.getId(), type)) {
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        }
+        if (type == LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER) {
+            if (sale.getStatus() != SaleStatus.OFFERED || sale.getOfferAmount() == null
+                    || request.responseDueDate() == null || !request.responseDueDate().isAfter(java.time.LocalDate.now())
+                    || request.amount() == null || request.amount().compareTo(sale.getOfferAmount()) != 0
+                    || !StringUtils.defaultIfBlank(request.currency(), sale.getCurrency()).equalsIgnoreCase(sale.getCurrency())) {
+                throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA_CONSTRAINT);
+            }
+        } else if (type == LeaseDocumentType.PROPERTY_SALE_AGREEMENT
+                && (sale.getStatus() != SaleStatus.AGREEMENT
+                || !documentRepo.existsBySaleIdAndDocumentTypeAndStatusAndActiveTrue(sale.getId(),
+                    LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER, LeaseDocumentStatus.SIGNED))) {
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         }
     }
 
@@ -270,5 +336,5 @@ public class LeaseDocumentService {
         }
     }
 
-    private record Context(Property property, Unit unit, Users issuer, Users recipient, Lease lease) {}
+    private record Context(Property property, Unit unit, Users issuer, Users recipient, Lease lease, SaleTransaction sale) {}
 }

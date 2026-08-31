@@ -11,6 +11,8 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.estate.EstateService;
 import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
+import org.pms.silverocean.service.leasedocument.LeaseDocumentStatus;
+import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
 import org.pms.silverocean.service.invites.InviteService;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.notification.NotificationDTO;
@@ -134,7 +136,7 @@ public class SalesService {
                     .orElseThrow(this::invalid);
             boolean involvedParty = evidence.getIssuerUserId() == sale.getSalesAgentUserId()
                     || (sale.getBuyerUserId() != null && evidence.getRecipientUserId() == sale.getBuyerUserId());
-            if (!involvedParty) throw invalid();
+            if (!involvedParty || !Objects.equals(evidence.getSaleId(), sale.getId())) throw invalid();
         }
         return milestones.save(new SaleMilestone(saleId, request.type().name(), request.status().name(), request.amount(),
                 sale.getCurrency(), StringUtils.left(StringUtils.trimToNull(request.externalReference()), 120),
@@ -158,8 +160,31 @@ public class SalesService {
         SaleTransaction sale = sales.findByIdForUpdate(id)
                 .filter(candidate -> Objects.equals(candidate.getBuyerUserId(), users.getUserId()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
-        if (sale.getOfferAmount() == null) throw invalid();
-        transition(sale, SaleStatus.RESERVED); sale.setOfferAcceptedAt(LocalDateTime.now());
+        if (!documents.existsBySaleIdAndDocumentTypeAndStatusAndActiveTrue(id,
+                LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER, LeaseDocumentStatus.SIGNED)) {
+            throw invalidTransition();
+        }
+        return reserve(sale);
+    }
+
+    @Transactional
+    public SaleTransaction acceptSignedOffer(long saleId, long documentId, java.math.BigDecimal amount) {
+        SaleTransaction sale = sales.findByIdForUpdate(saleId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
+        if (sale.getStatus() != SaleStatus.OFFERED || sale.getOfferAmount() == null
+                || amount == null || sale.getOfferAmount().compareTo(amount) != 0) throw invalidTransition();
+        LeaseDocument document = documents.findById(documentId).filter(LeaseDocument::isActive)
+                .filter(d -> Objects.equals(d.getSaleId(), saleId))
+                .filter(d -> d.getDocumentType() == LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER)
+                .filter(d -> d.getStatus() == LeaseDocumentStatus.SIGNED)
+                .orElseThrow(this::invalidTransition);
+        if (!Objects.equals(sale.getBuyerUserId(), document.getRecipientUserId())) throw invalidTransition();
+        return reserve(sale);
+    }
+
+    private SaleTransaction reserve(SaleTransaction sale) {
+        transition(sale, SaleStatus.RESERVED);
+        sale.setOfferAcceptedAt(LocalDateTime.now());
         SaleTransaction accepted = sales.save(sale);
         notifySalesAgent(accepted);
         return accepted;

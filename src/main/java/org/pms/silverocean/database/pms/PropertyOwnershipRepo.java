@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface PropertyOwnershipRepo extends JpaRepository<PropertyOwnership, Long> {
+    boolean existsByPropertyIdAndHomeownerUserIdAndActiveTrue(long propertyId, long homeownerUserId);
     Optional<PropertyOwnership> findBySourceSaleTransactionId(Long saleId);
     Optional<PropertyOwnership> findFirstByUnitIdAndActiveTrue(Long unitId);
     List<PropertyOwnership> findAllByHomeownerUserIdOrderByCreatedOnDesc(long userId);

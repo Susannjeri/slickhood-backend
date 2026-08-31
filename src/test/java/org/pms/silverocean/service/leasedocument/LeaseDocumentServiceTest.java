@@ -14,6 +14,8 @@ import org.pms.silverocean.service.lease.LeaseDao;
 import org.pms.silverocean.service.lease.LeaseService;
 import org.pms.silverocean.service.mustache.RenderService;
 import org.pms.silverocean.service.notification.email.EmailService;
+import org.pms.silverocean.service.sales.SaleStatus;
+import org.pms.silverocean.service.sales.SalesService;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -35,18 +37,23 @@ class LeaseDocumentServiceTest {
     @Mock RenderService renderer;
     @Mock EmailService email;
     @Mock LeaseService leaseService;
+    @Mock SaleTransactionRepo sales;
+    @Mock SalesService salesService;
+    @Mock DocumentBrandingService brandingService;
+    @Mock PropertyOwnershipRepo ownershipRepo;
     LeaseDocumentService service;
     Lease lease;
 
     @BeforeEach void setup() {
-        service = new LeaseDocumentService(documents, templates, leases, properties, units, users, renderer, email, leaseService);
+        service = new LeaseDocumentService(documents, templates, leases, properties, units, users, renderer, email,
+                leaseService, sales, salesService, brandingService, ownershipRepo);
         lease = new Lease(); lease.setId(11L); lease.setTenantId(12L); lease.setLeaseMode("RENT");
         lease.setPrice(45_000); lease.setCurrency("KES"); lease.setMoveInDate(LocalDate.of(2026, 10, 1)); lease.setActive(true);
         UnitTenant tenancy = new UnitTenant(); tenancy.setId(12L); tenancy.setUnitId(13L); tenancy.setUserId(14L); tenancy.setActive(true);
         Unit unit = new Unit(); unit.setId(13L); unit.setPropertyId(15L); unit.setRef("A-1"); unit.setActive(true);
         Property property = new Property(); property.setId(15L); property.setCreatedBy(16L); property.setName("Acacia"); property.setCurrency("KES"); property.setActive(true);
         Users owner = new Users(); owner.setId(16L); owner.setEmail("owner@example.com"); owner.setFullName("Owner");
-        Users tenant = new Users(); tenant.setId(14L); tenant.setEmail("tenant@example.com"); tenant.setFullName("Tenant");
+        Users tenant = new Users(); tenant.setId(14L); tenant.setEmail("tenant@example.com"); tenant.setFullName("Tenant"); tenant.setActive(true);
         lenient().when(users.getUserId()).thenReturn(16L);
         lenient().when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
         lenient().when(users.getUserObject()).thenReturn(owner);
@@ -58,32 +65,41 @@ class LeaseDocumentServiceTest {
         lenient().when(users.findById(16L)).thenReturn(Optional.of(owner));
     }
 
-    @Test void agreementCannotBeCreatedBeforeSignedLetterOfOffer() {
+    @Test void rentalAgreementDoesNotRequireASalesLetterOfOffer() {
         when(documents.existsOpen(11L, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT)).thenReturn(false);
-        when(documents.existsByLeaseIdAndDocumentTypeAndStatusAndActiveTrue(11L,
-                LeaseDocumentType.RENTAL_LETTER_OF_OFFER, LeaseDocumentStatus.SIGNED)).thenReturn(false);
+        LeaseDocumentTemplate template = new LeaseDocumentTemplate(); template.setId(21L); template.setVersion(3);
+        template.setDisplayName("Residential Lease Agreement"); template.setBodyHtml("<p>{{documentName}}</p>"); template.setActive(true);
+        when(templates.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT)).thenReturn(Optional.of(template));
+        when(renderer.renderInline(any(), any())).thenReturn("<p>Residential Lease Agreement</p>");
+        when(documents.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        assertThrows(PMSCustomException.class, () -> service.generate(new GenerateLeaseDocumentRequest(
-                11L, null, null, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT,
-                lease.getMoveInDate(), null, null, "KES", null)));
-        verify(documents, never()).save(any());
+        LeaseDocumentDTO result = service.generate(new GenerateLeaseDocumentRequest(
+                11L, null, null, null, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT,
+                lease.getMoveInDate(), null, new BigDecimal("45000.00"), "KES", null));
+
+        assertEquals(LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT, result.documentType());
     }
 
-    @Test void validLetterOfOfferCreatesImmutableDraftSnapshot() {
+    @Test void validPropertySaleLetterOfOfferCreatesSaleLinkedSnapshot() {
         LeaseDocumentTemplate template = new LeaseDocumentTemplate(); template.setId(21L); template.setVersion(3);
-        template.setDisplayName("Residential Tenancy Letter of Offer"); template.setBodyHtml("<p>{{documentName}}</p>"); template.setActive(true);
-        when(documents.existsOpen(11L, LeaseDocumentType.RENTAL_LETTER_OF_OFFER)).thenReturn(false);
-        when(templates.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.RENTAL_LETTER_OF_OFFER)).thenReturn(Optional.of(template));
-        when(renderer.renderInline(any(), any())).thenReturn("<p>Residential Tenancy Letter of Offer</p>");
+        template.setDisplayName("Property Sale Letter of Offer"); template.setBodyHtml("<p>{{documentName}}</p>"); template.setActive(true);
+        SaleTransaction sale = new SaleTransaction(); sale.setId(91L); sale.setPropertyId(15L); sale.setUnitId(13L);
+        sale.setBuyerUserId(14L); sale.setStatus(SaleStatus.OFFERED); sale.setOfferAmount(new BigDecimal("14500000"));
+        sale.setCurrency("KES"); sale.setActive(true);
+        when(sales.findByIdAndPropertyAccess(91L, 16L)).thenReturn(Optional.of(sale));
+        when(documents.existsOpenForSale(91L, LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER)).thenReturn(false);
+        when(templates.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER)).thenReturn(Optional.of(template));
+        when(renderer.renderInline(any(), any())).thenReturn("<p>Property Sale Letter of Offer</p>");
         when(documents.save(any())).thenAnswer(invocation -> { LeaseDocument d = invocation.getArgument(0); d.setId(31L); return d; });
 
-        LeaseDocumentDTO result = service.generate(new GenerateLeaseDocumentRequest(11L, null, null,
-                LeaseDocumentType.RENTAL_LETTER_OF_OFFER, lease.getMoveInDate(), LocalDate.now().plusDays(7),
-                new BigDecimal("45000.00"), "KES", "Subject to agreement"));
+        LeaseDocumentDTO result = service.generate(new GenerateLeaseDocumentRequest(null, 91L, null, null,
+                LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER, null, LocalDate.now().plusDays(7),
+                new BigDecimal("14500000.00"), "KES", "Subject to due diligence"));
 
         assertEquals(LeaseDocumentStatus.DRAFT, result.status());
         assertEquals(3, result.templateVersion());
-        assertEquals(LeaseDocumentType.RENTAL_LETTER_OF_OFFER, result.documentType());
+        assertEquals(91L, result.saleId());
+        assertEquals(LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER, result.documentType());
     }
 
     @Test void fullySignedResidentialAgreementActivatesGovernedLease() {
@@ -100,6 +116,22 @@ class LeaseDocumentServiceTest {
         assertEquals(LeaseDocumentStatus.SIGNED, result.status());
         verify(leaseService).activateFromGovernedAgreement(eq(11L), eq(16L), eq(14L),
                 eq(agreement.getIssuerSignedAt()), eq(agreement.getRecipientSignedAt()));
+    }
+
+    @Test void fullySignedSaleLetterOfOfferReservesTheLinkedSale() {
+        LeaseDocument offer = new LeaseDocument(); offer.setId(42L); offer.setSaleId(91L);
+        offer.setDocumentType(LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER);
+        offer.setStatus(LeaseDocumentStatus.PARTIALLY_SIGNED); offer.setIssuerUserId(16L);
+        offer.setRecipientUserId(14L); offer.setIssuerSignedAt(LocalDateTime.now().minusMinutes(1));
+        offer.setAmount(new BigDecimal("14500000")); offer.setActive(true);
+        when(users.getUserId()).thenReturn(14L);
+        when(documents.findAccessible(42L, 14L)).thenReturn(Optional.of(offer));
+        when(documents.save(offer)).thenReturn(offer);
+
+        LeaseDocumentDTO result = service.sign(42L);
+
+        assertEquals(LeaseDocumentStatus.SIGNED, result.status());
+        verify(salesService).acceptSignedOffer(91L, 42L, new BigDecimal("14500000"));
     }
 
     @Test void legallyUnreviewedStarterTemplateCannotBeIssued() {

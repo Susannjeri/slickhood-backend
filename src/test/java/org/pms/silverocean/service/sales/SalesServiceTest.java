@@ -139,10 +139,13 @@ class SalesServiceTest {
     }
 
     @Test
-    void buyerAcceptanceUsesLockedTransactionAndRecordedOffer() {
+    void buyerAcceptanceRequiresTheSignedSaleLetterOfOffer() {
         SaleTransaction sale = sale(SaleStatus.OFFERED); sale.setOfferAmount(new BigDecimal("14000000"));
         when(users.getUserId()).thenReturn(200L);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
+        when(documents.existsBySaleIdAndDocumentTypeAndStatusAndActiveTrue(1L,
+                org.pms.silverocean.service.leasedocument.LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER,
+                org.pms.silverocean.service.leasedocument.LeaseDocumentStatus.SIGNED)).thenReturn(true);
         when(sales.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         SaleTransaction accepted = service.acceptOffer(1L);
