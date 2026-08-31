@@ -4,6 +4,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.pms.silverocean.service.config.ConfigDTO;
+import org.pms.silverocean.database.pms.GateRequestNonceRepo;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.threadpooling.PMSThreadPoolExecutorService;
@@ -24,6 +25,7 @@ public class VisitorRoutines {
     private final VisitorService visitorService;
     private final ThreadPoolBeans threadPoolBeans;
     private final ConfigService configService;
+    private final GateRequestNonceRepo nonceRepo;
 
     private PMSThreadPoolExecutorService visitorCleanupPool;
     private Supplier<ConfigDTO> visitorExpireBatchSize;
@@ -39,6 +41,8 @@ public class VisitorRoutines {
 
     private void runExpiredVisitorBatch() {
         try {
+            int deletedNonces = nonceRepo.deleteExpired(ZonedDateTime.now(ZoneId.of("UTC")));
+            if (deletedNonces > 0) log.info("Deleted {} expired smart-gate nonces", deletedNonces);
             int batchSize = visitorExpireBatchSize.get().intValue();
             boolean hasMore = visitorService.cleanUpPendingExpiredVisitorRecords(
                     batchSize, visitorExpireDays.get().intValue());

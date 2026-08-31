@@ -98,6 +98,11 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
     @Query("SELECT u.id as unitId, u.propertyId as propertyId, u.ref as unitRef, p.name as propertyName  FROM UnitTenant ut JOIN Unit u ON ut.unitId = u.id JOIN Property p ON u.propertyId=p.id WHERE ut.unitId=:unitId AND ut.userId=:userId AND ut.active")
     Optional<PropertyIdUnitRefPropertyNameProjection> getByUnitIdAndUserIdIsTenant(Long unitId, long userId);
 
+    @Query("SELECT u.id as unitId, u.propertyId as propertyId, u.ref as unitRef, p.name as propertyName FROM Unit u JOIN Property p ON u.propertyId=p.id " +
+            "WHERE u.id=:unitId AND u.active AND p.active AND (EXISTS (SELECT 1 FROM UnitTenant ut WHERE ut.unitId=u.id AND ut.userId=:userId AND ut.active) " +
+            "OR EXISTS (SELECT 1 FROM PropertyOwnership po WHERE po.propertyId=p.id AND (po.unitId IS NULL OR po.unitId=u.id) AND po.homeownerUserId=:userId AND po.active))")
+    Optional<PropertyIdUnitRefPropertyNameProjection> getByUnitIdAndUserIdIsResident(Long unitId, long userId);
+
     @Query("SELECT u.id as unitId, u.propertyId as propertyId, u.ref as unitRef, p.name as propertyName  FROM UnitTenant ut JOIN Unit u ON ut.unitId = u.id JOIN Property p ON u.propertyId=p.id WHERE ut.userId=:userId AND ut.active")
     List<PropertyIdUnitRefPropertyNameProjection> getAllByUnitIdAndUserIdIsTenant(long userId);
 

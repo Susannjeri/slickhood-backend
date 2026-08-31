@@ -1,5 +1,6 @@
 package org.pms.silverocean.service.visitor;
 
+import jakarta.annotation.PostConstruct;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,12 @@ import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.database.pms.entities.Visitor;
 import org.pms.silverocean.database.pms.entities.VisitorAccessEvent;
 import org.pms.silverocean.service.PMSCustomException;
+import org.pms.silverocean.service.notification.NotificationDTO;
+import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.notification.common.NotificationType;
+import org.pms.silverocean.service.config.ConfigDTO;
+import org.pms.silverocean.service.config.ConfigService;
+import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.property.wrappers.DbUnitDTO;
@@ -56,6 +63,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Service
 @RequiredArgsConstructor
@@ -73,6 +81,14 @@ public class VisitorAccessService {
     private final GateRequestNonceRepo nonceRepo;
     private final VisitorAccessEventRepo eventRepo;
     private final ObjectMapper objectMapper;
+    private final NotificationService notificationService;
+    private final ConfigService configService;
+    private Supplier<ConfigDTO> visitorNotificationEnabled;
+
+    @PostConstruct
+    public void init() {
+        visitorNotificationEnabled = configService.getConfigByName(PMSConfigs.VISITOR_NOTIFICATION_ENABLED);
+    }
 
     @Transactional
     public RegisteredVisitDTO registerExpected(RegisterVisitRequest request) {
@@ -91,7 +107,10 @@ public class VisitorAccessService {
                 && unitRepo.findDTOByIdAndHomeowner(request.unitId(), request.hostUserId()).isEmpty())) {
             throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
         }
-        return createVisit(request, guard.getId(), request.hostUserId(), unit, true).visit();
+        RegisteredVisitDTO registered = createVisit(request, guard.getId(), request.hostUserId(), unit, true);
+        userDao.findById(request.hostUserId()).ifPresent(host -> queueSms(host.getPhoneNumber(), NotificationType.VISITOR_APPROVAL_REQUEST_SMS,
+                request.visitorName().trim() + " is waiting for your approval to visit " + unit.ref() + ". Open SlickHood Visitor Management to approve or deny access."));
+        return registered.visit();
     }
 
     @Transactional
@@ -105,13 +124,21 @@ public class VisitorAccessService {
         visitor.setApprovedBy(hostId);
         visitor.setApprovedAt(ZonedDateTime.now(UTC));
         if (request.decision() == VisitorDecisionRequest.Decision.DENY) {
+            if (StringUtils.isBlank(request.reason())) throw new PMSCustomException(ResponseCode.VISITOR_INVALID_STATUS);
+            visitor.setDecisionReason(request.reason().trim());
             visitor.setStatus(VisitorStatus.DENIED.name());
             visitorDao.save(visitor, "DENY_VISITOR_ACCESS");
+            queueSms(visitor.getPhoneNumber(), NotificationType.VISITOR_ACCESS_DENIED_SMS,
+                    "Your visit to " + visitor.getPropertyName() + " was not approved. Contact your host if you need assistance.");
             return new RegisteredVisitDTO(new VisitorDTO(visitor), null);
         }
         String accessCode = issueCredential(visitor);
+        visitor.setDecisionReason(null);
         visitor.setStatus(VisitorStatus.APPROVED.name());
         visitorDao.save(visitor, "APPROVE_VISITOR_ACCESS");
+        queueSms(visitor.getPhoneNumber(), NotificationType.VISITOR_ACCESS_APPROVED_SMS,
+                "Your visit to " + visitor.getPropertyName() + " is approved. Access code: " + accessCode +
+                        ". Valid until " + visitor.getValidUntil() + ". Keep this code private.");
         return new RegisteredVisitDTO(new VisitorDTO(visitor), accessCode);
     }
 
@@ -170,6 +197,8 @@ public class VisitorAccessService {
     @Transactional
     public AccessDecisionDTO decideFromDevice(String deviceCode, long timestamp, String nonce,
                                               String signature, String rawBody) {
+        if (StringUtils.isBlank(deviceCode) || deviceCode.length() > 64 || StringUtils.isBlank(signature) || signature.length() > 256
+                || rawBody == null || rawBody.length() > 4096) throw new IllegalArgumentException("INVALID_REQUEST");
         ZonedDateTime now = ZonedDateTime.now(UTC);
         GateDevice device = gateDeviceRepo.findByDeviceCodeAndEnabledTrueAndActiveTrue(deviceCode)
                 .orElseThrow(() -> new IllegalArgumentException("UNKNOWN_DEVICE"));
@@ -180,10 +209,15 @@ public class VisitorAccessService {
         gateDeviceRepo.save(device);
 
         SmartGateDecisionRequest request = parseRequest(rawBody);
+        validateRequest(request);
         return eventRepo.findByCorrelationId(request.correlationId())
-                .map(event -> new AccessDecisionDTO(
-                        AccessOutcome.GRANTED.name().equals(event.getOutcome()), event.getReasonCode(),
-                        event.getCorrelationId(), event.getVisitorId(), null, null, null, event.getOccurredAt()))
+                .map(event -> {
+                    if (event.getDeviceId() == null || event.getDeviceId() != device.getId() || event.getPropertyId() != device.getPropertyId()) {
+                        throw new IllegalArgumentException("CORRELATION_CONFLICT");
+                    }
+                    return new AccessDecisionDTO(AccessOutcome.GRANTED.name().equals(event.getOutcome()), event.getReasonCode(),
+                            event.getCorrelationId(), event.getVisitorId(), null, null, null, event.getOccurredAt());
+                })
                 .orElseGet(() -> evaluate(device, request, now));
     }
 
@@ -228,6 +262,11 @@ public class VisitorAccessService {
             code = issueCredential(visitor);
         }
         visitorDao.save(visitor, requiresApproval ? "REGISTER_UNPLANNED_VISITOR" : "REGISTER_ACCESS_VISITOR");
+        if (!requiresApproval) {
+            queueSms(visitor.getPhoneNumber(), NotificationType.VISITOR_ACCESS_APPROVED_SMS,
+                    "Your visit to " + visitor.getPropertyName() + " is approved. Access code: " + code +
+                            ". Valid until " + visitor.getValidUntil() + ". Keep this code private.");
+        }
         return new RegisteredVisitDTO(new VisitorDTO(visitor), code);
     }
 
@@ -248,6 +287,7 @@ public class VisitorAccessService {
                 visitor.setCheckOutGuardName(device.getDisplayName());
             }
             visitorDao.save(visitor, "SMART_GATE_" + request.direction().name());
+            notifyHost(visitor, request.direction(), now);
         }
         VisitorAccessEvent event = new VisitorAccessEvent();
         event.setVisitorId(visitor == null ? null : visitor.getId()); event.setPropertyId(device.getPropertyId());
@@ -268,7 +308,7 @@ public class VisitorAccessService {
         VisitorStatus status = VisitorStatus.valueOf(visitor.getStatus());
         if (request.direction() == AccessDirection.ENTRY) {
             if (status == VisitorStatus.CHECKED_IN) return "ANTI_PASSBACK";
-            if (!(status == VisitorStatus.APPROVED || status == VisitorStatus.PENDING || status == VisitorStatus.CHECKED_OUT)) return "VISIT_NOT_APPROVED";
+            if (!(status == VisitorStatus.APPROVED || status == VisitorStatus.CHECKED_OUT)) return "VISIT_NOT_APPROVED";
             if (visitor.getEntryCount() >= visitor.getMaxEntries()) return "ENTRY_LIMIT_REACHED";
             if (VisitType.DRIVE_IN.name().equals(visitor.getVisitType()) &&
                     !normalizePlate(visitor.getVehiclePlate()).equals(normalizePlate(request.vehiclePlate()))) return "VEHICLE_MISMATCH";
@@ -277,7 +317,7 @@ public class VisitorAccessService {
     }
 
     private void verifyFreshRequest(long timestamp, String nonce, ZonedDateTime now) {
-        if (StringUtils.length(nonce) < 16) throw new IllegalArgumentException("INVALID_NONCE");
+        if (StringUtils.length(nonce) < 16 || StringUtils.length(nonce) > 100) throw new IllegalArgumentException("INVALID_NONCE");
         ZonedDateTime sentAt = ZonedDateTime.ofInstant(java.time.Instant.ofEpochSecond(timestamp), UTC);
         if (Duration.between(sentAt, now).abs().compareTo(SIGNATURE_WINDOW) > 0) throw new IllegalArgumentException("STALE_REQUEST");
     }
@@ -309,6 +349,27 @@ public class VisitorAccessService {
     private SmartGateDecisionRequest parseRequest(String body) {
         try { return objectMapper.readValue(body, SmartGateDecisionRequest.class); }
         catch (JsonProcessingException e) { throw new IllegalArgumentException("INVALID_REQUEST", e); }
+    }
+
+    private void validateRequest(SmartGateDecisionRequest request) {
+        if (request == null || request.direction() == null || request.accessCode() == null || request.accessCode().length() != 43
+                || request.correlationId() == null || !request.correlationId().matches("[A-Za-z0-9._:-]{1,64}")
+                || (request.vehiclePlate() != null && request.vehiclePlate().length() > 20)) {
+            throw new IllegalArgumentException("INVALID_REQUEST");
+        }
+    }
+
+    private void notifyHost(Visitor visitor, AccessDirection direction, ZonedDateTime now) {
+        if (visitor.getHostUserId() == null) return;
+        userDao.findById(visitor.getHostUserId()).ifPresent(host -> queueSms(host.getPhoneNumber(),
+                direction == AccessDirection.ENTRY ? NotificationType.VISITOR_ARRIVAL_SMS : NotificationType.VISITOR_DEPARTURE_SMS,
+                "Your visitor " + visitor.getVisitorName() + (direction == AccessDirection.ENTRY ? " arrived at " : " departed at ") + now + "."));
+    }
+
+    private void queueSms(String phoneNumber, NotificationType type, String message) {
+        if (visitorNotificationEnabled != null && PMSUtils.booleanizeConfig(visitorNotificationEnabled.get()) && StringUtils.isNotBlank(phoneNumber)) {
+            notificationService.queueNotification(new NotificationDTO(message, phoneNumber, type));
+        }
     }
 
     private String issueCredential(Visitor visitor) {

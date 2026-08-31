@@ -127,7 +127,7 @@ public class VisitorController extends OutputStreamErrorHandler {
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).UPDATE_VISITOR_STATUS)")
     public ResponseEntity<ResponseDTO> checkInOrCheckOutVisitor(@PathVariable long visitorId,
                                                                 @RequestBody @Valid UpdateVisitorStatusRequest request) {
-        visitorService.updateVisitorStatus(visitorId, request.status());
+        visitorService.updateVisitorStatus(visitorId, request);
         return ResponseEntity.ok(new ResponseDTO(
                 true,
                 ResponseCode.VISITOR_STATUS_UPDATED.getCode(),

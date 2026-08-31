@@ -8,6 +8,7 @@ import org.mockito.MockitoAnnotations;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.database.pms.entities.Visitor;
+import org.pms.silverocean.database.pms.VisitorAccessEventRepo;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -20,6 +21,7 @@ import org.pms.silverocean.service.visitor.enums.VisitorCategory;
 import org.pms.silverocean.service.visitor.enums.VisitorStatus;
 import org.pms.silverocean.service.visitor.projections.PropertyIdUnitRefPropertyNameProjection;
 import org.pms.silverocean.service.visitor.wrappers.CreateVisitorRequest;
+import org.pms.silverocean.service.visitor.wrappers.UpdateVisitorStatusRequest;
 import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
@@ -34,6 +36,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 class VisitorServiceTest {
 
@@ -48,6 +51,8 @@ class VisitorServiceTest {
 
     @Mock
     private ConfigService configService;
+    @Mock
+    private VisitorAccessEventRepo accessEventRepo;
 
     private VisitorService visitorService;
 
@@ -56,7 +61,7 @@ class VisitorServiceTest {
         MockitoAnnotations.openMocks(this);
 
 
-        visitorService = new VisitorService(visitorDao, userDao, notificationService, i18NService, configService);
+        visitorService = new VisitorService(visitorDao, userDao, notificationService, i18NService, configService, accessEventRepo);
 
     }
 
@@ -203,7 +208,7 @@ class VisitorServiceTest {
     }
 
     @Test
-    void updateVisitorStatus_throwsException_whenAlreadyCheckedOut() {
+    void updateVisitorStatus_rejectsInvalidReentryData_whenCheckedOut() {
         Visitor visitor = new Visitor();
         visitor.setStatus(VisitorStatus.CHECKED_OUT.name());
 
@@ -216,13 +221,15 @@ class VisitorServiceTest {
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,
                 () -> visitorService.updateVisitorStatus(10L, VisitorStatus.CHECKED_IN));
-        assertEquals(ResponseCode.VISITOR_ALREADY_PROCESSED, ex.getResponseCode());
+        assertEquals(ResponseCode.VISITOR_INVALID_STATUS, ex.getResponseCode());
     }
 
     @Test
     void updateVisitorStatus_updatesStatus_whenVisitorIsPending() {
         Visitor visitor = new Visitor();
         visitor.setStatus(VisitorStatus.PENDING.name());
+        visitor.setExpectedArrivalTime(java.time.ZonedDateTime.now(java.time.ZoneId.of("UTC")).plusMinutes(5));
+        visitor.setMaxEntries(1);
 
         Users guard = new Users();
         guard.setId(1L);
@@ -237,5 +244,75 @@ class VisitorServiceTest {
         ArgumentCaptor<Visitor> captor = ArgumentCaptor.forClass(Visitor.class);
         verify(visitorDao).save(captor.capture(), anyString());
         assertEquals(VisitorStatus.CHECKED_IN.name(), captor.getValue().getStatus());
+        verify(accessEventRepo).save(any());
+    }
+
+    @Test
+    void invalidPhoneSearchReturnsNoRowsInsteadOfFallingBackToTheFullVisitorList() {
+        when(userDao.getUserId()).thenReturn(1L);
+        assertEquals(0, visitorService.listMyVisitors(PageRequest.of(0, 25), Optional.of("not-a-phone")).size());
+        verify(visitorDao, never()).findByTenantOrGuardOrLandlordOrPropertyManager(any(), anyLong());
+    }
+
+    @Test
+    void updateVisitorStatus_rejectsEntryBeforeHostApproval() {
+        Visitor visitor = validVisitor(VisitorStatus.PENDING_APPROVAL);
+        Users guard = new Users(); guard.setId(1L);
+        when(userDao.getUserObject()).thenReturn(guard);
+        when(visitorDao.findByIdAndGuard(10L, 1L)).thenReturn(Optional.of(visitor));
+
+        PMSCustomException ex = assertThrows(PMSCustomException.class,
+                () -> visitorService.updateVisitorStatus(10L, VisitorStatus.CHECKED_IN));
+        assertEquals(ResponseCode.VISITOR_INVALID_STATUS, ex.getResponseCode());
+    }
+
+    @Test
+    void updateVisitorStatus_enforcesWindowEntryLimitAndVehicleIdentity() {
+        Users guard = new Users(); guard.setId(1L);
+        when(userDao.getUserObject()).thenReturn(guard);
+
+        Visitor expired = validVisitor(VisitorStatus.APPROVED);
+        expired.setValidUntil(java.time.ZonedDateTime.now(java.time.ZoneId.of("UTC")).minusMinutes(1));
+        when(visitorDao.findByIdAndGuard(10L, 1L)).thenReturn(Optional.of(expired));
+        assertThrows(PMSCustomException.class, () -> visitorService.updateVisitorStatus(10L, VisitorStatus.CHECKED_IN));
+
+        Visitor wrongVehicle = validVisitor(VisitorStatus.APPROVED);
+        wrongVehicle.setVisitType("DRIVE_IN"); wrongVehicle.setVehiclePlate("KDA123A");
+        when(visitorDao.findByIdAndGuard(11L, 1L)).thenReturn(Optional.of(wrongVehicle));
+        assertThrows(PMSCustomException.class, () -> visitorService.updateVisitorStatus(11L,
+                new UpdateVisitorStatusRequest(VisitorStatus.CHECKED_IN, "KDB999B")));
+
+        Visitor exhausted = validVisitor(VisitorStatus.CHECKED_OUT);
+        exhausted.setEntryCount(1); exhausted.setMaxEntries(1);
+        when(visitorDao.findByIdAndGuard(12L, 1L)).thenReturn(Optional.of(exhausted));
+        assertThrows(PMSCustomException.class, () -> visitorService.updateVisitorStatus(12L, VisitorStatus.CHECKED_IN));
+    }
+
+    @Test
+    void deleteVisitor_blocksAnActiveOccupantAndRedactsTerminalPii() {
+        when(userDao.getUserId()).thenReturn(1L);
+        Visitor inside = validVisitor(VisitorStatus.CHECKED_IN);
+        when(visitorDao.findByIdAndCreatedBy(20L, 1L)).thenReturn(Optional.of(inside));
+        assertThrows(PMSCustomException.class, () -> visitorService.deleteVisitor(20L));
+
+        Visitor departed = validVisitor(VisitorStatus.CHECKED_OUT);
+        departed.setVisitorName("Sensitive Name"); departed.setPhoneNumber("+254700000000");
+        departed.setVehiclePlate("KDA123A"); departed.setCredentialHash("secret-hash");
+        when(visitorDao.findByIdAndCreatedBy(21L, 1L)).thenReturn(Optional.of(departed));
+        visitorService.deleteVisitor(21L);
+        assertEquals("Deleted visitor", departed.getVisitorName());
+        assertEquals(null, departed.getPhoneNumber());
+        assertEquals(null, departed.getCredentialHash());
+        assertEquals(false, departed.isActive());
+    }
+
+    private Visitor validVisitor(VisitorStatus status) {
+        Visitor visitor = new Visitor();
+        visitor.setId(10L); visitor.setPropertyId(5L); visitor.setStatus(status.name()); visitor.setActive(true);
+        visitor.setExpectedArrivalTime(java.time.ZonedDateTime.now(java.time.ZoneId.of("UTC")).plusMinutes(5));
+        visitor.setValidFrom(java.time.ZonedDateTime.now(java.time.ZoneId.of("UTC")).minusMinutes(5));
+        visitor.setValidUntil(java.time.ZonedDateTime.now(java.time.ZoneId.of("UTC")).plusMinutes(30));
+        visitor.setMaxEntries(1);
+        return visitor;
     }
 }

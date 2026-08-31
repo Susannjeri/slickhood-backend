@@ -27,7 +27,7 @@ public interface VisitorRepo extends JpaRepository<Visitor, Long> {
     @Query("SELECT v FROM Visitor v WHERE v.unitId = :unitId AND v.status = :status AND v.active = true")
     Page<Visitor> findByUnitIdAndStatus(Pageable pageable, long unitId, String status);
 
-    @Query("SELECT v FROM Visitor v WHERE v.id = :visitorId AND v.createdBy = :createdBy AND v.active = true")
+    @Query("SELECT v FROM Visitor v WHERE v.id=:visitorId AND (v.createdBy=:createdBy OR v.hostUserId=:createdBy) AND v.active=true")
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<Visitor> findByIdAndCreatedBy(long visitorId, long createdBy);
 
@@ -44,48 +44,34 @@ public interface VisitorRepo extends JpaRepository<Visitor, Long> {
 
 
     @Query(value = """
-            SELECT v.* FROM pms_visitor v
-                           JOIN (
-                                                 SELECT v1.id FROM pms_visitor v1 JOIN pms_property p1 ON v1.property_id = p1.id
-                                                 WHERE v1.created_by = :userId
-                                                 UNION
-                                                 SELECT v2.id FROM pms_visitor v2 JOIN pms_property p2 ON v2.property_id = p2.id
-                                                 WHERE p2.created_by = :userId
-                                                 UNION
-                                                 SELECT v3.id FROM pms_visitor v3 JOIN pms_property p3 ON v3.property_id = p3.id
-                                                 WHERE EXISTS (
-                                                     SELECT 1 FROM pms_property_manager pm WHERE pm.property_id = p3.id AND pm.user_id = :userId AND pm.active = 1)
-                                             ) AS allowed_ids ON v.id = allowed_ids.id
-             WHERE v.active = 1
-             ORDER BY id DESC
+            SELECT v.* FROM pms_visitor v JOIN pms_property p ON p.id=v.property_id
+             WHERE v.active=1 AND p.active=1 AND (v.created_by=:userId OR v.host_user_id=:userId OR p.created_by=:userId
+                OR EXISTS (SELECT 1 FROM pms_property_manager pm WHERE pm.property_id=p.id AND pm.user_id=:userId AND pm.active=1)
+                OR EXISTS (SELECT 1 FROM pms_property_ownership po WHERE po.property_id=p.id AND po.homeowner_user_id=:userId
+                    AND po.active=1 AND (po.unit_id IS NULL OR po.unit_id=v.unit_id)))
+             ORDER BY v.id DESC
              LIMIT :limit OFFSET :offset
             """, nativeQuery = true)
     List<Visitor> findByTenantOrLandlordOrGuardOrPropertyManager(@Param("limit") int limit, @Param("offset") long offset, long userId);
 
     @Query(value = """
-            SELECT v.* FROM pms_visitor v
-                       JOIN (
-                                                 SELECT v1.id FROM pms_visitor v1 JOIN pms_property p1 ON v1.property_id = p1.id
-                                                 WHERE v1.created_by = :userId
-                                                 UNION
-                                                 SELECT v2.id FROM pms_visitor v2 JOIN pms_property p2 ON v2.property_id = p2.id
-                                                 WHERE p2.created_by = :userId
-                                                 UNION
-                                                 SELECT v3.id FROM pms_visitor v3 JOIN pms_property p3 ON v3.property_id = p3.id
-                                                 WHERE EXISTS (
-                                                     SELECT 1 FROM pms_property_manager pm WHERE pm.property_id = p3.id AND pm.user_id = :userId AND pm.active = 1)
-                                             ) AS allowed_ids ON v.id = allowed_ids.id
-            WHERE v.active = 1 AND v.phone_number like CONCAT('%', :phoneNumber, '%')
-            ORDER BY id DESC
+            SELECT v.* FROM pms_visitor v JOIN pms_property p ON p.id=v.property_id
+            WHERE v.active=1 AND p.active=1 AND v.phone_number=:phoneNumber
+              AND (v.created_by=:userId OR v.host_user_id=:userId OR p.created_by=:userId
+                OR EXISTS (SELECT 1 FROM pms_property_manager pm WHERE pm.property_id=p.id AND pm.user_id=:userId AND pm.active=1)
+                OR EXISTS (SELECT 1 FROM pms_property_ownership po WHERE po.property_id=p.id AND po.homeowner_user_id=:userId
+                    AND po.active=1 AND (po.unit_id IS NULL OR po.unit_id=v.unit_id)))
+            ORDER BY v.id DESC
             LIMIT :limit OFFSET :offset
             """, nativeQuery = true)
     List<Visitor> findByTenantOrLandlordOrGuardOrPropertyManagerAndPhoneNumber(@Param("limit") int limit, @Param("offset") long offset, long userId, String phoneNumber);
 
-    @Query("SELECT v FROM Visitor v WHERE v.id=:visitorId AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId = v.propertyId AND pm.userId = :guardUserId AND pm.roleName=:guardRoleName)")
+    @Query("SELECT v FROM Visitor v WHERE v.id=:visitorId AND v.active=true AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId = v.propertyId AND pm.userId = :guardUserId AND pm.roleName=:guardRoleName AND pm.active=true)")
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<Visitor> findByIdAndGuard(long visitorId, long guardUserId, String guardRoleName);
 
-    @Query("SELECT v FROM Visitor v WHERE v.status = 'PENDING' AND v.expectedArrivalTime < :cutoff AND v.active = true ORDER BY v.expectedArrivalTime ASC")
+    @Query("SELECT v FROM Visitor v WHERE v.status IN ('PENDING','PENDING_APPROVAL','APPROVED','ARRIVED') AND v.active=true " +
+            "AND ((v.validUntil IS NOT NULL AND v.validUntil < :cutoff) OR (v.validUntil IS NULL AND v.expectedArrivalTime < :cutoff)) ORDER BY v.expectedArrivalTime ASC")
     List<Visitor> findExpiredPendingVisitors(@Param("cutoff") ZonedDateTime cutoff, Pageable pageable);
 
     @Query("SELECT COALESCE(COUNT(v), 0) FROM Visitor v JOIN PropertyManager pm ON v.propertyId=pm.propertyId" +

@@ -40,6 +40,9 @@ public enum NotificationType {
     VISITOR_ARRIVAL_EMAIL("email.visitor.arrival.subject","email.visitor.arrival.body", false, NotificationChannel.EMAIL),
     VISITOR_DEPARTURE_SMS("sms.visitor.departure", false, NotificationChannel.SMS),
     VISITOR_DEPARTURE_EMAIL("email.visitor.departure.subject","email.visitor.departure.body", false, NotificationChannel.EMAIL),
+    VISITOR_ACCESS_APPROVED_SMS("sms.visitor.access.approved", false, NotificationChannel.SMS),
+    VISITOR_ACCESS_DENIED_SMS("sms.visitor.access.denied", false, NotificationChannel.SMS),
+    VISITOR_APPROVAL_REQUEST_SMS("sms.visitor.approval.request", false, NotificationChannel.SMS),
 
     ACCOUNT_VERIFICATION_REQUEST_EMAIL("email.account.verification.request.subject","email.account.verification.request.body", true, NotificationChannel.EMAIL),
     ACCOUNT_VERIFICATION_FAILED_EMAIL("email.account.verification.failed.subject","email.account.verification.failed.body", true, NotificationChannel.EMAIL),

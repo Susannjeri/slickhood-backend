@@ -68,6 +68,10 @@ public class VisitorDao {
         return unitRepo.getByUnitIdAndUserIdIsTenant(unitId, userId);
     }
 
+    public Optional<PropertyIdUnitRefPropertyNameProjection> checkIfResidentInUnit(long unitId, long userId) {
+        return unitRepo.getByUnitIdAndUserIdIsResident(unitId, userId);
+    }
+
     public boolean canStaffOrOwnerAccessUnit(long unitId, long userId) {
         return unitRepo.findByIdAndStaffOrOwner(unitId, userId).isPresent();
     }
