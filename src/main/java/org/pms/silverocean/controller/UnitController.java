@@ -68,10 +68,10 @@ public class UnitController extends BasePropertyController {
                                                   @RequestParam("utilities") Set<Long> utilities,
                                                   @RequestParam("leaseMode") PMSLeaseMode leaseMode,
                                                   @RequestParam("price") double price,
-                                                  @RequestParam("templateId") Long templateId,
+                                                  @RequestParam("templateId") Optional<Long> templateId,
                                                   @RequestParam("image") MultipartFile image) {
 
-        UnitDTO unitDTO = new UnitDTO(propertyId, ref, unitType, size, new MeasurementUnitsDTO(measurementUnits.getId(), measurementUnits.getName()), utilities, leaseMode, price, currency.orElse(null), templateId);
+        UnitDTO unitDTO = new UnitDTO(propertyId, ref, unitType, size, new MeasurementUnitsDTO(measurementUnits.getId(), measurementUnits.getName()), utilities, leaseMode, price, currency.orElse(null), templateId.orElse(null));
         return handleUnit(unitDTO, propertyService::createUnit, image, HttpStatus.CREATED);
     }
 
@@ -88,9 +88,9 @@ public class UnitController extends BasePropertyController {
                                                 @RequestParam("utilities") Set<Long> utilities,
                                                 @RequestParam("leaseMode") PMSLeaseMode leaseMode,
                                                 @RequestParam("price") double price,
-                                                @RequestParam("templateId") Long templateId,
+                                                @RequestParam("templateId") Optional<Long> templateId,
                                                 @RequestParam("image") Optional<MultipartFile> image) {
-        return handleUnit(new UnitDTO(propertyId, ref, unitType, size, new MeasurementUnitsDTO(measurementUnits.getId(), measurementUnits.getName()), utilities, leaseMode, price, currency.orElse(null), templateId),
+        return handleUnit(new UnitDTO(propertyId, ref, unitType, size, new MeasurementUnitsDTO(measurementUnits.getId(), measurementUnits.getName()), utilities, leaseMode, price, currency.orElse(null), templateId.orElse(null)),
                 (dto, img) -> propertyService.editUnit(unitId, dto, img), image.orElse(null), HttpStatus.OK);
     }
 

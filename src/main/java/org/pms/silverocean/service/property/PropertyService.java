@@ -214,6 +214,7 @@ public class PropertyService {
                 i18NService.getLocalizedMessage(ResponseCode.PROPERTY_CREATION_SUCCESS), Set.of(property.getId()));
     }
 
+    @Transactional
     public ResponseDTO createUnit(UnitDTO unitDTO, MultipartFile image) {
         Pair<ResponseDTO, Property> validationResult = validateUnitAndImage(unitDTO, image);
         if (validationResult.getLeft() != null) {
@@ -227,7 +228,7 @@ public class PropertyService {
         }
         try {
             unitDao.save(unit);
-            saveUnitImage(unit, image, false);
+            saveUnitImage(unit, image);
             if (!property.isHasUnits()) {
                 property.setHasUnits(true);
                 propertyDao.update(property);
@@ -235,7 +236,10 @@ public class PropertyService {
             return new ResponseDTO(true, ResponseCode.UNIT_CREATION_SUCCESS.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_SUCCESS), Set.of(unit.getId()));
         } catch (PMSCustomException e) {
-            log.error(e.getMessage(), e);
+            if (e.getResponseCode() != ResponseCode.UNIT_CREATION_FAILED_DUPLICATE) {
+                throw e;
+            }
+            log.info("Duplicate unit reference rejected for property {}", unitDTO.propertyId());
         } catch (IOException e) {
             log.error("Error reading uploaded image", e);
             return new ResponseDTO(false,
@@ -245,11 +249,17 @@ public class PropertyService {
                 i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_FAILED_DUPLICATE));
     }
 
+    @Transactional
     public ResponseDTO updateUnitCharges(@RequestBody UnitChargesDTO unitChargesDTO) {
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitChargesDTO.unitId(), userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitChargesDTO.unitId(), userDao.getUserId());
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
+        }
+        long distinctChargeTypes = unitChargesDTO.charges().stream().map(dto -> dto.chargeId()).distinct().count();
+        boolean invalidChargeType = unitChargesDTO.charges().stream().anyMatch(dto -> unitDao.getChargeType(dto.chargeId()).isEmpty());
+        if (distinctChargeTypes != unitChargesDTO.charges().size() || invalidChargeType) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         }
         Set<UnitCharge> newUnitCharges = unitChargesDTO.charges().stream().map(dto -> {
             UnitCharge unitCharge = new UnitCharge(dto);
@@ -278,12 +288,13 @@ public class PropertyService {
                 i18NService.getLocalizedMessage(ResponseCode.UNIT_CHARGES), unitCharges);
     }
 
+    @Transactional
     public ResponseDTO createDuplicateJob(long unitId, int count) {
-        if (count > configService.getConfigByName(PMSConfigs.MAX_UNIT_DUPLICATE_COUNT).get().intValue()) {
+        if (count < 1 || count > configService.getConfigByName(PMSConfigs.MAX_UNIT_DUPLICATE_COUNT).get().intValue()) {
             return new ResponseDTO(false, ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT));
         }
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
         return unitFromDb.map(unit -> {
             BulkUnitJob bulkUnitJob = new BulkUnitJob();
             bulkUnitJob.setUnitId(unit.getId());
@@ -317,8 +328,9 @@ public class PropertyService {
         return new ResponseDTO(true, ResponseCode.CREATE_SIMILAR_UNITS_JOB_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.CREATE_SIMILAR_UNITS_JOB_LIST), count);
     }
 
+    @Transactional
     public ResponseDTO deleteUnit(long unitId) {
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
         return unitFromDb.map(unit -> {
             if (unit.isOccupied()) {
                 unitDao.logDeleteUnitFailure(unit, i18NService.getLocalizedMessage(ResponseCode.UNIT_IS_OCCUPIED));
@@ -329,7 +341,7 @@ public class PropertyService {
             garageService.deletePath(unit.getImagePath(), true);
             int countRemainingUnits = unitDao.countActiveByPropertyId(unit.getPropertyId());
             if (countRemainingUnits < 1) {
-                Property property = propertyDao.findByIdAndCreatedBy(unit.getPropertyId(), unit.getCreatedBy()).orElse(null);
+                Property property = propertyDao.findByIdAndStaffOrOwner(unit.getPropertyId(), userDao.getUserId()).orElse(null);
                 if (property != null) {
                     property.setHasUnits(false);
                     propertyDao.update(property);
@@ -341,8 +353,9 @@ public class PropertyService {
                 i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND)));
     }
 
+    @Transactional
     public ResponseDTO editUnit(long unitId, UnitDTO unitDTO, MultipartFile image) {
-        Optional<Property> targetProperty = propertyDao.findByIdAndCreatedBy(unitDTO.propertyId(), userDao.getUserId());
+        Optional<Property> targetProperty = propertyDao.findByIdAndStaffOrOwner(unitDTO.propertyId(), userDao.getUserId());
         if (targetProperty.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY));
@@ -355,9 +368,13 @@ public class PropertyService {
             }
         }
         Property property = targetProperty.get();
+        if (!isLeaseModeCompatible(property, unitDTO.leaseMode()) || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
+            return new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA));
+        }
 
         //get unit from db
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
@@ -365,7 +382,7 @@ public class PropertyService {
         Unit unit = unitFromDb.get();
         unit.updateFromDto(unitDTO);
         try {
-            saveUnitImage(unit, image, true);
+            saveUnitImage(unit, image);
             unitDao.update(unit);
             if (property != null && !property.isHasUnits()) {
                 property.setHasUnits(true);
@@ -396,8 +413,9 @@ public class PropertyService {
 //                i18NService.getLocalizedMessage(ResponseCode.UNIT_OCCUPATION_STATUS_UPDATED), Set.of(unitId));
 //    }
 
+    @Transactional
     public ResponseDTO advertiseUnit(long unitId) {
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
@@ -426,30 +444,50 @@ public class PropertyService {
     }
 
     public ResponseDTO uploadUnitSliderImages(long unitId, List<MultipartFile> images) {
-        Optional<Unit> unitFromDb = unitDao.findByIdAndCreatedBy(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
         }
+        if (images == null || images.isEmpty() || images.size() > 10) {
+            return new ResponseDTO(false, ResponseCode.INVALID_IMAGE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_IMAGE));
+        }
+        List<PendingUnitImage> pendingImages = new ArrayList<>(images.size());
+        long totalBytes = 0;
+        for (int index = 0; index < images.size(); index++) {
+            MultipartFile image = images.get(index);
+            Optional<ResponseDTO> validationResponse = validateImage(image);
+            if (validationResponse.isPresent()) {
+                return validationResponse.get();
+            }
+            totalBytes += image.getSize();
+            if (totalBytes > 50L * 1024 * 1024) {
+                return new ResponseDTO(false, ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED.getCode(),
+                        i18NService.getLocalizedMessage(ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED));
+            }
+            try {
+                String contentType = Objects.toString(image.getContentType(), "image/jpeg").toLowerCase(Locale.ROOT);
+                String extension = imageExtension(contentType);
+                pendingImages.add(new PendingUnitImage("unit-slider-" + (index + 1) + "." + extension, contentType, image.getBytes()));
+            } catch (IOException e) {
+                throw new PMSCustomException(ResponseCode.INVALID_IMAGE, e);
+            }
+        }
         Unit unit = unitFromDb.get();
-        threadPoolExecutorService.submit(() -> processImageUploadsAsync(unit.getCreatedBy(), unit.getPropertyId(), unit.getId(), images));
+        threadPoolExecutorService.submit(() -> processImageUploadsAsync(unit.getCreatedBy(), unit.getPropertyId(), unit.getId(), pendingImages));
         return new ResponseDTO(true, ResponseCode.IMAGES_UPLOADED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.IMAGES_UPLOADED), Set.of(unitId));
     }
 
-    public void processImageUploadsAsync(Long createdBy, Long propertyId, Long unitId, List<MultipartFile> images) {
+    private void processImageUploadsAsync(Long createdBy, Long propertyId, Long unitId, List<PendingUnitImage> images) {
         Path filePath = Paths.get(String.format("%d/%d/%d/%s/", createdBy, propertyId, unitId, SLIDERIMAGES));
 
         try {
             garageService.deletePath(filePath.toString(), true);
 
-            for (MultipartFile image : images) {
-                Optional<ResponseDTO> validationResponse = validateImage(image);
-                if (validationResponse.isEmpty()) {
-                    garageService.uploadFile(filePath.toString(), image);
-                } else {
-                    log.warn("Skipping invalid image: {}", image.getOriginalFilename());
-                }
+            for (PendingUnitImage image : images) {
+                String key = filePath.resolve(image.fileName()).toString().replace('\\', '/');
+                garageService.uploadBytes(key, image.content(), image.contentType());
             }
             log.info("Successfully completed async upload for Unit: {}", unitId);
         } catch (Exception ex) {
@@ -484,16 +522,29 @@ public class PropertyService {
     }
 
     private Pair<ResponseDTO, Property> validateUnitAndImage(UnitDTO unitDTO, MultipartFile image) {
-        Optional<Property> propertyOptional = propertyDao.findByIdAndCreatedBy(unitDTO.propertyId(), userDao.getUserId());
+        Optional<Property> propertyOptional = propertyDao.findByIdAndStaffOrOwner(unitDTO.propertyId(), userDao.getUserId());
         if (propertyOptional.isEmpty()) {
             return Pair.of(new ResponseDTO(false, ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY)), null);
+        }
+        Property property = propertyOptional.get();
+        if (!isLeaseModeCompatible(property, unitDTO.leaseMode()) || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
+            return Pair.of(new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA)), null);
         }
         Optional<ResponseDTO> imageValidationError = validateImage(image);
         if (imageValidationError.isPresent()) {
             return Pair.of(imageValidationError.get(), null);
         }
-        return Pair.of(null, propertyOptional.get());
+        return Pair.of(null, property);
+    }
+
+    private boolean isLeaseModeCompatible(Property property, PMSLeaseMode leaseMode) {
+        return switch (property.getManagementMode()) {
+            case RENTAL -> leaseMode == PMSLeaseMode.RENT;
+            case SALE -> leaseMode == PMSLeaseMode.SALE;
+            case SERVICE_CHARGE -> leaseMode == PMSLeaseMode.SERVICE_CHARGE;
+        };
     }
 
     private Optional<ResponseDTO> validateImage(MultipartFile image) {
@@ -831,11 +882,7 @@ public class PropertyService {
     private void savePropertyImage(Property property, MultipartFile image) throws IOException {
         Path filePath = Paths.get(String.format("%d/%d/", property.getCreatedBy(), property.getId()));
         String contentType = Objects.toString(image.getContentType(), "image/jpeg").toLowerCase(Locale.ROOT);
-        String extension = switch (contentType) {
-            case "image/png" -> "png";
-            case "image/webp" -> "webp";
-            default -> "jpg";
-        };
+        String extension = imageExtension(contentType);
         String fileName = "property-cover." + extension;
         garageService.uploadBytes(filePath.resolve(fileName).toString().replace('\\', '/'), image.getBytes(), contentType);
         property.setThumbnail(fileName);
@@ -843,24 +890,28 @@ public class PropertyService {
         propertyDao.update(property);
     }
 
-    private void saveUnitImage(Unit unit, MultipartFile image, boolean clearExisting) throws IOException {
+    private String imageExtension(String contentType) {
+        return switch (contentType) {
+            case "image/png" -> "png";
+            case "image/webp" -> "webp";
+            default -> "jpg";
+        };
+    }
+
+    private void saveUnitImage(Unit unit, MultipartFile image) throws IOException {
         if (image == null || image.getSize() == 0) {
             return;
         }
         Path filePath = Paths.get(String.format("%d/%d/%d/", unit.getCreatedBy(), unit.getPropertyId(), unit.getId()));
-        if (clearExisting) {
-            garageService.deletePath(filePath.toString(), false);
-        }
-
-        try {
-            garageService.uploadFile(filePath.toString(), image);
-        } catch (IOException ex) {
-            throw new PMSCustomException(ResponseCode.GENERAL_FAILURE, ex);
-        }
-        unit.setThumbnail(image.getOriginalFilename());
+        String contentType = Objects.toString(image.getContentType(), "image/jpeg").toLowerCase(Locale.ROOT);
+        String fileName = "unit-cover." + imageExtension(contentType);
+        garageService.uploadBytes(filePath.resolve(fileName).toString().replace('\\', '/'), image.getBytes(), contentType);
+        unit.setThumbnail(fileName);
         unit.setImagePath(filePath.toString());
         unitDao.update(unit);
     }
+
+    private record PendingUnitImage(String fileName, String contentType, byte[] content) {}
 
     private DuplicateUnitJobDTO runDuplicateJob(long unitJob) {
         Optional<BulkUnitJob> activeJobById = unitDao.findActiveJobById(unitJob);
@@ -868,7 +919,7 @@ public class PropertyService {
             BulkUnitJob bulkUnitJob = activeJobById.get();
 
             log.info("Running Duplicate Job Id: {}", bulkUnitJob.getId());
-            Optional<Unit> byIdAndCreatedBy = unitDao.findByIdAndCreatedBy(bulkUnitJob.getUnitId(), bulkUnitJob.getCreatedBy());
+            Optional<Unit> byIdAndCreatedBy = unitDao.findByIdAndStaffOrOwner(bulkUnitJob.getUnitId(), bulkUnitJob.getCreatedBy());
             int count = bulkUnitJob.getCount();
             if (byIdAndCreatedBy.isPresent()) {
                 Unit unitFromDb = byIdAndCreatedBy.get();
@@ -877,7 +928,7 @@ public class PropertyService {
                 try {
                     while (count-- > 0) {
                         Unit newUnit = duplicateUnitInstance(unitFromDb);
-                        newUnit.setRef(unitFromDb.getRef() + bulkUnitJob.getId() + count);
+                        newUnit.setRef(unitFromDb.getRef() + "-COPY-" + bulkUnitJob.getId() + "-" + (count + 1));
                         units.add(newUnit);
                     }
 
@@ -887,17 +938,21 @@ public class PropertyService {
                 } catch (Exception e) {
                     log.error(e.getMessage(), e);
                 } finally {
-                    unitDao.batchUpdate(units);
                     bulkUnitJob.setDescription(i18NService.getLocalizedMessage(jobStatusDescription.getDescription()));
                     bulkUnitJob.setCompleted(true);
                     log.info("Bulk job completed, updating status in db for job id {}", bulkUnitJob.getId());
                     unitDao.updateBulkUnitJob(bulkUnitJob);
                 }
                 return new DuplicateUnitJobDTO(ResponseCode.DUPLICATE_UNIT_JOB_SUCCESS.equals(jobStatusDescription), bulkUnitJob.getEmail());
+            } else {
+                bulkUnitJob.setDescription(i18NService.getLocalizedMessage(ResponseCode.DUPLICATE_UNIT_JOB_FAILED.getDescription()));
+                bulkUnitJob.setCompleted(true);
+                unitDao.updateBulkUnitJob(bulkUnitJob);
+                return new DuplicateUnitJobDTO(false, bulkUnitJob.getEmail());
             }
 
         }
-        return new DuplicateUnitJobDTO(true, null);
+        return new DuplicateUnitJobDTO(false, null);
     }
 
     private Unit duplicateUnitInstance(Unit baseUnit) {

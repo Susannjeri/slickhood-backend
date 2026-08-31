@@ -53,7 +53,7 @@ public class Unit extends BaseCreatorEntity implements Auditable {
 
     public Unit(UnitDTO unitDTO) {
         this.propertyId = unitDTO.propertyId();
-        this.ref = unitDTO.ref();
+        this.ref = unitDTO.ref().trim();
         this.unitType = unitDTO.unitType().name();
         this.size = unitDTO.size();
         this.utilities = unitDTO.utilities().stream().map(UtilitiesDTO::id)
@@ -71,7 +71,7 @@ public class Unit extends BaseCreatorEntity implements Auditable {
 
     public void updateFromDto(UnitDTO unitDTO) {
         this.propertyId = unitDTO.propertyId();
-        this.ref = unitDTO.ref();
+        this.ref = unitDTO.ref().trim();
         this.unitType = unitDTO.unitType().name();
         this.size = unitDTO.size();
         this.utilities = unitDTO.utilities().stream().map(UtilitiesDTO::id)

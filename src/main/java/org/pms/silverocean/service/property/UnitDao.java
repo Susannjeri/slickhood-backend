@@ -306,7 +306,11 @@ public class UnitDao {
     }
 
     public Optional<Utility> getUtilities(long id) {
-        return utilitiesCache.getUnchecked(id);
+        return utilitiesCache.getUnchecked(id).filter(Utility::isActive);
+    }
+
+    public Optional<ChargeType> getChargeType(long id) {
+        return chargeTypeCache.getUnchecked(id).filter(ChargeType::isActive);
     }
 
     public void deactivateAllUnitsWithinProperty(long propertyId) {
