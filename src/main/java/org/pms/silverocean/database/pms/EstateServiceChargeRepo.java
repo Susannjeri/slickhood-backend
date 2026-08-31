@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Lock;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.pms.silverocean.service.estate.ServiceChargeView;
@@ -71,6 +72,8 @@ public interface EstateServiceChargeRepo extends JpaRepository<EstateServiceChar
 
  @Lock(LockModeType.PESSIMISTIC_WRITE)
  @Query("SELECT c FROM EstateServiceCharge c JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND i.paid=false " +
-         "AND c.overdueNoticeQueuedAt IS NULL AND c.dueDate<:today ORDER BY c.dueDate,c.id")
- List<EstateServiceCharge> lockOverdueNoticeCandidates(LocalDate today, Pageable pageable);
+         "AND c.dueDate<:today AND c.overdueReminderCount<:maxReminders " +
+         "AND (c.lastOverdueReminderQueuedAt IS NULL OR c.lastOverdueReminderQueuedAt<=:repeatBefore) ORDER BY c.dueDate,c.id")
+ List<EstateServiceCharge> lockOverdueReminderCandidates(LocalDate today, LocalDateTime repeatBefore,
+                                                          int maxReminders, Pageable pageable);
 }

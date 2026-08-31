@@ -11,10 +11,14 @@ import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
@@ -23,6 +27,7 @@ public class NotificationService {
     private final NotificationDao notificationDao;
     private final UserDao userDao;
     private final Map<String, NotificationSender> senders;
+    private final ApplicationEventPublisher events;
     private Set<String> superAdminEmails;
 
 
@@ -38,9 +43,15 @@ public class NotificationService {
 
     public long queueNotification(NotificationDTO notificationDTO) {
         long notificationId = createNotification(notificationDTO.recipient(), notificationDTO.formattedMessage(), notificationDTO.notificationType());
-        NotificationSender sender = getPlatform(notificationDTO.notificationType().getChannel());
-        sender.send(notificationDTO, notificationId);
+        events.publishEvent(new NotificationQueued(notificationId, notificationDTO));
         return notificationId;
+    }
+
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void deliverAfterCommit(NotificationQueued queued) {
+        NotificationSender sender = getPlatform(queued.notification().notificationType().getChannel());
+        sender.send(queued.notification(), queued.notificationId());
     }
 
     public void sendEmailToSuperAdmin(NotificationType notificationType, String formattedMessage) {
@@ -57,6 +68,7 @@ public class NotificationService {
         notification.setChannel(notificationType.getChannel().name());
         notification.setRetry(notificationType.isRetry());
         notification.setRetries(0);
+        notification.setUpdatedOn(LocalDateTime.now());
         notification.setActive(true);
 
 
@@ -71,4 +83,6 @@ public class NotificationService {
         }
         return sender;
     }
+
+    public record NotificationQueued(long notificationId, NotificationDTO notification) {}
 }

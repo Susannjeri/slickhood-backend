@@ -30,7 +30,8 @@ class ServiceChargeReminderServiceTest {
         EstateServiceCharge overdue = charge(2L);
         when(charges.lockPreDueReminderCandidates(eq(today), eq(today.plusDays(3)), any(Pageable.class)))
                 .thenReturn(List.of(preDue));
-        when(charges.lockOverdueNoticeCandidates(eq(today), any(Pageable.class))).thenReturn(List.of(overdue));
+        when(charges.lockOverdueReminderCandidates(eq(today), any(java.time.LocalDateTime.class), eq(12), any(Pageable.class)))
+                .thenReturn(List.of(overdue));
 
         var result = new ServiceChargeReminderService(charges, events).queueBatch(today, 100);
 
@@ -38,12 +39,31 @@ class ServiceChargeReminderServiceTest {
         assertThat(result.overdue()).isEqualTo(1);
         assertThat(preDue.getPreDueReminderQueuedAt()).isNotNull();
         assertThat(overdue.getOverdueNoticeQueuedAt()).isNotNull();
+        assertThat(overdue.getLastOverdueReminderQueuedAt()).isNotNull();
+        assertThat(overdue.getOverdueReminderCount()).isEqualTo(1);
         verify(events).publish(eq(ServiceChargeReminderEvent.TYPE), eq("ESTATE_SERVICE_CHARGE"), eq("1"),
                 eq("SERVICE_CHARGE_PRE_DUE:1"), any(ServiceChargeReminderEvent.class));
         verify(events).publish(eq(ServiceChargeReminderEvent.TYPE), eq("ESTATE_SERVICE_CHARGE"), eq("2"),
-                eq("SERVICE_CHARGE_OVERDUE:2"), any(ServiceChargeReminderEvent.class));
+                eq("SERVICE_CHARGE_OVERDUE:2:1"), any(ServiceChargeReminderEvent.class));
         verify(charges).saveAll(List.of(preDue));
         verify(charges).saveAll(List.of(overdue));
+    }
+
+    @Test
+    void repeatedOverdueReminderUsesANewDedupeSequence() {
+        LocalDate today = LocalDate.of(2026, 8, 31);
+        EstateServiceCharge overdue = charge(2L);
+        overdue.setOverdueReminderCount(3);
+        when(charges.lockPreDueReminderCandidates(eq(today), eq(today.plusDays(3)), any(Pageable.class)))
+                .thenReturn(List.of());
+        when(charges.lockOverdueReminderCandidates(eq(today), any(java.time.LocalDateTime.class), eq(12), any(Pageable.class)))
+                .thenReturn(List.of(overdue));
+
+        new ServiceChargeReminderService(charges, events).queueBatch(today, 100);
+
+        assertThat(overdue.getOverdueReminderCount()).isEqualTo(4);
+        verify(events).publish(eq(ServiceChargeReminderEvent.TYPE), eq("ESTATE_SERVICE_CHARGE"), eq("2"),
+                eq("SERVICE_CHARGE_OVERDUE:2:4"), any(ServiceChargeReminderEvent.class));
     }
 
     private EstateServiceCharge charge(long id) {

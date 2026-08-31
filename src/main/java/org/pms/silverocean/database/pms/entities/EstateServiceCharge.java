@@ -17,4 +17,6 @@ public class EstateServiceCharge extends BaseCreatorEntity {
  @Column(nullable=false,precision=19,scale=2) private BigDecimal amount; private String currency;
  @Column(nullable=false) private LocalDate dueDate; private String description;
  private LocalDateTime preDueReminderQueuedAt; private LocalDateTime overdueNoticeQueuedAt;
+ private LocalDateTime lastOverdueReminderQueuedAt;
+ @Column(nullable=false) private int overdueReminderCount;
 }
