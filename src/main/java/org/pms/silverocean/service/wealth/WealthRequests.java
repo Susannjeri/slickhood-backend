@@ -45,4 +45,7 @@ public final class WealthRequests {
             @NotBlank @Size(max=160) String name, @NotNull @Positive BigDecimal targetAmount,
             @NotBlank @Pattern(regexp="[A-Za-z]{3}") String currency,
             @NotNull @FutureOrPresent LocalDate targetDate) {}
+
+    public record LiabilityBalanceRequest(@NotNull @PositiveOrZero BigDecimal outstandingPrincipal,
+            @PositiveOrZero BigDecimal monthlyPayment, LocalDate maturityDate) {}
 }

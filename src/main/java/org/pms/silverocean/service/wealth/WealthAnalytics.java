@@ -23,18 +23,21 @@ public final class WealthAnalytics {
         Map<Long,List<WealthCashFlow>> flowsByAsset=flows.stream().collect(Collectors.groupingBy(WealthCashFlow::getAssetId));
         Map<Long,BigDecimal> debtByAsset=liabilities.stream().collect(Collectors.groupingBy(WealthLiability::getAssetId,
                 Collectors.reducing(BigDecimal.ZERO,WealthLiability::getOutstandingPrincipal,BigDecimal::add)));
+        Map<Long,BigDecimal> debtServiceByAsset=liabilities.stream().collect(Collectors.groupingBy(WealthLiability::getAssetId,
+                Collectors.reducing(BigDecimal.ZERO,l->Optional.ofNullable(l.getMonthlyPayment()).orElse(BigDecimal.ZERO).multiply(BigDecimal.valueOf(12)),BigDecimal::add)));
         BigDecimal totalValue=sum(assets.stream().map(WealthAsset::getCurrentValue).toList());
-        List<AssetPerformance> performance=assets.stream().map(a->performance(a,flowsByAsset.getOrDefault(a.getId(),List.of()),debtByAsset.getOrDefault(a.getId(),BigDecimal.ZERO),totalValue,operating.getOrDefault(a.getId(),new OperatingInput(0,0,BigDecimal.ZERO)))).toList();
+        List<AssetPerformance> performance=assets.stream().map(a->performance(a,flowsByAsset.getOrDefault(a.getId(),List.of()),debtByAsset.getOrDefault(a.getId(),BigDecimal.ZERO),debtServiceByAsset.getOrDefault(a.getId(),BigDecimal.ZERO),totalValue,operating.getOrDefault(a.getId(),new OperatingInput(0,0,BigDecimal.ZERO)))).toList();
         BigDecimal debt=sum(performance.stream().map(AssetPerformance::debt).toList());
         BigDecimal income=sum(performance.stream().map(AssetPerformance::income).toList());
         BigDecimal expenses=sum(performance.stream().map(AssetPerformance::expenses).toList());
+        BigDecimal debtService=sum(performance.stream().map(AssetPerformance::annualDebtService).toList());
         BigDecimal arrears=sum(performance.stream().map(AssetPerformance::arrears).toList());
         int totalUnits=performance.stream().mapToInt(AssetPerformance::totalUnits).sum(),occupiedUnits=performance.stream().mapToInt(AssetPerformance::occupiedUnits).sum();
         BigDecimal noi=income.subtract(expenses),netWorth=totalValue.subtract(debt);
         long overdue=obligations.stream().filter(o->!"COMPLETED".equals(o.getStatus())&&deadline(o)!=null&&deadline(o).isBefore(LocalDate.now())).count();
         long upcoming=obligations.stream().filter(o->!"COMPLETED".equals(o.getStatus())&&deadline(o)!=null&&!deadline(o).isBefore(LocalDate.now())&&deadline(o).isBefore(LocalDate.now().plusDays(o.getReminderDays()+1L))).count();
         String currency=assets.stream().map(WealthAsset::getCurrency).findFirst().orElse("KES");
-        PortfolioSummary summary=new PortfolioSummary(currency,totalValue,debt,netWorth,income,expenses,noi,noi,
+        PortfolioSummary summary=new PortfolioSummary(currency,totalValue,debt,netWorth,income,expenses,noi,debtService,noi.subtract(debtService),
                 netWorth,sum(performance.stream().map(AssetPerformance::appreciation).toList()),pct(noi,totalValue),pct(debt,totalValue),
                 pct(BigDecimal.valueOf(occupiedUnits),BigDecimal.valueOf(totalUnits)),arrears,assets.size(),totalUnits,occupiedUnits,(int)upcoming,(int)overdue);
         List<Insight> insights=insights(assets,performance,obligations);
@@ -42,12 +45,12 @@ public final class WealthAnalytics {
         List<GoalProgress> progress=goals.stream().map(g->goal(g,summary)).toList();
         return new Dashboard(summary,performance,obligations,goals,progress,insights,projection);
     }
-    private static AssetPerformance performance(WealthAsset a,List<WealthCashFlow> flows,BigDecimal debt,BigDecimal total,OperatingInput operating){
+    private static AssetPerformance performance(WealthAsset a,List<WealthCashFlow> flows,BigDecimal debt,BigDecimal annualDebtService,BigDecimal total,OperatingInput operating){
         BigDecimal income=sum(flows.stream().filter(f->"INCOME".equals(f.getFlowType())).map(WealthCashFlow::getAmount).toList());
         BigDecimal expense=sum(flows.stream().filter(f->"EXPENSE".equals(f.getFlowType())).map(WealthCashFlow::getAmount).toList());
         BigDecimal noi=income.subtract(expense),value=a.getCurrentValue(),equity=value.subtract(debt);
         BigDecimal cost=Optional.ofNullable(a.getAcquisitionCost()).orElse(BigDecimal.ZERO);
-        return new AssetPerformance(a.getId(),a.getName(),a.getAssetType(),a.getCurrency(),value,debt,equity,income,expense,noi,pct(noi,value),value.subtract(cost),pct(debt,value),pct(value,total),operating.totalUnits(),operating.occupiedUnits(),pct(BigDecimal.valueOf(operating.occupiedUnits()),BigDecimal.valueOf(operating.totalUnits())),operating.arrears());
+        return new AssetPerformance(a.getId(),a.getName(),a.getAssetType(),a.getCurrency(),value,debt,equity,income,expense,noi,annualDebtService,noi.subtract(annualDebtService),pct(noi,value),value.subtract(cost),pct(debt,value),pct(value,total),operating.totalUnits(),operating.occupiedUnits(),pct(BigDecimal.valueOf(operating.occupiedUnits()),BigDecimal.valueOf(operating.totalUnits())),operating.arrears());
     }
     private static List<Insight> insights(List<WealthAsset> assets,List<AssetPerformance> rows,List<WealthObligation> obligations){
         List<Insight> result=new ArrayList<>(); LocalDate today=LocalDate.now();
@@ -64,11 +67,11 @@ public final class WealthAnalytics {
         return result;
     }
     private static List<ProjectionYear> project(PortfolioSummary s,int years,BigDecimal vg,BigDecimal ig,BigDecimal eg){
-        List<ProjectionYear> out=new ArrayList<>();BigDecimal value=s.totalAssetValue(),debt=s.totalDebt(),income=s.annualIncome(),expense=s.annualExpenses();
+        List<ProjectionYear> out=new ArrayList<>();BigDecimal value=s.totalAssetValue(),debt=s.totalDebt(),income=s.annualIncome(),expense=s.annualExpenses(),debtService=s.annualDebtService();
         BigDecimal vf=factor(vg),inf=factor(ig),ef=factor(eg);
-        for(int y=1;y<=years;y++){value=value.multiply(vf);income=income.multiply(inf);expense=expense.multiply(ef);out.add(new ProjectionYear(y,money(value),money(debt),money(value.subtract(debt)),money(income),money(expense),money(income.subtract(expense))));}return out;
+        for(int y=1;y<=years;y++){value=value.multiply(vf);income=income.multiply(inf);expense=expense.multiply(ef);out.add(new ProjectionYear(y,money(value),money(debt),money(value.subtract(debt)),money(income),money(expense),money(income.subtract(expense).subtract(debtService))));}return out;
     }
-    private static GoalProgress goal(WealthGoal g,PortfolioSummary s){BigDecimal current=switch(g.getGoalType()){case "INCOME"->s.annualIncome();case "EQUITY"->s.equity();case "DEBT_REDUCTION"->s.totalDebt();default->s.netWorth();};return new GoalProgress(g.getId(),g.getName(),g.getGoalType(),g.getTargetAmount(),current,pct(current,g.getTargetAmount()),g.getTargetDate(),g.getStatus());}
+    private static GoalProgress goal(WealthGoal g,PortfolioSummary s){BigDecimal current=switch(g.getGoalType()){case "INCOME"->s.annualIncome();case "EQUITY"->s.equity();case "DEBT_REDUCTION"->s.totalDebt();default->s.netWorth();};BigDecimal progress="DEBT_REDUCTION".equals(g.getGoalType())?(current.compareTo(g.getTargetAmount())<=0?HUNDRED:pct(g.getTargetAmount(),current)):pct(current,g.getTargetAmount());return new GoalProgress(g.getId(),g.getName(),g.getGoalType(),g.getTargetAmount(),current,progress,g.getTargetDate(),g.getStatus());}
     private static LocalDate deadline(WealthObligation o){return o.getExpiryDate()!=null?o.getExpiryDate():o.getDueDate();}
     private static BigDecimal sum(List<BigDecimal> values){return values.stream().filter(Objects::nonNull).reduce(BigDecimal.ZERO,BigDecimal::add);}
     private static BigDecimal pct(BigDecimal n,BigDecimal d){return d==null||d.signum()==0?BigDecimal.ZERO:n.multiply(HUNDRED).divide(d,2,RoundingMode.HALF_UP);}
