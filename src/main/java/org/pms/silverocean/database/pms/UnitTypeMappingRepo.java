@@ -8,13 +8,16 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
-import java.util.Optional;
+import java.util.List;
 import java.util.Set;
 
 public interface UnitTypeMappingRepo extends JpaRepository<UnitTypeToPropertyTypeMapping, Long> {
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    Optional<UnitTypeToPropertyTypeMapping> findUnitTypeToPropertyTypeMappingByUnitTypeAndPropertyType(PMSUnitTypes unitType, PMSPropertyType propertyType);
-
-    @Query("SELECT u.unitType FROM UnitTypeToPropertyTypeMapping u WHERE u.propertyType=:propertyType")
+    @Query("SELECT u.unitType FROM UnitTypeToPropertyTypeMapping u WHERE u.propertyType=:propertyType AND u.active=true")
     Set<PMSUnitTypes> findUnitTypeToPropertyTypeMappingByPropertyType(PMSPropertyType propertyType);
+
+    List<UnitTypeToPropertyTypeMapping> findAllByActiveTrue();
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM UnitTypeToPropertyTypeMapping u WHERE u.propertyType=:propertyType")
+    List<UnitTypeToPropertyTypeMapping> findAllForUpdateByPropertyType(PMSPropertyType propertyType);
 }

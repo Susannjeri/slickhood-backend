@@ -23,11 +23,18 @@ import org.pms.silverocean.service.property.PMSUnitTypes;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class UnitTypeToPropertyTypeMapping  extends BaseActiveEntity {
+public class UnitTypeToPropertyTypeMapping extends BaseActiveEntity implements Auditable {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private PMSUnitTypes unitType;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private PMSPropertyType propertyType;
+
+    @Override
+    public String toAuditJSON() {
+        return "{\"propertyType\":\"" + propertyType.name()
+                + "\",\"unitType\":\"" + unitType.name()
+                + "\",\"active\":" + isActive() + "}";
+    }
 }

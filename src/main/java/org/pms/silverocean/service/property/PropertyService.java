@@ -41,8 +41,11 @@ import org.pms.silverocean.service.property.wrappers.DuplicateUnitJobDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyAccountDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyManagerDetailsDTO;
+import org.pms.silverocean.service.property.wrappers.PropertyUnitTypeCatalogDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyViewDTO;
+import org.pms.silverocean.service.property.wrappers.TypeCatalogOption;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import org.pms.silverocean.service.property.wrappers.UnitTypeCatalogDTO;
 import org.pms.silverocean.service.property.wrappers.UnitTenantProjection;
 import org.pms.silverocean.service.property.wrappers.UtilitiesDTO;
 import org.pms.silverocean.service.threadpooling.PMSThreadPoolExecutorService;
@@ -82,6 +85,31 @@ import java.util.stream.Collectors;
 public class PropertyService {
     public static final String SLIDERIMAGES = "sliderimages";
     private static final String IMAGE_UPLOAD_EXECUTOR = "upload-images";
+    private static final List<PMSPropertyType> COMMON_PROPERTY_TYPES = List.of(
+            PMSPropertyType.APARTMENT_BLOCK,
+            PMSPropertyType.STANDALONE_HOUSE,
+            PMSPropertyType.AIRBNB_UNIT,
+            PMSPropertyType.TOWNHOUSE,
+            PMSPropertyType.MAISONETTE,
+            PMSPropertyType.BUNGALOW,
+            PMSPropertyType.SERVICED_APARTMENT,
+            PMSPropertyType.OFFICE_BLOCK_CBD,
+            PMSPropertyType.RETAIL_SHOP,
+            PMSPropertyType.GATED_ESTATE
+    );
+    private static final List<PMSUnitTypes> COMMON_UNIT_TYPES = List.of(
+            PMSUnitTypes.STUDIO,
+            PMSUnitTypes.BEDSITTER,
+            PMSUnitTypes.ONE_BEDROOM,
+            PMSUnitTypes.TWO_BEDROOM,
+            PMSUnitTypes.THREE_BEDROOM,
+            PMSUnitTypes.FOUR_BEDROOM,
+            PMSUnitTypes.FIVE_BEDROOM_PLUS,
+            PMSUnitTypes.ENTIRE_UNIT,
+            PMSUnitTypes.SINGLE_ROOM,
+            PMSUnitTypes.OFFICE_UNIT,
+            PMSUnitTypes.SHOP
+    );
     private final PropertyDao propertyDao;
 
     private final UnitDao unitDao;
@@ -137,23 +165,62 @@ public class PropertyService {
     }
 
     public ResponseDTO getSupportedPropertyTypes(String filter) {
-        Set<EnumWrapper> propertyTypes = PMSPropertyType.search(filter, i18NService).stream()
-                .map(type -> new EnumWrapper(type.name(), i18NService.getLocalizedMessage(type.getDisplayNamePlaceHolder()), i18NService.getLocalizedMessage(type.getDescriptionPlaceHolder())))
-                .collect(Collectors.toSet());
+        List<TypeCatalogOption> propertyTypes = PMSPropertyType.search(filter, i18NService).stream()
+                .map(this::propertyTypeOption)
+                .sorted(java.util.Comparator.comparingInt(TypeCatalogOption::displayOrder))
+                .toList();
         return new ResponseDTO(true, ResponseCode.PROPERTY_TYPES.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.PROPERTY_TYPES), propertyTypes);
     }
 
     public ResponseDTO getUnitTypes(PMSPropertyType propertyType) {
-        Set<EnumWrapper> unitTypes = unitTypeDao.getByPropertyType(propertyType).stream()
-                .map(pmsUnitType -> {
-                    return new EnumWrapper(pmsUnitType.name(),
-                            i18NService.getLocalizedMessage(pmsUnitType.getName()),
-                            i18NService.getLocalizedMessage(pmsUnitType.getDescription()));
-                })
-                .collect(Collectors.toSet());
+        List<TypeCatalogOption> unitTypes = unitTypeDao.getByPropertyType(propertyType).stream()
+                .map(this::unitTypeOption)
+                .sorted(java.util.Comparator.comparingInt(TypeCatalogOption::displayOrder))
+                .toList();
         return new ResponseDTO(true, ResponseCode.UNIT_TYPES.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.UNIT_TYPES), unitTypes);
+    }
+
+    public ResponseDTO getUnitTypeCatalog() {
+        List<TypeCatalogOption> allUnitTypes = EnumSet.allOf(PMSUnitTypes.class).stream()
+                .map(this::unitTypeOption)
+                .sorted(java.util.Comparator.comparingInt(TypeCatalogOption::displayOrder))
+                .toList();
+        var configuredCatalog = unitTypeDao.getConfiguredCatalog();
+        List<PropertyUnitTypeCatalogDTO> properties = EnumSet.allOf(PMSPropertyType.class).stream()
+                .map(propertyType -> new PropertyUnitTypeCatalogDTO(
+                        propertyTypeOption(propertyType),
+                        configuredCatalog.getOrDefault(propertyType, Set.of()).stream()
+                                .map(Enum::name).collect(Collectors.toSet())))
+                .sorted(java.util.Comparator.comparingInt(item -> item.propertyType().displayOrder()))
+                .toList();
+        return new ResponseDTO(true, ResponseCode.UNIT_TYPES.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.UNIT_TYPES),
+                new UnitTypeCatalogDTO(properties, allUnitTypes));
+    }
+
+    @Transactional
+    public ResponseDTO updateUnitTypeCatalog(PMSPropertyType propertyType, Set<PMSUnitTypes> unitTypes) {
+        unitTypeDao.replaceMappings(propertyType, unitTypes);
+        return getUnitTypes(propertyType);
+    }
+
+    private TypeCatalogOption propertyTypeOption(PMSPropertyType type) {
+        int commonIndex = COMMON_PROPERTY_TYPES.indexOf(type);
+        int categoryOrder = type.getCategory().ordinal();
+        int order = commonIndex >= 0 ? commonIndex : 100 + (categoryOrder * 100) + type.ordinal();
+        return new TypeCatalogOption(type.name(), i18NService.getLocalizedMessage(type.getDisplayNamePlaceHolder()),
+                i18NService.getLocalizedMessage(type.getDescriptionPlaceHolder()),
+                type.getCategory().name(), order, commonIndex >= 0);
+    }
+
+    private TypeCatalogOption unitTypeOption(PMSUnitTypes type) {
+        int commonIndex = COMMON_UNIT_TYPES.indexOf(type);
+        int order = commonIndex >= 0 ? commonIndex : 100 + type.ordinal();
+        return new TypeCatalogOption(type.name(), i18NService.getLocalizedMessage(type.getName()),
+                i18NService.getLocalizedMessage(type.getDescription()),
+                commonIndex >= 0 ? "COMMON" : "SPECIALISED", order, commonIndex >= 0);
     }
 
     public ResponseDTO getSupportedUtilities() {
@@ -368,7 +435,9 @@ public class PropertyService {
             }
         }
         Property property = targetProperty.get();
-        if (!isLeaseModeCompatible(property, unitDTO.leaseMode()) || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
+        if (!isLeaseModeCompatible(property, unitDTO.leaseMode())
+                || !unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()), unitDTO.unitType())
+                || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
             return new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA));
         }
@@ -528,7 +597,9 @@ public class PropertyService {
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY)), null);
         }
         Property property = propertyOptional.get();
-        if (!isLeaseModeCompatible(property, unitDTO.leaseMode()) || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
+        if (!isLeaseModeCompatible(property, unitDTO.leaseMode())
+                || !unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()), unitDTO.unitType())
+                || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
             return Pair.of(new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA)), null);
         }

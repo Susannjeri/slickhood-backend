@@ -56,6 +56,20 @@ public class UnitController extends BasePropertyController {
         return ResponseEntity.ok(propertyService.getUnitTypes(propertyType));
     }
 
+    @GetMapping("/type/catalog")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ResponseDTO> getUnitTypeCatalog() {
+        return ResponseEntity.ok(propertyService.getUnitTypeCatalog());
+    }
+
+    @PutMapping("/type/catalog/{propertyType}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ResponseDTO> updateUnitTypeCatalog(
+            @PathVariable PMSPropertyType propertyType,
+            @RequestBody Set<PMSUnitTypes> unitTypes) {
+        return ResponseEntity.ok(propertyService.updateUnitTypeCatalog(propertyType, unitTypes));
+    }
+
 
     @PostMapping("/create")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_UNIT)")

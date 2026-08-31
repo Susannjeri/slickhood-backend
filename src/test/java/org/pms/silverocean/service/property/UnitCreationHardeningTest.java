@@ -53,6 +53,7 @@ class UnitCreationHardeningTest {
     private UnitDao units;
     private UserDao users;
     private GarageService storage;
+    private UnitTypeDao unitTypes;
     private PropertyService service;
 
     @BeforeEach
@@ -61,9 +62,10 @@ class UnitCreationHardeningTest {
         units = mock(UnitDao.class);
         users = mock(UserDao.class);
         storage = mock(GarageService.class);
+        unitTypes = mock(UnitTypeDao.class);
         I18NService i18n = mock(I18NService.class);
         when(i18n.getLocalizedMessage(any(ResponseCode.class))).thenAnswer(call -> call.getArgument(0).toString());
-        service = new PropertyService(properties, units, mock(UnitTypeDao.class), users, i18n,
+        service = new PropertyService(properties, units, unitTypes, users, i18n,
                 mock(ParamDao.class), mock(AuditLogService.class), mock(ConfigService.class),
                 mock(PMSMeasurementUnitsConverter.class), mock(PropertyRoutines.class), storage,
                 mock(ThreadPoolBeans.class), mock(PaymentPlatformFactory.class), mock(AccountDao.class));
@@ -76,6 +78,7 @@ class UnitCreationHardeningTest {
         utility.setId(1L);
         utility.setActive(true);
         when(units.getUtilities(1L)).thenReturn(Optional.of(utility));
+        when(unitTypes.isAllowed(PMSPropertyType.APARTMENT_BLOCK, PMSUnitTypes.APARTMENT_UNIT)).thenReturn(true);
     }
 
     @Test
@@ -168,6 +171,7 @@ class UnitCreationHardeningTest {
         property.setId(9L);
         property.setName("Green Court");
         property.setCurrency("KES");
+        property.setType(PMSPropertyType.APARTMENT_BLOCK.name());
         property.setManagementMode(mode);
         property.setActive(true);
         return property;
