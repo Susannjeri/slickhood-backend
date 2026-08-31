@@ -94,4 +94,5 @@ public final class InsuranceModels {
     public record DocumentView(long id,Long caseId,Long policyId,Long claimId,String category,String displayName,String contentType,
             long fileSize,String checksumSha256,String downloadUrl,int versionNumber) {}
     public record OperationsSummary(long openCases,long unassignedCases,long paymentsAwaitingVerification,long openClaims,long renewalsDue) {}
+    public record StaffView(long id,String fullName,String email,String roleName) {}
 }

@@ -107,7 +107,9 @@ public class InsuranceCorrespondenceService {
         inbound.setSenderAddress(response.fromAddress().trim()); inbound.setRecipientAddress(senderAddress);
         inbound.setSubject(response.subject().trim()); inbound.setEncryptedBody(encryptionService.encrypt(response.body()));
         inbound.setBodyHash(hash(response.body())); inbound.setExternalMessageId(externalId);
-        inbound.setReceivedAt(LocalDateTime.now()); inbound.setCreatedBy(userDao.getUserId()); inbound.setActive(true);
+        // Mailbox polling runs without an authenticated web request. Preserve the initiating
+        // staff actor for audit instead of attempting to resolve a nonexistent scheduler user.
+        inbound.setReceivedAt(LocalDateTime.now()); inbound.setCreatedBy(outbound.getCreatedBy()); inbound.setActive(true);
         return view(company, exchangeRepo.save(inbound));
     }
 

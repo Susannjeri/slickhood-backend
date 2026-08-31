@@ -10,6 +10,7 @@ import org.pms.silverocean.service.insurance.InsuranceModels.CompanyEmailConfigu
 import org.pms.silverocean.service.insurance.InsuranceService;
 import org.pms.silverocean.service.insurance.InsuranceCorrespondenceService;
 import org.pms.silverocean.service.insurance.InsuranceOperationsService;
+import org.pms.silverocean.service.insurance.InsuranceStaffDirectoryService;
 import org.pms.silverocean.service.insurance.InsuranceModels.InsurerEmailRequest;
 import org.pms.silverocean.service.insurance.InsuranceModels.InsurerEmailResponse;
 import org.springframework.http.ResponseEntity;
@@ -26,6 +27,7 @@ public class InsuranceController {
     private final InsuranceService service;
     private final InsuranceCorrespondenceService correspondenceService;
     private final InsuranceOperationsService operations;
+    private final InsuranceStaffDirectoryService staffDirectory;
     private final I18NService i18n;
 
     @GetMapping("/companies") @PreAuthorize("isAuthenticated()")
@@ -36,6 +38,7 @@ public class InsuranceController {
     @PostMapping("/cases") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> createCase(@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.CaseRequest r){return ok(operations.create(r));}
     @GetMapping("/cases") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> myCases(){return ok(operations.mine());}
     @GetMapping("/cases/{id}") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> myCase(@PathVariable long id){return ok(operations.myCase(id));}
+    @PostMapping("/cases/{id}/withdraw") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> withdrawCase(@PathVariable long id){return ok(operations.withdraw(id));}
     @PostMapping("/cases/{id}/select-quote") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> selectQuote(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.SelectQuoteRequest r){return ok(operations.selectQuote(id,r));}
     @PostMapping("/cases/{id}/payments") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> recordPayment(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.PaymentRequest r){return ok(operations.recordPayment(id,r));}
     @PostMapping(value="/payments/{id}/proof",consumes="multipart/form-data") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> paymentProof(@PathVariable long id,@RequestParam MultipartFile file)throws IOException{return ok(operations.uploadPaymentProof(id,file));}
@@ -47,6 +50,7 @@ public class InsuranceController {
     @GetMapping("/documents/{id}") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> document(@PathVariable long id){return ok(operations.document(id));}
 
     @GetMapping("/admin/operations/summary") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_INSURANCE_REPORTS)") public ResponseEntity<ResponseDTO> operationsSummary(){return ok(operations.summary());}
+    @GetMapping("/admin/staff") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).REVIEW_INSURANCE_APPLICATIONS)") public ResponseEntity<ResponseDTO> staff(){return ok(staffDirectory.activeStaff());}
     @GetMapping("/admin/cases") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).REVIEW_INSURANCE_APPLICATIONS)") public ResponseEntity<ResponseDTO> queue(@RequestParam(required=false) String status,Pageable pageable){return ok(operations.queue(status,pageable));}
     @PostMapping("/admin/cases/{id}/assign") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).REVIEW_INSURANCE_APPLICATIONS)") public ResponseEntity<ResponseDTO> assign(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.AssignmentRequest r){return ok(operations.assign(id,r));}
     @PostMapping("/admin/cases/{id}/status") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).REVIEW_INSURANCE_APPLICATIONS)") public ResponseEntity<ResponseDTO> caseStatus(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.CaseStatusRequest r){return ok(operations.updateCaseStatus(id,r));}
