@@ -113,6 +113,21 @@ class UnitCreationHardeningTest {
     }
 
     @Test
+    void disabledCatalogMappingBlocksUnitCreation() throws Exception {
+        when(properties.findByIdAndStaffOrOwner(9L, 77L))
+                .thenReturn(Optional.of(property(PMSPropertyManagementMode.SERVICE_CHARGE)));
+        when(unitTypes.isAllowed(PMSPropertyType.APARTMENT_BLOCK, PMSUnitTypes.APARTMENT_UNIT))
+                .thenReturn(false);
+
+        var response = service.createUnit(request(PMSLeaseMode.SERVICE_CHARGE), validPng());
+
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(response.getCode()).isEqualTo(ResponseCode.INVALID_FIELD_DATA.getCode());
+        verify(units, never()).save(any(Unit.class));
+        verify(storage, never()).uploadBytes(anyString(), any(), anyString());
+    }
+
+    @Test
     void storageFailurePropagatesInsteadOfBeingReportedAsADuplicate() throws Exception {
         when(properties.findByIdAndStaffOrOwner(9L, 77L)).thenReturn(Optional.of(property(PMSPropertyManagementMode.SERVICE_CHARGE)));
         doAnswer(call -> { ((Unit) call.getArgument(0)).setId(31L); return null; }).when(units).save(any(Unit.class));

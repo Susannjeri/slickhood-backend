@@ -24,7 +24,7 @@ import java.util.Optional;
 public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExecutor<Unit> {
     @Query("SELECT p.createdBy FROM Unit u JOIN Property p ON p.id=u.propertyId WHERE u.id=:unitId AND u.active AND p.active")
     Optional<Long> findPropertyOwnerId(long unitId);
-    @Query("SELECT DISTINCT u FROM Unit u JOIN Property p ON p.id=u.propertyId WHERE u.active AND p.active AND " +
+    @Query("SELECT u FROM Unit u JOIN Property p ON p.id=u.propertyId WHERE u.active AND p.active AND " +
             "(:privileged=true OR p.createdBy=:userId OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active) " +
             "OR EXISTS (SELECT 1 FROM UnitTenant ut WHERE ut.unitId=u.id AND ut.userId=:userId AND ut.active) " +
             "OR EXISTS (SELECT 1 FROM PropertyOwnership po WHERE po.propertyId=p.id AND (po.unitId IS NULL OR po.unitId=u.id) AND po.homeownerUserId=:userId AND po.active)) " +

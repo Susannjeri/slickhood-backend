@@ -108,6 +108,12 @@ class RentalPaymentMySqlIT {
         unit.setActive(true);
         unit = units.saveAndFlush(unit);
 
+        // MySQL rejects SELECT DISTINCT entity queries ordered by a joined column
+        // unless the ordering expression is selected. This exercises the exact
+        // property/unit report query used by the production unit-list endpoint.
+        List<Unit> reportUnits = units.findForReport(landlord.getId(), false, PageRequest.of(0, 20));
+        assertEquals(List.of(unit.getId()), reportUnits.stream().map(Unit::getId).toList());
+
         UnitTenant tenancy = new UnitTenant();
         tenancy.setUnitId(unit.getId());
         tenancy.setUserId(tenant.getId());
