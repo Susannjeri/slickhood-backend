@@ -36,6 +36,27 @@ public interface UserRepo extends JpaRepository<Users, Long>, JpaSpecificationEx
     @Query("SELECT u FROM Users u JOIN UserRole ur ON u.id=ur.userId JOIN Role r ON ur.roleId=r.id WHERE r.name='Superadmin' AND r.active AND u.active")
     Set<Users> findSuperAdminAccounts();
 
+    interface InsuranceStaffRow {
+        Long getId();
+        String getFullName();
+        String getEmail();
+        String getRoleName();
+    }
+
+    @Query("""
+        SELECT u.id AS id, u.fullName AS fullName, u.email AS email, r.name AS roleName
+        FROM Users u JOIN UserRole ur ON u.id=ur.userId JOIN Role r ON ur.roleId=r.id
+        WHERE r.name IN :roleNames AND r.active=true AND u.active=true
+        ORDER BY u.fullName, u.email
+    """)
+    List<InsuranceStaffRow> findActiveInsuranceStaff(@Param("roleNames") Set<String> roleNames);
+
+    @Query("""
+        SELECT COUNT(u) FROM Users u JOIN UserRole ur ON u.id=ur.userId JOIN Role r ON ur.roleId=r.id
+        WHERE u.id=:userId AND r.name IN :roleNames AND r.active=true AND u.active=true
+    """)
+    long countActiveInsuranceStaff(@Param("userId") long userId, @Param("roleNames") Set<String> roleNames);
+
     @Query("""
         SELECT (SUM(CASE WHEN u.active THEN 1.0 ELSE 0.0 END) * 100.0) / COUNT(u)
         FROM Users u

@@ -30,7 +30,11 @@ The useful controls were isolated candidate builds, checksums, backups, private-
 - Encrypted, correlated insurer correspondence with transactional outbox delivery, reference validation, replay protection and feature-flagged IMAP ingestion.
 - Durable customer email notifications plus selected-quote payment reminders and 30-day renewal reminders.
 - Indexed and batched staff queues to avoid per-row query growth.
+- Agency-scoped case, payment, policy, claim and renewal queries; one agency cannot leak into another agency's operations totals or queues.
+- A centralized case/claim/renewal lifecycle policy, customer self-service withdrawal before payment, and an active-role staff directory rather than raw adviser IDs.
+- Mailbox ingestion attributes verified replies to the initiating outbound actor, so scheduled IMAP work does not depend on a request-bound security context.
 - Customer workspace at `/dashboard/insurance`; authorised staff workspace at `/dashboard/insurance/operations`.
+- Explicit, accessible operation dialogs replace browser prompts; partial API failure preserves successfully loaded customer and staff records.
 
 ## Required production configuration
 
@@ -72,13 +76,16 @@ Before enabling IMAP, send a correlated quotation request to a test insurer mail
 
 ## Acceptance evidence recorded locally
 
-- Backend final full suite: 390 tests passed, 0 failed, 1 existing environment-dependent test skipped.
-- Insurance security/role/performance suite: 9 passed, 0 failed within the final full run.
+- Backend final full suite: 399 tests passed, 0 failed, 1 existing environment-dependent test skipped.
+- Targeted insurance security, state-machine, correspondence, staff-directory and role suite: 18 passed, 0 failed; the final full run repeated the preceding insurance tests successfully.
 - Backend compilation: successful in the final full run.
 - Frontend clean lockfile install: 548 packages, 0 vulnerabilities reported by npm.
 - Targeted insurance lint: 0 errors and 0 warnings.
+- Full CI lint budget: 0 errors, 477/478 warnings; the Windows launcher and generated Playwright-report exclusions were repaired so this guard is reproducible locally and in CI.
 - Next.js 16.3.3 production build: successful, 79 routes, including both insurance routes.
-- Playwright insurance E2E: 3 passed (customer quote submission, manager operations and adviser permission-aware operations).
+- Playwright insurance E2E: 4 passed (customer quote submission; payment and withdrawal dialogs; manager operations; adviser permission-aware operations).
+- Full Playwright regression: 47 passed, including authentication, estate/homeowner, sales, rental, visitor, Soko/payment, privacy, KYC and Wealth journeys. This pass also found and fixed an existing estate detail request loop caused by shared metadata loading state.
+- Performance safeguards: customer case hydration remains a bounded batch-query path; agency dashboards use database counts and paged queues; staff eligibility is a constant-time count query; frontend queue hydration runs independent requests concurrently and preserves partial results.
 - The Windows E2E launcher was corrected to spawn `npm.cmd` through a shell on Windows/Node 22.
 
 The production-compatible MySQL migration run, live SMTP/IMAP handshake, authenticated browser E2E, load test and live smoke test remain deployment-environment gates. They cannot be truthfully certified from this Windows workspace because Docker, production credentials and the production host are not present.

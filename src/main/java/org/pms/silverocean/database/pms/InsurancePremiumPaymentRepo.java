@@ -8,4 +8,5 @@ public interface InsurancePremiumPaymentRepo extends JpaRepository<InsurancePrem
  List<InsurancePremiumPayment> findAllByCaseIdInAndActiveTrueOrderByCaseIdAscCreatedOnDesc(Collection<Long> caseIds);
  @Lock(LockModeType.PESSIMISTIC_WRITE) @Query("select p from InsurancePremiumPayment p where p.id=:id and p.active=true") Optional<InsurancePremiumPayment> findByIdForUpdate(long id);
  long countByActiveTrueAndStatus(String status);
+ @Query("select count(p) from InsurancePremiumPayment p join InsuranceCase c on p.caseId=c.id where c.agencyId=:agencyId and p.active=true and p.status=:status") long countByAgencyIdAndStatus(long agencyId,String status);
 }

@@ -14,4 +14,5 @@ public interface InsuranceCaseRepo extends JpaRepository<InsuranceCase,Long>{
  long countByAgencyIdAndActiveTrueAndAssignedAdviserIdIsNullAndStatusNotIn(long agencyId,Collection<String> statuses);
  boolean existsByReferenceAndActiveTrue(String reference);
  Page<InsuranceCase> findAllByActiveTrueAndStatusInAndSelectedAtBeforeAndPaymentReminderSentAtIsNull(Collection<String> statuses,java.time.LocalDateTime cutoff,Pageable pageable);
+ @Query("select c from InsuranceCase c where c.agencyId=:agencyId and c.active=true and c.status in :statuses and c.selectedAt<:cutoff and c.paymentReminderSentAt is null") Page<InsuranceCase> findPaymentReminderQueueByAgencyId(long agencyId,Collection<String> statuses,java.time.LocalDateTime cutoff,Pageable pageable);
 }
