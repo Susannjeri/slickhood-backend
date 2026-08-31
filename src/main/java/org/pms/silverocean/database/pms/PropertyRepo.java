@@ -13,6 +13,9 @@ import java.util.Optional;
 import java.util.List;
 
 public interface PropertyRepo extends JpaRepository<Property, Long>,  JpaSpecificationExecutor<Property> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Property p WHERE p.id=:id")
+    Optional<Property> findAndLockById(@org.springframework.data.repository.query.Param("id") long id);
     Optional<Property> findByNameAndAddressAndCreatedBy(String name, String address, long createdBy);
     Optional<Property> findByIdAndCreatedByAndActiveTrue(long id, long createdBy);
     List<Property> findAllByCreatedByAndActiveTrue(long createdBy);
