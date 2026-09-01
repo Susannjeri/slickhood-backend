@@ -27,6 +27,7 @@ public class InsuranceController {
     private final InsuranceService service;
     private final InsuranceCorrespondenceService correspondenceService;
     private final InsuranceOperationsService operations;
+    private final org.pms.silverocean.service.insurance.InsuranceRenewalService renewals;
     private final InsuranceStaffDirectoryService staffDirectory;
     private final I18NService i18n;
 
@@ -44,6 +45,12 @@ public class InsuranceController {
     @PostMapping(value="/payments/{id}/proof",consumes="multipart/form-data") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> paymentProof(@PathVariable long id,@RequestParam MultipartFile file)throws IOException{return ok(operations.uploadPaymentProof(id,file));}
     @GetMapping("/payments/{id}/proof") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> paymentProof(@PathVariable long id){return ok(operations.paymentProof(id));}
     @GetMapping("/policies") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> policies(){return ok(operations.policies());}
+    @GetMapping("/renewals") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> myRenewals(){return ok(renewals.mine());}
+    @PostMapping("/policies/{id}/renewal/request") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> requestRenewal(@PathVariable long id){return ok(renewals.request(id));}
+    @PostMapping("/policies/{id}/renewal/accept") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> acceptRenewal(@PathVariable long id){return ok(renewals.accept(id));}
+    @PostMapping("/policies/{id}/renewal/payments") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> renewalPayment(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.RenewalPaymentRequest r){return ok(renewals.recordPayment(id,r));}
+    @PostMapping(value="/renewal-payments/{id}/proof",consumes="multipart/form-data") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> renewalProof(@PathVariable long id,@RequestParam MultipartFile file)throws IOException{return ok(renewals.uploadProof(id,file));}
+    @GetMapping("/renewal-payments/{id}/proof") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> renewalProof(@PathVariable long id){return ok(renewals.proof(id));}
     @PostMapping("/claims") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> claim(@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.ClaimRequest r){return ok(operations.claim(r));}
     @GetMapping("/claims") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> claims(){return ok(operations.claims());}
     @PostMapping(value="/documents",consumes="multipart/form-data") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> uploadDocument(@RequestParam(required=false) Long caseId,@RequestParam(required=false) Long policyId,@RequestParam(required=false) Long claimId,@RequestParam String category,@RequestParam MultipartFile file)throws IOException{return ok(operations.upload(caseId,policyId,claimId,category,file));}
@@ -64,6 +71,11 @@ public class InsuranceController {
     @PostMapping("/admin/claims/{id}/status") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_CLAIMS)") public ResponseEntity<ResponseDTO> claimStatus(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.ClaimStatusRequest r){return ok(operations.updateClaim(id,r));}
     @PostMapping("/admin/policies/{id}/renewal") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_RENEWALS)") public ResponseEntity<ResponseDTO> renewal(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.RenewalRequest r){return ok(operations.renewal(id,r));}
     @GetMapping("/admin/renewals") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_RENEWALS)") public ResponseEntity<ResponseDTO> renewals(Pageable pageable){return ok(operations.renewalQueue(pageable));}
+    @GetMapping("/admin/renewal-journeys") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_RENEWALS)") public ResponseEntity<ResponseDTO> renewalJourneys(){return ok(renewals.queue());}
+    @PostMapping("/admin/policies/{id}/renewal-offer") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_RENEWALS)") public ResponseEntity<ResponseDTO> renewalOffer(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.RenewalOfferRequest r){return ok(renewals.publishOffer(id,r));}
+    @PostMapping("/admin/renewal-payments/{id}/decision") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VERIFY_INSURANCE_PAYMENTS)") public ResponseEntity<ResponseDTO> renewalPaymentDecision(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.PaymentDecisionRequest r){return ok(renewals.decide(id,r));}
+    @PostMapping("/admin/renewal-payments/{id}/remit") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VERIFY_INSURANCE_PAYMENTS)") public ResponseEntity<ResponseDTO> renewalPaymentRemit(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.RemittanceRequest r){return ok(renewals.remit(id,r));}
+    @PostMapping("/admin/policies/{id}/renewal-complete") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).ISSUE_INSURANCE_POLICIES)") public ResponseEntity<ResponseDTO> renewalComplete(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.RenewalCompleteRequest r){return ok(renewals.complete(id,r));}
 
     @GetMapping("/companies/{code}/payment-options") @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ResponseDTO> paymentOptions(@PathVariable String code) { return ok(service.customerPaymentOptions(code)); }

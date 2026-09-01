@@ -20,9 +20,9 @@ class InsuranceStateMachineTest {
     }
 
     @Test
-    void claimAndRenewalTerminalStatesCannotReopen() {
+    void claimsAndLapsedRenewalsStayClosedButRenewedPoliciesCanStartTheirNextTerm() {
         assertThat(InsuranceStateMachine.canMoveClaim("CLOSED", "ACKNOWLEDGED")).isFalse();
-        assertThat(InsuranceStateMachine.canMoveRenewal("RENEWED", "CONTACTED")).isFalse();
+        assertThat(InsuranceStateMachine.canMoveRenewal("RENEWED", "CONTACTED")).isTrue();
         assertThat(InsuranceStateMachine.canMoveRenewal("LAPSED", "CONTACTED")).isFalse();
     }
 }
