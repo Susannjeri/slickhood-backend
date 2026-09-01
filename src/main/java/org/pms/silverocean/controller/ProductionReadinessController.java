@@ -23,7 +23,7 @@ public class ProductionReadinessController {
         var assessment = guardrails.assess();
         var body = Map.<String, Object>of(
                 "status", assessment.ready() ? "UP" : "DOWN",
-                "scope", "wealth,insurance,affiliate,services,soko",
+                "scope", "wealth,insurance,affiliate,services,soko,helpdesk",
                 "missingOrUnsafeConfiguration", assessment.missingOrUnsafeConfiguration());
         return ResponseEntity.status(assessment.ready() ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE).body(body);
     }

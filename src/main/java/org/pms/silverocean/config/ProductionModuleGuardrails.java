@@ -14,8 +14,8 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Secret-safe release checks for the Wealth, Insurance, Affiliate, Services and
- * Soko production capabilities. The deployment endpoint exposes property names,
+ * Secret-safe release checks for the Wealth, Insurance, Affiliate, Services,
+ * Soko and Help Desk production capabilities. The deployment endpoint exposes property names,
  * never configured values.
  */
 @Component
