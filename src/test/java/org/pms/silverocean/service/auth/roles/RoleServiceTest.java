@@ -438,6 +438,8 @@ class RoleServiceTest {
     void selfAssignRole_pendingKyc_isRejectedWithoutAddingRole() {
         testUser.setAccountStatus(AccountStatus.PENDING_KYC.name());
         when(userDao.getUserObject()).thenReturn(testUser);
+        when(roleRepo.findByIdAndActive(testRole.getId())).thenReturn(Optional.of(testRole));
+        when(userRoleRepo.findByUserIdAndRoleId(testUser.getId(), testRole.getId())).thenReturn(0);
 
         PMSCustomException exception = assertThrows(PMSCustomException.class,
                 () -> roleService.selfAssignRole(testRole.getId()));
@@ -445,6 +447,36 @@ class RoleServiceTest {
         assertEquals(ResponseCode.KYC_ACCOUNT_RESTRICTED, exception.getResponseCode());
         verify(userRoleRepo, never()).save(any(UserRole.class));
         verify(kycService, never()).reopenForNewRoleRequirements();
+    }
+
+    @Test
+    void selfAssignRole_pendingKyc_existingRoleResumesIdempotently() {
+        testUser.setAccountStatus(AccountStatus.PENDING_KYC.name());
+        when(userDao.getUserObject()).thenReturn(testUser);
+        when(roleRepo.findByIdAndActive(testRole.getId())).thenReturn(Optional.of(testRole));
+        when(userRoleRepo.findByUserIdAndRoleId(testUser.getId(), testRole.getId())).thenReturn(1);
+
+        ResponseDTO response = roleService.selfAssignRole(testRole.getId());
+
+        assertTrue(response.isSuccess());
+        assertEquals(true, ((java.util.Map<?, ?>) response.getData().getFirst()).get("kycRequired"));
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+        verify(kycService, never()).reopenForNewRoleRequirements();
+    }
+
+    @Test
+    void buyerRoleReceivesOnlyBuyerScopedProperties() {
+        Role buyerRole = new Role(PMSRole.BUYER.getName(), PMSRole.BUYER.getDescription(), false);
+        buyerRole.setId(13L);
+        buyerRole.setActive(true);
+        when(userRoleRepo.findByUserId(testUser.getId())).thenReturn(java.util.Set.of(buyerRole));
+        when(permissionRepo.findByRoleId(buyerRole.getId())).thenReturn(java.util.Set.of());
+        when(userRoleRepo.findBuyerProperty(testUser.getId())).thenReturn(java.util.Set.of());
+
+        roleService.getPermissionsForUser(testUser.getId());
+
+        verify(userRoleRepo).findBuyerProperty(testUser.getId());
+        verify(userRoleRepo, never()).findStaffPropertyByUserIdAndRole(testUser.getId(), PMSRole.BUYER.name());
     }
 
     @Test

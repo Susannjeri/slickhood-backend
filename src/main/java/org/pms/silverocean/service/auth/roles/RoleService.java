@@ -74,18 +74,22 @@ public class RoleService {
         this.saleTransactionRepo = saleTransactionRepo;
     }
 
+    @Transactional
     public ResponseDTO selfAssignRole(long roleId) {
         Users user = userDao.getUserObject();
         if (user == null) throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
-        if (!AccountStatus.ACTIVE.name().equals(user.getAccountStatus())) {
+        checkIfRoleIsValidAndSelfAssignable(roleId);
+        boolean alreadyAssigned = userRoleRepo.findByUserIdAndRoleId(user.getId(), roleId) > 0;
+        if (!alreadyAssigned && !AccountStatus.ACTIVE.name().equals(user.getAccountStatus())) {
             throw new PMSCustomException(ResponseCode.KYC_ACCOUNT_RESTRICTED);
         }
-        checkIfRoleIsValidAndSelfAssignable(roleId);
-        if (userRoleRepo.findByUserIdAndRoleId(user.getId(), roleId) == 0) {
+        if (!alreadyAssigned) {
             UserRole userRole = saveUserRole(user.getId(), roleId);
             auditLogService.createAuditLog(userRole, org.pms.silverocean.service.auth.roles.enums.Permission.ASSIGN_ROLE);
         }
-        boolean kycRequired = kycService.reopenForNewRoleRequirements();
+        boolean kycRequired = alreadyAssigned
+                ? !AccountStatus.ACTIVE.name().equals(user.getAccountStatus())
+                : kycService.reopenForNewRoleRequirements();
         return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY),
                 Map.of("roleId", roleId, "kycRequired", kycRequired));
@@ -115,6 +119,10 @@ public class RoleService {
 
         if (PMSRole.HOMEOWNER.equals(pmsRole)) {
             return userRoleRepo.findHomeownerProperty(userId);
+        }
+
+        if (PMSRole.BUYER.equals(pmsRole)) {
+            return userRoleRepo.findBuyerProperty(userId);
         }
 
         return userRoleRepo.findStaffPropertyByUserIdAndRole(userId, pmsRole.name());
@@ -177,6 +185,7 @@ public class RoleService {
         }
     }
 
+    @Transactional
     public ResponseDTO addRoleToLoggedInUserUsingInviteToken(String inviteToken) {
         Users user = userDao.getUserObject();
         if (user == null) {
