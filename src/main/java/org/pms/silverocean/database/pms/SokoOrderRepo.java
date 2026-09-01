@@ -2,6 +2,7 @@ package org.pms.silverocean.database.pms;
 
 import jakarta.persistence.LockModeType;
 import org.pms.silverocean.database.pms.entities.SokoOrder;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
