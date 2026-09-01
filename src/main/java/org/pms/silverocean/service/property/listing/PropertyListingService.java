@@ -11,6 +11,7 @@ import org.pms.silverocean.database.pms.entities.PropertyListing;
 import org.pms.silverocean.database.pms.entities.PropertyListingInquiry;
 import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.helpdesk.HelpDeskRateLimiter;
 import org.pms.silverocean.service.notification.NotificationDTO;
@@ -50,10 +51,13 @@ public class PropertyListingService {
     private final GarageService garage;
     private final HelpDeskRateLimiter rateLimiter;
     private final NotificationService notifications;
+    private final AuditLogService audit;
 
     @Value("${property-listings.expiry-days:90}") private int expiryDays;
     @Value("${property-listings.inquiries-per-minute:5}") private int inquiryLimit;
     @Value("${property-listings.public-api-prefix:/public/property-listings}") private String publicApiPrefix;
+    @Value("${property-listings.max-public-image-bytes:10485760}") private long maxPublicImageBytes;
+    @Value("${property-listings.inquiry-consent-version:property-enquiry-2026-09}") private String inquiryConsentVersion;
 
     @Transactional
     public Publication publish(long unitId, PublishRequest request) {
@@ -84,8 +88,9 @@ public class PropertyListingService {
         listing.setSuspensionReason(null);
         unit.setAdvertise(true);
         units.save(unit);
-        listings.save(listing);
-        return publication(listing);
+        PropertyListing saved = listings.save(listing);
+        audit.createAuditLog(saved, "property_listing_publish");
+        return publication(saved);
     }
 
     @Transactional
@@ -102,20 +107,23 @@ public class PropertyListingService {
         if (listing.getId() == null) return new Publication(null, "PAUSED", null, null);
         listing.setStatus("PAUSED");
         listing.setUnpublishedAt(now());
-        listings.save(listing);
-        return publication(listing);
+        PropertyListing saved = listings.save(listing);
+        audit.createAuditLog(saved, "property_listing_pause");
+        return publication(saved);
     }
 
     @Transactional(readOnly = true)
     public ListingPage search(String rawType, String location, String unitType, Double minPrice,
                               Double maxPrice, int page, int size) {
         String type = normalizeType(rawType);
-        int safePage = Math.max(0, page);
+        if (page < 0 || page > 10_000) badRequest("Page is outside the supported range");
+        int safePage = page;
         int safeSize = Math.max(1, Math.min(size, 24));
         if (minPrice != null && minPrice < 0 || maxPrice != null && maxPrice < 0 ||
                 minPrice != null && maxPrice != null && minPrice > maxPrice) badRequest("Invalid price range");
         Page<PropertyListing> result = listings.searchPublic(type, cleanFilter(location), cleanFilter(unitType),
-                minPrice, maxPrice, now(), PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "publishedAt")));
+                minPrice, maxPrice, now(), PageRequest.of(safePage, safeSize,
+                        Sort.by(Sort.Order.desc("publishedAt"), Sort.Order.desc("id"))));
         return new ListingPage(result.stream().map(this::card).toList(), result.getNumber(), result.getSize(),
                 result.getTotalPages(), result.getTotalElements());
     }
@@ -130,7 +138,16 @@ public class PropertyListingService {
         return new ListingDetail(listing.getPublicSlug(), listing.getListingType(), listing.getHeadline(),
                 listing.getDescription(), property.getName(), property.getType(), readable(unit.getUnitType()),
                 unit.getSize(), unit.getPrice(), unit.getCurrency(), approximate(property.getAddress()),
-                amenities(unit), images, listing.getPublishedAt(), listing.getExpiresAt(), true);
+                amenities(unit), images, listing.getPublishedAt(), listing.getExpiresAt(), publisherVerified(listing));
+    }
+
+    @Transactional(readOnly = true)
+    public ListingFilters filters(String rawType) {
+        String type = normalizeType(rawType);
+        List<UnitTypeOption> unitTypes = listings.findPublicUnitTypes(type, now()).stream()
+                .filter(StringUtils::isNotBlank).limit(200)
+                .map(value -> new UnitTypeOption(value, readable(value))).toList();
+        return new ListingFilters(unitTypes);
     }
 
     @Transactional(readOnly = true)
@@ -143,24 +160,34 @@ public class PropertyListingService {
         String contentType = StringUtils.defaultString(object.contentType()).toLowerCase(Locale.ROOT);
         if (!List.of("image/jpeg", "image/png", "image/webp").contains(contentType))
             throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        long length = object.contentLength() == null ? object.bytes().length : object.contentLength();
+        if (length <= 0 || length > maxPublicImageBytes || object.bytes().length > maxPublicImageBytes)
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Listing image exceeds the public delivery limit");
         return object;
     }
 
     @Transactional
     public void inquire(String slug, InquiryRequest request, String clientFingerprint) {
         if (StringUtils.isNotBlank(request.website())) return; // honeypot: acknowledge without persisting spam
-        String fingerprint = hash(StringUtils.defaultString(clientFingerprint, "unknown") + ":" + request.email().toLowerCase(Locale.ROOT));
-        try { rateLimiter.check("property-inquiry:" + fingerprint, Math.max(1, inquiryLimit)); }
+        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
+        String normalizedClient = StringUtils.left(StringUtils.defaultString(clientFingerprint, "unknown"), 500);
+        String fingerprint = hash(normalizedClient + ":" + normalizedEmail);
+        try {
+            rateLimiter.check("property-inquiry-email:" + hash(normalizedEmail), Math.max(1, inquiryLimit));
+            rateLimiter.check("property-inquiry-client:" + hash(normalizedClient), Math.max(10, inquiryLimit * 5));
+        }
         catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Please wait before sending another enquiry"); }
         PropertyListing listing = publicListing(slug);
         PropertyListingInquiry inquiry = new PropertyListingInquiry();
         inquiry.setListingId(listing.getId());
         inquiry.setName(request.name().trim());
-        inquiry.setEmail(request.email().trim().toLowerCase(Locale.ROOT));
+        inquiry.setEmail(normalizedEmail);
         inquiry.setPhone(StringUtils.trimToNull(request.phone()));
         inquiry.setMessage(request.message().trim());
         inquiry.setStatus("NEW");
         inquiry.setFingerprintHash(fingerprint);
+        inquiry.setConsentVersion(inquiryConsentVersion);
+        inquiry.setConsentedAt(now());
         inquiry.setActive(true);
         inquiries.save(inquiry);
         users.findById(listing.getPublisherUserId()).map(u -> u.getEmail()).filter(StringUtils::isNotBlank).ifPresent(email -> {
@@ -210,7 +237,9 @@ public class PropertyListingService {
             listing.getUnit().setAdvertise(true);
         } else badRequest("Unsupported moderation action");
         units.save(listing.getUnit());
-        return admin(listings.save(listing));
+        PropertyListing saved = listings.save(listing);
+        audit.createAuditLog(saved, "SUSPEND".equals(action) ? "property_listing_suspend" : "property_listing_reactivate");
+        return admin(saved);
     }
 
     @Scheduled(cron = "${property-listings.expiry-cron:0 */15 * * * *}")
@@ -222,6 +251,7 @@ public class PropertyListingService {
             listing.setUnpublishedAt(now());
             listing.getUnit().setAdvertise(false);
             units.save(listing.getUnit());
+            audit.createAuditLog(listing, "property_listing_expire");
         }
         listings.saveAll(expired.getContent());
     }
@@ -248,7 +278,7 @@ public class PropertyListingService {
     private String listingType(Property p) { return "SALE".equalsIgnoreCase(String.valueOf(p.getManagementMode())) ? "SALE" : "RENT"; }
     private String normalizeType(String type) { if (StringUtils.isBlank(type)) return null; String value=type.trim().toUpperCase(Locale.ROOT); if (!List.of("RENT","SALE").contains(value)) badRequest("Listing type must be RENT or SALE"); return value; }
     private String cleanFilter(String value) { value=StringUtils.trimToNull(value); if(value!=null&&value.length()>80) badRequest("Filter is too long"); return value; }
-    private String slug(Unit u) { String base=(u.getProperty().getName()+"-"+u.getUnitType()).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+","-").replaceAll("(^-|-$)",""); if(base.length()>130)base=base.substring(0,130); return base+"-"+UUID.randomUUID().toString().substring(0,8); }
+    private String slug(Unit u) { String base=(u.getProperty().getName()+"-"+u.getUnitType()).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+","-").replaceAll("(^-|-$)",""); if(base.length()>130)base=base.substring(0,130); return base+"-"+UUID.randomUUID().toString().replace("-",""); }
     private String readable(String value) {
         String[] words = StringUtils.defaultString(value, "Property").replace('_', ' ').toLowerCase(Locale.ROOT).split("\\s+");
         return Arrays.stream(words).filter(StringUtils::isNotBlank)
@@ -280,6 +310,7 @@ public class PropertyListingService {
     private boolean supportedImagePath(String path) { String lower=StringUtils.defaultString(path).toLowerCase(Locale.ROOT); return lower.endsWith(".jpg")||lower.endsWith(".jpeg")||lower.endsWith(".png")||lower.endsWith(".webp"); }
     private String join(String a,String b){return StringUtils.removeEnd(a,"/")+"/"+StringUtils.removeStart(b,"/");}
     private long requireUser(){Long id=users.getUserId();if(id==null)throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);return id;}
+    private boolean publisherVerified(PropertyListing listing){return users.findById(listing.getPublisherUserId()).map(user->user.isVerified()).orElse(false);}
     private ZonedDateTime now(){return ZonedDateTime.now(ZoneOffset.UTC);}
     private String hash(String value){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
     private void badRequest(String message){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,message);}

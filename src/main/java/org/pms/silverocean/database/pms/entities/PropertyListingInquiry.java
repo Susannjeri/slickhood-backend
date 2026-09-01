@@ -10,6 +10,7 @@ import jakarta.persistence.ManyToOne;
 import lombok.Getter;
 import lombok.Setter;
 import org.pms.silverocean.database.pms.entities.base.BaseActiveEntity;
+import java.time.ZonedDateTime;
 
 @Entity
 @Table(name = "pms_property_listing_inquiry", indexes = {
@@ -31,6 +32,10 @@ public class PropertyListingInquiry extends BaseActiveEntity {
     private String status;
     @Column(nullable = false, length = 64)
     private String fingerprintHash;
+    @Column(nullable = false, length = 40)
+    private String consentVersion;
+    @Column(nullable = false)
+    private ZonedDateTime consentedAt;
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "listing_id", insertable = false, updatable = false)
     private PropertyListing listing;

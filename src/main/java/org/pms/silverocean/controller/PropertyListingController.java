@@ -3,6 +3,7 @@ package org.pms.silverocean.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.property.listing.PropertyListingModels.*;
 import org.pms.silverocean.service.property.listing.PropertyListingService;
@@ -23,27 +24,32 @@ public class PropertyListingController {
     private final PropertyListingService service;
 
     @GetMapping("/public/property-listings")
-    public ListingPage search(@RequestParam(required = false) String type,
+    public ResponseEntity<ListingPage> search(@RequestParam(required = false) String type,
                               @RequestParam(required = false) String location,
                               @RequestParam(required = false) String unitType,
                               @RequestParam(required = false) Double minPrice,
                               @RequestParam(required = false) Double maxPrice,
                               @RequestParam(defaultValue = "0") int page,
                               @RequestParam(defaultValue = "12") int size) {
-        return service.search(type, location, unitType, minPrice, maxPrice, page, size);
+        return publicJson(service.search(type, location, unitType, minPrice, maxPrice, page, size));
     }
 
     @GetMapping("/public/property-listings/{slug}")
-    public ListingDetail detail(@PathVariable String slug) { return service.detail(slug); }
+    public ResponseEntity<ListingDetail> detail(@PathVariable String slug) { return publicJson(service.detail(slug)); }
+
+    @GetMapping("/public/property-listings/filters")
+    public ResponseEntity<ListingFilters> filters(@RequestParam(required = false) String type) {
+        return publicJson(service.filters(type));
+    }
 
     @GetMapping("/public/property-listings/{slug}/images/{index}")
     public ResponseEntity<byte[]> image(@PathVariable String slug, @PathVariable int index) {
         GarageService.StoredObject image = service.image(slug, index);
         return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(Duration.ofHours(6)).cachePublic())
+                .cacheControl(CacheControl.maxAge(Duration.ofMinutes(5)).cachePublic().mustRevalidate())
                 .header("X-Content-Type-Options", "nosniff")
                 .contentType(MediaType.parseMediaType(image.contentType()))
-                .contentLength(image.contentLength() == null ? image.bytes().length : image.contentLength())
+                .contentLength(image.bytes().length)
                 .body(image.bytes());
     }
 
@@ -82,8 +88,11 @@ public class PropertyListingController {
     }
 
     private String clientFingerprint(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        String ip = forwarded == null ? request.getRemoteAddr() : forwarded.split(",", 2)[0].trim();
-        return ip + ":" + request.getHeader("User-Agent");
+        return PMSUtils.getIPAddress(request);
+    }
+
+    private <T> ResponseEntity<T> publicJson(T body) {
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "public, max-age=60, stale-while-revalidate=120")
+                .header("X-Content-Type-Options", "nosniff").body(body);
     }
 }

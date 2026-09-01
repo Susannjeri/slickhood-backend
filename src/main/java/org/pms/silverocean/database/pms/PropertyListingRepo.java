@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 
 import java.time.ZonedDateTime;
 import java.util.Optional;
+import java.util.List;
 
 public interface PropertyListingRepo extends JpaRepository<PropertyListing, Long> {
     Optional<PropertyListing> findByUnitId(long unitId);
@@ -29,6 +30,12 @@ public interface PropertyListingRepo extends JpaRepository<PropertyListing, Long
             "WHERE l.publicSlug=:slug AND l.active AND l.status='PUBLISHED' " +
             "AND (l.expiresAt IS NULL OR l.expiresAt>:now) AND u.active AND NOT u.occupied AND u.advertise AND p.active")
     Optional<PropertyListing> findPublicBySlug(String slug, ZonedDateTime now);
+
+    @Query("SELECT DISTINCT u.unitType FROM PropertyListing l JOIN Unit u ON u.id=l.unitId JOIN Property p ON p.id=u.propertyId " +
+            "WHERE l.active AND l.status='PUBLISHED' AND (l.expiresAt IS NULL OR l.expiresAt>:now) " +
+            "AND u.active AND NOT u.occupied AND u.advertise AND p.active " +
+            "AND (:type IS NULL OR l.listingType=:type) ORDER BY u.unitType")
+    List<String> findPublicUnitTypes(String type, ZonedDateTime now);
 
     @EntityGraph(attributePaths = {"unit", "unit.property"})
     Page<PropertyListing> findAllByOrderByCreatedOnDesc(Pageable pageable);

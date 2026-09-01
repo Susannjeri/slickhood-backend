@@ -47,6 +47,8 @@ public class ProductionModuleGuardrails {
         boundedInt("helpdesk.sla-scan-delay-ms", 60_000, 10_000, 3_600_000);
         boundedInt("property-listings.expiry-days", 90, 1, 365);
         boundedInt("property-listings.inquiries-per-minute", 5, 1, 30);
+        boundedInt("property-listings.max-public-image-bytes", 10_485_760, 1_048_576, 20_971_520);
+        boundedText("property-listings.inquiry-consent-version", "property-enquiry-2026-09", 1, 40);
     }
 
     public Assessment assess() {
@@ -191,6 +193,13 @@ public class ProductionModuleGuardrails {
         Duration configured = Duration.parse(value(key, fallback));
         if (configured.compareTo(minimum) < 0 || configured.compareTo(maximum) > 0) {
             throw new IllegalStateException(key + " must be between " + minimum + " and " + maximum);
+        }
+    }
+
+    private void boundedText(String key, String fallback, int minimum, int maximum) {
+        int length = value(key, fallback).trim().length();
+        if (length < minimum || length > maximum) {
+            throw new IllegalStateException(key + " length must be between " + minimum + " and " + maximum);
         }
     }
 

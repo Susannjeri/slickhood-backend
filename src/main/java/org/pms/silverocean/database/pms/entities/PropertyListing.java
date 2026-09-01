@@ -21,7 +21,7 @@ import java.time.ZonedDateTime;
         @Index(name = "idx_listing_publisher", columnList = "publisherUserId,status")
 })
 @Getter @Setter
-public class PropertyListing extends BaseCreatorEntity {
+public class PropertyListing extends BaseCreatorEntity implements Auditable {
     @Column(nullable = false, unique = true)
     private long unitId;
     @Column(nullable = false, unique = true, length = 180)
@@ -52,4 +52,11 @@ public class PropertyListing extends BaseCreatorEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "unit_id", insertable = false, updatable = false)
     private Unit unit;
+
+    @Override
+    public String toAuditJSON() {
+        return "{\"id\":" + getId() + ",\"unitId\":" + unitId + ",\"publicSlug\":\"" + publicSlug
+                + "\",\"listingType\":\"" + listingType + "\",\"status\":\"" + status
+                + "\",\"publisherUserId\":" + publisherUserId + ",\"active\":" + isActive() + "}";
+    }
 }

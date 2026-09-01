@@ -30,6 +30,8 @@ public final class PropertyListingModels {
                                 List<String> imageUrls, ZonedDateTime publishedAt, ZonedDateTime expiresAt,
                                 boolean verified) { }
     public record ListingPage(List<ListingCard> items, int page, int size, int totalPages, long totalElements) { }
+    public record UnitTypeOption(String value, String label) { }
+    public record ListingFilters(List<UnitTypeOption> unitTypes) { }
     public record Publication(String slug, String status, ZonedDateTime publishedAt, ZonedDateTime expiresAt) { }
     public record AdminListing(long id, String slug, long unitId, String status, String listingType,
                                String headline, long publisherUserId, ZonedDateTime publishedAt,
