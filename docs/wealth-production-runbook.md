@@ -26,8 +26,9 @@ Confirm the object-storage bucket enforces server-side encryption, blocks public
 2. Deploy the backend. Flyway must apply `V47__personal_wealth_advisor.sql` successfully before any frontend promotion.
 3. Confirm application health, `GET /wealth/market/status`, object storage, ClamAV connectivity, and that a clean test PDF can be uploaded.
 4. Confirm an EICAR test file is rejected and never appears in object storage.
-5. Deploy the frontend and run the smoke matrix below.
-6. Observe quote failures, scheduler failures, upload failures, database latency and dashboard latency through one complete scheduler interval before promotion.
+5. Inspect a vault list response and confirm it contains neither `fileRef` nor a download URL. Open one document and confirm the owner-scoped detail request produces a working short-lived URL.
+6. Deploy the frontend and run the smoke matrix below.
+7. Observe quote failures, scheduler failures, upload failures, database latency and dashboard latency through one complete scheduler interval before promotion.
 
 ## Smoke and isolation matrix
 
@@ -35,9 +36,18 @@ Confirm the object-storage bucket enforces server-side encryption, blocks public
 - Create a market asset, refresh it twice inside the minimum interval, and confirm only one provider request is made.
 - Disable the provider and confirm the last known value remains unchanged and status becomes stale/unavailable.
 - Upload personal will and trust documents; upload a document linked to an asset; verify both lists and downloads.
+- Confirm vault lists are capped, do not mint object-store links in bulk, and never expose private storage keys.
 - As a second user, attempt direct access to the first user's asset, valuation and vault IDs; every request must return not-found/denied without metadata leakage.
 - Verify dashboard totals, currency conversion, goals, deadlines, advisor actions and a portfolio with at least 10,000 assets.
 - Verify mobile and desktop layouts and keyboard-only document upload.
+
+## Promotion guardrails
+
+- Market quotes must have a positive price, matching asset currency and a non-future timestamp. Provider failures must preserve the last known asset value.
+- Dashboard scenario inputs outside 1–30 years or -100%–100% growth must be rejected at the API boundary.
+- Asset and cash-flow valuation dates cannot be in the future; obligations require a due or expiry date; liability and document date ranges must be chronological.
+- The vault is fail-closed when antivirus scanning is required. Only metadata is returned by list operations; download links are minted on owner-scoped detail access.
+- Do not promote if the complete backend suite, frontend production build, lint budget, wealth browser tests, dependency audit, migration validation or staging isolation matrix fails.
 
 ## Rollback
 
