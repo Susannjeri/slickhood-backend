@@ -6,14 +6,19 @@ Region: `ca-central-1`
 
 Bucket-owner account: `603455138904`
 
-Runtime principal: `arn:aws:iam::672626785173:role/AmazonLightsailInstanceRole`
+Runtime account: `603455138904`
+
+Amazon Lightsail exposes an AWS-managed internal instance identity but does not
+provide a customer-managed EC2 instance profile on this instance. Use a
+dedicated `slickhood-storage-prod` IAM user with only the runtime policy in this
+directory. Store its access key only in the root-readable production secret
+file; never commit it or place it in the systemd unit.
 
 ## Mandatory release gates
 
 1. Resolve the bucket with `GetBucketLocation` from the production instance.
-   This is a cross-account connection from runtime account `672626785173` to
-   bucket-owner account `603455138904`, so both the runtime role identity
-   policy and destination bucket policy are required.
+   The bucket and customer workload are in account `603455138904`. Do not grant
+   access to the AWS-managed Lightsail internal role from another account.
 2. Apply and read back Block Public Access, bucket-owner-enforced ownership,
    SSE-S3 encryption, versioning, lifecycle rules and the HTTPS-only bucket
    policy.
@@ -39,7 +44,8 @@ Runtime principal: `arn:aws:iam::672626785173:role/AmazonLightsailInstanceRole`
 
 ## Runtime configuration
 
-Do not set static AWS access-key or secret-key variables.
+Set the dedicated storage user's key only through the root-readable production
+secret file. Do not hard-code or commit either value.
 
 ```ini
 GARAGE_S3_BUCKET=slickhood-production-documents-603455138904-ca-central-1-an
@@ -58,9 +64,9 @@ APP_CORS_REQUIRE_HTTPS=true
 APP_CORS_ALLOWED_ORIGINS=https://app.slickhood.com
 ```
 
-`GARAGE_S3_URL`, `GARAGE_PRESIGNER_URL`, `GARAGE_ACCESS_KEY` and
-`GARAGE_SECRET_KEY` must be absent for the AWS S3 configuration. Their presence
-would select the legacy Garage endpoint or static credentials.
+`GARAGE_S3_URL` and `GARAGE_PRESIGNER_URL` must be absent for native AWS S3.
+`GARAGE_ACCESS_KEY` and `GARAGE_SECRET_KEY` must come only from the protected
+runtime secret file for this Lightsail deployment.
 
 ## Rollback
 
