@@ -55,6 +55,10 @@ public class AccountService {
         if (AccountCategory.SLICKHOOD.equals(dto.category()) && !userDao.hasRole(PMSRole.SUPER_ADMIN)) {
             throw new PMSCustomException(ResponseCode.ACCOUNT_INSUFFICIENT_PERMISSIONS);
         }
+        if (AccountCategory.AFFILIATE.equals(dto.category()) &&
+                !userDao.hasRole(PMSRole.AFFILIATE) && !userDao.hasRole(PMSRole.SUPER_ADMIN)) {
+            throw new PMSCustomException(ResponseCode.ACCOUNT_INSUFFICIENT_PERMISSIONS);
+        }
         if (AccountCategory.INSURANCE.equals(dto.category()) &&
                 !userDao.hasPermission(org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_INSURANCE_PAYMENT_CONFIG)) {
             throw new PMSCustomException(ResponseCode.ACCOUNT_INSUFFICIENT_PERMISSIONS);
