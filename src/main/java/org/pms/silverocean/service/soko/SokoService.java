@@ -1,6 +1,7 @@
 package org.pms.silverocean.service.soko;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.SokoOrderItemRepo;
@@ -25,6 +26,10 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.security.EncryptionService;
+import org.pms.silverocean.service.I18NService;
+import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.notification.common.NotificationType;
+import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.soko.SokoModels.CatalogProduct;
 import org.pms.silverocean.service.soko.SokoModels.OrderDetail;
 import org.pms.silverocean.service.soko.SokoModels.StoreDetail;
@@ -41,6 +46,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.util.HtmlUtils;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -60,8 +66,9 @@ import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class SokoService {
-    private static final String DRAFT="DRAFT", PUBLISHED="PUBLISHED", OUT_OF_STOCK="OUT_OF_STOCK";
+    private static final String DRAFT="DRAFT", PENDING_REVIEW="PENDING_REVIEW", PUBLISHED="PUBLISHED", REJECTED="REJECTED", SUSPENDED="SUSPENDED", OUT_OF_STOCK="OUT_OF_STOCK";
     private static final SecureRandom SECURE_RANDOM=new SecureRandom();
     private final SokoStoreRepo storeRepo;
     private final SokoProductRepo productRepo;
@@ -75,6 +82,8 @@ public class SokoService {
     private final VisitorService visitorService;
     private final GarageService garageService;
     private final EncryptionService encryptionService;
+    private final NotificationService notificationService;
+    private final I18NService i18n;
     @Value("${soko.stock-reservation-minutes:20}") private long reservationMinutes;
 
     public Page<CatalogProduct> catalog(Pageable pageable, Long storeId, String category, String query, Double latitude, Double longitude, Double radiusKm) {
@@ -106,12 +115,12 @@ public class SokoService {
 
     @Transactional
     public SokoStore updateStore(long id,SokoRequests.StoreUpsert request) {
-        SokoStore s=ownedStore(id); applyStore(s,request); if(PUBLISHED.equals(s.getStatus()))validatePublishable(s); return storeRepo.save(s);
+        SokoStore s=ownedStore(id); applyStore(s,request); if(PUBLISHED.equals(s.getStatus()))validatePublishable(s);else if(PENDING_REVIEW.equals(s.getStatus())||REJECTED.equals(s.getStatus()))s.setStatus(DRAFT); return storeRepo.save(s);
     }
 
     @Transactional
     public SokoStore publishStore(long id) {
-        SokoStore s=ownedStore(id); validatePublishable(s); s.setStatus(PUBLISHED); return storeRepo.save(s);
+        SokoStore s=ownedStore(id); validatePublishable(s);if(SUSPENDED.equals(s.getStatus()))throw forbidden();s.setStatus(PENDING_REVIEW);s.setSubmittedAt(now());s.setReviewReason(null);s.setReviewedAt(null);s.setReviewedByUserId(null);return storeRepo.save(s);
     }
 
     public List<SokoStore> myStores(){return storeRepo.findAllByOwnerUserIdAndActiveTrueOrderByName(userDao.getUserId());}
@@ -128,12 +137,19 @@ public class SokoService {
 
     @Transactional
     public SokoProduct publishProduct(long id){
-        SokoProduct p=productRepo.findById(id).orElseThrow(this::notFound); ownedStore(p.getStoreId());
+        SokoProduct p=productRepo.findById(id).orElseThrow(this::notFound); SokoStore store=ownedStore(p.getStoreId());if(!PUBLISHED.equals(store.getStatus())||SUSPENDED.equals(p.getStatus()))throw invalid();
         if(StringUtils.isBlank(p.getImageUrl())&&productImageRepo.findAllByProductIdAndActiveTrueOrderByDisplayOrderAsc(id).isEmpty())throw new PMSCustomException(ResponseCode.INVALID_IMAGE);
         p.setStatus(p.getStockQuantity()>0?PUBLISHED:OUT_OF_STOCK); return productRepo.save(p);
     }
 
     public List<SokoProduct> myProducts(long storeId){ownedStore(storeId);return productRepo.findAllByStoreIdAndActiveTrueOrderByName(storeId);}
+
+    public SokoModels.AdminSummary adminSummary(){requireSuperAdmin();long orders=orderRepo.countByActiveTrue();long complete=orderRepo.countByStatusAndActiveTrue("COMPLETED")+orderRepo.countByStatusAndActiveTrue("CANCELLED")+orderRepo.countByStatusAndActiveTrue("EXPIRED");return new SokoModels.AdminSummary(storeRepo.countByActiveTrue(),storeRepo.countByStatusAndActiveTrue(PENDING_REVIEW),storeRepo.countByStatusAndActiveTrue(PUBLISHED),productRepo.countByActiveTrue(),productRepo.countByStatusAndActiveTrue(PUBLISHED),orders,Math.max(0,orders-complete));}
+    public Page<SokoStore> adminStores(String status,Pageable pageable){requireSuperAdmin();Pageable safe=bounded(pageable);return StringUtils.isBlank(status)?storeRepo.findAllByActiveTrue(safe):storeRepo.findAllByStatusAndActiveTrue(status.trim().toUpperCase(Locale.ROOT),safe);}
+    public Page<SokoProduct> adminProducts(Pageable pageable){requireSuperAdmin();return productRepo.findAllByActiveTrue(bounded(pageable));}
+    public Page<OrderDetail> adminOrders(Pageable pageable){requireSuperAdmin();return hydrate(orderRepo.findAllByActiveTrue(bounded(pageable)));}
+    @Transactional public SokoStore moderateStore(long id,SokoRequests.ModerationDecision request){requireSuperAdmin();SokoStore store=storeRepo.findByIdAndActiveTrue(id).orElseThrow(this::notFound);String decision=request.decision().toUpperCase(Locale.ROOT);if(("REJECT".equals(decision)||"SUSPEND".equals(decision))&&StringUtils.isBlank(request.reason()))throw invalid();switch(decision){case "APPROVE"->{if(!PENDING_REVIEW.equals(store.getStatus()))throw invalid();validatePublishable(store);store.setStatus(PUBLISHED);}case "REJECT"->{if(!PENDING_REVIEW.equals(store.getStatus()))throw invalid();store.setStatus(REJECTED);}case "SUSPEND"->{if(!PUBLISHED.equals(store.getStatus()))throw invalid();store.setStatus(SUSPENDED);}case "REACTIVATE"->{if(!SUSPENDED.equals(store.getStatus()))throw invalid();validatePublishable(store);store.setStatus(PUBLISHED);}default->throw invalid();}store.setReviewedAt(now());store.setReviewedByUserId(userDao.getUserId());store.setReviewReason(StringUtils.left(StringUtils.trimToNull(request.reason()),1000));store=storeRepo.save(store);notifyModeration(store.getOwnerUserId(),store.getName(),store.getStatus(),store.getReviewReason());return store;}
+    @Transactional public SokoProduct moderateProduct(long id,SokoRequests.ModerationDecision request){requireSuperAdmin();SokoProduct product=productRepo.findById(id).filter(SokoProduct::isActive).orElseThrow(this::notFound);String decision=request.decision().toUpperCase(Locale.ROOT);if("SUSPEND".equals(decision)){if(StringUtils.isBlank(request.reason())||!List.of(PUBLISHED,OUT_OF_STOCK).contains(product.getStatus()))throw invalid();product.setStatus(SUSPENDED);}else if("REACTIVATE".equals(decision)){if(!SUSPENDED.equals(product.getStatus()))throw invalid();SokoStore store=storeRepo.findByIdAndActiveTrue(product.getStoreId()).orElseThrow(this::notFound);if(!PUBLISHED.equals(store.getStatus()))throw invalid();product.setStatus(product.getStockQuantity()>0?PUBLISHED:OUT_OF_STOCK);}else throw invalid();product.setModeratedAt(now());product.setModeratedByUserId(userDao.getUserId());product.setModerationReason(StringUtils.left(StringUtils.trimToNull(request.reason()),1000));product=productRepo.save(product);SokoStore owner=storeRepo.findByIdAndActiveTrue(product.getStoreId()).orElseThrow(this::notFound);notifyModeration(owner.getOwnerUserId(),product.getName(),product.getStatus(),product.getModerationReason());return product;}
 
     @Transactional
     public SokoModels.ProductImages replaceProductImages(long productId, List<MultipartFile> images) throws IOException {
@@ -295,6 +311,8 @@ public class SokoService {
     }
     private SokoStore ownedStore(long id){return storeRepo.findByIdAndOwnerUserIdAndActiveTrue(id,userDao.getUserId()).orElseThrow(this::notFound);}
     private void requireMerchantRole(){if(!userDao.hasRole(PMSRole.SERVICE_PROVIDER)&&!userDao.hasRole(PMSRole.SUPER_ADMIN))throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
+    private void requireSuperAdmin(){if(!userDao.hasRole(PMSRole.SUPER_ADMIN))throw forbidden();}
+    private void notifyModeration(long ownerId,String name,String status,String reason){try{userDao.findById(ownerId).map(user->user.getEmail()).filter(StringUtils::isNotBlank).ifPresent(email->{String detail=StringUtils.defaultIfBlank(reason,"No action is required.");String body=String.format(i18n.getLocalizedMessage(NotificationType.SOKO_MODERATION_EMAIL.getBody()),HtmlUtils.htmlEscape(name),HtmlUtils.htmlEscape(status.replace('_',' ')),HtmlUtils.htmlEscape(detail));notificationService.queueNotification(new NotificationDTO(body,email,NotificationType.SOKO_MODERATION_EMAIL));});}catch(RuntimeException ex){log.warn("Soko moderation notification could not be queued for owner {}",ownerId,ex);}}
     private void requireState(SokoOrder o,String state){if(!state.equals(o.getStatus()))throw invalid();}
     private BigDecimal zero(BigDecimal value){return value==null?BigDecimal.ZERO:value;}
     private ZonedDateTime now(){return ZonedDateTime.now(ZoneId.of("UTC"));}

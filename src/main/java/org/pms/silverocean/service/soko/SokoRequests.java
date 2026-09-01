@@ -73,4 +73,5 @@ public final class SokoRequests {
     public enum FinanceType { REFUND, SETTLEMENT }
     public enum FinanceStatus { REQUESTED, PROCESSING, CONFIRMED, FAILED }
     public record FinanceUpdate(@NotNull FinanceType type,@NotNull FinanceStatus status,@NotNull @DecimalMin("0.01") BigDecimal amount,@Size(max=120) String providerReference) {}
+    public record ModerationDecision(@NotBlank @Pattern(regexp="APPROVE|REJECT|SUSPEND|REACTIVATE") String decision,@Size(max=1000) String reason) {}
 }

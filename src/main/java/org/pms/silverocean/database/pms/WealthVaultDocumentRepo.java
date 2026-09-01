@@ -8,4 +8,5 @@ public interface WealthVaultDocumentRepo extends JpaRepository<WealthVaultDocume
  List<WealthVaultDocument> findTop200ByOwnerUserIdAndActiveTrueOrderByCreatedOnDesc(long ownerUserId);
  Optional<WealthVaultDocument> findByIdAndOwnerUserIdAndActiveTrue(long id,long ownerUserId);
  boolean existsByOwnerUserIdAndCategoryAndActiveTrue(long ownerUserId,String category);
+ long countByActiveTrue();
 }

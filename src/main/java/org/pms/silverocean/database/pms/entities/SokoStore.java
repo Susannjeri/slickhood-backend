@@ -9,6 +9,7 @@ import lombok.Setter;
 import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;
 
 import java.math.BigDecimal;
+import java.time.ZonedDateTime;
 
 @Entity
 @Table(name = "pms_soko_store", indexes = {
@@ -31,4 +32,8 @@ public class SokoStore extends BaseCreatorEntity {
     private BigDecimal deliveryFee;
     private String currency;
     private Long paymentAccountId;
+    private ZonedDateTime submittedAt;
+    private ZonedDateTime reviewedAt;
+    private Long reviewedByUserId;
+    @jakarta.persistence.Column(length=1000) private String reviewReason;
 }

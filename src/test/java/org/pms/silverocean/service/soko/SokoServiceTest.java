@@ -23,6 +23,8 @@ import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.pms.silverocean.service.security.DecryptDTO;
+import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.visitor.VisitorService;
 import org.springframework.mock.web.MockMultipartFile;
 
@@ -39,10 +41,10 @@ class SokoServiceTest {
     @Mock SokoStoreRepo stores; @Mock SokoProductRepo products; @Mock SokoOrderRepo orders;
     @Mock SokoOrderItemRepo items; @Mock InvoiceDao invoices; @Mock AccountDao accounts;
     @Mock SokoRiderRepo riders; @Mock UserDao users; @Mock VisitorService visitors;
-    @Mock SokoProductImageRepo productImages; @Mock GarageService garage; @Mock EncryptionService encryption;
+    @Mock SokoProductImageRepo productImages; @Mock GarageService garage; @Mock EncryptionService encryption; @Mock NotificationService notifications; @Mock I18NService i18n;
     SokoService service;
 
-    @BeforeEach void setup(){service=new SokoService(stores,products,productImages,orders,items,riders,invoices,accounts,users,visitors,garage,encryption);}
+    @BeforeEach void setup(){service=new SokoService(stores,products,productImages,orders,items,riders,invoices,accounts,users,visitors,garage,encryption,notifications,i18n);}
 
     @Test void createRiderRegistersAnAvailablePreferredRider(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);when(users.getUserId()).thenReturn(7L);when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(riders.save(any())).thenAnswer(i->i.getArgument(0));
@@ -116,6 +118,17 @@ class SokoServiceTest {
         when(users.hasRole(PMSRole.SERVICE_PROVIDER)).thenReturn(false);when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(false);
         var request=new SokoRequests.StoreUpsert("Fresh Corner",null,null,null,null,null,BigDecimal.TEN,true,false,BigDecimal.ZERO,"KES",null);
         assertThrows(PMSCustomException.class,()->service.createStore(request));verifyNoInteractions(stores);
+    }
+
+    @Test void superadminCanRejectPendingShopWithAuditableReason(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setActive(true);store.setStatus("PENDING_REVIEW");when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);when(users.getUserId()).thenReturn(1L);when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(stores.save(store)).thenReturn(store);
+        SokoStore result=service.moderateStore(2L,new SokoRequests.ModerationDecision("REJECT","Payment identity does not match the shop."));
+        assertEquals("REJECTED",result.getStatus());assertEquals(1L,result.getReviewedByUserId());assertNotNull(result.getReviewedAt());assertEquals("Payment identity does not match the shop.",result.getReviewReason());
+    }
+
+    @Test void merchantCannotUsePlatformModerationApi(){
+        when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(false);
+        assertThrows(PMSCustomException.class,()->service.moderateStore(2L,new SokoRequests.ModerationDecision("APPROVE",null)));verify(stores,never()).findByIdAndActiveTrue(anyLong());
     }
 
     @Test void checkoutRejectsInsufficientStockWithoutCreatingOrder(){

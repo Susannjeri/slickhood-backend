@@ -13,6 +13,9 @@ import org.springframework.data.domain.Pageable;
 import java.time.ZonedDateTime;
 
 public interface SokoOrderRepo extends JpaRepository<SokoOrder, Long> {
+    Page<SokoOrder> findAllByActiveTrue(Pageable pageable);
+    long countByActiveTrue();
+    long countByStatusAndActiveTrue(String status);
     List<SokoOrder> findAllByCustomerUserIdAndActiveTrueOrderByCreatedOnDesc(long customerUserId);
     Page<SokoOrder> findAllByCustomerUserIdAndActiveTrue(long customerUserId,Pageable pageable);
     List<SokoOrder> findAllByStoreIdInAndActiveTrueOrderByCreatedOnDesc(List<Long> storeIds);

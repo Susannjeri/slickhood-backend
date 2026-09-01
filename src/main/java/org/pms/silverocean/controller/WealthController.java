@@ -8,6 +8,7 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.wealth.WealthRequests.*;
 import org.pms.silverocean.service.wealth.WealthService;
 import org.pms.silverocean.service.wealth.WealthMarketDataService;
+import org.pms.silverocean.service.wealth.WealthAdminService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -24,7 +25,12 @@ import java.time.LocalDate;
 
 @RestController @RequestMapping("/wealth") @RequiredArgsConstructor @Validated
 public class WealthController {
-    private final WealthService service; private final WealthMarketDataService marketDataService; private final I18NService i18n;
+    private final WealthService service; private final WealthMarketDataService marketDataService; private final WealthAdminService adminService; private final I18NService i18n;
+    @GetMapping("/asset-types") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> assetTypes(){return ok(adminService.publicTypes());}
+    @GetMapping("/admin/summary") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminSummary(){return ok(adminService.summary());}
+    @GetMapping("/admin/asset-types") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminAssetTypes(){return ok(adminService.adminTypes());}
+    @PostMapping("/admin/asset-types") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> createAssetType(@RequestBody WealthAdminService.AssetTypeRequest request){return ok(adminService.create(request));}
+    @PutMapping("/admin/asset-types/{id}") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> updateAssetType(@PathVariable long id,@RequestBody WealthAdminService.AssetTypeRequest request){return ok(adminService.update(id,request));}
     @GetMapping("/dashboard") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)")
     public ResponseEntity<ResponseDTO> dashboard(@RequestParam(defaultValue="5") @Min(1) @Max(30) int years,@RequestParam(defaultValue="5") @DecimalMin("-100") @DecimalMax("100") BigDecimal valueGrowth,@RequestParam(defaultValue="3") @DecimalMin("-100") @DecimalMax("100") BigDecimal incomeGrowth,@RequestParam(defaultValue="3") @DecimalMin("-100") @DecimalMax("100") BigDecimal expenseGrowth){return ok(service.dashboard(years,valueGrowth,incomeGrowth,expenseGrowth));}
     @GetMapping("/assets") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> assets(){return ok(service.assets());}
