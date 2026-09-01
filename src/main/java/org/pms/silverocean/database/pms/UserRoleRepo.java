@@ -28,13 +28,18 @@ public interface UserRoleRepo extends JpaRepository<UserRole, Long> {
 
 
 
-    @Query("SELECT new org.pms.silverocean.service.wrappers.IdNameDescDTO(u.propertyId, p.name)  FROM Unit u JOIN Property p ON p.id=u.propertyId JOIN UnitTenant ut ON u.id=ut.unitId WHERE ut.userId=:userId AND ut.active AND u.active")
+    @Query("SELECT new org.pms.silverocean.service.wrappers.IdNameDescDTO(u.propertyId, p.name)  FROM Unit u JOIN Property p ON p.id=u.propertyId JOIN UnitTenant ut ON u.id=ut.unitId WHERE ut.userId=:userId AND ut.active AND u.active AND p.active")
     Set<IdNameDescDTO> findTenantProperty(Long userId);
 
     @Query("SELECT DISTINCT new org.pms.silverocean.service.wrappers.IdNameDescDTO(p.id, p.name) " +
             "FROM PropertyOwnership o JOIN Property p ON p.id=o.propertyId " +
             "WHERE o.homeownerUserId=:userId AND o.active AND p.active")
     Set<IdNameDescDTO> findHomeownerProperty(Long userId);
+
+    @Query("SELECT DISTINCT new org.pms.silverocean.service.wrappers.IdNameDescDTO(p.id, p.name) " +
+            "FROM SaleTransaction s JOIN Property p ON p.id=s.propertyId " +
+            "WHERE s.buyerUserId=:userId AND s.active AND p.active")
+    Set<IdNameDescDTO> findBuyerProperty(Long userId);
 
     @Query("SELECT COUNT(ur) FROM UserRole ur JOIN Role r ON ur.roleId=r.id WHERE ur.roleId=:roleId AND ur.userId=:userId")
     int findByUserIdAndRoleId(Long userId, Long roleId);
