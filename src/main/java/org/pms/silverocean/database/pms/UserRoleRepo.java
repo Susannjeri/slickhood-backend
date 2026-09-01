@@ -4,15 +4,23 @@ import org.pms.silverocean.database.pms.entities.Role;
 import org.pms.silverocean.database.pms.entities.UserRole;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.wrappers.IdNameDescDTO;
+import org.pms.silverocean.service.users.UserRoleNameDTO;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
 public interface UserRoleRepo extends JpaRepository<UserRole, Long> {
     @Query("SELECT r FROM UserRole ur JOIN Role r ON ur.roleId=r.id WHERE ur.userId=:userId")
     Set<Role> findByUserId(Long userId);
+
+    @Query("SELECT new org.pms.silverocean.service.users.UserRoleNameDTO(ur.userId, r.name) " +
+            "FROM UserRole ur JOIN Role r ON ur.roleId=r.id " +
+            "WHERE ur.userId IN :userIds AND r.active")
+    List<UserRoleNameDTO> findRoleNamesByUserIds(Collection<Long> userIds);
 
     @Query("SELECT new org.pms.silverocean.service.wrappers.IdNameDescDTO(p.id, p.name) FROM Property p WHERE p.createdBy=:userId and p.active")
     Set<IdNameDescDTO> findLandlordsProperty(Long userId);

@@ -4,14 +4,20 @@ import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.wrappers.EnumWrapper;
 
+import java.util.List;
+
 public record UserDTO(String name, String email, String phoneNumber, String registrationDate, String lastLogin,
                       String registrationIp, String country, String countryCode, String city, String source,
                       EnumWrapper profileType, String organizationName, String identificationNumber, String taxPin,
-                      boolean active, boolean completedProfile, boolean verified) {
+                      boolean active, boolean completedProfile, boolean verified, List<String> userTypes) {
     public UserDTO(Users users, EnumWrapper profileType) {
+        this(users, profileType, List.of());
+    }
+
+    public UserDTO(Users users, EnumWrapper profileType, List<String> userTypes) {
         this(users.getFullName(), users.getEmail(), users.getPhoneNumber(), PMSUtils.toKenyanTime(users.getCreatedOn()), PMSUtils.timeAgo(users.getLastLogin()),
                 users.getRegistrationIP(), users.getCountry(), users.getCountryCode(), users.getCity(), users.getSource(),
                 profileType, users.getOrganizationName(), users.getIdentificationNumber(), users.getTaxPin(),
-                users.isActive(), users.isCompletedProfile(), users.isVerified());
+                users.isActive(), users.isCompletedProfile(), users.isVerified(), List.copyOf(userTypes));
     }
 }

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.common.ResponseCode;
+import org.pms.silverocean.database.pms.UserRoleRepo;
 import org.pms.silverocean.database.pms.entities.UserOTP;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
@@ -35,6 +36,7 @@ class SilverOceanUserServicePhoneVerificationTest {
 
     @Mock private I18NService i18NService;
     @Mock private UserDao userDao;
+    @Mock private UserRoleRepo userRoleRepo;
     @Mock private NotificationService notificationService;
     @Mock private OTPEncryptionService otpEncryptionService;
 
@@ -43,7 +45,7 @@ class SilverOceanUserServicePhoneVerificationTest {
 
     @BeforeEach
     void setUp() {
-        service = new SilverOceanUserService(i18NService, userDao, notificationService, otpEncryptionService);
+        service = new SilverOceanUserService(i18NService, userDao, userRoleRepo, notificationService, otpEncryptionService);
         ReflectionTestUtils.setField(service, "otpResendCooldownSeconds", 60);
         currentUser = new Users();
         currentUser.setId(41L);
