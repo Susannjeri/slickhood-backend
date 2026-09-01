@@ -67,6 +67,10 @@ jobs:
             staged_dir="$target_dir/incoming/${{ github.sha }}"
             health_url='${{ secrets.BACKEND_HEALTHCHECK_URL }}'
             test -n "$target_dir" && test -n "$health_url"
+            case "$health_url" in
+              */actuator/health/production-readiness) ;;
+              *) echo "BACKEND_HEALTHCHECK_URL must target /actuator/health/production-readiness" >&2; exit 1 ;;
+            esac
             cd "$staged_dir"
             sha256sum -c release.sha256
             set -- ./*.jar
