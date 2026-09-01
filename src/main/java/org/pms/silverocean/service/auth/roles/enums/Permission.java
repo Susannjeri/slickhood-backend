@@ -45,6 +45,9 @@ public class Permission {
 
     public static final String VIEW_NOTIFICATIONS = "view_notifications";
     public static final String VIEW_MY_NOTIFICATIONS = "view_my_notifications";
+    public static final String VIEW_HELPDESK_QUEUE = "view_helpdesk_queue";
+    public static final String MANAGE_HELPDESK_CASES = "manage_helpdesk_cases";
+    public static final String MANAGE_HELPDESK_ARTICLES = "manage_helpdesk_articles";
     public static final String ROTATE_KEY = "rotate_key";
 
     public static final String CREATE_INVITE = "create_invite";

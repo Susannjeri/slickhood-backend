@@ -17,7 +17,8 @@ class ProductionModuleGuardrailsTest {
         assertThat(assessment.ready()).isFalse();
         assertThat(assessment.missingOrUnsafeConfiguration()).contains("wealth.market.enabled=true",
                 "wealth.vault.antivirus.required=true", "app.insurance.imap.enabled=true",
-                "affiliate.commission-rate (must be explicit)", "one verified payment callback secret");
+                "affiliate.commission-rate (must be explicit)", "helpdesk.ai.enabled=true",
+                "helpdesk.ai.api-key / OPENAI_API_KEY", "one verified payment callback secret");
     }
 
     @Test
@@ -84,6 +85,9 @@ class ProductionModuleGuardrailsTest {
                 .withProperty("app.insurance.imap.password", "configured")
                 .withProperty("app.insurance.mail.from", "insurance@example.com")
                 .withProperty("app.insurance.mail.reply-to", "insurance@example.com")
+                .withProperty("helpdesk.ai.enabled", "true")
+                .withProperty("helpdesk.ai.api-key", "configured")
+                .withProperty("helpdesk.ai.base-url", "https://api.openai.com/v1")
                 .withProperty("affiliate.commission-rate", "10")
                 .withProperty("affiliate.minimum-payout", "1000")
                 .withProperty("affiliate.commission-hold-days", "14")
