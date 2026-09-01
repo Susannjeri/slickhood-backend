@@ -42,6 +42,7 @@ import java.util.stream.Collectors;
 public class GarageService {
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
+    private final UploadMalwarePolicy malwarePolicy;
     @Value("${garage.s3.bucket:slickhood-bucket}")
     private String bucketName;
     @Value("${garage.bootstrap.enabled:true}")
@@ -49,9 +50,10 @@ public class GarageService {
     private final ResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
 
 
-    public GarageService(S3Client s3Client, S3Presigner s3Presigner) {
+    public GarageService(S3Client s3Client, S3Presigner s3Presigner, UploadMalwarePolicy malwarePolicy) {
         this.s3Client = s3Client;
         this.s3Presigner = s3Presigner;
+        this.malwarePolicy = malwarePolicy;
     }
 
     @PostConstruct
@@ -76,13 +78,17 @@ public class GarageService {
             fileName = fileName.substring(1);
         }
 
+        byte[] content = Files.readAllBytes(file.toPath());
+        malwarePolicy.requireSafe(content);
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                 .bucket(bucketName)
                 .key(fileName)
                 .contentType(detectedType)
+                .contentLength((long) content.length)
+                .serverSideEncryption("AES256")
                 .build();
 
-        s3Client.putObject(putObjectRequest, RequestBody.fromFile(file));
+        s3Client.putObject(putObjectRequest, RequestBody.fromBytes(content));
     }
 
     public void uploadFile(String path, MultipartFile multipartFile) throws IOException {
@@ -100,6 +106,7 @@ public class GarageService {
         if (StringUtils.isBlank(key) || content == null || content.length == 0 || StringUtils.isBlank(contentType)) {
             throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
         }
+        malwarePolicy.requireSafe(content);
         s3Client.putObject(PutObjectRequest.builder()
                         .bucket(bucketName)
                         .key(key.startsWith("/") ? key.substring(1) : key)
