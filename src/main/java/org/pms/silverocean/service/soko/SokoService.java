@@ -24,6 +24,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.security.EncryptionService;
 import org.pms.silverocean.service.soko.SokoModels.CatalogProduct;
 import org.pms.silverocean.service.soko.SokoModels.OrderDetail;
 import org.pms.silverocean.service.soko.SokoModels.StoreDetail;
@@ -33,6 +34,7 @@ import org.pms.silverocean.service.visitor.wrappers.CreateVisitorRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,12 +74,13 @@ public class SokoService {
     private final UserDao userDao;
     private final VisitorService visitorService;
     private final GarageService garageService;
+    private final EncryptionService encryptionService;
     @Value("${soko.stock-reservation-minutes:20}") private long reservationMinutes;
 
     public Page<CatalogProduct> catalog(Pageable pageable, Long storeId, String category, String query, Double latitude, Double longitude, Double radiusKm) {
         String cleanCategory=StringUtils.trimToNull(category), cleanQuery=StringUtils.trimToNull(query);
         GeoBounds bounds=GeoBounds.of(latitude,longitude,radiusKm);
-        Page<SokoProduct> page=productRepo.searchCatalog(pageable,storeId,cleanCategory,cleanQuery,latitude,longitude,bounds.minLat(),bounds.maxLat(),bounds.minLng(),bounds.maxLng());
+        Page<SokoProduct> page=productRepo.searchCatalog(bounded(pageable),storeId,cleanCategory,cleanQuery,latitude,longitude,bounds.minLat(),bounds.maxLat(),bounds.minLng(),bounds.maxLng());
         List<Long> productIds=page.stream().map(SokoProduct::getId).toList();
         Map<Long,List<String>> images=imageUrlsByProduct(productIds);
         Map<Long,SokoStore> stores=storeRepo.findAllById(page.stream().map(SokoProduct::getStoreId).distinct().toList())
@@ -198,6 +201,16 @@ public class SokoService {
 
     @Transactional
     public OrderDetail checkout(SokoRequests.Checkout request){
+        return checkout(request,UUID.randomUUID().toString());
+    }
+
+    @Transactional
+    public OrderDetail checkout(SokoRequests.Checkout request,String idempotencyKey){
+        long customerUserId=userDao.getUserId();
+        String cleanKey=StringUtils.defaultIfBlank(StringUtils.trimToNull(idempotencyKey),UUID.randomUUID().toString());
+        if(cleanKey.length()>80||!cleanKey.matches("[A-Za-z0-9._:-]+"))throw invalid();
+        var existing=orderRepo.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(customerUserId,cleanKey);
+        if(existing.isPresent())return detail(existing.get());
         SokoStore store=storeRepo.findByIdAndActiveTrue(request.storeId()).filter(s->PUBLISHED.equals(s.getStatus())).orElseThrow(this::notFound);
         validateDelivery(store,request);
         if(request.items().stream().map(SokoRequests.CheckoutItem::productId).distinct().count()!=request.items().size())throw invalid();
@@ -209,22 +222,22 @@ public class SokoService {
             subtotal=subtotal.add(p.getPrice().multiply(BigDecimal.valueOf(line.quantity())));
         }
         BigDecimal fee="DELIVERY".equalsIgnoreCase(request.deliveryMethod())?zero(store.getDeliveryFee()):BigDecimal.ZERO;
-        SokoOrder o=new SokoOrder(); o.setOrderNumber("SOKO-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(Locale.ROOT)); o.setStoreId(store.getId()); o.setCustomerUserId(userDao.getUserId()); o.setCreatedBy(userDao.getUserId()); o.setActive(true); o.setStatus("PENDING_PAYMENT"); o.setPaymentStatus("UNPAID");o.setRefundStatus("NOT_REQUIRED");o.setSettlementStatus("PENDING");o.setReservationExpiresAt(now().plusMinutes(reservationMinutes)); o.setDeliveryMethod(request.deliveryMethod().toUpperCase(Locale.ROOT)); o.setDeliveryAddress(StringUtils.trimToNull(request.deliveryAddress())); o.setCustomerPhone(request.customerPhone()); o.setNotes(StringUtils.trimToNull(request.notes())); o.setDestinationUnitId(request.destinationUnitId()); o.setSubtotal(subtotal); o.setDeliveryFee(fee); o.setTotal(subtotal.add(fee)); o.setCurrency(store.getCurrency()); o.setPlacedAt(now()); orderRepo.save(o);
+        SokoOrder o=new SokoOrder(); o.setOrderNumber("SOKO-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(Locale.ROOT)); o.setStoreId(store.getId()); o.setCustomerUserId(customerUserId); o.setCreatedBy(customerUserId); o.setCheckoutIdempotencyKey(cleanKey); o.setActive(true); o.setStatus("PENDING_PAYMENT"); o.setPaymentStatus("UNPAID");o.setRefundStatus("NOT_REQUIRED");o.setSettlementStatus("PENDING");o.setReservationExpiresAt(now().plusMinutes(reservationMinutes)); o.setDeliveryMethod(request.deliveryMethod().toUpperCase(Locale.ROOT)); o.setDeliveryAddress(StringUtils.trimToNull(request.deliveryAddress())); o.setCustomerPhone(request.customerPhone()); o.setNotes(StringUtils.trimToNull(request.notes())); o.setDestinationUnitId(request.destinationUnitId()); o.setSubtotal(subtotal); o.setDeliveryFee(fee); o.setTotal(subtotal.add(fee)); o.setCurrency(store.getCurrency()); o.setPlacedAt(now()); orderRepo.save(o);
         List<SokoOrderItem> items=new ArrayList<>();
         for(int i=0;i<products.size();i++){SokoProduct p=products.get(i);int qty=request.items().get(i).quantity();SokoOrderItem it=new SokoOrderItem();it.setOrderId(o.getId());it.setProductId(p.getId());it.setProductName(p.getName());it.setUnit(p.getUnit());it.setUnitPrice(p.getPrice());it.setQuantity(qty);it.setLineTotal(p.getPrice().multiply(BigDecimal.valueOf(qty)));it.setCreatedBy(userDao.getUserId());it.setActive(true);items.add(itemRepo.save(it));}
         PMSInvoice invoice=createInvoice(o,store,items);o.setInvoiceRef(invoice.getRef());orderRepo.save(o);return detail(o,store,items);
     }
 
-    public Page<OrderDetail> myOrders(Pageable pageable){return orderRepo.findAllByCustomerUserIdAndActiveTrue(userDao.getUserId(),bounded(pageable)).map(this::detail);}
-    public Page<OrderDetail> merchantOrders(Pageable pageable){List<Long> ids=myStores().stream().map(SokoStore::getId).toList();if(ids.isEmpty())return Page.empty(bounded(pageable));return orderRepo.findAllByStoreIdInAndActiveTrue(ids,bounded(pageable)).map(this::detail);}
+    public Page<OrderDetail> myOrders(Pageable pageable){return hydrate(orderRepo.findAllByCustomerUserIdAndActiveTrue(userDao.getUserId(),bounded(pageable)));}
+    public Page<OrderDetail> merchantOrders(Pageable pageable){List<Long> ids=myStores().stream().map(SokoStore::getId).toList();if(ids.isEmpty())return Page.empty(bounded(pageable));return hydrate(orderRepo.findAllByStoreIdInAndActiveTrue(ids,bounded(pageable)));}
 
-    public String deliveryCode(long orderId){SokoOrder o=orderRepo.findById(orderId).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId())throw forbidden();if(!"DELIVERY".equals(o.getDeliveryMethod())||StringUtils.isBlank(o.getDeliveryCode())||!List.of("DISPATCHED","COMPLETED").contains(o.getStatus()))throw invalid();return o.getDeliveryCode();}
+    public String deliveryCode(long orderId){SokoOrder o=orderRepo.findById(orderId).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId())throw forbidden();String code=decryptDeliveryCode(o);if(!"DELIVERY".equals(o.getDeliveryMethod())||StringUtils.isBlank(code)||!List.of("DISPATCHED","COMPLETED").contains(o.getStatus()))throw invalid();return code;}
 
-    @Transactional public OrderDetail uploadDeliveryProof(long orderId,MultipartFile proof)throws IOException{SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);ownedStore(o.getStoreId());if(!"DISPATCHED".equals(o.getStatus())||proof==null||proof.isEmpty()||proof.getSize()>5L*1024*1024)throw invalid();String type=StringUtils.defaultString(proof.getContentType()).toLowerCase(Locale.ROOT);byte[] bytes=proof.getBytes();if(!validProof(type,bytes))throw new PMSCustomException(ResponseCode.INVALID_IMAGE);String extension="image/png".equals(type)?"png":"jpg";String ref="soko/delivery-proof/"+o.getId()+"/"+UUID.randomUUID()+"."+extension;garageService.uploadBytes(ref,bytes,type);o.setDeliveryProofReference(ref);o.setDeliveryProofContentType(type);o.setDeliveryProofSize((long)bytes.length);o.setDeliveryProofAt(now());orderRepo.save(o);return detail(o);}
+    @Transactional public OrderDetail uploadDeliveryProof(long orderId,MultipartFile proof)throws IOException{SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);ownedStore(o.getStoreId());if(!"DISPATCHED".equals(o.getStatus())||StringUtils.isNotBlank(o.getDeliveryProofReference())||proof==null||proof.isEmpty()||proof.getSize()>5L*1024*1024)throw invalid();String type=StringUtils.defaultString(proof.getContentType()).toLowerCase(Locale.ROOT);byte[] bytes=proof.getBytes();if(!validProof(type,bytes))throw new PMSCustomException(ResponseCode.INVALID_IMAGE);String extension="image/png".equals(type)?"png":"jpg";String ref="soko/delivery-proof/"+o.getId()+"/"+UUID.randomUUID()+"."+extension;garageService.uploadBytes(ref,bytes,type);o.setDeliveryProofReference(ref);o.setDeliveryProofContentType(type);o.setDeliveryProofSize((long)bytes.length);o.setDeliveryProofAt(now());orderRepo.save(o);return detail(o);}
     public String deliveryProof(long orderId){SokoOrder o=orderRepo.findById(orderId).filter(x->x.isActive()).orElseThrow(this::notFound);SokoStore store=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId()&&store.getOwnerUserId()!=userDao.getUserId())throw forbidden();if(StringUtils.isBlank(o.getDeliveryProofReference()))throw notFound();return garageService.getPresignedUrlForStoredObject(o.getDeliveryProofReference());}
 
     @Transactional(noRollbackFor=PMSCustomException.class)
-    public OrderDetail confirmDelivery(long orderId,SokoRequests.DeliveryConfirmation request){SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);SokoStore store=ownedStore(o.getStoreId());if(!"DELIVERY".equals(o.getDeliveryMethod())||!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified()||StringUtils.isBlank(o.getDeliveryCode())||StringUtils.isBlank(o.getDeliveryProofReference()))throw invalid();if(o.getDeliveryCodeAttempts()>=5)throw forbidden();o.setDeliveryCodeAttempts(o.getDeliveryCodeAttempts()+1);if(!o.getDeliveryCode().equals(request.code())){orderRepo.save(o);throw invalid();}o.setDeliveryCodeVerified(true);o.setDeliveryRecipientName(StringUtils.left(StringUtils.trimToNull(request.recipientName()),160));o.setDeliveryProofAt(now());o.setStatus("COMPLETED");o.setCompletedAt(now());releaseRider(o,true);orderRepo.save(o);return detail(o,store,itemRepo.findAllByOrderIdAndActiveTrueOrderById(o.getId()));}
+    public OrderDetail confirmDelivery(long orderId,SokoRequests.DeliveryConfirmation request){SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);SokoStore store=ownedStore(o.getStoreId());String code=decryptDeliveryCode(o);if(!"DELIVERY".equals(o.getDeliveryMethod())||!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified()||StringUtils.isBlank(code)||StringUtils.isBlank(o.getDeliveryProofReference()))throw invalid();if(o.getDeliveryCodeAttempts()>=5)throw forbidden();o.setDeliveryCodeAttempts(o.getDeliveryCodeAttempts()+1);if(!constantTimeEquals(code,request.code())){orderRepo.save(o);throw invalid();}o.setDeliveryCodeVerified(true);o.setDeliveryCode(null);o.setEncryptedDeliveryCode(null);o.setDeliveryRecipientName(StringUtils.left(StringUtils.trimToNull(request.recipientName()),160));o.setDeliveryProofAt(now());o.setStatus("COMPLETED");o.setCompletedAt(now());releaseRider(o,true);orderRepo.save(o);return detail(o,store,itemRepo.findAllByOrderIdAndActiveTrueOrderById(o.getId()));}
 
     @Transactional
     public OrderDetail transition(long orderId,String requested,SokoRequests.Dispatch dispatch){
@@ -256,17 +269,30 @@ public class SokoService {
     private PMSInvoice createInvoice(SokoOrder o,SokoStore s,List<SokoOrderItem> items){PMSInvoice inv=new PMSInvoice();inv.setUnitId(o.getDestinationUnitId()==null?0:o.getDestinationUnitId());inv.setPropertyId(0);inv.setDescription(("Soko order "+o.getOrderNumber()).getBytes(StandardCharsets.UTF_8));String html=items.stream().map(i->"<tr><td><span>"+i.getProductName()+" x "+i.getQuantity()+"</span></td><td class='amount-col'>"+i.getLineTotal()+"</td></tr>").collect(Collectors.joining());inv.setHtmlDescription(html.getBytes(StandardCharsets.UTF_8));inv.setAmount(o.getTotal().doubleValue());inv.setPendingAmount(o.getTotal().doubleValue());inv.setCurrency(o.getCurrency());inv.setBilledUserId(o.getCustomerUserId());inv.setPayToUserId(s.getOwnerUserId());inv.setActive(true);inv.setBillingType("SOKO");inv.setCustomerPhoneNumber(o.getCustomerPhone());userDao.findById(o.getCustomerUserId()).ifPresent(u->inv.setCustomerEmail(u.getEmail()));invoiceDao.createInvoice(inv);return inv;}
     private void assignAndRegisterDelivery(SokoOrder o,SokoRequests.Dispatch d){
         if(d==null)throw invalid();
+        ZonedDateTime expectedArrival=d.expectedArrivalTime().atZone(ZoneId.of("Africa/Nairobi")).withZoneSameInstant(ZoneId.of("UTC"));
+        if(!expectedArrival.isAfter(now()))throw invalid();
         if(d.riderId()!=null){SokoRider rider=riderRepo.findForUpdate(d.riderId(),o.getStoreId()).orElseThrow(this::notFound);if(!"ACTIVE".equals(rider.getStatus())||!"AVAILABLE".equals(rider.getAvailability()))throw invalid();rider.setAvailability("BUSY");riderRepo.save(rider);o.setRiderId(rider.getId());o.setCourierName(rider.getDisplayName());o.setCourierPhone(rider.getPhoneNumber());o.setCourierVehiclePlate(rider.getVehiclePlate());}
         else {if(StringUtils.isBlank(d.courierName())||StringUtils.isBlank(d.courierPhone()))throw invalid();o.setRiderId(null);o.setCourierName(d.courierName().trim());o.setCourierPhone(d.courierPhone().trim());o.setCourierVehiclePlate(StringUtils.trimToNull(d.vehiclePlate()));}
-        o.setDeliveryCode(String.format(Locale.ROOT,"%06d",SECURE_RANDOM.nextInt(1_000_000)));o.setDeliveryCodeAttempts(0);o.setDeliveryCodeVerified(false);o.setExpectedArrivalAt(d.expectedArrivalTime().atZone(ZoneId.of("Africa/Nairobi")).withZoneSameInstant(ZoneId.of("UTC")));
+        String deliveryCode=String.format(Locale.ROOT,"%06d",SECURE_RANDOM.nextInt(1_000_000));o.setDeliveryCode(null);o.setEncryptedDeliveryCode(encryptionService.encrypt(deliveryCode));o.setDeliveryCodeAttempts(0);o.setDeliveryCodeVerified(false);o.setExpectedArrivalAt(expectedArrival);
         if(o.getDestinationUnitId()==null)return;var visitor=visitorService.preRegisterDeliveryForHost(o.getCustomerUserId(),new CreateVisitorRequest(o.getCourierName(),o.getCourierVehiclePlate(),d.expectedArrivalTime(),null,false,o.getDestinationUnitId(),o.getCourierPhone(), VisitorCategory.DELIVERY));o.setDeliveryVisitorId(visitor.getId());
     }
     private void releaseRider(SokoOrder o,boolean completed){if(o.getRiderId()==null)return;riderRepo.findForUpdate(o.getRiderId(),o.getStoreId()).ifPresent(r->{if("BUSY".equals(r.getAvailability()))r.setAvailability("AVAILABLE");if(completed)r.setCompletedDeliveries(r.getCompletedDeliveries()+1);riderRepo.save(r);});}
     private boolean validProof(String type,byte[] b){if(b==null)return false;return switch(type){case "image/jpeg"->b.length>3&&(b[0]&255)==255&&(b[1]&255)==216;case "image/png"->b.length>8&&(b[0]&255)==137&&b[1]=='P'&&b[2]=='N'&&b[3]=='G';default->false;};}
+    private String decryptDeliveryCode(SokoOrder order){if(order.getEncryptedDeliveryCode()!=null)return encryptionService.decrypt(order.getEncryptedDeliveryCode()).decryptedValue();return order.getDeliveryCode();}
+    private boolean constantTimeEquals(String expected,String actual){return java.security.MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),actual.getBytes(StandardCharsets.UTF_8));}
     private Pageable bounded(Pageable p){return PageRequest.of(Math.max(0,p.getPageNumber()),Math.min(100,Math.max(1,p.getPageSize())),p.getSort().isSorted()?p.getSort():Sort.by(Sort.Direction.DESC,"createdOn"));}
     private void restoreStock(SokoOrder o){if(o.isStockReleased())return;for(SokoOrderItem i:itemRepo.findAllByOrderIdAndActiveTrueOrderById(o.getId())){SokoProduct p=productRepo.findByIdForUpdate(i.getProductId()).orElse(null);if(p!=null){p.setStockQuantity(p.getStockQuantity()+i.getQuantity());if(OUT_OF_STOCK.equals(p.getStatus()))p.setStatus(PUBLISHED);productRepo.save(p);}}o.setStockReleased(true);}
     private OrderDetail detail(SokoOrder o){SokoStore s=storeRepo.findById(o.getStoreId()).orElseThrow(this::notFound);return detail(o,s,itemRepo.findAllByOrderIdAndActiveTrueOrderById(o.getId()));}
     private OrderDetail detail(SokoOrder o,SokoStore s,List<SokoOrderItem> items){String channel=s.getPaymentAccountId()==null?null:accountDao.getAccountById(s.getPaymentAccountId()).getChannel().name();return new OrderDetail(o,s.getName(),s.getPaymentAccountId(),channel,items);}
+    private Page<OrderDetail> hydrate(Page<SokoOrder> page){
+        if(page.isEmpty())return new PageImpl<>(List.of(),page.getPageable(),page.getTotalElements());
+        List<Long> orderIds=page.stream().map(SokoOrder::getId).toList();
+        Map<Long,List<SokoOrderItem>> itemsByOrder=itemRepo.findAllByOrderIdInAndActiveTrueOrderByOrderIdAscIdAsc(orderIds).stream().collect(Collectors.groupingBy(SokoOrderItem::getOrderId));
+        Map<Long,SokoStore> stores=storeRepo.findAllById(page.stream().map(SokoOrder::getStoreId).distinct().toList()).stream().collect(Collectors.toMap(SokoStore::getId,Function.identity()));
+        Map<Long,String> channels=stores.values().stream().filter(s->s.getPaymentAccountId()!=null).collect(Collectors.toMap(SokoStore::getId,s->accountDao.getAccountById(s.getPaymentAccountId()).getChannel().name()));
+        List<OrderDetail> content=page.stream().map(o->{SokoStore s=stores.get(o.getStoreId());if(s==null)throw notFound();return new OrderDetail(o,s.getName(),s.getPaymentAccountId(),channels.get(s.getId()),itemsByOrder.getOrDefault(o.getId(),List.of()));}).toList();
+        return new PageImpl<>(content,page.getPageable(),page.getTotalElements());
+    }
     private SokoStore ownedStore(long id){return storeRepo.findByIdAndOwnerUserIdAndActiveTrue(id,userDao.getUserId()).orElseThrow(this::notFound);}
     private void requireMerchantRole(){if(!userDao.hasRole(PMSRole.SERVICE_PROVIDER)&&!userDao.hasRole(PMSRole.SUPER_ADMIN))throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
     private void requireState(SokoOrder o,String state){if(!state.equals(o.getStatus()))throw invalid();}
