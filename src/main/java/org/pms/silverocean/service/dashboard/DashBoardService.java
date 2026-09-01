@@ -27,6 +27,7 @@ import org.pms.silverocean.service.sp.dao.ServiceProviderReportDao;
 import org.pms.silverocean.service.threadpooling.PMSThreadPoolExecutorService;
 import org.pms.silverocean.service.threadpooling.ThreadPoolBeans;
 import org.pms.silverocean.service.visitor.VisitorReportDao;
+import org.pms.silverocean.service.insurance.InsuranceOperationsService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -48,19 +49,17 @@ public class DashBoardService {
     private final SaleTransactionRepo saleRepo;
     private final LeaseDocumentRepo documentRepo;
     private final EstateServiceChargeRepo chargeRepo;
-
-    @Value("${spring.datasource.hikari.maximum-pool-size:10}")
-    private int maxPoolSize;
-
+    private final InsuranceOperationsService insuranceOperationsService;
 
     public DashBoardService(UnitReportDao unitReportDao, UserDao userDao, ThreadPoolBeans threadPoolBeans,
                             UserReportDao userReportDao, InvoiceReportDao invoiceReportDao,
                             CurrencyConversionService currencyConversionService, ServiceProviderReportDao serviceProviderReportDao, VisitorReportDao visitorReportDao,
                             PropertyOwnershipRepo ownershipRepo, SaleTransactionRepo saleRepo, LeaseDocumentRepo documentRepo,
-                            EstateServiceChargeRepo chargeRepo) {
+                            EstateServiceChargeRepo chargeRepo, InsuranceOperationsService insuranceOperationsService,
+                            @Value("${spring.datasource.hikari.maximum-pool-size:10}") int maxPoolSize) {
         this.unitReportDao = unitReportDao;
         this.userDao = userDao;
-        this.reportExecutorService = threadPoolBeans.ioExecutorService("REPORTS", maxPoolSize > 0 ? maxPoolSize / 2 : 10 / 2);
+        this.reportExecutorService = threadPoolBeans.ioExecutorService("REPORTS", Math.max(1, maxPoolSize / 2));
         this.userReportDao = userReportDao;
         this.invoiceReportDao = invoiceReportDao;
         this.currencyConversionService = currencyConversionService;
@@ -70,6 +69,7 @@ public class DashBoardService {
         this.saleRepo = saleRepo;
         this.documentRepo = documentRepo;
         this.chargeRepo = chargeRepo;
+        this.insuranceOperationsService = insuranceOperationsService;
     }
 
     public CompletableFuture<ReportDto> getReportDtoPerActiveRole(PMSRole activeRole) {
@@ -80,12 +80,12 @@ public class DashBoardService {
             case LANDLORD -> buildLandlordDto().thenApply(dto -> (ReportDto) dto);
             case SERVICE_PROVIDER -> buildServiceProviderDto().thenApply(dto -> (ReportDto) dto);
             case ASSET_PORTFOLIO_MANAGER, AFFILIATE -> CompletableFuture.failedFuture(new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE));
-            case SUPPORT, SALES_MARKETING, FINANCE -> buildInternalStaffDto(activeRole).thenApply(dto -> (ReportDto) dto);
+            case SUPPORT, SALES_MARKETING, FINANCE -> buildPlatformStaffDto(activeRole).thenApply(dto -> (ReportDto) dto);
             case TENANT -> buildTenantDto().thenApply(dto -> (ReportDto) dto);
             case PROPERTY_MANAGER -> buildPropertyManagerDto().thenApply(dto -> (ReportDto) dto);
             case WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER, ESTATE_OPERATIONS_MANAGER,
-                 SECURITY_SUPERVISOR, SALES_COORDINATOR, LISTING_AGENT, WORKSPACE_VIEWER ->
-                    buildInternalStaffDto(activeRole).thenApply(dto -> (ReportDto) dto);
+                 SECURITY_SUPERVISOR, WORKSPACE_VIEWER -> buildWorkspaceStaffDto(activeRole).thenApply(dto -> (ReportDto) dto);
+            case SALES_COORDINATOR, LISTING_AGENT -> buildSalesTeamDto(activeRole).thenApply(dto -> (ReportDto) dto);
             case ESTATE_MANAGER -> buildEstateManagerDto().thenApply(dto -> (ReportDto) dto);
             case HOMEOWNER -> buildHomeownerDto().thenApply(dto -> (ReportDto) dto);
             case SALES_AGENT -> buildSalesAgentDto().thenApply(dto -> (ReportDto) dto);
@@ -96,16 +96,43 @@ public class DashBoardService {
         };
     }
 
-    private CompletableFuture<BusinessRoleDashboardDto> buildInternalStaffDto(PMSRole role) {
-        return CompletableFuture.completedFuture(new BusinessRoleDashboardDto(role.name(),
-                0, 0, 0, 0,
-                "Assigned work", "Awaiting action", "Completed today", "Escalations"));
+    private CompletableFuture<BusinessRoleDashboardDto> buildPlatformStaffDto(PMSRole role) {
+        long activeProperties = unitReportDao.countTotalActiveProperties();
+        long monthlyUsers = userReportDao.getUserLoggedInWithinCurrentMonth();
+        long healthyUsers = Math.max(0, Math.round(100 - userReportDao.getInActiveUserPercentage()));
+        long subscriptionCollections = invoiceReportDao.getTotalPaidSubscriptionsWithinCurrentMonth().stream()
+                .map(amount -> currencyConversionService.convert(amount.getAmount(), amount.getCurrency(), "KES"))
+                .reduce(BigDecimal.ZERO, BigDecimal::add).longValue();
+        return CompletableFuture.completedFuture(new BusinessRoleDashboardDto(role.name(), activeProperties, monthlyUsers,
+                healthyUsers, subscriptionCollections, "Active properties", "Users active this month",
+                "Active user rate %", "Subscription collections (KES)"));
     }
 
     private CompletableFuture<BusinessRoleDashboardDto> buildInsuranceDto(PMSRole role) {
+        var summary = insuranceOperationsService.summary();
+        return CompletableFuture.completedFuture(new BusinessRoleDashboardDto(role.name(), summary.openCases(),
+                summary.unassignedCases(), summary.openClaims(), summary.renewalsDue(), "Open applications",
+                "Unassigned applications", "Open claims", "Renewals due"));
+    }
+
+    private CompletableFuture<BusinessRoleDashboardDto> buildWorkspaceStaffDto(PMSRole role) {
+        long userId = userDao.getUserId();
+        long units = unitReportDao.countAllUnitsByPropertyManager(userId);
+        long properties = unitReportDao.countAllPropertyByPropertyManager(userId);
+        long occupied = unitReportDao.countUnitsOccupiedByPropertyManager(userId);
+        long unsigned = unitReportDao.countUnsignedLeasesByPropertyManager(userId);
+        return CompletableFuture.completedFuture(new BusinessRoleDashboardDto(role.name(), properties, units, occupied,
+                unsigned, "Assigned properties", "Managed units", "Occupied units", "Leases awaiting signature"));
+    }
+
+    private CompletableFuture<BusinessRoleDashboardDto> buildSalesTeamDto(PMSRole role) {
+        long userId = userDao.getUserId();
         return CompletableFuture.completedFuture(new BusinessRoleDashboardDto(role.name(),
-                0, 0, 0, 0,
-                "Applications to review", "Quotes awaiting response", "Active claims", "Upcoming renewals"));
+                saleRepo.countBySalesAgentUserIdAndActiveTrue(userId),
+                saleRepo.countBySalesAgentUserIdAndStatusAndActiveTrue(userId, SaleStatus.OFFERED),
+                saleRepo.countBySalesAgentUserIdAndStatusAndActiveTrue(userId, SaleStatus.DUE_DILIGENCE),
+                saleRepo.countBySalesAgentUserIdAndStatusAndActiveTrue(userId, SaleStatus.COMPLETED),
+                "Active sales", "Offers", "Due diligence", "Completed sales"));
     }
 
     private CompletableFuture<BusinessRoleDashboardDto> buildEstateManagerDto() {
