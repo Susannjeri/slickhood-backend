@@ -321,6 +321,21 @@ class ServiceBookingServiceTest {
     }
 
     @Test
+    void latePaymentOnCancelledBookingRequestsRefundWithoutReopeningJob() {
+        ServiceBooking booking = makeBooking(40L, 10L, BookingStatus.CANCELLED.name());
+        booking.setInvoiceRef("INV-40");
+        booking.setPaymentStatus("UNPAID");
+        when(bookingDao.findByInvoiceRefForUpdate("INV-40")).thenReturn(Optional.of(booking));
+
+        service.completePaidInvoice("INV-40", "PSK-LATE");
+
+        assertEquals(BookingStatus.CANCELLED.name(), booking.getStatus());
+        assertEquals("PAID", booking.getPaymentStatus());
+        assertEquals("REQUESTED", booking.getRefundStatus());
+        verify(bookingDao).save(booking, "SYSTEM_SP_LATE_PAYMENT_REFUND_REQUESTED");
+    }
+
+    @Test
     void providerCanStartOnlyPaidBooking() {
         when(userDao.getUserId()).thenReturn(99L);
         ServiceBooking booking = makeBooking(41L, 10L, BookingStatus.PAID.name());

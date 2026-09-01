@@ -17,10 +17,13 @@ public interface SokoOrderRepo extends JpaRepository<SokoOrder, Long> {
     Page<SokoOrder> findAllByCustomerUserIdAndActiveTrue(long customerUserId,Pageable pageable);
     List<SokoOrder> findAllByStoreIdInAndActiveTrueOrderByCreatedOnDesc(List<Long> storeIds);
     Page<SokoOrder> findAllByStoreIdInAndActiveTrue(List<Long> storeIds,Pageable pageable);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<SokoOrder> findByInvoiceRefAndActiveTrue(String invoiceRef);
+    Optional<SokoOrder> findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(long customerUserId,String checkoutIdempotencyKey);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from SokoOrder o where o.id=:id and o.active=true")
     Optional<SokoOrder> findByIdForUpdate(long id);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from SokoOrder o where o.active=true and o.status='PENDING_PAYMENT' and o.stockReleased=false and o.reservationExpiresAt<:now")
     List<SokoOrder> findExpiredReservations(ZonedDateTime now,Pageable pageable);
 

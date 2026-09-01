@@ -44,7 +44,7 @@ public class SokoController {
     @GetMapping("/rider/my") public ResponseEntity<ResponseDTO> myRiders(@RequestParam long storeId){return ok(service.myRiders(storeId));}
     @PutMapping("/rider/{id}/availability") public ResponseEntity<ResponseDTO> riderAvailability(@PathVariable long id,@RequestParam String availability){return ok(service.setRiderAvailability(id,availability));}
     @DeleteMapping("/rider/{id}") public ResponseEntity<ResponseDTO> removeRider(@PathVariable long id){service.removeRider(id);return ok(null);}
-    @PostMapping("/order/checkout") public ResponseEntity<ResponseDTO> checkout(@RequestBody @Valid SokoRequests.Checkout r){return ok(service.checkout(r));}
+    @PostMapping("/order/checkout") public ResponseEntity<ResponseDTO> checkout(@RequestHeader(value="Idempotency-Key",required=false) String idempotencyKey,@RequestBody @Valid SokoRequests.Checkout r){return ok(service.checkout(r,idempotencyKey));}
     @GetMapping("/order/my") public ResponseEntity<ResponseDTO> myOrders(Pageable pageable){return page(service.myOrders(pageable));}
     @GetMapping("/order/merchant") public ResponseEntity<ResponseDTO> merchantOrders(Pageable pageable){return page(service.merchantOrders(pageable));}
     @GetMapping("/order/{id}/delivery-code") public ResponseEntity<ResponseDTO> deliveryCode(@PathVariable long id){return ok(service.deliveryCode(id));}
