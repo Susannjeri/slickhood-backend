@@ -5,6 +5,7 @@ import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.controller.wrappers.UpdateUserDetailsDTO;
+import org.pms.silverocean.database.pms.UserRoleRepo;
 import org.pms.silverocean.database.pms.entities.UserOTP;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
@@ -24,13 +25,18 @@ import org.springframework.beans.factory.annotation.Value;
 
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
+import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 public class SilverOceanUserService {
     private final I18NService i18NService;
     private final UserDao userDao;
+    private final UserRoleRepo userRoleRepo;
 
     private final NotificationService notificationService;
     private final OTPEncryptionService otpEncryptionService;
@@ -39,17 +45,29 @@ public class SilverOceanUserService {
     @Value("${security.otp.resend-cooldown-seconds:60}")
     private int otpResendCooldownSeconds;
 
-    public SilverOceanUserService(I18NService i18NService, UserDao userDao, NotificationService notificationService, OTPEncryptionService otpEncryptionService) {
+    public SilverOceanUserService(I18NService i18NService, UserDao userDao, UserRoleRepo userRoleRepo,
+                                  NotificationService notificationService, OTPEncryptionService otpEncryptionService) {
         this.i18NService = i18NService;
         this.userDao = userDao;
+        this.userRoleRepo = userRoleRepo;
         this.notificationService = notificationService;
         this.otpEncryptionService = otpEncryptionService;
     }
 
 
     public ResponseDTO getUserList(Pageable pageable, Optional<String> searchParam) {
-        Page<UserDTO> filteredUsers = userDao.searchAllUsers(pageable, searchParam)
-                .map(users -> new UserDTO(users, new EnumWrapper(ProfileType.valueOf(users.getProfileType()).name(), i18NService.getLocalizedMessage(ProfileType.valueOf(users.getProfileType()).getName()), null)));
+        Page<Users> usersPage = userDao.searchAllUsers(pageable, searchParam);
+        List<Long> userIds = usersPage.stream().map(Users::getId).toList();
+        Map<Long, List<String>> roleNamesByUser = userIds.isEmpty()
+                ? Collections.emptyMap()
+                : userRoleRepo.findRoleNamesByUserIds(userIds).stream()
+                .collect(Collectors.groupingBy(UserRoleNameDTO::userId,
+                        Collectors.mapping(UserRoleNameDTO::roleName,
+                                Collectors.collectingAndThen(Collectors.toSet(), roles -> roles.stream().sorted().toList()))));
+        Page<UserDTO> filteredUsers = usersPage.map(users -> new UserDTO(users,
+                new EnumWrapper(ProfileType.valueOf(users.getProfileType()).name(),
+                        i18NService.getLocalizedMessage(ProfileType.valueOf(users.getProfileType()).getName()), null),
+                roleNamesByUser.getOrDefault(users.getId(), List.of())));
         return new ResponseDTO(true, ResponseCode.LIST_OF_USERS.getCode(), i18NService.getLocalizedMessage(ResponseCode.LIST_OF_USERS), filteredUsers.toList(),
                 filteredUsers.getTotalPages(), filteredUsers.getTotalElements(), filteredUsers.getSize());
     }
