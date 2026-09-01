@@ -8,4 +8,5 @@ public class InsuranceAgency extends BaseCreatorEntity {
  @Column(nullable=false,length=160) private String name;
  @Column(length=254) private String supportEmail;
  @Column(length=40) private String supportPhone;
+ @Column(length=800) private String logoUrl;
 }

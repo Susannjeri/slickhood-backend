@@ -79,6 +79,23 @@ public class InsuranceController {
         return ok(service.companyEmailConfigurations());
     }
 
+    @GetMapping("/admin/companies")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_CATALOG)")
+    public ResponseEntity<ResponseDTO> adminCompanies() { return ok(service.adminCompanies()); }
+
+    @PostMapping("/admin/companies")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_CATALOG)")
+    public ResponseEntity<ResponseDTO> createCompany(@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.CompanyCreateRequest request) {
+        return ok(service.createCompany(request));
+    }
+
+    @PutMapping("/admin/companies/{code}")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_CATALOG)")
+    public ResponseEntity<ResponseDTO> updateCompany(@PathVariable String code,
+            @Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.CompanyUpdateRequest request) {
+        return ok(service.updateCompany(code, request));
+    }
+
     @PutMapping("/admin/companies/{code}/email-configuration")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_CATALOG)")
     public ResponseEntity<ResponseDTO> configureCompanyEmails(@PathVariable String code,

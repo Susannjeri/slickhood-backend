@@ -3,6 +3,7 @@ package org.pms.silverocean.service.insurance;
 import lombok.RequiredArgsConstructor;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.InsuranceCompanyRepo;
+import org.pms.silverocean.database.pms.InsuranceAgencyRepo;
 import org.pms.silverocean.database.pms.InsurancePaymentConfigurationRepo;
 import org.pms.silverocean.database.pms.entities.InsuranceCompany;
 import org.pms.silverocean.database.pms.entities.InsurancePaymentConfiguration;
@@ -17,8 +18,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.net.URI;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -28,6 +31,7 @@ import static org.pms.silverocean.service.insurance.InsuranceModels.*;
 @RequiredArgsConstructor
 public class InsuranceService {
     private final InsuranceCompanyRepo companyRepo;
+    private final InsuranceAgencyRepo agencyRepo;
     private final InsurancePaymentConfigurationRepo configurationRepo;
     private final AccountDao accountDao;
     private final AccountService accountService;
@@ -35,6 +39,34 @@ public class InsuranceService {
 
     public List<CompanyView> companies() {
         return companyRepo.findByActiveTrueOrderByNameAsc().stream().map(this::view).toList();
+    }
+
+    public List<CompanyAdminView> adminCompanies() {
+        return companyRepo.findAllByOrderByNameAsc().stream().map(this::adminView).toList();
+    }
+
+    @Transactional("pmsDBTransactionManager")
+    public CompanyAdminView createCompany(CompanyCreateRequest request) {
+        if (companyRepo.findByCodeIgnoreCase(request.code().trim()).isPresent()) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
+        var agency = agencyRepo.findByCodeAndActiveTrue("SILVERWOOD")
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND));
+        InsuranceCompany company = new InsuranceCompany();
+        company.setAgencyId(agency.getId());
+        company.setCode(request.code().trim().toUpperCase(Locale.ROOT));
+        company.setCreatedBy(userDao.getUserId());
+        apply(company, request.name(), request.logoUrl(), request.description(), request.quotationEmail(),
+                request.claimsEmail(), request.renewalsEmail(), true);
+        return adminView(companyRepo.save(company));
+    }
+
+    @Transactional("pmsDBTransactionManager")
+    public CompanyAdminView updateCompany(String companyCode, CompanyUpdateRequest request) {
+        InsuranceCompany company = anyCompany(companyCode);
+        apply(company, request.name(), request.logoUrl(), request.description(), request.quotationEmail(),
+                request.claimsEmail(), request.renewalsEmail(), request.active());
+        return adminView(companyRepo.save(company));
     }
 
     public List<CompanyEmailConfigurationView> companyEmailConfigurations() {
@@ -127,8 +159,44 @@ public class InsuranceService {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND));
     }
 
+    private InsuranceCompany anyCompany(String code) {
+        return companyRepo.findByCodeIgnoreCase(code)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND));
+    }
+
     private CompanyView view(InsuranceCompany c) {
-        return new CompanyView(c.getId(), c.getCode(), c.getName(), c.getLogoUrl(), c.getDescription());
+        return new CompanyView(c.getId(), c.getCode(), c.getName(), c.getLogoUrl(), c.getDescription(), c.isActive());
+    }
+
+    private CompanyAdminView adminView(InsuranceCompany c) {
+        return new CompanyAdminView(c.getId(), c.getCode(), c.getName(), c.getLogoUrl(), c.getDescription(),
+                c.getQuotationEmail(), c.getClaimsEmail(), c.getRenewalsEmail(), c.isActive());
+    }
+
+    private void apply(InsuranceCompany company, String name, String logoUrl, String description,
+                       String quotationEmail, String claimsEmail, String renewalsEmail, boolean active) {
+        company.setName(name.trim());
+        company.setLogoUrl(validLogoUrl(logoUrl));
+        company.setDescription(trimToNull(description));
+        company.setQuotationEmail(trimToNull(quotationEmail));
+        company.setClaimsEmail(trimToNull(claimsEmail));
+        company.setRenewalsEmail(trimToNull(renewalsEmail));
+        company.setActive(active);
+    }
+
+    private String validLogoUrl(String value) {
+        String candidate = trimToNull(value);
+        if (candidate == null) return null;
+        if (candidate.matches("^/insurance/brands/[A-Za-z0-9._-]+$")) return candidate;
+        try {
+            URI uri = URI.create(candidate);
+            if ("https".equalsIgnoreCase(uri.getScheme()) && uri.getHost() != null && uri.getUserInfo() == null) {
+                return candidate;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Converted to the API's standard field-validation response below.
+        }
+        throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
     }
 
     private CompanyEmailConfigurationView emailView(InsuranceCompany c) {

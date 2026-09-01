@@ -19,7 +19,21 @@ import java.util.List;
 public final class InsuranceModels {
     private InsuranceModels() {}
 
-    public record CompanyView(long id, String code, String name, String logoUrl, String description) {}
+    public record CompanyView(long id, String code, String name, String logoUrl, String description, boolean active) {}
+
+    public record CompanyAdminView(long id, String code, String name, String logoUrl, String description,
+            String quotationEmail, String claimsEmail, String renewalsEmail, boolean active) {}
+
+    public record CompanyCreateRequest(
+            @NotBlank @Pattern(regexp="[A-Z][A-Z0-9_]{1,49}") String code,
+            @NotBlank @Size(max=160) String name, @Size(max=800) String logoUrl,
+            @Size(max=1000) String description, @Email String quotationEmail,
+            @Email String claimsEmail, @Email String renewalsEmail) {}
+
+    public record CompanyUpdateRequest(@NotBlank @Size(max=160) String name,
+            @Size(max=800) String logoUrl, @Size(max=1000) String description,
+            @Email String quotationEmail, @Email String claimsEmail,
+            @Email String renewalsEmail, @NotNull Boolean active) {}
 
     public record CompanyEmailConfigurationRequest(@Email String quotationEmail,
             @Email String claimsEmail, @Email String renewalsEmail) {}
@@ -51,7 +65,7 @@ public final class InsuranceModels {
             java.time.LocalDateTime receivedAt, String lastError) {}
 
     public record ProductView(String code,String name,String description,List<String> subjectTypes) {}
-    public record AgencyView(String code,String name,String supportEmail,String supportPhone) {}
+    public record AgencyView(String code,String name,String supportEmail,String supportPhone,String logoUrl) {}
 
     public record CaseRequest(
             @NotBlank @Pattern(regexp="MOTOR|DOMESTIC|FIRE_ALLIED|WIBA_EL|ALL_RISKS|MEDICAL|MARINE_CARGO|TRAVEL") String productCode,
