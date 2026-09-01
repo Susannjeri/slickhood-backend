@@ -22,7 +22,7 @@ public class SimpleCorsFilter {
     @Value("${app.cors.allowed-methods:GET,POST,PUT,PATCH,DELETE,OPTIONS}")
     private String[] allowedMethods;
 
-    @Value("${app.cors.allowed-headers:Authorization,Content-Type,X-Slickhood-Role,X-Correlation-Id}")
+    @Value("${app.cors.allowed-headers:Authorization,Content-Type,X-Slickhood-Role,X-Correlation-Id,X-Help-Token}")
     private String[] allowedHeaders;
 
     @Bean

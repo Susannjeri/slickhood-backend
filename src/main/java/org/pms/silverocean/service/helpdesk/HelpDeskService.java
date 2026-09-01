@@ -30,7 +30,7 @@ public class HelpDeskService {
     private static final Set<String> CATEGORIES = Set.of("REGISTRATION", "ACCOUNT", "KYC", "PAYMENTS", "PROPERTY",
             "RENTALS", "SALES", "VISITORS", "SERVICES", "SOKO", "WEALTH", "INSURANCE", "AFFILIATE", "GENERAL");
     private static final Pattern SECRET_PATTERN = Pattern.compile(
-            "(?i)(?:sk-[a-z0-9_-]{12,}|bearer\\s+[a-z0-9._-]{12,}|(?:password|passcode|otp|pin)\\s*[:=]\\s*\\S+|(?:\\d[ -]?){13,19})");
+            "(?i)(?:sk-[a-z0-9_-]{12,}|bearer\\s+[a-z0-9._-]{12,}|(?:password|passcode|otp|pin|api[ _-]?key|secret|private[ _-]?key)\\s*[:=]\\s*\\S+|(?<!\\d)\\d{6}(?!\\d)|(?<![a-z0-9])(?=[a-z0-9]{6}(?![a-z0-9]))(?=[a-z0-9]*[a-z])(?=[a-z0-9]*\\d)[a-z0-9]{6}(?![a-z0-9])|(?:\\d[ -]?){13,19})");
     private static final int MESSAGE_PAGE_SIZE = 100;
 
     private final HelpConversationRepo conversations;
@@ -100,10 +100,12 @@ public class HelpDeskService {
         return detail(conversations.save(c), false);
     }
 
+    @Transactional
     public HelpDeskModels.ConversationView send(long id, HelpDeskModels.SendMessage request) {
         long userId = requireUser(); return respond(owned(id), request, "user:" + userId, userId);
     }
 
+    @Transactional
     public HelpDeskModels.ConversationView sendGuest(String ticketNumber, String token, HelpDeskModels.SendMessage request) {
         HelpConversation c = guestOwned(ticketNumber, token);
         return respond(c, request, "guest:" + c.getGuestTokenHash(), null);
@@ -242,10 +244,18 @@ public class HelpDeskService {
         }
         saveMessage(c, "USER", input, null, null, null, creator, false, request.idempotencyKey());
         c.setAgentUnreadCount(c.getAgentUnreadCount() + 1); List<HelpArticle> sources = relevant(input, c.getActiveRole());
+        if (sources.isEmpty()) {
+            markEscalated(c, "NORMAL");
+            saveMessage(c, "SYSTEM", "I could not find an approved Slickhood help article that answers this safely. A human support agent will review your request.",
+                    null, null, null, creator, false, null);
+            return detail(c, false);
+        }
         try {
             HelpDeskModels.AiAnswer answer = ai.answer(instructions(), prompt(c, input, sources), hash(rateSubject));
             OpenAiHelpDeskClient.ModerationResult outputModeration = ai.moderate(answer.text());
             if (!outputModeration.available() || outputModeration.flagged()) throw new IllegalStateException("Unsafe AI output");
+            if (!answer.escalated() && !hasApprovedCitation(answer.text(), sources))
+                throw new IllegalStateException("AI answer was not grounded in an approved help article");
             if (answer.escalated()) markEscalated(c, "NORMAL");
             saveMessage(c, "AI", answer.text(), answer.model(), answer.responseId(), ids(sources), creator, false, null);
         } catch (Exception e) {
@@ -325,6 +335,9 @@ public class HelpDeskService {
     }
     private boolean visible(HelpArticle a, String role) { return a.getAudienceRoles()==null || a.getAudienceRoles().isBlank() || Arrays.stream(a.getAudienceRoles().split(",")).map(String::trim).anyMatch(role::equalsIgnoreCase); }
     private String ids(List<HelpArticle> a) { return a.stream().map(x -> String.valueOf(x.getId())).collect(Collectors.joining(",")); }
+    private boolean hasApprovedCitation(String answer, List<HelpArticle> sources) {
+        return sources.stream().anyMatch(article -> answer.contains("[Article " + article.getId() + "]"));
+    }
     private String prompt(HelpConversation c, String input, List<HelpArticle> sources) {
         List<HelpMessage> history = new ArrayList<>(messages.findByConversationIdAndActiveTrueOrderByCreatedOnDesc(c.getId(), PageRequest.of(0, maxContextMessages))); Collections.reverse(history);
         String context = sources.stream().map(a -> "ARTICLE "+a.getId()+": "+a.getTitle()+"\n"+a.getBody()).collect(Collectors.joining("\n\n"));

@@ -115,4 +115,22 @@ class HelpDeskServiceTest {
         assertFalse(saved.getValue().getContent().contains("123456"));
         verifyNoInteractions(ai);
     }
+
+    @Test void standaloneAlphanumericOtpIsNotPersisted() {
+        when(users.getUserId()).thenReturn(17L);
+        HelpConversation conversation = new HelpConversation();
+        conversation.setId(6L); conversation.setTicketNumber("SH-TEST-OTP"); conversation.setUserId(17L);
+        conversation.setActiveRole("Tenant"); conversation.setStatus("OPEN"); conversation.setPriority("NORMAL"); conversation.setActive(true);
+        when(conversations.findByIdAndUserIdAndActiveTrue(6L, 17L)).thenReturn(Optional.of(conversation));
+        when(conversations.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(messages.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.send(6L, new HelpDeskModels.SendMessage("3HZTD7"));
+
+        ArgumentCaptor<HelpMessage> saved = ArgumentCaptor.forClass(HelpMessage.class);
+        verify(messages).save(saved.capture());
+        assertEquals("SYSTEM", saved.getValue().getSenderType());
+        assertFalse(saved.getValue().getContent().contains("3HZTD7"));
+        verifyNoInteractions(ai);
+    }
 }

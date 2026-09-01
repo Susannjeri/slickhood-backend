@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Certifies the real production upgrade boundary on MySQL. The first migration run recreates the
- * production V46 boundary; the second applies this release through V57 and validates checksums.
+ * production V46 boundary; the second applies this release through V58 and validates checksums.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayMigrationMySqlIT {
@@ -28,7 +28,7 @@ class FlywayMigrationMySqlIT {
             .withPassword("slickhood_test_only");
 
     @Test
-    void productionV46UpgradesCleanlyThroughV57() throws Exception {
+    void productionV46UpgradesCleanlyThroughV58() throws Exception {
         try (var connection = DriverManager.getConnection(
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())) {
             ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v46-production-schema.sql"));
@@ -40,7 +40,7 @@ class FlywayMigrationMySqlIT {
                 .load();
         assertTrue(release.migrate().success);
         release.validate();
-        assertEquals("57", release.info().current().getVersion().getVersion());
+        assertEquals("58", release.info().current().getVersion().getVersion());
     }
 
     private org.flywaydb.core.api.configuration.FluentConfiguration configuration() {

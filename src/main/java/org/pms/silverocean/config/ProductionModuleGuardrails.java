@@ -65,6 +65,7 @@ public class ProductionModuleGuardrails {
         require(failures, "spring.mail.password");
         requireHttps(failures, "app.public-url");
         requireHttpsOrigins(failures, "app.cors.allowed-origins");
+        requireCsvToken(failures, "app.cors.allowed-headers", "X-Help-Token");
 
         requireTrue(failures, "wealth.market.enabled");
         require(failures, "wealth.market.alpha-vantage.api-key");
@@ -177,6 +178,13 @@ public class ProductionModuleGuardrails {
                 return;
             }
         }
+    }
+
+    private void requireCsvToken(List<String> failures, String key, String requiredToken) {
+        String configured = environment.getProperty(key);
+        boolean present = configured != null && List.of(configured.split(",")).stream()
+                .map(String::trim).anyMatch(requiredToken::equalsIgnoreCase);
+        if (!present) failures.add(key + " (must include " + requiredToken + ")");
     }
 
     private boolean isHttps(String configured) {

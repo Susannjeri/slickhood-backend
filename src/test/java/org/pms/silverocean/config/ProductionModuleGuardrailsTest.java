@@ -22,6 +22,7 @@ class ProductionModuleGuardrailsTest {
                 "affiliate.commission-rate (must be explicit)",
                 "affiliate.eligible-payment-count (must be explicit)",
                 "helpdesk.ai.enabled=true", "helpdesk.ai.api-key / OPENAI_API_KEY",
+                "app.cors.allowed-headers (must include X-Help-Token)",
                 "M-Pesa or enabled Paystack verified callback configuration");
     }
 
@@ -82,6 +83,7 @@ class ProductionModuleGuardrailsTest {
                 .withProperty("spring.mail.password", "configured")
                 .withProperty("app.public-url", "https://slickhood.com")
                 .withProperty("app.cors.allowed-origins", "https://slickhood.com,https://www.slickhood.com")
+                .withProperty("app.cors.allowed-headers", "Authorization,Content-Type,X-Help-Token")
                 .withProperty("wealth.market.enabled", "true")
                 .withProperty("wealth.market.alpha-vantage.api-key", "configured")
                 .withProperty("wealth.market.alpha-vantage.base-url", "https://www.alphavantage.co")
