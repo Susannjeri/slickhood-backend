@@ -18,7 +18,7 @@ public class ProductionReadinessController implements HealthIndicator {
         var assessment = guardrails.assess();
         var builder = assessment.ready() ? Health.up() : Health.down();
         return builder
-                .withDetail("scope", "wealth,insurance,affiliate,services,soko")
+                .withDetail("scope", "wealth,insurance,affiliate,services,soko,helpdesk")
                 .withDetail("missingOrUnsafeConfiguration", assessment.missingOrUnsafeConfiguration())
                 .build();
     }
