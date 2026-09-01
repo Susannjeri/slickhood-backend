@@ -38,6 +38,28 @@ jobs:
           test -z "$duplicates" || { echo "Duplicate Flyway versions: $duplicates" >&2; exit 1; }
       - name: Compile, test, and package
         run: mvn -B clean verify --file pom.xml
+      - name: Require Docker-backed MySQL certification
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          report = Path("target/failsafe-reports/TEST-org.pms.silverocean.database.RentalPaymentMySqlIT.xml")
+          if not report.is_file():
+              raise SystemExit("RentalPaymentMySqlIT report is missing")
+          suite = ET.parse(report).getroot()
+          tests = int(suite.attrib.get("tests", "0"))
+          skipped = int(suite.attrib.get("skipped", "0"))
+          failures = int(suite.attrib.get("failures", "0"))
+          errors = int(suite.attrib.get("errors", "0"))
+          if (tests, skipped, failures, errors) != (1, 0, 0, 0):
+              raise SystemExit(
+                  f"RentalPaymentMySqlIT must execute and pass: tests={tests}, "
+                  f"skipped={skipped}, failures={failures}, errors={errors}"
+              )
+          print("RentalPaymentMySqlIT executed against Docker MySQL and passed")
+          PY
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
