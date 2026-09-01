@@ -47,6 +47,8 @@ public class GarageService {
     private String bucketName;
     @Value("${garage.bootstrap.enabled:true}")
     private boolean bootstrapEnabled;
+    @Value("${garage.presigner.duration-seconds:120}")
+    private long presignerDurationSeconds;
     private final ResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
 
 
@@ -127,7 +129,7 @@ public class GarageService {
                 .build();
 
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(Duration.ofMinutes(5))
+                .signatureDuration(Duration.ofSeconds(Math.max(30, Math.min(300, presignerDurationSeconds))))
                 .getObjectRequest(getObjectRequest)
                 .build();
 
