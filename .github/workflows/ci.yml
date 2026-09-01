@@ -38,6 +38,14 @@ jobs:
           test -z "$duplicates" || { echo "Duplicate Flyway versions: $duplicates" >&2; exit 1; }
       - name: Compile, test, and package
         run: mvn -B clean verify --file pom.xml
+      - name: Require Docker-backed MySQL integration coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="target/failsafe-reports/TEST-org.pms.silverocean.database.RentalPaymentMySqlIT.xml"
+          test -f "$report" || { echo "Required MySQL integration report is missing." >&2; exit 1; }
+          skipped="$(sed -n 's/.*skipped="\([0-9][0-9]*\)".*/\1/p' "$report" | head -n 1)"
+          test "${skipped:-1}" = "0" || { echo "RentalPaymentMySqlIT was skipped; Docker/MySQL validation is mandatory." >&2; exit 1; }
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4

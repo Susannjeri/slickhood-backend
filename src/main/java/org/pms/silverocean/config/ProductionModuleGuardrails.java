@@ -4,6 +4,9 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -40,6 +43,8 @@ public class ProductionModuleGuardrails {
 
         require(failures, "garage.s3.access.key");
         require(failures, "garage.s3.secret.key");
+        require(failures, "garage.s3.region");
+        require(failures, "garage.s3.bucket");
         requireHttps(failures, "garage.presigner.url");
         rejectLocal(failures, "garage.s3.url");
 
@@ -55,6 +60,8 @@ public class ProductionModuleGuardrails {
         requireTrue(failures, "wealth.vault.antivirus.enabled");
         requireTrue(failures, "wealth.vault.antivirus.required");
         require(failures, "wealth.vault.antivirus.host");
+        requireReachable(failures, "wealth.vault.antivirus.host", "wealth.vault.antivirus.port",
+                3310, "wealth.vault.antivirus");
 
         requireTrue(failures, "app.insurance.imap.enabled");
         require(failures, "app.insurance.imap.host");
@@ -63,16 +70,18 @@ public class ProductionModuleGuardrails {
         require(failures, "app.insurance.mail.from");
         require(failures, "app.insurance.mail.reply-to");
 
-        requireExplicit(failures, "affiliate.commission-rate");
+        requireDecimal(failures, "affiliate.commission-rate", new BigDecimal("25"));
+        requireInteger(failures, "affiliate.eligible-payment-count", 3);
         requireExplicit(failures, "affiliate.minimum-payout");
         requireExplicit(failures, "affiliate.commission-hold-days");
 
-        if (!hasText("payment.paystack.secret-key")
-                && !hasText("payment.flutterwave.webhook-secret")
-                && !hasText("payment.mpesa.callback-token")) {
-            failures.add("one verified payment callback secret");
+        boolean paystackEnabled = Boolean.parseBoolean(value("payment.paystack.enabled", "false"));
+        boolean paystackReady = paystackEnabled && hasText("payment.paystack.secret-key");
+        boolean mpesaReady = hasText("payment.mpesa.callback-token");
+        if (!paystackReady && !mpesaReady) {
+            failures.add("M-Pesa or enabled Paystack verified callback configuration");
         }
-        if (Boolean.parseBoolean(value("payment.paystack.enabled", "false"))) {
+        if (paystackEnabled) {
             require(failures, "payment.paystack.secret-key");
             requireHttps(failures, "payment.paystack.callback-url");
         }
@@ -86,6 +95,42 @@ public class ProductionModuleGuardrails {
 
     private void requireExplicit(List<String> failures, String key) {
         if (!environment.containsProperty(key) || !hasText(key)) failures.add(key + " (must be explicit)");
+    }
+
+    private void requireDecimal(List<String> failures, String key, BigDecimal required) {
+        requireExplicit(failures, key);
+        if (!hasText(key)) return;
+        try {
+            if (new BigDecimal(value(key, "")).compareTo(required) != 0) {
+                failures.add(key + "=" + required.stripTrailingZeros().toPlainString() + " (required)");
+            }
+        } catch (NumberFormatException ignored) {
+            failures.add(key + " (valid decimal required)");
+        }
+    }
+
+    private void requireInteger(List<String> failures, String key, int required) {
+        requireExplicit(failures, key);
+        if (!hasText(key)) return;
+        try {
+            if (Integer.parseInt(value(key, "")) != required) {
+                failures.add(key + "=" + required + " (required)");
+            }
+        } catch (NumberFormatException ignored) {
+            failures.add(key + " (valid integer required)");
+        }
+    }
+
+    private void requireReachable(List<String> failures, String hostKey, String portKey,
+                                  int defaultPort, String capability) {
+        if (!hasText(hostKey)) return;
+        int port = environment.getProperty(portKey, Integer.class, defaultPort);
+        int configuredTimeout = environment.getProperty("wealth.vault.antivirus.timeout-ms", Integer.class, 5_000);
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(value(hostKey, ""), port), Math.min(configuredTimeout, 1_500));
+        } catch (Exception ignored) {
+            failures.add(capability + " (unreachable)");
+        }
     }
 
     private void requireTrue(List<String> failures, String key) {

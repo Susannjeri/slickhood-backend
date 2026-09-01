@@ -3,6 +3,8 @@ package org.pms.silverocean.config;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
+import java.net.ServerSocket;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -17,16 +19,22 @@ class ProductionModuleGuardrailsTest {
         assertThat(assessment.ready()).isFalse();
         assertThat(assessment.missingOrUnsafeConfiguration()).contains("wealth.market.enabled=true",
                 "wealth.vault.antivirus.required=true", "app.insurance.imap.enabled=true",
-                "affiliate.commission-rate (must be explicit)", "one verified payment callback secret");
+                "affiliate.commission-rate (must be explicit)",
+                "affiliate.eligible-payment-count (must be explicit)",
+                "M-Pesa or enabled Paystack verified callback configuration");
     }
 
     @Test
-    void acceptsCompleteProductionConfiguration() {
-        var environment = completeEnvironment();
-        var guardrails = new ProductionModuleGuardrails(environment);
-        guardrails.validateSafeBounds();
+    void acceptsCompleteProductionConfiguration() throws Exception {
+        try (var clamAv = new ServerSocket(0)) {
+            var environment = completeEnvironment()
+                    .withProperty("wealth.vault.antivirus.host", "127.0.0.1")
+                    .withProperty("wealth.vault.antivirus.port", String.valueOf(clamAv.getLocalPort()));
+            var guardrails = new ProductionModuleGuardrails(environment);
+            guardrails.validateSafeBounds();
 
-        assertThat(guardrails.assess().ready()).isTrue();
+            assertThat(guardrails.assess().ready()).isTrue();
+        }
     }
 
     @Test
@@ -38,10 +46,34 @@ class ProductionModuleGuardrailsTest {
                 .hasMessageContaining("wealth.market.batch-size");
     }
 
+    @Test
+    void rejectsLegacyAffiliateTermsAndFlutterwaveOnlyCallbacks() throws Exception {
+        try (var clamAv = new ServerSocket(0)) {
+            var environment = completeEnvironment()
+                    .withProperty("wealth.vault.antivirus.host", "127.0.0.1")
+                    .withProperty("wealth.vault.antivirus.port", String.valueOf(clamAv.getLocalPort()))
+                    .withProperty("affiliate.commission-rate", "10")
+                    .withProperty("affiliate.eligible-payment-count", "99")
+                    .withProperty("payment.paystack.enabled", "false")
+                    .withProperty("payment.paystack.secret-key", "")
+                    .withProperty("payment.flutterwave.webhook-secret", "legacy-only");
+
+            var assessment = new ProductionModuleGuardrails(environment).assess();
+
+            assertThat(assessment.ready()).isFalse();
+            assertThat(assessment.missingOrUnsafeConfiguration()).contains(
+                    "affiliate.commission-rate=25 (required)",
+                    "affiliate.eligible-payment-count=3 (required)",
+                    "M-Pesa or enabled Paystack verified callback configuration");
+        }
+    }
+
     private MockEnvironment completeEnvironment() {
         return new MockEnvironment()
                 .withProperty("garage.s3.access.key", "configured")
                 .withProperty("garage.s3.secret.key", "configured")
+                .withProperty("garage.s3.region", "ap-south-1")
+                .withProperty("garage.s3.bucket", "slickhood-production")
                 .withProperty("garage.s3.url", "http://garage.internal:3900")
                 .withProperty("garage.presigner.url", "https://files.slickhood.com")
                 .withProperty("spring.mail.host", "smtp.example.com")
@@ -61,9 +93,12 @@ class ProductionModuleGuardrailsTest {
                 .withProperty("app.insurance.imap.password", "configured")
                 .withProperty("app.insurance.mail.from", "insurance@example.com")
                 .withProperty("app.insurance.mail.reply-to", "insurance@example.com")
-                .withProperty("affiliate.commission-rate", "10")
+                .withProperty("affiliate.commission-rate", "25")
+                .withProperty("affiliate.eligible-payment-count", "3")
                 .withProperty("affiliate.minimum-payout", "1000")
                 .withProperty("affiliate.commission-hold-days", "14")
-                .withProperty("payment.paystack.secret-key", "configured");
+                .withProperty("payment.paystack.enabled", "true")
+                .withProperty("payment.paystack.secret-key", "configured")
+                .withProperty("payment.paystack.callback-url", "https://app.slickhood.com/payment/callback");
     }
 }

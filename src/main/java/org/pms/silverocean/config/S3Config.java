@@ -26,7 +26,8 @@ public class S3Config {
     @Value("${garage.presigner.url:http://127.0.0.1:3900}")
     private String presignerGarageUrl;
 
-    private final String region = "garage";
+    @Value("${garage.s3.region:garage}")
+    private String region;
 
     @Bean
     public S3Client s3Client() {
