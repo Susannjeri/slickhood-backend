@@ -28,7 +28,7 @@ public interface LeaseRepo extends JpaRepository<Lease, Long> {
             "WHERE l.active AND ut.active AND l.moveOutDate IS NOT NULL AND l.moveOutDate BETWEEN :from AND :to AND " +
             "(:privileged=true OR ut.userId=:userId OR u.createdBy=:userId OR u.propertyId IN " +
             "(SELECT pm.propertyId FROM PropertyManager pm WHERE pm.userId=:userId AND pm.active)) ORDER BY l.moveOutDate")
-    List<LeaseExpiryProjection> findExpiringForReport(long userId, boolean privileged, LocalDate from, LocalDate to);
+    List<LeaseExpiryProjection> findExpiringForReport(long userId, boolean privileged, LocalDate from, LocalDate to, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT l FROM Lease l JOIN UnitTenant ut ON l.tenantId=ut.id WHERE ut.userId=:userId AND l.id=:leaseId AND l.active AND ut.active")

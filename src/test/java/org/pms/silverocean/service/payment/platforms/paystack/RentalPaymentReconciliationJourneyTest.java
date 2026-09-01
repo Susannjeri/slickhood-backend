@@ -201,7 +201,7 @@ class RentalPaymentReconciliationJourneyTest {
         activeUser.set(LANDLORD_ID);
         ReportService reports = reports(users, invoiceRepo, paymentRepo, lineRepo);
         LocalDate from = LocalDate.now().minusDays(1);
-        LocalDate to = LocalDate.now().plusDays(1);
+        LocalDate to = LocalDate.now();
 
         var reconciliation = reports.generate("PAYMENT_RECONCILIATION", from, to);
         assertEquals(1L, reconciliation.metrics().get("Successful"));

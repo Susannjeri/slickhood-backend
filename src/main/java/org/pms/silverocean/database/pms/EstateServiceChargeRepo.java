@@ -24,7 +24,7 @@ public interface EstateServiceChargeRepo extends JpaRepository<EstateServiceChar
  @Query("SELECT DISTINCT c FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId WHERE c.active AND c.createdOn >= :start AND c.createdOn < :end AND " +
          "(:privileged=true OR c.homeownerUserId=:userId OR p.createdBy=:userId OR EXISTS " +
          "(SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=c.propertyId AND pm.userId=:userId AND pm.active)) ORDER BY c.dueDate DESC")
- List<EstateServiceCharge> findForReport(long userId,boolean privileged,ZonedDateTime start,ZonedDateTime end);
+ List<EstateServiceCharge> findForReport(long userId,boolean privileged,ZonedDateTime start,ZonedDateTime end,Pageable pageable);
 
  @Query("SELECT new org.pms.silverocean.service.estate.ServiceChargeView(c.id,c.propertyId,p.name,c.unitId,u.ref," +
          "c.homeownerUserId,c.invoiceId,i.ref,c.amount,c.currency,c.dueDate,c.description,i.paid,i.pendingAmount," +
