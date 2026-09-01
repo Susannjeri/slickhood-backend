@@ -32,7 +32,7 @@ public class InsuranceCorrespondenceService {
     private final InsuranceEmailSender emailSender;
     private final DomainEventOutboxPublisher outboxPublisher;
     private final UserDao userDao;
-    @Value("${app.insurance.mail.from}") private String senderAddress;
+    @Value("${app.insurance.mail.from:info@silverwoodinsurance.com}") private String senderAddress;
 
     @Transactional("pmsDBTransactionManager")
     public EmailExchangeView queue(InsurerEmailRequest request) {

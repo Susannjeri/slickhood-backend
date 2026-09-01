@@ -12,8 +12,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class InsuranceEmailSender {
     private final JavaMailSender mailSender;
-    @Value("${app.insurance.mail.from}") private String fromAddress;
-    @Value("${app.insurance.mail.reply-to}") private String replyTo;
+    @Value("${app.insurance.mail.from:info@silverwoodinsurance.com}") private String fromAddress;
+    @Value("${app.insurance.mail.reply-to:info@silverwoodinsurance.com}") private String replyTo;
     @Value("${app.insurance.mail.display.name:Silverwood Insurance Agency}") private String displayName;
 
     public String send(String recipient, String subject, String htmlBody) throws Exception {
