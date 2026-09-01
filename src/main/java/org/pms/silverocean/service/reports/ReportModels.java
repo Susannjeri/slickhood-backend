@@ -14,6 +14,7 @@ public final class ReportModels {
             String description,
             String category,
             boolean supportsDateRange,
+            String dateMode,
             List<String> availableToRoles
     ) {}
 
@@ -25,6 +26,9 @@ public final class ReportModels {
             Map<String, Object> metrics,
             List<String> columns,
             List<Map<String, Object>> rows,
-            boolean truncated
+            boolean truncated,
+            int rowLimit
     ) {}
+
+    public record CsvExport(byte[] content, boolean truncated, int rowLimit) {}
 }

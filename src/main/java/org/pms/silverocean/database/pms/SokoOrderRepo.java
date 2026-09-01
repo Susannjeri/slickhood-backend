@@ -22,5 +22,5 @@ public interface SokoOrderRepo extends JpaRepository<SokoOrder, Long> {
 
     @Query("SELECT o FROM SokoOrder o JOIN SokoStore s ON s.id=o.storeId WHERE o.active AND o.createdOn >= :start AND o.createdOn < :end " +
             "AND (:privileged=true OR o.customerUserId=:userId OR s.ownerUserId=:userId) ORDER BY o.createdOn DESC")
-    List<SokoOrder> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end);
+    List<SokoOrder> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end, Pageable pageable);
 }

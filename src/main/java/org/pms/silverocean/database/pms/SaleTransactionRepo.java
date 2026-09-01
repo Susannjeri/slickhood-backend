@@ -64,5 +64,5 @@ public interface SaleTransactionRepo extends JpaRepository<SaleTransaction, Long
     @Query("SELECT DISTINCT s FROM SaleTransaction s JOIN Property p ON p.id=s.propertyId WHERE s.active AND s.createdOn >= :start AND s.createdOn < :end AND " +
             "(:privileged=true OR s.salesAgentUserId=:userId OR s.buyerUserId=:userId OR p.createdBy=:userId " +
             "OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=s.propertyId AND pm.userId=:userId AND pm.active)) ORDER BY s.createdOn DESC")
-    List<SaleTransaction> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end);
+    List<SaleTransaction> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end, Pageable pageable);
 }

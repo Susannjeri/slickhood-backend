@@ -57,5 +57,5 @@ public interface ServiceBookingRepo extends JpaRepository<ServiceBooking, Long> 
 
     @Query("SELECT DISTINCT b FROM ServiceBooking b JOIN ProviderService ps ON b.serviceId=ps.id WHERE b.active AND b.createdOn >= :start AND b.createdOn < :end " +
             "AND (:privileged=true OR b.createdBy=:userId OR ps.createdBy=:userId) ORDER BY b.createdOn DESC")
-    List<ServiceBooking> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end);
+    List<ServiceBooking> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end, Pageable pageable);
 }
