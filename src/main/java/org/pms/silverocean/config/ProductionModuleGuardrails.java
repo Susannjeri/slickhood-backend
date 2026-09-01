@@ -45,6 +45,8 @@ public class ProductionModuleGuardrails {
         boundedDuration("helpdesk.sla.normal", "PT4H", Duration.ofMinutes(30), Duration.ofDays(1));
         boundedDuration("helpdesk.sla.low", "PT8H", Duration.ofHours(1), Duration.ofDays(2));
         boundedInt("helpdesk.sla-scan-delay-ms", 60_000, 10_000, 3_600_000);
+        boundedInt("property-listings.expiry-days", 90, 1, 365);
+        boundedInt("property-listings.inquiries-per-minute", 5, 1, 30);
     }
 
     public Assessment assess() {

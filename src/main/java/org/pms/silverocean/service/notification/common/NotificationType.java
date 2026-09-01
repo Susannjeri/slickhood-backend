@@ -71,6 +71,7 @@ public enum NotificationType {
     HELPDESK_ESCALATION_EMAIL("email.helpdesk.escalation.subject", "email.helpdesk.escalation.body", true, NotificationChannel.EMAIL),
     HELPDESK_AGENT_REPLY_EMAIL("email.helpdesk.agent.reply.subject", "email.helpdesk.agent.reply.body", true, NotificationChannel.EMAIL),
     HELPDESK_SLA_BREACH_EMAIL("email.helpdesk.sla.breach.subject", "email.helpdesk.sla.breach.body", true, NotificationChannel.EMAIL),
+    PROPERTY_LISTING_INQUIRY_EMAIL("email.property.listing.inquiry.subject", "email.property.listing.inquiry.body", true, NotificationChannel.EMAIL),
     ;
 
 

@@ -58,6 +58,7 @@ public class SecurityConfig {
                         .requestMatchers("/soko/catalog/**").permitAll()
                         .requestMatchers("/affiliate/public/**").permitAll()
                         .requestMatchers("/helpdesk/public/**").permitAll()
+                        .requestMatchers("/public/property-listings/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .cors(cors -> cors.configurationSource(corsFilter.corsConfigurationSource()))

@@ -1057,7 +1057,8 @@ public class PropertyService {
         newUnit.setPrice(baseUnit.getPrice());
         newUnit.setCurrency(baseUnit.getCurrency());
         newUnit.setOccupied(false);
-        newUnit.setAdvertise(baseUnit.isAdvertise());
+        // A duplicate is a new inventory item and must pass publication checks independently.
+        newUnit.setAdvertise(false);
         newUnit.setActive(true);
         newUnit.setCreatedBy(baseUnit.getCreatedBy());
         newUnit.setTemplateId(baseUnit.getTemplateId());

@@ -39,7 +39,7 @@ public class AccountActivationFilter extends OncePerRequestFilter {
             "/auth/", "/otp/", "/kyc/", "/role/", "/helpdesk/",
             "/user/details", "/user/verify/contact", "/user/update/contact",
             "/actuator/health", "/error", "/deployed-hash", "/invite/validate", "/team-access/invitations/accept",
-            "/sp/directory/", "/soko/catalog/", "/affiliate/public/");
+            "/sp/directory/", "/soko/catalog/", "/affiliate/public/", "/public/property-listings");
 
     private final UserDao userDao;
     private final I18NService i18NService;

@@ -33,6 +33,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.pms.silverocean.service.property.listing.PropertyListingService;
 
 import java.util.List;
 import java.util.Optional;
@@ -44,11 +45,13 @@ import java.util.function.BiFunction;
 @Validated
 public class UnitController extends BasePropertyController {
     private final PropertyService propertyService;
+    private final PropertyListingService propertyListingService;
 
 
-    public UnitController(PropertyService propertyService,  I18NService i18NService) {
+    public UnitController(PropertyService propertyService, PropertyListingService propertyListingService, I18NService i18NService) {
         super(i18NService);
         this.propertyService = propertyService;
+        this.propertyListingService = propertyListingService;
     }
 
     @GetMapping("/type")
@@ -153,8 +156,8 @@ public class UnitController extends BasePropertyController {
     @PatchMapping("/{unitId}/advertise-toggle")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).ADVERTISE_UNIT)")
     public ResponseEntity<ResponseDTO> advertiseUnit(@PathVariable("unitId") long unitId) {
-        ResponseDTO responseDTO = propertyService.advertiseUnit(unitId);
-        return responseDTO.isSuccess() ? ResponseEntity.ok(responseDTO) : ResponseEntity.status(HttpStatus.NOT_FOUND).body(responseDTO);
+        var publication = propertyListingService.toggleLegacy(unitId);
+        return ResponseEntity.ok(new ResponseDTO(true, "S0000", "Publication status updated", publication));
     }
 
     @PutMapping("/images")

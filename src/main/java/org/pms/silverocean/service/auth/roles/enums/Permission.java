@@ -17,6 +17,7 @@ public class Permission {
     public static final String DUPLICATE_UNIT = "create_similar_unit";
     public static final String MARK_OCCUPIED_UNIT = "mark_occupied";
     public static final String ADVERTISE_UNIT = "advertise_unit";
+    public static final String MANAGE_PROPERTY_LISTINGS = "manage_property_listings";
 
     public static final String VIEW_AUDIT_LOGS = "view_audit_logs";
 

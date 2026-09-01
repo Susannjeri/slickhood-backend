@@ -64,7 +64,7 @@ public class Unit extends BaseCreatorEntity implements Auditable {
         this.price = unitDTO.price();
         this.currency = unitDTO.currency();
         this.occupied = unitDTO.occupied();
-        this.advertise = unitDTO.advertise();
+        // Publication is managed by PropertyListingService so ordinary edits cannot bypass its guardrails.
         this.setActive(true);
         this.templateId = unitDTO.templateId();
     }
