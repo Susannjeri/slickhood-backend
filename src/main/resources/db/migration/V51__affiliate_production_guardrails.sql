@@ -11,8 +11,8 @@ UPDATE pms_affiliate_payout p
 
 ALTER TABLE pms_affiliate_commission
  ADD COLUMN available_at DATETIME(6),
- ADD COLUMN reversed_at DATETIME(6),
- ADD COLUMN reversal_reason VARCHAR(1000),
+ MODIFY COLUMN reversed_at DATETIME(6),
+ MODIFY COLUMN reversal_reason VARCHAR(1000),
  ADD KEY idx_affiliate_commission_maturity (status,active,available_at);
 
 UPDATE pms_affiliate_commission SET available_at=earned_at WHERE available_at IS NULL;
