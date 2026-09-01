@@ -34,10 +34,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          report="target/failsafe-reports/TEST-org.pms.silverocean.database.RentalPaymentMySqlIT.xml"
-          test -f "$report" || { echo "Required MySQL integration report is missing." >&2; exit 1; }
-          skipped="$(sed -n 's/.*skipped="\([0-9][0-9]*\)".*/\1/p' "$report" | head -n 1)"
-          test "${skipped:-1}" = "0" || { echo "RentalPaymentMySqlIT was skipped; Docker/MySQL validation is mandatory." >&2; exit 1; }
+          for test_class in RentalPaymentMySqlIT FlywayMigrationMySqlIT; do
+            report="target/failsafe-reports/TEST-org.pms.silverocean.database.${test_class}.xml"
+            test -f "$report" || { echo "Required ${test_class} report is missing." >&2; exit 1; }
+            skipped="$(sed -n 's/.*skipped="\([0-9][0-9]*\)".*/\1/p' "$report" | head -n 1)"
+            test "${skipped:-1}" = "0" || { echo "${test_class} was skipped; Docker/MySQL validation is mandatory." >&2; exit 1; }
+          done
 
       - name: Reject destructive or duplicate Flyway migrations
         shell: bash
