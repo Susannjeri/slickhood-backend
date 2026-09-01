@@ -3,9 +3,13 @@ package org.pms.silverocean.database;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.sql.DriverManager;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,15 +28,16 @@ class FlywayMigrationMySqlIT {
             .withPassword("slickhood_test_only");
 
     @Test
-    void productionV46UpgradesCleanlyThroughV57() {
-        Flyway toProductionBoundary = configuration()
-                .target(MigrationVersion.fromVersion("46"))
+    void productionV46UpgradesCleanlyThroughV57() throws Exception {
+        try (var connection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())) {
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/v46-production-schema.sql"));
+        }
+
+        Flyway release = configuration()
+                .baselineVersion(MigrationVersion.fromVersion("46"))
+                .baselineOnMigrate(true)
                 .load();
-
-        assertTrue(toProductionBoundary.migrate().success);
-        assertEquals("46", toProductionBoundary.info().current().getVersion().getVersion());
-
-        Flyway release = configuration().load();
         assertTrue(release.migrate().success);
         release.validate();
         assertEquals("57", release.info().current().getVersion().getVersion());
