@@ -66,7 +66,7 @@ class HelpDeskServiceTest {
         verify(conversations, never()).findByIdAndActiveTrue(anyLong());
     }
 
-    @Test void aiFailureEscalatesAndProvidesSafeFallback() {
+    @Test void missingApprovedArticleEscalatesAndProvidesSafeFallback() {
         when(users.getUserId()).thenReturn(17L);
         HelpConversation conversation = new HelpConversation();
         conversation.setId(5L); conversation.setUserId(17L); conversation.setActiveRole("Tenant");
@@ -77,7 +77,6 @@ class HelpDeskServiceTest {
         when(messages.findByConversationIdAndActiveTrueOrderByCreatedOnDesc(eq(5L), any())).thenReturn(List.of());
         when(articles.findByPublishedTrueAndActiveTrueOrderByCategoryAscTitleAsc()).thenReturn(List.of());
         when(ai.moderate(anyString())).thenReturn(new OpenAiHelpDeskClient.ModerationResult(true, false));
-        when(ai.answer(anyString(), anyString(), anyString())).thenThrow(new IllegalStateException("provider unavailable"));
 
         var result = service.send(5L, new HelpDeskModels.SendMessage("My payment is missing"));
         assertEquals("ESCALATED", result.status());
@@ -132,5 +131,21 @@ class HelpDeskServiceTest {
         assertEquals("SYSTEM", saved.getValue().getSenderType());
         assertFalse(saved.getValue().getContent().contains("3HZTD7"));
         verifyNoInteractions(ai);
+    }
+
+    @Test void customerDetailNeverIncludesInternalNotes() {
+        when(users.getUserId()).thenReturn(17L);
+        HelpConversation conversation = new HelpConversation();
+        conversation.setId(7L); conversation.setUserId(17L); conversation.setActive(true);
+        when(conversations.findByIdAndUserIdAndActiveTrue(7L, 17L)).thenReturn(Optional.of(conversation));
+        when(conversations.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        HelpMessage publicReply = new HelpMessage(); publicReply.setId(1L); publicReply.setContent("Visible reply");
+        HelpMessage privateNote = new HelpMessage(); privateNote.setId(2L); privateNote.setContent("Private note"); privateNote.setInternalNote(true);
+        when(messages.findByConversationIdAndActiveTrueOrderByCreatedOnDesc(eq(7L), any()))
+                .thenReturn(List.of(privateNote, publicReply));
+
+        var result = service.get(7L);
+
+        assertEquals(List.of("Visible reply"), result.messages().stream().map(HelpDeskModels.MessageView::content).toList());
     }
 }
