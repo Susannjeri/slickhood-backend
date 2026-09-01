@@ -53,7 +53,7 @@ public class SokoController {
     @GetMapping("/order/{id}/delivery/proof") public ResponseEntity<ResponseDTO> proof(@PathVariable long id){return ok(service.deliveryProof(id));}
     @PutMapping("/order/{id}/status") public ResponseEntity<ResponseDTO> status(@PathVariable long id,@RequestParam String status,@RequestBody(required=false) @Valid SokoRequests.Dispatch dispatch){return ok(service.transition(id,status,dispatch));}
     @PutMapping("/order/{id}/cancel") public ResponseEntity<ResponseDTO> cancel(@PathVariable long id,@RequestBody @Valid SokoRequests.Cancellation request){return ok(service.cancel(id,request));}
-    @PutMapping("/order/{id}/finance") public ResponseEntity<ResponseDTO> finance(@PathVariable long id,@RequestBody @Valid SokoRequests.FinanceUpdate request){return ok(service.finance(id,request));}
+    @PutMapping("/order/{id}/finance") @PreAuthorize("hasAnyRole('FINANCE','SUPER_ADMIN')") public ResponseEntity<ResponseDTO> finance(@PathVariable long id,@RequestBody @Valid SokoRequests.FinanceUpdate request){return ok(service.finance(id,request));}
     @GetMapping("/admin/summary") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminSummary(){return ok(service.adminSummary());}
     @GetMapping("/admin/stores") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminStores(@RequestParam(required=false)String status,Pageable pageable){return page(service.adminStores(status,pageable));}
     @PutMapping("/admin/stores/{id}/moderation") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> moderateStore(@PathVariable long id,@RequestBody @Valid SokoRequests.ModerationDecision request){return ok(service.moderateStore(id,request));}

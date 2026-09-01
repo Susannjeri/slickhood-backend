@@ -2,6 +2,7 @@ package org.pms.silverocean.service.soko;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -40,12 +41,12 @@ public final class SokoRequests {
             @Min(0) int stockQuantity,
             @Size(max=800) String imageUrl) {}
 
-    public record CheckoutItem(@NotNull Long productId, @Min(1) int quantity) {}
+    public record CheckoutItem(@NotNull Long productId, @Min(1) @Max(10_000) int quantity) {}
 
     public record Checkout(
             @NotNull Long storeId,
-            @NotEmpty List<@Valid CheckoutItem> items,
-            @NotBlank String deliveryMethod,
+            @NotEmpty @Size(max=50) List<@Valid CheckoutItem> items,
+            @NotBlank @Pattern(regexp="(?i)DELIVERY|PICKUP") String deliveryMethod,
             @Size(max=500) String deliveryAddress,
             @NotBlank @Size(max=30) String customerPhone,
             @Size(max=1000) String notes,

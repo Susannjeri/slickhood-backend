@@ -70,10 +70,16 @@ jobs:
             live=/home/silverocean/backend/silverocean-0.0.1-SNAPSHOT.jar
             candidate=/tmp/slickhood-backend-release/silverocean-0.0.1-SNAPSHOT.jar
             rollback="/home/silverocean/backups/backend-$stamp.jar"
+            health_url='${{ secrets.BACKEND_HEALTHCHECK_URL }}'
+            test -n "$health_url"
+            case "$health_url" in
+              https://*/actuator/health/production-readiness) ;;
+              *) echo "BACKEND_HEALTHCHECK_URL must be HTTPS and target /actuator/health/production-readiness" >&2; exit 1 ;;
+            esac
             installed=false
             wait_for_health() {
               for attempt in $(seq 1 36); do
-                if curl --insecure --fail --silent --show-error https://127.0.0.1:8989/actuator/health | grep -q '"status":"UP"'; then
+                if curl --fail --silent --show-error "$health_url" | grep -q '"status":"UP"'; then
                   return 0
                 fi
                 sleep 5
