@@ -15,4 +15,5 @@ public final class SokoModels {
     public record ProductImages(long productId, List<String> imageUrls) {}
     public record StoreDetail(SokoStore store, List<SokoProduct> products) {}
     public record OrderDetail(SokoOrder order, String storeName, Long paymentAccountId, String paymentChannel, List<SokoOrderItem> items) {}
+    public record AdminSummary(long stores,long pendingStores,long publishedStores,long products,long publishedProducts,long orders,long activeOrders) {}
 }

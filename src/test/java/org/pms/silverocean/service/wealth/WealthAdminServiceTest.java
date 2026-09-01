@@ -1,0 +1,8 @@
+package org.pms.silverocean.service.wealth;
+import org.junit.jupiter.api.Test;import org.junit.jupiter.api.extension.ExtendWith;import org.mockito.Mock;import org.mockito.junit.jupiter.MockitoExtension;import org.pms.silverocean.database.pms.*;import org.pms.silverocean.database.pms.entities.WealthAssetType;import org.pms.silverocean.service.PMSCustomException;import org.pms.silverocean.service.auth.dao.UserDao;import java.util.Optional;import static org.junit.jupiter.api.Assertions.*;import static org.mockito.Mockito.*;
+@ExtendWith(MockitoExtension.class)
+class WealthAdminServiceTest{
+ @Mock WealthAssetTypeRepo types;@Mock WealthAssetRepo assets;@Mock WealthVaultDocumentRepo vault;@Mock UserDao users;
+ @Test void hiddenTypeRemainsEditableOnAnExistingAssetButCannotBeSelectedForANewOne(){WealthAssetType type=new WealthAssetType();type.setCode("LEGACY");type.setActive(false);when(types.findByCodeIgnoreCase("LEGACY")).thenReturn(Optional.of(type));WealthAdminService service=new WealthAdminService(types,assets,vault,users);assertSame(type,service.requireForAsset("LEGACY","LEGACY"));assertThrows(PMSCustomException.class,()->service.requireForAsset("LEGACY",null));}
+ @Test void summaryContainsCountsOnly(){when(assets.countByActiveTrue()).thenReturn(8L);when(assets.countDistinctOwners()).thenReturn(3L);when(vault.countByActiveTrue()).thenReturn(4L);when(assets.countByPricingModeAndActiveTrue("MARKET")).thenReturn(2L);when(types.findAllByActiveTrueOrderByDisplayOrderAscLabelAsc()).thenReturn(java.util.List.of());var result=new WealthAdminService(types,assets,vault,users).summary();assertEquals(8,result.activeAssets());assertEquals(3,result.owners());assertEquals(4,result.vaultDocuments());}
+}

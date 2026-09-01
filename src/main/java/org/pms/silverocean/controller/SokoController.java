@@ -54,5 +54,11 @@ public class SokoController {
     @PutMapping("/order/{id}/status") public ResponseEntity<ResponseDTO> status(@PathVariable long id,@RequestParam String status,@RequestBody(required=false) @Valid SokoRequests.Dispatch dispatch){return ok(service.transition(id,status,dispatch));}
     @PutMapping("/order/{id}/cancel") public ResponseEntity<ResponseDTO> cancel(@PathVariable long id,@RequestBody @Valid SokoRequests.Cancellation request){return ok(service.cancel(id,request));}
     @PutMapping("/order/{id}/finance") public ResponseEntity<ResponseDTO> finance(@PathVariable long id,@RequestBody @Valid SokoRequests.FinanceUpdate request){return ok(service.finance(id,request));}
+    @GetMapping("/admin/summary") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminSummary(){return ok(service.adminSummary());}
+    @GetMapping("/admin/stores") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminStores(@RequestParam(required=false)String status,Pageable pageable){return page(service.adminStores(status,pageable));}
+    @PutMapping("/admin/stores/{id}/moderation") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> moderateStore(@PathVariable long id,@RequestBody @Valid SokoRequests.ModerationDecision request){return ok(service.moderateStore(id,request));}
+    @GetMapping("/admin/products") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminProducts(Pageable pageable){return page(service.adminProducts(pageable));}
+    @PutMapping("/admin/products/{id}/moderation") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> moderateProduct(@PathVariable long id,@RequestBody @Valid SokoRequests.ModerationDecision request){return ok(service.moderateProduct(id,request));}
+    @GetMapping("/admin/orders") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminOrders(Pageable pageable){return page(service.adminOrders(pageable));}
     private ResponseEntity<ResponseDTO> page(Page<?> p){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),p.getContent(),p.getTotalPages(),p.getTotalElements(),p.getSize()));}
 }
