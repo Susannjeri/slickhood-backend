@@ -261,7 +261,7 @@ public class ReportService {
 
     private ReportModels.Data affiliateEarnings(ReportModels.Definition definition, Range range, int rowLimit) {
         List<AffiliateCommission> fetched=affiliateCommissions.findForReport(userId(),privileged(),range.start(),range.end(),page(rowLimit));boolean truncated=isTruncated(fetched,rowLimit);List<AffiliateCommission> data=cap(fetched,rowLimit);
-        List<Map<String,Object>> rows=data.stream().map(c->row("Invoice",c.getInvoiceRef(),"Status",c.getStatus(),"Qualifying amount",c.getQualifyingAmount(),"Rate %",c.getCommissionRate(),"Commission",affiliateNet(c),"Currency",c.getCurrency(),"Earned",c.getEarnedAt(),"Available",c.getAvailableAt())).toList();
+        List<Map<String,Object>> rows=data.stream().map(c->row("Invoice",c.getInvoiceRef(),"Status",c.getStatus(),"Qualifying amount",c.getQualifyingAmount(),"Rate %",c.getCommissionRate(),"Commission",affiliateNet(c),"Currency",c.getCurrency(),"Earned",c.getEarnedAt(),"Payout",c.getPayoutId())).toList();
         return data(definition,range,map("Commissions",data.size(),"Pending",count(data,c->"PENDING".equals(c.getStatus())),"Available",count(data,c->"EARNED".equals(c.getStatus())),"Paid",count(data,c->"PAID".equals(c.getStatus())),"Earnings by currency",totalsByCurrency(data,AffiliateCommission::getCurrency,this::affiliateNet)),rows,truncated,rowLimit);
     }
 
