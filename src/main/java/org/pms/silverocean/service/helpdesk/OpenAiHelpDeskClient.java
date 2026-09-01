@@ -18,7 +18,7 @@ public class OpenAiHelpDeskClient {
     private final boolean enabled;
 
     public OpenAiHelpDeskClient(RestClient.Builder builder,
-                                @Value("${helpdesk.ai.base-url}") String baseUrl,
+                                @Value("${helpdesk.ai.base-url:https://api.openai.com/v1}") String baseUrl,
                                 @Value("${helpdesk.ai.api-key:}") String apiKey,
                                 @Value("${helpdesk.ai.model:gpt-5-mini}") String model,
                                 @Value("${helpdesk.ai.enabled:true}") boolean enabled) {

@@ -12,5 +12,7 @@ class ModuleBoundaryTest {
     @Test void paymentDoesNotDependOnSubscriptionImplementation()throws IOException{assertNoJavaSourceContains(SOURCE.resolve("service/payment"),"org.pms.silverocean.service.subscription");}
     @Test void paymentDoesNotDependOnRoleService()throws IOException{assertNoJavaSourceContains(SOURCE.resolve("service/payment"),"org.pms.silverocean.service.auth.roles.RoleService");}
     @Test void runtimeDirectoryDoesNotRequireAnEmbeddedBuildProperty()throws IOException{assertNoJavaSourceContains(SOURCE,"@Value(\"${silverocean.dir}\")");}
+    @Test void optionalHelpDeskDoesNotRequireAnEmbeddedApiEndpoint()throws IOException{assertNoJavaSourceContains(SOURCE,"@Value(\"${helpdesk.ai.base-url}\")");}
+    @Test void insuranceMailIdentityHasAProductionSafeDefault()throws IOException{assertNoJavaSourceContains(SOURCE,"@Value(\"${app.insurance.mail.from}\")");assertNoJavaSourceContains(SOURCE,"@Value(\"${app.insurance.mail.reply-to}\")");}
     private void assertNoJavaSourceContains(Path root,String...needles)throws IOException{try(var paths=Files.walk(root)){List<String> violations=paths.filter(p->p.toString().endsWith(".java")).filter(p->{try{String source=Files.readString(p);for(String needle:needles)if(!source.contains(needle))return false;return true;}catch(IOException e){throw new RuntimeException(e);}}).map(Path::toString).toList();assertTrue(violations.isEmpty(),"Module boundary violations: "+violations);}}
 }
