@@ -12,6 +12,7 @@ import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.notification.*;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,7 +34,7 @@ public class InsuranceRenewalService {
  private static final long MAX_FILE=10L*1024*1024; private static final Set<String> TYPES=Set.of("application/pdf","image/jpeg","image/png");
  private final InsuranceAgencyRepo agencies; private final InsuranceCaseRepo cases; private final InsurancePolicyRepo policies; private final InsuranceCompanyRepo companies;
  private final InsuranceRenewalOfferRepo offers; private final InsuranceRenewalPaymentRepo payments; private final InsurancePaymentConfigurationRepo configurations;
- private final AccountService accountService; private final UserDao users; private final GarageService garage; private final NotificationService notifications; private final I18NService i18n;
+ private final AccountService accountService; private final UserDao users; private final GarageService garage; private final UploadMalwarePolicy malwarePolicy; private final NotificationService notifications; private final I18NService i18n;
  @Value("${app.public-url:https://slickhood.com}") private String publicUrl;
 
  public List<RenewalJourneyView> mine(){return journeys(policies.findAllByCustomerUserIdAndActiveTrueOrderByEndDateDesc(uid()));}
@@ -65,7 +66,7 @@ public class InsuranceRenewalService {
  private InsuranceAgency agency(){return agencies.findByCodeAndActiveTrue("SILVERWOOD").orElseThrow(this::notFound);} private long uid(){return users.getUserId();}
  private void stamp(org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity e){e.setCreatedBy(uid());e.setActive(true);} private String renewalLink(long id){return StringUtils.removeEnd(publicUrl,"/")+"/dashboard/insurance?tab=policies&policyId="+id;}
  private void notify(String email,String policy,String state,String link){String body=String.format(i18n.getLocalizedMessage(NotificationType.INSURANCE_RENEWAL_EMAIL.getBody()),HtmlUtils.htmlEscape(policy),HtmlUtils.htmlEscape(state),HtmlUtils.htmlEscape(link));notifications.queueNotification(new NotificationDTO(body,email,NotificationType.INSURANCE_RENEWAL_EMAIL));}
- private byte[] validate(MultipartFile f)throws IOException{if(f==null||f.isEmpty()||f.getSize()>MAX_FILE||!TYPES.contains(f.getContentType()))throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);byte[] b=f.getBytes();boolean ok="application/pdf".equals(f.getContentType())?b.length>4&&b[0]=='%'&&b[1]=='P'&&b[2]=='D'&&b[3]=='F':"image/png".equals(f.getContentType())?b.length>8&&(b[0]&255)==0x89&&b[1]=='P'&&b[2]=='N'&&b[3]=='G':b.length>3&&(b[0]&255)==0xff&&(b[1]&255)==0xd8;if(!ok)throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);return b;}
+ private byte[] validate(MultipartFile f)throws IOException{if(f==null||f.isEmpty()||f.getSize()>MAX_FILE||!TYPES.contains(f.getContentType()))throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);byte[] b=f.getBytes();boolean ok="application/pdf".equals(f.getContentType())?b.length>4&&b[0]=='%'&&b[1]=='P'&&b[2]=='D'&&b[3]=='F':"image/png".equals(f.getContentType())?b.length>8&&(b[0]&255)==0x89&&b[1]=='P'&&b[2]=='N'&&b[3]=='G':b.length>3&&(b[0]&255)==0xff&&(b[1]&255)==0xd8;if(!ok)throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);malwarePolicy.requireSafe(b);return b;}
  private String extension(String n){String safe=StringUtils.defaultString(n);int dot=safe.lastIndexOf('.');return dot<0?"":safe.substring(dot).toLowerCase(Locale.ROOT).replaceAll("[^.a-z0-9]","");} private String hash(byte[] b){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(b));}catch(Exception e){throw new IllegalStateException(e);}}
  private PMSCustomException invalid(){return new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);} private PMSCustomException notFound(){return new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND);} private PMSCustomException forbidden(){return new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);}
 }

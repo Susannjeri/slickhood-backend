@@ -8,6 +8,7 @@ import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.sp.dao.ProviderDocumentDao;
 import org.pms.silverocean.service.sp.dao.ProviderProfileDao;
 import org.pms.silverocean.service.sp.enums.DocumentStatus;
@@ -32,6 +33,7 @@ public class ProviderDocumentService {
     private final ProviderDocumentDao documentDao;
     private final UserDao userDao;
     private final GarageService garageService;
+    private final UploadMalwarePolicy malwarePolicy;
     private final ProviderProfileDao profileDao;
     private final ProviderServiceDao serviceDao;
 
@@ -44,6 +46,7 @@ public class ProviderDocumentService {
         try { type=DocumentType.valueOf(documentType.trim().toUpperCase(Locale.ROOT)); }
         catch (RuntimeException ex) { throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA); }
         byte[] bytes=validatedDocument(file);
+        malwarePolicy.requireSafe(bytes);
         String contentType=file.getContentType().toLowerCase(Locale.ROOT);
         String fileRef="sp/documents/"+serviceId+"/"+type.name().toLowerCase(Locale.ROOT)+"-"+UUID.randomUUID()+extension(contentType);
         garageService.uploadBytes(fileRef,bytes,contentType);

@@ -13,6 +13,7 @@ import org.pms.silverocean.service.account.dto.AccountDTO;
 import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
@@ -43,7 +44,7 @@ public class InsuranceOperationsService {
  private final InsuranceQuoteRepo quoteRepo; private final InsurancePremiumPaymentRepo paymentRepo; private final InsurancePaymentConfigurationRepo paymentConfigurationRepo; private final InsurancePolicyRepo policyRepo;
  private final InsuranceClaimRepo claimRepo; private final InsuranceDocumentRepo documentRepo; private final InsuranceActivityRepo activityRepo;
  private final InsuranceStaffDirectoryService staffDirectory;
- private final UserDao userDao; private final AccountService accountService; private final GarageService garageService; private final NotificationService notifications; private final I18NService i18n;
+ private final UserDao userDao; private final AccountService accountService; private final GarageService garageService; private final UploadMalwarePolicy malwarePolicy; private final NotificationService notifications; private final I18NService i18n;
  @Value("${app.public-url:https://slickhood.com}") private String publicUrl;
 
  public AgencyView agency(){var a=agencyEntity();return new AgencyView(a.getCode(),a.getName(),a.getSupportEmail(),a.getSupportPhone(),a.getLogoUrl());}
@@ -116,7 +117,7 @@ public class InsuranceOperationsService {
  private InsuranceCase caseForAgency(long id){long agencyId=agencyEntity().getId();return caseRepo.findById(id).filter(x->x.isActive()&&x.getAgencyId()==agencyId).orElseThrow(this::notFound);}
  private void transition(InsuranceCase c,String to,String event,String note){String from=c.getStatus();c.setStatus(to);caseRepo.save(c);activity(c.getId(),null,event,from,to,note);}
  private void activity(Long caseId,Long claimId,String event,String from,String to,String note){InsuranceActivity a=new InsuranceActivity();a.setCaseId(caseId);a.setClaimId(claimId);a.setEventType(event);a.setFromStatus(from);a.setToStatus(to);a.setNote(StringUtils.trimToNull(note));a.setActorUserId(uid());stamp(a);activityRepo.save(a);}
- private byte[] validate(MultipartFile f)throws IOException{if(f==null||f.isEmpty()||f.getSize()>MAX_FILE||!TYPES.contains(f.getContentType()))throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);byte[] b=f.getBytes();boolean ok="application/pdf".equals(f.getContentType())?b.length>4&&b[0]=='%'&&b[1]=='P'&&b[2]=='D'&&b[3]=='F':"image/png".equals(f.getContentType())?b.length>8&&(b[0]&255)==0x89&&b[1]=='P'&&b[2]=='N'&&b[3]=='G':b.length>3&&(b[0]&255)==0xff&&(b[1]&255)==0xd8;if(!ok)throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);return b;}
+ private byte[] validate(MultipartFile f)throws IOException{if(f==null||f.isEmpty()||f.getSize()>MAX_FILE||!TYPES.contains(f.getContentType()))throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);byte[] b=f.getBytes();boolean ok="application/pdf".equals(f.getContentType())?b.length>4&&b[0]=='%'&&b[1]=='P'&&b[2]=='D'&&b[3]=='F':"image/png".equals(f.getContentType())?b.length>8&&(b[0]&255)==0x89&&b[1]=='P'&&b[2]=='N'&&b[3]=='G':b.length>3&&(b[0]&255)==0xff&&(b[1]&255)==0xd8;if(!ok)throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);malwarePolicy.requireSafe(b);return b;}
  private String path(long owner,String folder,MultipartFile f){String n=safeName(f.getOriginalFilename()),ext=n.contains(".")?n.substring(n.lastIndexOf('.')).toLowerCase(Locale.ROOT):"";return "insurance/"+AGENCY.toLowerCase(Locale.ROOT)+"/"+owner+"/"+folder+"/"+UUID.randomUUID()+ext;}
  private String safeName(String n){String s=StringUtils.defaultIfBlank(n,"document").replaceAll("[^A-Za-z0-9._ -]","_");return s.length()>255?s.substring(s.length()-255):s;}
  private String hash(byte[] b){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(b));}catch(Exception e){throw new IllegalStateException(e);}}
