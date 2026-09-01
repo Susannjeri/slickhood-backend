@@ -9,7 +9,7 @@
         "s3:ListBucket",
         "s3:ListBucketMultipartUploads"
       ],
-      "Resource": "arn:aws:s3:::slickhood-production-documents"
+      "Resource": "arn:aws:s3:::slickhood-production-documents-603455138904-ca-central-1-an"
     },
     {
       "Sid": "ManageSlickhoodDocumentObjects",
@@ -21,7 +21,7 @@
         "s3:AbortMultipartUpload",
         "s3:ListMultipartUploadParts"
       ],
-      "Resource": "arn:aws:s3:::slickhood-production-documents/*"
+      "Resource": "arn:aws:s3:::slickhood-production-documents-603455138904-ca-central-1-an/*"
     }
   ]
 }
