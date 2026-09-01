@@ -97,6 +97,11 @@ class SubscriptionEntitlementServiceTest {
         service.requireSessionBusinessProductIfApplicable();
     }
 
+    @Test void anonymousSessionMayUsePublicBusinessCatalogues() {
+        when(users.getUserId()).thenReturn(null);
+        service.requireSessionBusinessProductIfApplicable();
+    }
+
     private UserSubscription subscription(String code, SubscriptionProduct product, ZonedDateTime endAt) {
         UserSubscription value = UserSubscription.builder().planCode(code).productKey(product)
                 .status(SubscriptionStatus.ACTIVE).startAt(ZonedDateTime.now().minusDays(1)).endAt(endAt).build();
