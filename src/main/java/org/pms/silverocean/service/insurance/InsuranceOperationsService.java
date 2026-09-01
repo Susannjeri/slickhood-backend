@@ -40,7 +40,7 @@ public class InsuranceOperationsService {
  private final InsuranceStaffDirectoryService staffDirectory;
  private final UserDao userDao; private final GarageService garageService; private final NotificationService notifications; private final I18NService i18n;
 
- public AgencyView agency(){var a=agencyEntity();return new AgencyView(a.getCode(),a.getName(),a.getSupportEmail(),a.getSupportPhone());}
+ public AgencyView agency(){var a=agencyEntity();return new AgencyView(a.getCode(),a.getName(),a.getSupportEmail(),a.getSupportPhone(),a.getLogoUrl());}
  public List<ProductView> products(){return List.of(
   new ProductView("MOTOR","Motor Insurance","Private, commercial and PSV vehicle protection.",List.of("VEHICLE")),
   new ProductView("DOMESTIC","Domestic Package","Home, contents and personal liability protection.",List.of("PROPERTY","VALUABLES")),
