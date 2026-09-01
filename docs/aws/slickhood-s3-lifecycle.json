@@ -1,0 +1,37 @@
+{
+  "Rules": [
+    {
+      "ID": "abort-incomplete-multipart-uploads",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": ""
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    },
+    {
+      "ID": "retain-and-archive-noncurrent-document-versions",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": ""
+      },
+      "NoncurrentVersionTransitions": [
+        {
+          "NoncurrentDays": 30,
+          "StorageClass": "STANDARD_IA"
+        },
+        {
+          "NoncurrentDays": 90,
+          "StorageClass": "GLACIER"
+        }
+      ],
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 2555
+      },
+      "Expiration": {
+        "ExpiredObjectDeleteMarker": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyInsecureTransport",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::slickhood-production-documents",
+        "arn:aws:s3:::slickhood-production-documents/*"
+      ],
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    },
+    {
+      "Sid": "AllowSlickhoodProductionRoleBucketAccess",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::672626785173:role/AmazonLightsailInstanceRole"
+      },
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:ListBucket",
+        "s3:ListBucketMultipartUploads"
+      ],
+      "Resource": "arn:aws:s3:::slickhood-production-documents"
+    },
+    {
+      "Sid": "AllowSlickhoodProductionRoleObjectAccess",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::672626785173:role/AmazonLightsailInstanceRole"
+      },
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": "arn:aws:s3:::slickhood-production-documents/*"
+    }
+  ]
+}
