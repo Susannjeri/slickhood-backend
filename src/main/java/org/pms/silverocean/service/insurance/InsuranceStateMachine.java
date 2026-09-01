@@ -28,11 +28,12 @@ final class InsuranceStateMachine {
             "DECLINED", Set.of("CLOSED"),
             "SETTLED", Set.of("CLOSED"));
     private static final Map<String, Set<String>> RENEWAL_TRANSITIONS = Map.of(
-            "UPCOMING", Set.of("CONTACTED"),
+            "UPCOMING", Set.of("CONTACTED", "RENEWAL_QUOTED", "LAPSED"),
             "CONTACTED", Set.of("RENEWAL_QUOTED", "LAPSED"),
             "RENEWAL_QUOTED", Set.of("ACCEPTED", "LAPSED"),
             "ACCEPTED", Set.of("PAID", "LAPSED"),
-            "PAID", Set.of("RENEWED"));
+            "PAID", Set.of("RENEWED"),
+            "RENEWED", Set.of("CONTACTED", "RENEWAL_QUOTED", "LAPSED"));
 
     private InsuranceStateMachine() {
     }

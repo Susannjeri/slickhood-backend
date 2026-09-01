@@ -93,6 +93,13 @@ public final class InsuranceModels {
     public record ClaimStatusRequest(@NotBlank @Pattern(regexp="ACKNOWLEDGED|DOCS_REQUIRED|SENT_TO_INSURER|ASSESSED|APPROVED|DECLINED|SETTLED|CLOSED") String status,
             @Size(max=120) String insurerReference,@Size(max=8000) String note) {}
     public record RenewalRequest(@NotBlank @Pattern(regexp="CONTACTED|RENEWAL_QUOTED|ACCEPTED|PAID|RENEWED|LAPSED") String status) {}
+    public record RenewalOfferRequest(@NotBlank @Size(max=80) String quoteNumber,
+            @NotBlank @Pattern(regexp="[A-Z]{3}") String currency,@NotNull @DecimalMin("0.00") BigDecimal basePremium,
+            @NotNull @DecimalMin("0.00") BigDecimal taxesLevies,@NotNull @DecimalMin("0.01") BigDecimal totalPremium,
+            @NotBlank @Size(max=12000) String coverageSummary,@Size(max=12000) String exclusions,
+            @NotNull @FutureOrPresent LocalDate validUntil,@NotNull LocalDate coverStartDate,@NotNull LocalDate coverEndDate) {}
+    public record RenewalPaymentRequest(@Positive long paymentConfigurationId,@NotBlank @Size(max=120) String paymentReference,@NotNull LocalDateTime paidAt) {}
+    public record RenewalCompleteRequest(@NotBlank @Size(max=120) String policyNumber) {}
 
     public record QuoteView(long id,long companyId,String companyCode,String companyName,String quoteNumber,String status,
             String currency,BigDecimal basePremium,BigDecimal taxesLevies,BigDecimal totalPremium,String excessDetails,
@@ -104,6 +111,12 @@ public final class InsuranceModels {
             Long assignedAdviserId,LocalDateTime submittedAt,Long selectedQuoteId,List<QuoteView> quotes,List<PaymentView> payments) {}
     public record PolicyView(long id,long caseId,String policyNumber,String companyName,String productCode,String status,
             LocalDate startDate,LocalDate endDate,String renewalStatus) {}
+    public record RenewalOfferView(long id,long policyId,String quoteNumber,String currency,BigDecimal basePremium,BigDecimal taxesLevies,
+            BigDecimal totalPremium,String coverageSummary,String exclusions,LocalDate validUntil,LocalDate coverStartDate,LocalDate coverEndDate,String status) {}
+    public record RenewalPaymentView(long id,long policyId,long renewalOfferId,long paymentConfigurationId,BigDecimal amount,String currency,
+            String paymentReference,LocalDateTime paidAt,String status,String rejectionReason,String remittanceReference,LocalDateTime remittedAt,
+            boolean proofAvailable,String proofContentType) {}
+    public record RenewalJourneyView(long policyId,String companyCode,RenewalOfferView offer,RenewalPaymentView payment) {}
     public record ClaimView(long id,long policyId,String policyNumber,String reference,String status,LocalDateTime incidentAt,
             String incidentLocation,String description,BigDecimal estimatedAmount,String insurerReference,String resolutionNotes) {}
     public record DocumentView(long id,Long caseId,Long policyId,Long claimId,String category,String displayName,String contentType,
