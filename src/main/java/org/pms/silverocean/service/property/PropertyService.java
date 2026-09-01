@@ -148,7 +148,7 @@ public class PropertyService {
     @Value("${max.upload.image.pixels:40000000}")
     private long maxImagePixels;
 
-    @Value("${silverocean.dir}")
+    @Value("${silverocean.dir:${SILVEROCEAN_DIR:/var/lib/silverocean}}")
     private String appDir;
 
     private final static String PROPERTY_ID_PREFIX = PMSUtils.ID_PREFIX + "112";

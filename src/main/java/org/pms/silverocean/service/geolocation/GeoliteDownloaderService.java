@@ -28,7 +28,7 @@ public class GeoliteDownloaderService {
     @Value("${geolite.edition:GeoLite2-City}")
     private String edition;
 
-    @Value("${silverocean.dir}")
+    @Value("${silverocean.dir:${SILVEROCEAN_DIR:/var/lib/silverocean}}")
     private String appDir;
 
     @Value("${geolite.max-age:P14D}") // default: 14 days
