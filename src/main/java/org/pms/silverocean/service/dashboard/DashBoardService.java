@@ -27,7 +27,11 @@ import org.pms.silverocean.service.sp.dao.ServiceProviderReportDao;
 import org.pms.silverocean.service.threadpooling.PMSThreadPoolExecutorService;
 import org.pms.silverocean.service.threadpooling.ThreadPoolBeans;
 import org.pms.silverocean.service.visitor.VisitorReportDao;
-import org.pms.silverocean.service.insurance.InsuranceOperationsService;
+import org.pms.silverocean.database.pms.InsuranceEmailExchangeRepo;
+import org.pms.silverocean.database.pms.AffiliateCommissionRepo;
+import org.pms.silverocean.database.pms.AffiliateReferralRepo;
+import org.pms.silverocean.database.pms.WealthAssetRepo;
+import org.pms.silverocean.database.pms.WealthGoalRepo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -49,13 +53,19 @@ public class DashBoardService {
     private final SaleTransactionRepo saleRepo;
     private final LeaseDocumentRepo documentRepo;
     private final EstateServiceChargeRepo chargeRepo;
-    private final InsuranceOperationsService insuranceOperationsService;
+    private final InsuranceEmailExchangeRepo insuranceEmailExchangeRepo;
+    private final AffiliateReferralRepo affiliateReferralRepo;
+    private final AffiliateCommissionRepo affiliateCommissionRepo;
+    private final WealthAssetRepo wealthAssetRepo;
+    private final WealthGoalRepo wealthGoalRepo;
 
     public DashBoardService(UnitReportDao unitReportDao, UserDao userDao, ThreadPoolBeans threadPoolBeans,
                             UserReportDao userReportDao, InvoiceReportDao invoiceReportDao,
                             CurrencyConversionService currencyConversionService, ServiceProviderReportDao serviceProviderReportDao, VisitorReportDao visitorReportDao,
                             PropertyOwnershipRepo ownershipRepo, SaleTransactionRepo saleRepo, LeaseDocumentRepo documentRepo,
-                            EstateServiceChargeRepo chargeRepo, InsuranceOperationsService insuranceOperationsService,
+                            EstateServiceChargeRepo chargeRepo, InsuranceEmailExchangeRepo insuranceEmailExchangeRepo,
+                            AffiliateReferralRepo affiliateReferralRepo, AffiliateCommissionRepo affiliateCommissionRepo,
+                            WealthAssetRepo wealthAssetRepo, WealthGoalRepo wealthGoalRepo,
                             @Value("${spring.datasource.hikari.maximum-pool-size:10}") int maxPoolSize) {
         this.unitReportDao = unitReportDao;
         this.userDao = userDao;
@@ -69,7 +79,11 @@ public class DashBoardService {
         this.saleRepo = saleRepo;
         this.documentRepo = documentRepo;
         this.chargeRepo = chargeRepo;
-        this.insuranceOperationsService = insuranceOperationsService;
+        this.insuranceEmailExchangeRepo = insuranceEmailExchangeRepo;
+        this.affiliateReferralRepo = affiliateReferralRepo;
+        this.affiliateCommissionRepo = affiliateCommissionRepo;
+        this.wealthAssetRepo = wealthAssetRepo;
+        this.wealthGoalRepo = wealthGoalRepo;
     }
 
     public CompletableFuture<ReportDto> getReportDtoPerActiveRole(PMSRole activeRole) {
@@ -79,7 +93,8 @@ public class DashBoardService {
         return switch (activeRole) {
             case LANDLORD -> buildLandlordDto().thenApply(dto -> (ReportDto) dto);
             case SERVICE_PROVIDER -> buildServiceProviderDto().thenApply(dto -> (ReportDto) dto);
-            case ASSET_PORTFOLIO_MANAGER, AFFILIATE -> CompletableFuture.failedFuture(new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE));
+            case ASSET_PORTFOLIO_MANAGER -> buildWealthDto(activeRole).thenApply(dto -> (ReportDto) dto);
+            case AFFILIATE -> buildAffiliateDto(activeRole).thenApply(dto -> (ReportDto) dto);
             case SUPPORT, SALES_MARKETING, FINANCE -> buildPlatformStaffDto(activeRole).thenApply(dto -> (ReportDto) dto);
             case TENANT -> buildTenantDto().thenApply(dto -> (ReportDto) dto);
             case PROPERTY_MANAGER -> buildPropertyManagerDto().thenApply(dto -> (ReportDto) dto);
@@ -109,10 +124,32 @@ public class DashBoardService {
     }
 
     private CompletableFuture<BusinessRoleDashboardDto> buildInsuranceDto(PMSRole role) {
-        var summary = insuranceOperationsService.summary();
-        return CompletableFuture.completedFuture(new BusinessRoleDashboardDto(role.name(), summary.openCases(),
-                summary.unassignedCases(), summary.openClaims(), summary.renewalsDue(), "Open applications",
-                "Unassigned applications", "Open claims", "Renewals due"));
+        long queued = insuranceEmailExchangeRepo.countByDirectionAndStatusAndActiveTrue("OUTBOUND", "QUEUED");
+        long sent = insuranceEmailExchangeRepo.countByDirectionAndStatusAndActiveTrue("OUTBOUND", "SENT");
+        long received = insuranceEmailExchangeRepo.countByDirectionAndStatusAndActiveTrue("INBOUND", "RECEIVED_UNVERIFIED");
+        long failed = insuranceEmailExchangeRepo.countByDirectionAndStatusAndActiveTrue("OUTBOUND", "FAILED");
+        return CompletableFuture.completedFuture(new BusinessRoleDashboardDto(role.name(), queued, sent, received,
+                failed, "Requests queued", "Requests sent", "Responses awaiting review", "Failed requests"));
+    }
+
+    private CompletableFuture<BusinessRoleDashboardDto> buildAffiliateDto(PMSRole role) {
+        long userId = userDao.getUserId();
+        long referrals = affiliateReferralRepo.countByAffiliateUserIdAndActiveTrue(userId);
+        long conversions = affiliateReferralRepo.countByAffiliateUserIdAndStatusAndActiveTrue(userId, "CONVERTED");
+        long available = affiliateCommissionRepo.countByAffiliateUserIdAndStatusAndActiveTrue(userId, "EARNED");
+        long paid = affiliateCommissionRepo.countByAffiliateUserIdAndStatusAndActiveTrue(userId, "PAID");
+        return CompletableFuture.completedFuture(new BusinessRoleDashboardDto(role.name(), referrals, conversions,
+                available, paid, "Referrals", "Conversions", "Available commissions", "Paid commissions"));
+    }
+
+    private CompletableFuture<BusinessRoleDashboardDto> buildWealthDto(PMSRole role) {
+        long userId = userDao.getUserId();
+        long assets = wealthAssetRepo.countByOwnerUserIdAndActiveTrue(userId);
+        long connectedProperties = wealthAssetRepo.countByOwnerUserIdAndPropertyIdIsNotNullAndActiveTrue(userId);
+        long goals = wealthGoalRepo.countByOwnerUserIdAndActiveTrue(userId);
+        return CompletableFuture.completedFuture(new BusinessRoleDashboardDto(role.name(), assets,
+                connectedProperties, goals, 0, "Active assets", "Connected properties", "Active goals",
+                "Actions completed"));
     }
 
     private CompletableFuture<BusinessRoleDashboardDto> buildWorkspaceStaffDto(PMSRole role) {

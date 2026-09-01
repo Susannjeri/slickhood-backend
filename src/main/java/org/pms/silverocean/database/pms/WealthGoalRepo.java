@@ -6,4 +6,5 @@ import java.util.Optional;
 public interface WealthGoalRepo extends JpaRepository<WealthGoal,Long>{
  List<WealthGoal> findAllByOwnerUserIdAndActiveTrueOrderByTargetDate(long ownerUserId);
  Optional<WealthGoal> findByIdAndOwnerUserIdAndActiveTrue(long id,long ownerUserId);
+ long countByOwnerUserIdAndActiveTrue(long ownerUserId);
 }

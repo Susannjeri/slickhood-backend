@@ -9,4 +9,5 @@ import java.util.Optional;
 public interface InsuranceEmailExchangeRepo extends JpaRepository<InsuranceEmailExchange, Long> {
     Optional<InsuranceEmailExchange> findByCorrelationId(String correlationId);
     List<InsuranceEmailExchange> findByCaseReferenceOrderByCreatedOnAsc(String caseReference);
+    long countByDirectionAndStatusAndActiveTrue(String direction, String status);
 }
