@@ -82,7 +82,8 @@ public final class InsuranceModels {
             @Size(max=1000) String excessDetails,@NotBlank @Size(max=12000) String coverageSummary,
             @Size(max=12000) String exclusions,@NotNull @FutureOrPresent LocalDate validUntil) {}
     public record SelectQuoteRequest(@Positive long quoteId) {}
-    public record PaymentRequest(@NotNull @DecimalMin("0.01") BigDecimal amount,@NotBlank @Pattern(regexp="[A-Z]{3}") String currency,
+    public record PaymentRequest(@Positive Long paymentConfigurationId,
+            @NotNull @DecimalMin("0.01") BigDecimal amount,@NotBlank @Pattern(regexp="[A-Z]{3}") String currency,
             @NotBlank @Size(max=120) String paymentReference,@NotNull LocalDateTime paidAt) {}
     public record PaymentDecisionRequest(@NotBlank @Pattern(regexp="VERIFIED|REJECTED") String status,@Size(max=500) String reason) {}
     public record RemittanceRequest(@NotBlank @Size(max=120) String reference) {}
@@ -96,8 +97,8 @@ public final class InsuranceModels {
     public record QuoteView(long id,long companyId,String companyCode,String companyName,String quoteNumber,String status,
             String currency,BigDecimal basePremium,BigDecimal taxesLevies,BigDecimal totalPremium,String excessDetails,
             String coverageSummary,String exclusions,LocalDate validUntil) {}
-    public record PaymentView(long id,long quoteId,BigDecimal amount,String currency,String paymentReference,LocalDateTime paidAt,
-            String status,String rejectionReason,String remittanceReference,LocalDateTime remittedAt,boolean proofAvailable) {}
+    public record PaymentView(long id,long quoteId,Long paymentConfigurationId,BigDecimal amount,String currency,String paymentReference,LocalDateTime paidAt,
+            String status,String rejectionReason,String remittanceReference,LocalDateTime remittedAt,boolean proofAvailable,String proofContentType) {}
     public record CaseView(long id,String reference,String productCode,String status,String fullName,String email,String phone,
             String subjectType,String subjectDescription,BigDecimal sumInsured,String currency,LocalDate coverStartDate,String riskDetails,
             Long assignedAdviserId,LocalDateTime submittedAt,Long selectedQuoteId,List<QuoteView> quotes,List<PaymentView> payments) {}
