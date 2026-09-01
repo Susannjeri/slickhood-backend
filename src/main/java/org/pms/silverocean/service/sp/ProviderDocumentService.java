@@ -9,6 +9,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.sp.dao.ProviderDocumentDao;
+import org.pms.silverocean.service.sp.dao.ProviderProfileDao;
 import org.pms.silverocean.service.sp.enums.DocumentStatus;
 import org.pms.silverocean.service.sp.wrappers.ProviderDocumentDTO;
 import org.springframework.data.domain.Page;
@@ -19,21 +20,25 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.ZonedDateTime;
+import java.util.Locale;
+import java.util.UUID;
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ProviderDocumentService {
     private final ProviderDocumentDao documentDao;
+    private final ProviderProfileDao profileDao;
+    private final ProviderServiceDao serviceDao;
     private final UserDao userDao;
     private final GarageService garageService;
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ProviderDocumentDTO uploadDocument(long serviceId, MultipartFile file,
                                               String documentType, ZonedDateTime expiryDate) throws IOException {
-        String filePath = "sp/documents/" + serviceId + "/";
-        garageService.uploadFile(filePath, file);
-        String fileRef = (filePath + file.getOriginalFilename()).replaceAll("\\s+", "_");
+        requireOwnedService(serviceId);
+        String fileRef = "sp/documents/" + serviceId + "/" + UUID.randomUUID() + safeExtension(file.getOriginalFilename());
+        garageService.uploadBytes(fileRef, file.getBytes(), file.getContentType());
 
         long userId = userDao.getUserId();
         ProviderDocument document = new ProviderDocument();
@@ -50,9 +55,35 @@ public class ProviderDocumentService {
         return new ProviderDocumentDTO(document, downloadUrl);
     }
 
-    public Page<ProviderDocumentDTO> listDocumentsForService(long serviceId, Pageable pageable) {
+    public Page<ProviderDocumentDTO> listOwnedDocumentsForService(long serviceId, Pageable pageable) {
+        requireOwnedService(serviceId);
+        return listDocumentsForAdmin(serviceId, pageable);
+    }
+
+    public Page<ProviderDocumentDTO> listDocumentsForAdmin(long serviceId, Pageable pageable) {
         return documentDao.findByServiceId(serviceId, pageable)
                 .map(d -> new ProviderDocumentDTO(d, garageService.getPresignedUrl(d.getFileRef())));
+    }
+
+    private void requireOwnedService(long serviceId) {
+        long userId = userDao.getUserId();
+        var profile = profileDao.findByUserIdAndActive(userId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        serviceDao.findByIdAndProfileId(serviceId, profile.getId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+    }
+
+    private String safeExtension(String originalName) {
+        if (originalName == null) {
+            return "";
+        }
+        String name = originalName.toLowerCase(Locale.ROOT);
+        int dot = name.lastIndexOf('.');
+        if (dot < 0) {
+            return "";
+        }
+        String extension = name.substring(dot);
+        return extension.matches("\\.[a-z0-9]{1,10}") ? extension : "";
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
