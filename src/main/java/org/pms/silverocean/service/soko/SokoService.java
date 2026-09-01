@@ -25,6 +25,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.notification.NotificationService;
@@ -81,6 +82,7 @@ public class SokoService {
     private final UserDao userDao;
     private final VisitorService visitorService;
     private final GarageService garageService;
+    private final UploadMalwarePolicy malwarePolicy;
     private final EncryptionService encryptionService;
     private final NotificationService notificationService;
     private final I18NService i18n;
@@ -159,7 +161,7 @@ public class SokoService {
         List<PendingImage> pending=new ArrayList<>(images.size());
         long total=0;
         for(MultipartFile image:images){
-            byte[] bytes=validatedImageBytes(image);
+            byte[] bytes=validatedImageBytes(image);malwarePolicy.requireSafe(bytes);
             total+=bytes.length;
             if(total>25L*1024*1024)throw new PMSCustomException(ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED);
             String type=image.getContentType().toLowerCase(Locale.ROOT);
@@ -249,7 +251,7 @@ public class SokoService {
 
     public String deliveryCode(long orderId){SokoOrder o=orderRepo.findById(orderId).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId())throw forbidden();String code=decryptDeliveryCode(o);if(!"DELIVERY".equals(o.getDeliveryMethod())||StringUtils.isBlank(code)||!List.of("DISPATCHED","COMPLETED").contains(o.getStatus()))throw invalid();return code;}
 
-    @Transactional public OrderDetail uploadDeliveryProof(long orderId,MultipartFile proof)throws IOException{SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);ownedStore(o.getStoreId());if(!"DISPATCHED".equals(o.getStatus())||StringUtils.isNotBlank(o.getDeliveryProofReference())||proof==null||proof.isEmpty()||proof.getSize()>5L*1024*1024)throw invalid();String type=StringUtils.defaultString(proof.getContentType()).toLowerCase(Locale.ROOT);byte[] bytes=proof.getBytes();if(!validProof(type,bytes))throw new PMSCustomException(ResponseCode.INVALID_IMAGE);String extension="image/png".equals(type)?"png":"jpg";String ref="soko/delivery-proof/"+o.getId()+"/"+UUID.randomUUID()+"."+extension;garageService.uploadBytes(ref,bytes,type);o.setDeliveryProofReference(ref);o.setDeliveryProofContentType(type);o.setDeliveryProofSize((long)bytes.length);o.setDeliveryProofAt(now());orderRepo.save(o);return detail(o);}
+    @Transactional public OrderDetail uploadDeliveryProof(long orderId,MultipartFile proof)throws IOException{SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);ownedStore(o.getStoreId());if(!"DISPATCHED".equals(o.getStatus())||StringUtils.isNotBlank(o.getDeliveryProofReference())||proof==null||proof.isEmpty()||proof.getSize()>5L*1024*1024)throw invalid();String type=StringUtils.defaultString(proof.getContentType()).toLowerCase(Locale.ROOT);byte[] bytes=proof.getBytes();if(!validProof(type,bytes))throw new PMSCustomException(ResponseCode.INVALID_IMAGE);malwarePolicy.requireSafe(bytes);String extension="image/png".equals(type)?"png":"jpg";String ref="soko/delivery-proof/"+o.getId()+"/"+UUID.randomUUID()+"."+extension;garageService.uploadBytes(ref,bytes,type);o.setDeliveryProofReference(ref);o.setDeliveryProofContentType(type);o.setDeliveryProofSize((long)bytes.length);o.setDeliveryProofAt(now());orderRepo.save(o);return detail(o);}
     public String deliveryProof(long orderId){SokoOrder o=orderRepo.findById(orderId).filter(x->x.isActive()).orElseThrow(this::notFound);SokoStore store=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId()&&store.getOwnerUserId()!=userDao.getUserId())throw forbidden();if(StringUtils.isBlank(o.getDeliveryProofReference()))throw notFound();return garageService.getPresignedUrlForStoredObject(o.getDeliveryProofReference());}
 
     @Transactional(noRollbackFor=PMSCustomException.class)

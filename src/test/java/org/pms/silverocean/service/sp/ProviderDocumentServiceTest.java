@@ -12,6 +12,7 @@ import org.pms.silverocean.database.pms.entities.ProviderService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.sp.dao.ProviderDocumentDao;
 import org.pms.silverocean.service.sp.dao.ProviderProfileDao;
 import org.springframework.mock.web.MockMultipartFile;
@@ -25,10 +26,10 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class ProviderDocumentServiceTest {
     @Mock ProviderDocumentDao documents; @Mock UserDao users; @Mock GarageService garage;
-    @Mock ProviderProfileDao profiles; @Mock ProviderServiceDao services;
+    @Mock ProviderProfileDao profiles; @Mock ProviderServiceDao services; @Mock UploadMalwarePolicy malwarePolicy;
     ProviderDocumentService service;
 
-    @BeforeEach void setup(){service=new ProviderDocumentService(documents,users,garage,profiles,services);}
+    @BeforeEach void setup(){service=new ProviderDocumentService(documents,users,garage,malwarePolicy,profiles,services);}
 
     @Test void uploadChecksOwnershipAndUsesGeneratedKey() throws Exception {
         ProviderProfile profile=new ProviderProfile();profile.setId(3L);

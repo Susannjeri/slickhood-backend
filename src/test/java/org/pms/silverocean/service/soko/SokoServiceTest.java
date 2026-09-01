@@ -21,6 +21,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.pms.silverocean.service.security.DecryptDTO;
 import org.pms.silverocean.service.notification.NotificationService;
@@ -41,10 +42,10 @@ class SokoServiceTest {
     @Mock SokoStoreRepo stores; @Mock SokoProductRepo products; @Mock SokoOrderRepo orders;
     @Mock SokoOrderItemRepo items; @Mock InvoiceDao invoices; @Mock AccountDao accounts;
     @Mock SokoRiderRepo riders; @Mock UserDao users; @Mock VisitorService visitors;
-    @Mock SokoProductImageRepo productImages; @Mock GarageService garage; @Mock EncryptionService encryption; @Mock NotificationService notifications; @Mock I18NService i18n;
+    @Mock SokoProductImageRepo productImages; @Mock GarageService garage; @Mock UploadMalwarePolicy malwarePolicy; @Mock EncryptionService encryption; @Mock NotificationService notifications; @Mock I18NService i18n;
     SokoService service;
 
-    @BeforeEach void setup(){service=new SokoService(stores,products,productImages,orders,items,riders,invoices,accounts,users,visitors,garage,encryption,notifications,i18n);}
+    @BeforeEach void setup(){service=new SokoService(stores,products,productImages,orders,items,riders,invoices,accounts,users,visitors,garage,malwarePolicy,encryption,notifications,i18n);}
 
     @Test void createRiderRegistersAnAvailablePreferredRider(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);when(users.getUserId()).thenReturn(7L);when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(riders.save(any())).thenAnswer(i->i.getArgument(0));

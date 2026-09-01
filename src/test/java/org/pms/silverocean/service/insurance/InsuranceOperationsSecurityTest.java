@@ -20,6 +20,7 @@ import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.springframework.web.multipart.MultipartFile;
@@ -35,7 +36,7 @@ import static org.mockito.Mockito.*;
 class InsuranceOperationsSecurityTest {
  @Mock InsuranceAgencyRepo agencies;@Mock InsuranceCompanyRepo companies;@Mock InsuranceCaseRepo cases;@Mock InsuranceQuoteRepo quotes;
  @Mock InsurancePremiumPaymentRepo payments;@Mock InsurancePaymentConfigurationRepo paymentConfigurations;@Mock InsurancePolicyRepo policies;@Mock InsuranceClaimRepo claims;@Mock InsuranceDocumentRepo documents;
- @Mock InsuranceActivityRepo activities;@Mock InsuranceStaffDirectoryService staffDirectory;@Mock UserDao users;@Mock AccountService accountsService;@Mock GarageService garage;@Mock NotificationService notifications;@Mock I18NService i18n;
+ @Mock InsuranceActivityRepo activities;@Mock InsuranceStaffDirectoryService staffDirectory;@Mock UserDao users;@Mock AccountService accountsService;@Mock GarageService garage;@Mock UploadMalwarePolicy malwarePolicy;@Mock NotificationService notifications;@Mock I18NService i18n;
  @InjectMocks InsuranceOperationsService service;
 
  @Test void customerCannotReadAnotherCustomersCase(){when(users.getUserId()).thenReturn(77L);when(cases.findByIdAndCustomerUserIdAndActiveTrue(15,77)).thenReturn(Optional.empty());assertThatThrownBy(()->service.myCase(15)).isInstanceOf(PMSCustomException.class);verify(cases,never()).findById(15L);}
