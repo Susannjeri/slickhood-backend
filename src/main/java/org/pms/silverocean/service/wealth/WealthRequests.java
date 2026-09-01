@@ -15,18 +15,23 @@ public final class WealthRequests {
             @Size(max=500) String location,
             @NotBlank @Pattern(regexp="[A-Za-z]{3}") String currency,
             @PositiveOrZero BigDecimal acquisitionCost,
-            LocalDate acquisitionDate,
+            @PastOrPresent LocalDate acquisitionDate,
             @NotNull @PositiveOrZero BigDecimal currentValue,
-            @NotNull LocalDate valuationDate,
-            @Size(max=30) String status) {}
+            @NotNull @PastOrPresent LocalDate valuationDate,
+            @Pattern(regexp="ACTIVE|MATURED|SOLD|CLOSED") String status,
+            @Pattern(regexp="[A-Za-z0-9._-]{1,20}") String exchangeCode,
+            @Pattern(regexp="[A-Za-z0-9.^:_-]{1,40}") String instrumentSymbol,
+            @Positive BigDecimal quantity,
+            @PositiveOrZero BigDecimal averageUnitCost,
+            @Pattern(regexp="MANUAL|MARKET") String pricingMode) {}
 
     public record ValuationRequest(@NotNull @PositiveOrZero BigDecimal amount,
-            @NotNull LocalDate valuationDate, @NotBlank @Size(max=60) String source,
+            @NotNull @PastOrPresent LocalDate valuationDate, @NotBlank @Size(max=60) String source,
             @Size(max=1000) String notes) {}
 
     public record CashFlowRequest(@NotBlank @Pattern(regexp="INCOME|EXPENSE") String flowType,
             @NotBlank @Size(max=60) String category, @NotNull @Positive BigDecimal amount,
-            @NotNull LocalDate entryDate, @Size(max=500) String description, boolean recurring) {}
+            @NotNull @PastOrPresent LocalDate entryDate, @Size(max=500) String description, boolean recurring) {}
 
     public record LiabilityRequest(@NotBlank @Size(max=100) String lender,
             @NotBlank @Pattern(regexp="[A-Za-z]{3}") String currency,
@@ -41,7 +46,7 @@ public final class WealthRequests {
             @Pattern(regexp="[A-Za-z]{3}") String currency,
             @Min(0) @Max(365) Integer reminderDays, @Size(max=500) String notes) {}
 
-    public record GoalRequest(@NotBlank @Size(max=40) String goalType,
+    public record GoalRequest(@NotBlank @Pattern(regexp="NET_WORTH|INCOME|EQUITY|DEBT_REDUCTION") String goalType,
             @NotBlank @Size(max=160) String name, @NotNull @Positive BigDecimal targetAmount,
             @NotBlank @Pattern(regexp="[A-Za-z]{3}") String currency,
             @NotNull @FutureOrPresent LocalDate targetDate) {}

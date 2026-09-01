@@ -236,9 +236,11 @@ public class ReportService {
 
     private ReportModels.Data affiliateEarnings(ReportModels.Definition definition, Range range) {
         List<AffiliateCommission> data=affiliateCommissions.findForReport(userId(),privileged(),range.start(),range.end(),page());
-        List<Map<String,Object>> rows=data.stream().map(c->row("Invoice",c.getInvoiceRef(),"Status",c.getStatus(),"Qualifying amount",c.getQualifyingAmount(),"Rate %",c.getCommissionRate(),"Commission",c.getCommissionAmount(),"Currency",c.getCurrency(),"Earned",c.getEarnedAt(),"Payout",c.getPayoutId())).toList();
-        return data(definition,range,map("Commissions",data.size(),"Approved",count(data,c->"APPROVED".equals(c.getStatus())),"Paid",count(data,c->"PAID".equals(c.getStatus())),"Earnings by currency",totalsByCurrency(data,AffiliateCommission::getCurrency,AffiliateCommission::getCommissionAmount)),rows);
+        List<Map<String,Object>> rows=data.stream().map(c->row("Invoice",c.getInvoiceRef(),"Status",c.getStatus(),"Qualifying amount",c.getQualifyingAmount(),"Rate %",c.getCommissionRate(),"Commission",affiliateNet(c),"Currency",c.getCurrency(),"Earned",c.getEarnedAt(),"Available",c.getAvailableAt())).toList();
+        return data(definition,range,map("Commissions",data.size(),"Pending",count(data,c->"PENDING".equals(c.getStatus())),"Available",count(data,c->"EARNED".equals(c.getStatus())),"Paid",count(data,c->"PAID".equals(c.getStatus())),"Earnings by currency",totalsByCurrency(data,AffiliateCommission::getCurrency,this::affiliateNet)),rows);
     }
+
+    private BigDecimal affiliateNet(AffiliateCommission commission){return List.of("REVERSED","CLAWBACK_DUE","CLAWBACK_REQUESTED","CLAWBACK_SETTLED").contains(commission.getStatus())?BigDecimal.ZERO:commission.getCommissionAmount();}
 
     private ReportModels.Data kycOperations(ReportModels.Definition definition, Range range) {
         List<KycCase> data=kycCases.findForReport(userId(),privileged(),range.start(),range.end(),page());

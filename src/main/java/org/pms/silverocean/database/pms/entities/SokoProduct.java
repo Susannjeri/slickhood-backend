@@ -9,6 +9,7 @@ import lombok.Setter;
 import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;
 
 import java.math.BigDecimal;
+import java.time.ZonedDateTime;
 
 @Entity
 @Table(name = "pms_soko_product", indexes = {
@@ -27,4 +28,7 @@ public class SokoProduct extends BaseCreatorEntity {
     private int stockQuantity;
     private String imageUrl;
     private String status;
+    private ZonedDateTime moderatedAt;
+    private Long moderatedByUserId;
+    @jakarta.persistence.Column(length=1000) private String moderationReason;
 }

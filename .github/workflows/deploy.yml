@@ -30,6 +30,17 @@ jobs:
       - name: Build with Maven
         run: mvn -B clean verify --file pom.xml
 
+      - name: Require Docker-backed MySQL integration coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_class in RentalPaymentMySqlIT FlywayMigrationMySqlIT; do
+            report="target/failsafe-reports/TEST-org.pms.silverocean.database.${test_class}.xml"
+            test -f "$report" || { echo "Required ${test_class} report is missing." >&2; exit 1; }
+            skipped="$(sed -n 's/.*skipped="\([0-9][0-9]*\)".*/\1/p' "$report" | head -n 1)"
+            test "${skipped:-1}" = "0" || { echo "${test_class} was skipped; Docker/MySQL validation is mandatory." >&2; exit 1; }
+          done
+
       - name: Reject destructive or duplicate Flyway migrations
         shell: bash
         run: |
@@ -70,10 +81,18 @@ jobs:
             live=/home/silverocean/backend/silverocean-0.0.1-SNAPSHOT.jar
             candidate=/tmp/slickhood-backend-release/silverocean-0.0.1-SNAPSHOT.jar
             rollback="/home/silverocean/backups/backend-$stamp.jar"
+            health_url='${{ secrets.BACKEND_HEALTHCHECK_URL }}'
+            test -n "$health_url"
+            case "$health_url" in
+              https://*/actuator/health/production-readiness) ;;
+              *) echo "BACKEND_HEALTHCHECK_URL must be HTTPS and target /actuator/health/production-readiness" >&2; exit 1 ;;
+            esac
+            base_health_url="${health_url%/production-readiness}"
             installed=false
             wait_for_health() {
+              url="$1"
               for attempt in $(seq 1 36); do
-                if curl --insecure --fail --silent --show-error https://127.0.0.1:8989/actuator/health | grep -q '"status":"UP"'; then
+                if curl --fail --silent --show-error "$url" | grep -q '"status":"UP"'; then
                   return 0
                 fi
                 sleep 5
@@ -84,7 +103,7 @@ jobs:
               if [ "$installed" = "true" ] && sudo test -f "$rollback"; then
                 sudo install -o silverocean -g silverocean -m 0644 "$rollback" "$live"
                 sudo systemctl restart pms.service
-                if ! wait_for_health; then
+                if ! wait_for_health "$base_health_url"; then
                   echo "Rollback release failed to become healthy" >&2
                   sudo systemctl status pms.service --no-pager || true
                   return 1
@@ -109,7 +128,7 @@ jobs:
             sudo install -o silverocean -g silverocean -m 0644 "$candidate" "$live"
             installed=true
             sudo systemctl restart pms.service
-            if wait_for_health; then
+            if wait_for_health "$health_url"; then
               installed=false
               exit 0
             fi

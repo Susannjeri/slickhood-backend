@@ -11,13 +11,28 @@ import java.time.LocalDateTime;
 @Table(name = "pms_help_conversation")
 @Getter @Setter
 public class HelpConversation extends BaseCreatorEntity {
-    private long userId;
+    private Long userId;
+    private String ticketNumber;
+    private String guestTokenHash;
+    private LocalDateTime guestExpiresAt;
     private String activeRole;
     private String subject;
+    private String category;
+    private String pageContext;
     private String status;
     private String priority;
+    private int priorityRank;
     private Long assignedToUserId;
     private LocalDateTime lastMessageAt;
+    private LocalDateTime waitingSince;
+    private LocalDateTime slaDueAt;
+    private LocalDateTime slaBreachedAt;
+    private LocalDateTime firstResponseAt;
     private LocalDateTime escalatedAt;
     private LocalDateTime resolvedAt;
+    private int customerUnreadCount;
+    private int agentUnreadCount;
+
+    @Version
+    private long version;
 }

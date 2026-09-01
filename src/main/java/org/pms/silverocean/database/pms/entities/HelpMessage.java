@@ -16,4 +16,6 @@ public class HelpMessage extends BaseCreatorEntity {
     private String model;
     private String providerResponseId;
     private String sourceArticleIds;
+    private boolean internalNote;
+    private String idempotencyKey;
 }

@@ -47,6 +47,7 @@ import java.math.BigDecimal;
 
 @RestController
 @RequestMapping("/sp")
+@PreAuthorize("isAuthenticated()")
 @Validated
 @Slf4j
 public class ServiceProviderController extends OutputStreamErrorHandler {
@@ -202,7 +203,7 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
     @GetMapping("/document/{serviceId}/list")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).UPLOAD_SP_DOCUMENT)")
     public ResponseEntity<ResponseDTO> listDocuments(@PathVariable long serviceId, Pageable pageable) {
-        var page = documentService.listDocumentsForService(serviceId, pageable);
+        var page = documentService.listMyDocumentsForService(serviceId, pageable);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_DOCUMENT_UPLOADED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_DOCUMENT_UPLOADED),
                 page.getContent(), page.getTotalPages(), page.getTotalElements(), page.getSize()));
@@ -285,6 +286,7 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
     }
 
     @PutMapping("/booking/{bookingId}/finance")
+    @PreAuthorize("hasAnyRole('FINANCE','SUPER_ADMIN')")
     public ResponseEntity<ResponseDTO> updateBookingFinance(@PathVariable long bookingId,
                                                             @RequestBody @Valid MarketplaceFinanceRequest request) {
         var booking = bookingService.updateFinance(bookingId, request);

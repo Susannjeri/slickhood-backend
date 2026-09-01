@@ -8,4 +8,5 @@ import java.util.List;
 public interface HelpMessageRepo extends JpaRepository<HelpMessage, Long> {
     List<HelpMessage> findByConversationIdAndActiveTrueOrderByCreatedOnAsc(long conversationId);
     List<HelpMessage> findByConversationIdAndActiveTrueOrderByCreatedOnDesc(long conversationId, Pageable pageable);
+    boolean existsByConversationIdAndIdempotencyKey(long conversationId, String idempotencyKey);
 }

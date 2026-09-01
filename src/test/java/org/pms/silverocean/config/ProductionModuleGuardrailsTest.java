@@ -1,0 +1,110 @@
+package org.pms.silverocean.config;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.mock.env.MockEnvironment;
+
+import java.net.ServerSocket;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class ProductionModuleGuardrailsTest {
+    @Test
+    void reportsMissingRuntimeCapabilitiesWithoutExposingValues() {
+        var guardrails = new ProductionModuleGuardrails(new MockEnvironment());
+        guardrails.validateSafeBounds();
+
+        var assessment = guardrails.assess();
+
+        assertThat(assessment.ready()).isFalse();
+        assertThat(assessment.missingOrUnsafeConfiguration()).contains("wealth.market.enabled=true",
+                "wealth.vault.antivirus.required=true", "app.insurance.imap.enabled=true",
+                "affiliate.commission-rate (must be explicit)",
+                "affiliate.eligible-payment-count (must be explicit)",
+                "helpdesk.ai.enabled=true", "helpdesk.ai.api-key / OPENAI_API_KEY",
+                "app.cors.allowed-headers (must include X-Help-Token)",
+                "M-Pesa or enabled Paystack verified callback configuration");
+    }
+
+    @Test
+    void acceptsCompleteProductionConfiguration() throws Exception {
+        try (var clamAv = new ServerSocket(0)) {
+            var environment = completeEnvironment()
+                    .withProperty("wealth.vault.antivirus.host", "127.0.0.1")
+                    .withProperty("wealth.vault.antivirus.port", String.valueOf(clamAv.getLocalPort()));
+            var guardrails = new ProductionModuleGuardrails(environment);
+            guardrails.validateSafeBounds();
+
+            assertThat(guardrails.assess().ready()).isTrue();
+        }
+    }
+
+    @Test
+    void rejectsUnsafeSchedulerAndBatchConfigurationAtStartup() {
+        var environment = new MockEnvironment().withProperty("wealth.market.batch-size", "1000");
+
+        assertThatThrownBy(() -> new ProductionModuleGuardrails(environment).validateSafeBounds())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("wealth.market.batch-size");
+    }
+
+    @Test
+    void rejectsLegacyAffiliateTermsAndFlutterwaveOnlyCallbacks() throws Exception {
+        try (var clamAv = new ServerSocket(0)) {
+            var environment = completeEnvironment()
+                    .withProperty("wealth.vault.antivirus.host", "127.0.0.1")
+                    .withProperty("wealth.vault.antivirus.port", String.valueOf(clamAv.getLocalPort()))
+                    .withProperty("affiliate.commission-rate", "10")
+                    .withProperty("affiliate.eligible-payment-count", "99")
+                    .withProperty("payment.paystack.enabled", "false")
+                    .withProperty("payment.paystack.secret-key", "")
+                    .withProperty("payment.flutterwave.webhook-secret", "legacy-only");
+
+            var assessment = new ProductionModuleGuardrails(environment).assess();
+
+            assertThat(assessment.ready()).isFalse();
+            assertThat(assessment.missingOrUnsafeConfiguration()).contains(
+                    "affiliate.commission-rate=25 (required)",
+                    "affiliate.eligible-payment-count=3 (required)",
+                    "M-Pesa or enabled Paystack verified callback configuration");
+        }
+    }
+
+    private MockEnvironment completeEnvironment() {
+        return new MockEnvironment()
+                .withProperty("garage.s3.access.key", "configured")
+                .withProperty("garage.s3.secret.key", "configured")
+                .withProperty("garage.s3.region", "ap-south-1")
+                .withProperty("garage.s3.bucket", "slickhood-production")
+                .withProperty("garage.s3.url", "http://garage.internal:3900")
+                .withProperty("garage.presigner.url", "https://files.slickhood.com")
+                .withProperty("spring.mail.host", "smtp.example.com")
+                .withProperty("spring.mail.username", "mailer")
+                .withProperty("spring.mail.password", "configured")
+                .withProperty("app.public-url", "https://slickhood.com")
+                .withProperty("app.cors.allowed-origins", "https://slickhood.com,https://www.slickhood.com")
+                .withProperty("app.cors.allowed-headers", "Authorization,Content-Type,X-Help-Token")
+                .withProperty("wealth.market.enabled", "true")
+                .withProperty("wealth.market.alpha-vantage.api-key", "configured")
+                .withProperty("wealth.market.alpha-vantage.base-url", "https://www.alphavantage.co")
+                .withProperty("wealth.vault.antivirus.enabled", "true")
+                .withProperty("wealth.vault.antivirus.required", "true")
+                .withProperty("wealth.vault.antivirus.host", "clamav.internal")
+                .withProperty("app.insurance.imap.enabled", "true")
+                .withProperty("app.insurance.imap.host", "imap.example.com")
+                .withProperty("app.insurance.imap.username", "insurance@example.com")
+                .withProperty("app.insurance.imap.password", "configured")
+                .withProperty("app.insurance.mail.from", "insurance@example.com")
+                .withProperty("app.insurance.mail.reply-to", "insurance@example.com")
+                .withProperty("affiliate.commission-rate", "25")
+                .withProperty("affiliate.eligible-payment-count", "3")
+                .withProperty("helpdesk.ai.enabled", "true")
+                .withProperty("helpdesk.ai.api-key", "configured")
+                .withProperty("helpdesk.ai.base-url", "https://api.openai.com/v1")
+                .withProperty("affiliate.minimum-payout", "1000")
+                .withProperty("affiliate.commission-hold-days", "14")
+                .withProperty("payment.paystack.enabled", "true")
+                .withProperty("payment.paystack.secret-key", "configured")
+                .withProperty("payment.paystack.callback-url", "https://app.slickhood.com/payment/callback");
+    }
+}

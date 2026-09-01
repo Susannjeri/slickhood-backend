@@ -114,9 +114,17 @@ public class GarageService {
         if (!doesFileExist(fileName)) {
             return "";
         }
+        return getPresignedUrlForStoredObject(fileName);
+    }
+
+    /** Presigns a key already validated by a database record, avoiding an S3 HEAD request per catalogue row. */
+    public String getPresignedUrlForStoredObject(String fileName) {
+        if (StringUtils.isBlank(fileName)) {
+            return "";
+        }
         GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(bucketName)
-                .key(fileName)
+                .key(fileName.startsWith("/") ? fileName.substring(1) : fileName)
                 .build();
 
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()

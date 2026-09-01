@@ -45,6 +45,9 @@ public class Permission {
 
     public static final String VIEW_NOTIFICATIONS = "view_notifications";
     public static final String VIEW_MY_NOTIFICATIONS = "view_my_notifications";
+    public static final String VIEW_HELPDESK_QUEUE = "view_helpdesk_queue";
+    public static final String MANAGE_HELPDESK_CASES = "manage_helpdesk_cases";
+    public static final String MANAGE_HELPDESK_ARTICLES = "manage_helpdesk_articles";
     public static final String ROTATE_KEY = "rotate_key";
 
     public static final String CREATE_INVITE = "create_invite";
@@ -162,6 +165,7 @@ public class Permission {
     // Insurance Hub - customer access is authenticated and owner-scoped; these are Silverwood operations only.
     public static final String REVIEW_INSURANCE_APPLICATIONS = "review_insurance_applications";
     public static final String MANAGE_INSURANCE_QUOTES = "manage_insurance_quotes";
+    public static final String APPROVE_INSURANCE_QUOTES = "approve_insurance_quotes";
     public static final String MANAGE_INSURANCE_CLAIMS = "manage_insurance_claims";
     public static final String MANAGE_INSURANCE_RENEWALS = "manage_insurance_renewals";
     public static final String MANAGE_INSURANCE_CATALOG = "manage_insurance_catalog";

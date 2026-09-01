@@ -7,4 +7,5 @@ import java.util.List;
 
 public interface SokoOrderItemRepo extends JpaRepository<SokoOrderItem, Long> {
     List<SokoOrderItem> findAllByOrderIdAndActiveTrueOrderById(long orderId);
+    List<SokoOrderItem> findAllByOrderIdInAndActiveTrueOrderByOrderIdAscIdAsc(List<Long> orderIds);
 }

@@ -2,6 +2,7 @@ package org.pms.silverocean.service.soko;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -40,12 +41,12 @@ public final class SokoRequests {
             @Min(0) int stockQuantity,
             @Size(max=800) String imageUrl) {}
 
-    public record CheckoutItem(@NotNull Long productId, @Min(1) int quantity) {}
+    public record CheckoutItem(@NotNull Long productId, @Min(1) @Max(10_000) int quantity) {}
 
     public record Checkout(
             @NotNull Long storeId,
-            @NotEmpty List<@Valid CheckoutItem> items,
-            @NotBlank String deliveryMethod,
+            @NotEmpty @Size(max=50) List<@Valid CheckoutItem> items,
+            @NotBlank @Pattern(regexp="(?i)DELIVERY|PICKUP") String deliveryMethod,
             @Size(max=500) String deliveryAddress,
             @NotBlank @Size(max=30) String customerPhone,
             @Size(max=1000) String notes,
@@ -73,4 +74,5 @@ public final class SokoRequests {
     public enum FinanceType { REFUND, SETTLEMENT }
     public enum FinanceStatus { REQUESTED, PROCESSING, CONFIRMED, FAILED }
     public record FinanceUpdate(@NotNull FinanceType type,@NotNull FinanceStatus status,@NotNull @DecimalMin("0.01") BigDecimal amount,@Size(max=120) String providerReference) {}
+    public record ModerationDecision(@NotBlank @Pattern(regexp="APPROVE|REJECT|SUSPEND|REACTIVATE") String decision,@Size(max=1000) String reason) {}
 }

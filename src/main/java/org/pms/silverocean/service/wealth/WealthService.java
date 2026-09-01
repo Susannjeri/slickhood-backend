@@ -10,6 +10,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.currencyexchange.CurrencyConversionService;
 import org.pms.silverocean.service.wrappers.IdNameDescDTO;
+import org.pms.silverocean.service.wealth.vault.VaultMalwareScanner;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -19,6 +20,8 @@ import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
+import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 import static org.pms.silverocean.service.wealth.WealthModels.*;
@@ -30,22 +33,25 @@ public class WealthService {
     private static final Set<String> ALLOWED_TYPES=Set.of("application/pdf","image/jpeg","image/png",
             "application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "application/vnd.ms-excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    private static final Set<String> VAULT_CATEGORIES=Set.of("WILL","TRUST","TRUST_DEED","POWER_OF_ATTORNEY","BENEFICIARY_NOMINATION","TITLE_DOCUMENT","TITLE_DEED","SALE_AGREEMENT","LEASE","SHARE_CERTIFICATE","INSURANCE_POLICY","PENSION_STATEMENT","TAX_RECORD","VALUATION","APPROVAL","WARRANTY","LOAN","RECEIPT","OTHER");
     private final WealthAssetRepo assetRepo; private final WealthValuationRepo valuationRepo;
     private final WealthCashFlowRepo cashFlowRepo; private final WealthLiabilityRepo liabilityRepo;
     private final WealthObligationRepo obligationRepo; private final WealthVaultDocumentRepo vaultRepo;
     private final WealthGoalRepo goalRepo; private final UserDao userDao; private final GarageService garageService;
     private final CurrencyConversionService currencyConversionService;
+    private final VaultMalwareScanner malwareScanner;
+    private final WealthAdminService wealthAdminService;
     private final UnitRepo unitRepo; private final PMSInvoiceRepo invoiceRepo; private final PropertyRepo propertyRepo;
     @Value("${wealth.base.currency:KES}") private String baseCurrency;
 
-    public List<WealthAsset> assets(){return ownedAssets();}
+    public List<AssetView> assets(){return ownedAssets().stream().map(AssetView::new).toList();}
     public List<IdNameDescDTO> propertyOptions(){return propertyRepo.findAllWealthLinkableByUserId(userDao.getUserId());}
-    @Transactional public WealthAsset createAsset(AssetRequest r){
+    @Transactional public AssetView createAsset(AssetRequest r){
         validateAssetRequest(r);validatePropertyLink(r.propertyId(),null);
         WealthAsset a=new WealthAsset();apply(a,r);a.setOwnerUserId(userDao.getUserId());a.setCreatedBy(userDao.getUserId());a.setActive(true);
-        a=assetRepo.save(a); recordValuation(a,r.currentValue(),r.valuationDate(),"OPENING_VALUE","Initial asset value");return a;
+        a=assetRepo.save(a); recordValuation(a,r.currentValue(),r.valuationDate(),"OPENING_VALUE","Initial asset value");return new AssetView(a);
     }
-    @Transactional public WealthAsset updateAsset(long id,AssetRequest r){validateAssetRequest(r);WealthAsset a=asset(id);validatePropertyLink(r.propertyId(),id);BigDecimal old=a.getCurrentValue();LocalDate oldDate=a.getValuationDate();apply(a,r);a=assetRepo.save(a);if(old.compareTo(r.currentValue())!=0||!oldDate.equals(r.valuationDate()))recordValuation(a,r.currentValue(),r.valuationDate(),"ASSET_UPDATE","Value updated from asset record");return a;}
+    @Transactional public AssetView updateAsset(long id,AssetRequest r){validateAssetRequest(r);WealthAsset a=asset(id);validatePropertyLink(r.propertyId(),id);BigDecimal old=a.getCurrentValue();LocalDate oldDate=a.getValuationDate();apply(a,r);a=assetRepo.save(a);if(old.compareTo(r.currentValue())!=0||!oldDate.equals(r.valuationDate()))recordValuation(a,r.currentValue(),r.valuationDate(),"ASSET_UPDATE","Value updated from asset record");return new AssetView(a);}
     @Transactional public void archiveAsset(long id){WealthAsset a=asset(id);a.setActive(false);assetRepo.save(a);}
     @Transactional public WealthValuation addValuation(long assetId,ValuationRequest r){if(r.valuationDate().isAfter(LocalDate.now()))throw invalid();WealthAsset a=asset(assetId);a.setCurrentValue(r.amount());a.setValuationDate(r.valuationDate());assetRepo.save(a);return recordValuation(a,r.amount(),r.valuationDate(),r.source(),r.notes());}
     public List<WealthValuation> valuations(long assetId){asset(assetId);return valuationRepo.findAllByAssetIdAndActiveTrueOrderByValuationDateDesc(assetId);}
@@ -64,15 +70,19 @@ public class WealthService {
     @Transactional public WealthGoal updateGoal(long id,GoalRequest r){WealthGoal g=goal(id);apply(g,r);return goalRepo.save(g);}
     @Transactional public void archiveGoal(long id){WealthGoal g=goal(id);g.setActive(false);goalRepo.save(g);}
 
-    @Transactional public VaultDocumentView upload(long assetId,String category,LocalDate documentDate,LocalDate expiryDate,String notes,MultipartFile file) throws IOException {
-        asset(assetId);validateFile(file);if(documentDate!=null&&expiryDate!=null&&expiryDate.isBefore(documentDate))throw invalid();String original=Objects.requireNonNull(file.getOriginalFilename());String safe=java.nio.file.Path.of(original).getFileName().toString();if(!safe.equals(original))throw invalid();String normalizedCategory=normalizeCategory(category);
-        byte[] bytes=file.getBytes();String extension=safe.lastIndexOf('.')>=0?safe.substring(safe.lastIndexOf('.')).toLowerCase():"";String ref="wealth/"+userDao.getUserId()+"/"+assetId+"/"+UUID.randomUUID()+extension;garageService.uploadBytes(ref,bytes,Objects.requireNonNull(file.getContentType()));
-        WealthVaultDocument d=new WealthVaultDocument();d.setAssetId(assetId);d.setCategory(normalizedCategory);d.setDisplayName(safe);d.setFileRef(ref);d.setContentType(file.getContentType());d.setFileSize(file.getSize());d.setChecksumSha256(sha256(bytes));d.setDocumentDate(documentDate);d.setExpiryDate(expiryDate);d.setNotes(notes);stamp(d);d=vaultRepo.save(d);return new VaultDocumentView(d,garageService.getPresignedUrl(ref));
+    @Transactional public VaultDocumentView upload(long assetId,String category,LocalDate documentDate,LocalDate expiryDate,String notes,MultipartFile file) throws IOException {return upload((Long)assetId,category,documentDate,expiryDate,notes,file);}
+    @Transactional public VaultDocumentView upload(Long assetId,String category,LocalDate documentDate,LocalDate expiryDate,String notes,MultipartFile file) throws IOException {
+        if(assetId!=null)asset(assetId);String normalized=category==null?null:category.trim().toUpperCase();if(!VAULT_CATEGORIES.contains(normalized))throw invalid();
+        if((documentDate!=null&&documentDate.isAfter(LocalDate.now()))||(expiryDate!=null&&documentDate!=null&&expiryDate.isBefore(documentDate)))throw invalid();
+        byte[] bytes=file==null?null:file.getBytes();validateFile(file,bytes);VaultMalwareScanner.Result scan=malwareScanner.scan(bytes);if(scan==VaultMalwareScanner.Result.INFECTED||(scan==VaultMalwareScanner.Result.UNAVAILABLE&&malwareScanner.required()))throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);String original=Objects.requireNonNull(file.getOriginalFilename());String safe=java.nio.file.Path.of(original).getFileName().toString();if(!safe.equals(original)||safe.length()>255)throw invalid();
+        String extension=safe.contains(".")?safe.substring(safe.lastIndexOf('.')).toLowerCase(Locale.ROOT):"";long owner=userDao.getUserId();String ref="wealth/"+owner+"/vault/"+UUID.randomUUID()+extension;garageService.uploadBytes(ref,bytes,file.getContentType());
+        WealthVaultDocument d=new WealthVaultDocument();d.setOwnerUserId(owner);d.setAssetId(assetId);d.setCategory(normalized);d.setDisplayName(safe);d.setFileRef(ref);d.setContentType(file.getContentType());d.setFileSize(file.getSize());d.setChecksumSha256(sha256(bytes));d.setDocumentDate(documentDate);d.setExpiryDate(expiryDate);d.setNotes(notes==null?null:notes.trim());stamp(d);d=vaultRepo.save(d);return vaultView(d,null);
     }
-    public List<VaultDocumentView> documents(long assetId){asset(assetId);return vaultRepo.findAllByAssetIdAndActiveTrueOrderByCreatedOnDesc(assetId).stream().map(d->new VaultDocumentView(d,garageService.getPresignedUrl(d.getFileRef()))).toList();}
-    public VaultDocumentView document(long id){WealthVaultDocument d=vaultRepo.findByIdAndAssetIdInAndActiveTrue(id,assetIds()).orElseThrow(this::notFound);return new VaultDocumentView(d,garageService.getPresignedUrl(d.getFileRef()));}
+    public List<VaultDocumentView> documents(long assetId){asset(assetId);return vaultRepo.findTop200ByAssetIdAndActiveTrueOrderByCreatedOnDesc(assetId).stream().map(d->vaultView(d,null)).toList();}
+    public List<VaultDocumentView> documents(){return vaultRepo.findTop200ByOwnerUserIdAndActiveTrueOrderByCreatedOnDesc(userDao.getUserId()).stream().map(d->vaultView(d,null)).toList();}
+    public VaultDocumentView document(long id){WealthVaultDocument d=vaultRepo.findByIdAndOwnerUserIdAndActiveTrue(id,userDao.getUserId()).orElseThrow(this::notFound);return vaultView(d,garageService.getPresignedUrl(d.getFileRef()));}
+    @Transactional public void archiveDocument(long id){WealthVaultDocument d=vaultRepo.findByIdAndOwnerUserIdAndActiveTrue(id,userDao.getUserId()).orElseThrow(this::notFound);d.setActive(false);vaultRepo.save(d);}
     public AssetLedger ledger(long assetId){asset(assetId);return new AssetLedger(valuations(assetId),cashFlowRepo.findAllByAssetIdAndActiveTrueOrderByEntryDateDesc(assetId),liabilityRepo.findAllByAssetIdAndActiveTrueOrderByIdDesc(assetId),obligationRepo.findAllByAssetIdAndActiveTrueOrderByDueDateAsc(assetId),documents(assetId));}
-    @Transactional public void archiveDocument(long id){WealthVaultDocument d=vaultRepo.findByIdAndAssetIdInAndActiveTrue(id,assetIds()).orElseThrow(this::notFound);d.setActive(false);vaultRepo.save(d);}
     public Dashboard dashboard(int years,BigDecimal valueGrowth,BigDecimal incomeGrowth,BigDecimal expenseGrowth){
         List<WealthAsset> sourceAssets=ownedAssets();List<Long> ids=sourceAssets.stream().map(WealthAsset::getId).toList();LocalDate today=LocalDate.now();
         List<WealthCashFlow> sourceFlows=ids.isEmpty()?List.of():cashFlowRepo.findAllByAssetIdInAndActiveTrueAndEntryDateBetween(ids,today.minusYears(1).plusDays(1),today);
@@ -83,10 +93,11 @@ public class WealthService {
         List<WealthCashFlow> flows=sourceFlows.stream().map(f->baseFlow(f,assetCurrencies.get(f.getAssetId()))).toList();
         List<WealthLiability> liabilities=sourceLiabilities.stream().map(this::baseLiability).toList();
         List<WealthGoal> goals=goalRepo.findAllByOwnerUserIdAndActiveTrueOrderByTargetDate(userDao.getUserId()).stream().map(this::baseGoal).toList();
-        return WealthAnalytics.calculate(assets,flows,liabilities,obligations,goals,operatingInputs(sourceAssets),years,valueGrowth,incomeGrowth,expenseGrowth);
+        Dashboard calculated=WealthAnalytics.calculate(assets,flows,liabilities,obligations,goals,operatingInputs(sourceAssets),years,valueGrowth,incomeGrowth,expenseGrowth);
+        AdvisorProfile advisor=advisor(sourceAssets,sourceFlows,goals);return new Dashboard(calculated.summary(),calculated.assets(),calculated.obligations(),calculated.goals(),calculated.goalProgress(),calculated.insights(),calculated.projection(),advisor);
     }
 
-    private void apply(WealthAsset a,AssetRequest r){a.setPropertyId(r.propertyId());a.setAssetType(r.assetType().trim().toUpperCase());a.setName(r.name().trim());a.setReference(trim(r.reference()));a.setLocation(trim(r.location()));a.setCurrency(r.currency().toUpperCase());a.setAcquisitionCost(Optional.ofNullable(r.acquisitionCost()).orElse(BigDecimal.ZERO));a.setAcquisitionDate(r.acquisitionDate());a.setCurrentValue(r.currentValue());a.setValuationDate(r.valuationDate());a.setStatus(r.status()==null?"ACTIVE":r.status().toUpperCase());}
+    private void apply(WealthAsset a,AssetRequest r){validateAssetRequest(r);String type=r.assetType().trim().toUpperCase();WealthAssetType configuredType=wealthAdminService.requireForAsset(type,a.getAssetType());String pricing=Optional.ofNullable(r.pricingMode()).orElse("MANUAL").trim().toUpperCase();if("MARKET".equals(pricing)&&(!configuredType.isMarketPricingAllowed()||r.instrumentSymbol()==null||r.instrumentSymbol().isBlank()||r.exchangeCode()==null||r.exchangeCode().isBlank()||r.quantity()==null))throw invalid();a.setPropertyId(r.propertyId());a.setAssetType(type);a.setName(r.name().trim());a.setReference(trim(r.reference()));a.setLocation(trim(r.location()));a.setCurrency(r.currency().toUpperCase());BigDecimal cost=r.acquisitionCost();if(cost==null&&r.quantity()!=null&&r.averageUnitCost()!=null)cost=r.quantity().multiply(r.averageUnitCost());a.setAcquisitionCost(Optional.ofNullable(cost).orElse(BigDecimal.ZERO));a.setAcquisitionDate(r.acquisitionDate());a.setCurrentValue(r.currentValue());a.setValuationDate(r.valuationDate());a.setStatus(r.status()==null?"ACTIVE":r.status().toUpperCase());a.setExchangeCode(upper(r.exchangeCode()));a.setInstrumentSymbol(upper(r.instrumentSymbol()));a.setQuantity(r.quantity());a.setAverageUnitCost(r.averageUnitCost());a.setPricingMode(pricing);if(!"MARKET".equals(pricing)){a.setMarketPrice(null);a.setQuoteProvider(null);a.setQuoteStatus(null);a.setQuoteAsOf(null);}}
     private void apply(WealthCashFlow f,CashFlowRequest r){f.setFlowType(r.flowType());f.setCategory(r.category().trim().toUpperCase());f.setAmount(r.amount());f.setEntryDate(r.entryDate());f.setDescription(trim(r.description()));f.setRecurring(r.recurring());}
     private void apply(WealthObligation o,ObligationRequest r){o.setObligationType(r.obligationType().trim().toUpperCase());o.setTitle(r.title().trim());o.setEffectiveDate(r.effectiveDate());o.setDueDate(r.dueDate());o.setExpiryDate(r.expiryDate());o.setAmount(r.amount());o.setCurrency(r.currency()==null?null:r.currency().toUpperCase());o.setReminderDays(Optional.ofNullable(r.reminderDays()).orElse(30));o.setNotes(trim(r.notes()));}
     private void apply(WealthGoal g,GoalRequest r){g.setGoalType(r.goalType().trim().toUpperCase());g.setName(r.name().trim());g.setTargetAmount(r.targetAmount());g.setCurrency(r.currency().toUpperCase());g.setTargetDate(r.targetDate());}
@@ -102,12 +113,16 @@ public class WealthService {
     private <T extends org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity> void stamp(T e){e.setCreatedBy(userDao.getUserId());e.setActive(true);}
     private PMSCustomException notFound(){return new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND);}
     private PMSCustomException invalid(){return new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);}
-    private void validateFile(MultipartFile file){if(file==null||file.isEmpty()||file.getSize()>MAX_VAULT_BYTES||!ALLOWED_TYPES.contains(file.getContentType()))throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);}
+    private void validateFile(MultipartFile file,byte[] bytes){if(file==null||file.isEmpty()||file.getSize()>MAX_VAULT_BYTES||!ALLOWED_TYPES.contains(file.getContentType())||!signatureMatches(file.getContentType(),bytes))throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);}
+    private VaultDocumentView vaultView(WealthVaultDocument document,String downloadUrl){return new VaultDocumentView(new VaultDocumentMetadata(document),downloadUrl);}
+    private boolean signatureMatches(String type,byte[] b){if(b==null||b.length<4)return false;return switch(type){case "application/pdf"->b[0]=='%'&&b[1]=='P'&&b[2]=='D'&&b[3]=='F';case "image/png"->(b[0]&255)==137&&b[1]=='P'&&b[2]=='N'&&b[3]=='G';case "image/jpeg"->(b[0]&255)==255&&(b[1]&255)==216;case "application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"->b[0]=='P'&&b[1]=='K';case "application/msword","application/vnd.ms-excel"->(b[0]&255)==208&&(b[1]&255)==207&&(b[2]&255)==17&&(b[3]&255)==224;default->false;};}
     private void validateAssetRequest(AssetRequest r){if(r.valuationDate().isAfter(LocalDate.now())||(r.acquisitionDate()!=null&&r.acquisitionDate().isAfter(LocalDate.now())))throw invalid();}
     private void validateLiability(BigDecimal original,BigDecimal outstanding,LocalDate start,LocalDate maturity){if(outstanding.compareTo(original)>0||(start!=null&&maturity!=null&&maturity.isBefore(start)))throw invalid();}
     private void validateObligation(ObligationRequest r){if(r.dueDate()==null&&r.expiryDate()==null)throw invalid();if(r.effectiveDate()!=null&&r.dueDate()!=null&&r.dueDate().isBefore(r.effectiveDate()))throw invalid();if(r.effectiveDate()!=null&&r.expiryDate()!=null&&r.expiryDate().isBefore(r.effectiveDate()))throw invalid();}
     private String normalizeCategory(String value){String normalized=Optional.ofNullable(value).orElse("").trim().toUpperCase().replaceAll("[^A-Z0-9_]+","_");if(normalized.isBlank()||normalized.length()>50)throw invalid();return normalized;}
     private String trim(String value){return value==null?null:value.trim();}
+    private String upper(String value){return value==null||value.isBlank()?null:value.trim().toUpperCase(Locale.ROOT);}
+    private AdvisorProfile advisor(List<WealthAsset> assets,List<WealthCashFlow> flows,List<WealthGoal> goals){long owner=userDao.getUserId();boolean will=vaultRepo.existsByOwnerUserIdAndCategoryAndActiveTrue(owner,"WILL"),trust=vaultRepo.existsByOwnerUserIdAndCategoryAndActiveTrue(owner,"TRUST_DEED");int stale=(int)assets.stream().filter(a->a.getValuationDate()==null||ChronoUnit.DAYS.between(a.getValuationDate(),LocalDate.now())>("MARKET".equals(a.getPricingMode())?7:365)).count();int score=assets.isEmpty()?0:30;score+=assets.stream().allMatch(a->a.getAcquisitionCost()!=null)?15:0;score+=stale==0&&!assets.isEmpty()?20:0;score+=flows.isEmpty()?0:15;score+=goals.isEmpty()?0:10;score+=will?5:0;score+=trust?5:0;List<String> actions=new ArrayList<>();if(assets.isEmpty())actions.add("Add your first asset to establish a net-worth baseline.");if(stale>0)actions.add("Refresh "+stale+" stale asset valuation"+(stale==1?".":"s."));if(flows.isEmpty()&&!assets.isEmpty())actions.add("Record income and expenses to understand portfolio cash flow.");if(goals.isEmpty())actions.add("Set a wealth goal so progress can be measured.");if(!will)actions.add("Store your current will or note that estate planning is pending.");if(!trust)actions.add("Add trust documents if a trust forms part of your estate plan.");if(actions.isEmpty())actions.add("Your records are current; review beneficiaries and valuations periodically.");String headline=score>=85?"Your wealth records are in strong shape":score>=55?"Your wealth picture is taking shape":"Build a clearer picture of your wealth";return new AdvisorProfile(Math.min(score,100),headline,actions,(int)assets.stream().filter(a->"MARKET".equals(a.getPricingMode())).count(),stale,will,trust);}
     private String sha256(byte[] bytes){try{return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}catch(NoSuchAlgorithmException e){throw new IllegalStateException(e);}}
     private BigDecimal base(BigDecimal amount,String currency){return currencyConversionService.convert(Optional.ofNullable(amount).orElse(BigDecimal.ZERO),currency,baseCurrency);}
     private WealthAsset baseAsset(WealthAsset source){WealthAsset a=new WealthAsset();a.setId(source.getId());a.setName(source.getName());a.setAssetType(source.getAssetType());a.setCurrency(baseCurrency);a.setCurrentValue(base(source.getCurrentValue(),source.getCurrency()));a.setAcquisitionCost(base(source.getAcquisitionCost(),source.getCurrency()));a.setValuationDate(source.getValuationDate());a.setActive(true);return a;}

@@ -7,25 +7,39 @@ import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.wealth.WealthRequests.*;
 import org.pms.silverocean.service.wealth.WealthService;
+import org.pms.silverocean.service.wealth.WealthMarketDataService;
+import org.pms.silverocean.service.wealth.WealthAdminService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.validation.annotation.Validated;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
-@RestController @RequestMapping("/wealth") @RequiredArgsConstructor
+@RestController @RequestMapping("/wealth") @RequiredArgsConstructor @Validated
 public class WealthController {
-    private final WealthService service; private final I18NService i18n;
+    private final WealthService service; private final WealthMarketDataService marketDataService; private final WealthAdminService adminService; private final I18NService i18n;
+    @GetMapping("/asset-types") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> assetTypes(){return ok(adminService.publicTypes());}
+    @GetMapping("/admin/summary") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminSummary(){return ok(adminService.summary());}
+    @GetMapping("/admin/asset-types") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminAssetTypes(){return ok(adminService.adminTypes());}
+    @PostMapping("/admin/asset-types") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> createAssetType(@RequestBody WealthAdminService.AssetTypeRequest request){return ok(adminService.create(request));}
+    @PutMapping("/admin/asset-types/{id}") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> updateAssetType(@PathVariable long id,@RequestBody WealthAdminService.AssetTypeRequest request){return ok(adminService.update(id,request));}
     @GetMapping("/dashboard") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)")
-    public ResponseEntity<ResponseDTO> dashboard(@RequestParam(defaultValue="5") int years,@RequestParam(defaultValue="5") BigDecimal valueGrowth,@RequestParam(defaultValue="3") BigDecimal incomeGrowth,@RequestParam(defaultValue="3") BigDecimal expenseGrowth){return ok(service.dashboard(years,valueGrowth,incomeGrowth,expenseGrowth));}
+    public ResponseEntity<ResponseDTO> dashboard(@RequestParam(defaultValue="5") @Min(1) @Max(30) int years,@RequestParam(defaultValue="5") @DecimalMin("-100") @DecimalMax("100") BigDecimal valueGrowth,@RequestParam(defaultValue="3") @DecimalMin("-100") @DecimalMax("100") BigDecimal incomeGrowth,@RequestParam(defaultValue="3") @DecimalMin("-100") @DecimalMax("100") BigDecimal expenseGrowth){return ok(service.dashboard(years,valueGrowth,incomeGrowth,expenseGrowth));}
     @GetMapping("/assets") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> assets(){return ok(service.assets());}
     @GetMapping("/property-options") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_ASSETS)") public ResponseEntity<ResponseDTO> propertyOptions(){return ok(service.propertyOptions());}
     @PostMapping("/assets") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_ASSETS)") public ResponseEntity<ResponseDTO> create(@Valid @RequestBody AssetRequest r){return ok(service.createAsset(r));}
     @PutMapping("/assets/{id}") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_ASSETS)") public ResponseEntity<ResponseDTO> update(@PathVariable long id,@Valid @RequestBody AssetRequest r){return ok(service.updateAsset(id,r));}
     @DeleteMapping("/assets/{id}") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_ASSETS)") public ResponseEntity<ResponseDTO> archive(@PathVariable long id){service.archiveAsset(id);return ok(null);}
+    @PostMapping("/assets/{id}/market/refresh") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_ASSETS)") public ResponseEntity<ResponseDTO> refreshMarket(@PathVariable long id){return ok(marketDataService.refresh(id));}
+    @GetMapping("/market/status") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> marketStatus(){return ok(marketDataService.status());}
     @PostMapping("/assets/{id}/valuations") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_FINANCE)") public ResponseEntity<ResponseDTO> valuation(@PathVariable long id,@Valid @RequestBody ValuationRequest r){return ok(service.addValuation(id,r));}
     @GetMapping("/assets/{id}/valuations") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> valuations(@PathVariable long id){return ok(service.valuations(id));}
     @PostMapping("/assets/{id}/cash-flows") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_FINANCE)") public ResponseEntity<ResponseDTO> cashFlow(@PathVariable long id,@Valid @RequestBody CashFlowRequest r){return ok(service.addCashFlow(id,r));}
@@ -45,6 +59,8 @@ public class WealthController {
     @PostMapping("/assets/{id}/vault") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_VAULT)") public ResponseEntity<ResponseDTO> upload(@PathVariable long id,@RequestParam String category,@RequestParam(required=false) LocalDate documentDate,@RequestParam(required=false) LocalDate expiryDate,@RequestParam(required=false) String notes,@RequestParam MultipartFile file) throws IOException{return ok(service.upload(id,category,documentDate,expiryDate,notes,file));}
     @GetMapping("/assets/{id}/vault") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> documents(@PathVariable long id){return ok(service.documents(id));}
     @GetMapping("/assets/{id}/ledger") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> ledger(@PathVariable long id){return ok(service.ledger(id));}
+    @PostMapping("/vault") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_VAULT)") public ResponseEntity<ResponseDTO> personalUpload(@RequestParam(required=false) Long assetId,@RequestParam String category,@RequestParam(required=false) LocalDate documentDate,@RequestParam(required=false) LocalDate expiryDate,@RequestParam(required=false) String notes,@RequestParam MultipartFile file) throws IOException{return ok(service.upload(assetId,category,documentDate,expiryDate,notes,file));}
+    @GetMapping("/vault") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> vault(){return ok(service.documents());}
     @GetMapping("/vault/{id}") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_WEALTH)") public ResponseEntity<ResponseDTO> document(@PathVariable long id){return ok(service.document(id));}
     @DeleteMapping("/vault/{id}") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_WEALTH_VAULT)") public ResponseEntity<ResponseDTO> archiveDocument(@PathVariable long id){service.archiveDocument(id);return ok(null);}
     private ResponseEntity<ResponseDTO> ok(Object data){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),data));}

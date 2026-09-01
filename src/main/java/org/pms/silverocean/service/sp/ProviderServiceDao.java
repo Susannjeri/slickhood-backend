@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.List;
 import java.math.BigDecimal;
 
 @Service
@@ -58,6 +59,8 @@ public class ProviderServiceDao {
     public Optional<ProviderService> findById(long id) {
         return repo.findById(id);
     }
+
+    public List<ProviderService> findAllById(Iterable<Long> ids) { return repo.findAllById(ids); }
 
     public Optional<ProviderService> findByIdAndProfileId(long id, long profileId) {
         return repo.findByIdAndProfileId(id, profileId);
