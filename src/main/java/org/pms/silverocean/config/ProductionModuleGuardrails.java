@@ -36,6 +36,18 @@ public class ProductionModuleGuardrails {
         boundedInt("app.insurance.imap.port", 993, 1, 65_535);
         boundedInt("app.insurance.imap.max-per-poll", 50, 1, 200);
         boundedInt("app.insurance.imap.poll-delay-ms", 60_000, 10_000, 3_600_000);
+        boundedInt("helpdesk.ai.max-input-chars", 4_000, 500, 8_000);
+        boundedInt("helpdesk.ai.max-context-messages", 12, 2, 30);
+        boundedInt("helpdesk.guest-session-hours", 24, 1, 72);
+        boundedInt("helpdesk.rate-limit-per-minute", 20, 5, 60);
+        boundedInt("helpdesk.guest-start-limit-per-minute", 10, 2, 30);
+        boundedDuration("helpdesk.ai.connect-timeout", "PT3S", Duration.ofMillis(250), Duration.ofSeconds(10));
+        boundedDuration("helpdesk.ai.read-timeout", "PT20S", Duration.ofSeconds(2), Duration.ofSeconds(45));
+        boundedDuration("helpdesk.sla.urgent", "PT15M", Duration.ofMinutes(5), Duration.ofHours(2));
+        boundedDuration("helpdesk.sla.high", "PT1H", Duration.ofMinutes(15), Duration.ofHours(8));
+        boundedDuration("helpdesk.sla.normal", "PT4H", Duration.ofMinutes(30), Duration.ofDays(1));
+        boundedDuration("helpdesk.sla.low", "PT8H", Duration.ofHours(1), Duration.ofDays(2));
+        boundedInt("helpdesk.sla-scan-delay-ms", 60_000, 10_000, 3_600_000);
     }
 
     public Assessment assess() {
@@ -72,6 +84,12 @@ public class ProductionModuleGuardrails {
 
         requireDecimal(failures, "affiliate.commission-rate", new BigDecimal("25"));
         requireInteger(failures, "affiliate.eligible-payment-count", 3);
+
+        requireTrue(failures, "helpdesk.ai.enabled");
+        if (!hasText("helpdesk.ai.api-key") && !hasText("OPENAI_API_KEY")) failures.add("helpdesk.ai.api-key / OPENAI_API_KEY");
+        String helpdeskBaseUrl = hasText("helpdesk.ai.base-url") ? environment.getProperty("helpdesk.ai.base-url")
+                : environment.getProperty("HELPDESK_AI_BASE_URL");
+        if (!isHttps(helpdeskBaseUrl)) failures.add("helpdesk.ai.base-url / HELPDESK_AI_BASE_URL (HTTPS required)");
         requireExplicit(failures, "affiliate.minimum-payout");
         requireExplicit(failures, "affiliate.commission-hold-days");
 

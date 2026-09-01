@@ -68,6 +68,9 @@ public enum NotificationType {
     INSURANCE_CLAIM_EMAIL("email.insurance.claim.subject", "email.insurance.claim.body", true, NotificationChannel.EMAIL),
     INSURANCE_RENEWAL_EMAIL("email.insurance.renewal.subject", "email.insurance.renewal.body", true, NotificationChannel.EMAIL),
     SOKO_MODERATION_EMAIL("email.soko.moderation.subject", "email.soko.moderation.body", true, NotificationChannel.EMAIL),
+    HELPDESK_ESCALATION_EMAIL("email.helpdesk.escalation.subject", "email.helpdesk.escalation.body", true, NotificationChannel.EMAIL),
+    HELPDESK_AGENT_REPLY_EMAIL("email.helpdesk.agent.reply.subject", "email.helpdesk.agent.reply.body", true, NotificationChannel.EMAIL),
+    HELPDESK_SLA_BREACH_EMAIL("email.helpdesk.sla.breach.subject", "email.helpdesk.sla.breach.body", true, NotificationChannel.EMAIL),
     ;
 
 

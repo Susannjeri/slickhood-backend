@@ -21,6 +21,7 @@ class ProductionModuleGuardrailsTest {
                 "wealth.vault.antivirus.required=true", "app.insurance.imap.enabled=true",
                 "affiliate.commission-rate (must be explicit)",
                 "affiliate.eligible-payment-count (must be explicit)",
+                "helpdesk.ai.enabled=true", "helpdesk.ai.api-key / OPENAI_API_KEY",
                 "M-Pesa or enabled Paystack verified callback configuration");
     }
 
@@ -95,6 +96,9 @@ class ProductionModuleGuardrailsTest {
                 .withProperty("app.insurance.mail.reply-to", "insurance@example.com")
                 .withProperty("affiliate.commission-rate", "25")
                 .withProperty("affiliate.eligible-payment-count", "3")
+                .withProperty("helpdesk.ai.enabled", "true")
+                .withProperty("helpdesk.ai.api-key", "configured")
+                .withProperty("helpdesk.ai.base-url", "https://api.openai.com/v1")
                 .withProperty("affiliate.minimum-payout", "1000")
                 .withProperty("affiliate.commission-hold-days", "14")
                 .withProperty("payment.paystack.enabled", "true")
