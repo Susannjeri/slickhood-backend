@@ -52,6 +52,8 @@ GARAGE_S3_BUCKET=slickhood-production-documents-603455138904-ca-central-1-an
 GARAGE_S3_REGION=ca-central-1
 GARAGE_S3_PATH_STYLE=false
 GARAGE_S3_REQUIRE_HTTPS=true
+GARAGE_S3_ACCESS_KEY=<from-protected-runtime-secret>
+GARAGE_S3_SECRET_KEY=<from-protected-runtime-secret>
 GARAGE_PRESIGNER_DURATION_SECONDS=120
 GARAGE_BOOTSTRAP_ENABLED=false
 ANTIVIRUS_ENABLED=true
@@ -65,8 +67,8 @@ APP_CORS_ALLOWED_ORIGINS=https://app.slickhood.com
 ```
 
 `GARAGE_S3_URL` and `GARAGE_PRESIGNER_URL` must be absent for native AWS S3.
-`GARAGE_ACCESS_KEY` and `GARAGE_SECRET_KEY` must come only from the protected
-runtime secret file for this Lightsail deployment.
+`GARAGE_S3_ACCESS_KEY` and `GARAGE_S3_SECRET_KEY` must come only from the
+protected runtime secret file for this Lightsail deployment.
 
 ## Rollback
 
