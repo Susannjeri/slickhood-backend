@@ -8,6 +8,7 @@ import java.time.*;
 public class InsurancePremiumPayment extends BaseCreatorEntity {
  @Column(nullable=false) private long caseId;
  @Column(nullable=false) private long quoteId;
+ private Long paymentConfigurationId;
  @Column(nullable=false) private BigDecimal amount;
  @Column(nullable=false,length=3) private String currency;
  @Column(nullable=false,length=120) private String paymentReference;
