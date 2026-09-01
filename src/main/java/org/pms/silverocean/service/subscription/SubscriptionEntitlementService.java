@@ -142,8 +142,9 @@ public class SubscriptionEntitlementService {
      */
     @Transactional(readOnly = true)
     public void requireSessionBusinessProductIfApplicable() {
+        Long userId = users.getUserId();
+        if (userId == null) return;
         if (internalStaff()) return;
-        long userId = users.getUserId();
         var memberWorkspace = memberships.findFirstByUserIdAndStatusInAndActiveTrueOrderByCreatedOnDesc(
                         userId, LIVE_MEMBERSHIPS)
                 .flatMap(membership -> workspaces.findById(membership.getWorkspaceId()))
