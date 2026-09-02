@@ -5,6 +5,8 @@ import org.pms.silverocean.database.pms.HelpRateLimitRepo;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -20,7 +22,8 @@ public class HelpDeskRateLimiter {
         repository.increment(subjectHash, window);
         Integer count = repository.requestCount(subjectHash, window);
         if (count != null && count > limit) {
-            throw new IllegalArgumentException("Please wait before sending more help messages.");
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "Please wait before sending more help messages.");
         }
     }
 

@@ -13,6 +13,8 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -99,20 +101,25 @@ class HelpDeskServiceTest {
         assertNull(saved.getValue().getUserId());
     }
 
-    @Test void sensitiveMessageIsNotPersistedAndIsEscalated() {
+    @Test void sensitiveMessageIsRejectedAndNotPersisted() {
         when(users.getUserId()).thenReturn(17L);
         HelpConversation conversation = new HelpConversation();
         conversation.setId(5L); conversation.setTicketNumber("SH-TEST"); conversation.setUserId(17L);
         conversation.setActiveRole("Tenant"); conversation.setStatus("OPEN"); conversation.setPriority("NORMAL"); conversation.setActive(true);
         when(conversations.findByIdAndUserIdAndActiveTrue(5L, 17L)).thenReturn(Optional.of(conversation));
-        when(conversations.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(messages.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        var result = service.send(5L, new HelpDeskModels.SendMessage("My OTP=123456"));
-        assertEquals("ESCALATED", result.status());
-        ArgumentCaptor<HelpMessage> saved = ArgumentCaptor.forClass(HelpMessage.class);
-        verify(messages).save(saved.capture());
-        assertEquals("SYSTEM", saved.getValue().getSenderType());
-        assertFalse(saved.getValue().getContent().contains("123456"));
-        verifyNoInteractions(ai);
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> service.send(5L, new HelpDeskModels.SendMessage("My OTP is 123456")));
+        assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
+        verifyNoInteractions(messages, ai);
+        verify(conversations, never()).save(any());
+    }
+
+    @Test void invalidGuestTokenIsAControlledNotFoundResponse() {
+        String validLengthToken = "x".repeat(40);
+        when(conversations.findByTicketNumberAndGuestTokenHashAndActiveTrue(eq("SH-TEST"), anyString()))
+                .thenReturn(Optional.empty());
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> service.getGuest("SH-TEST", validLengthToken));
+        assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
     }
 }

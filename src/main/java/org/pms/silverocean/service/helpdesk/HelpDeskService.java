@@ -23,6 +23,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @RequiredArgsConstructor
@@ -30,7 +32,7 @@ public class HelpDeskService {
     private static final Set<String> CATEGORIES = Set.of("REGISTRATION", "ACCOUNT", "KYC", "PAYMENTS", "PROPERTY",
             "RENTALS", "SALES", "VISITORS", "SERVICES", "SOKO", "WEALTH", "INSURANCE", "AFFILIATE", "GENERAL");
     private static final Pattern SECRET_PATTERN = Pattern.compile(
-            "(?i)(?:sk-[a-z0-9_-]{12,}|bearer\\s+[a-z0-9._-]{12,}|(?:password|passcode|otp|pin)\\s*[:=]\\s*\\S+|(?:\\d[ -]?){13,19})");
+            "(?i)(?:sk-[a-z0-9_-]{12,}|bearer\\s+[a-z0-9._-]{12,}|(?:password|passcode|otp|pin)\\s*(?::|=|\\bis\\b)\\s*\\S+|(?:\\d[ -]?){13,19})");
     private static final int MESSAGE_PAGE_SIZE = 100;
 
     private final HelpConversationRepo conversations;
@@ -232,8 +234,8 @@ public class HelpDeskService {
         if (idempotent(c, request.idempotencyKey())) return detail(c, false);
         rateLimiter.check(hash(rateSubject), rateLimitPerMinute); String input = cleanInput(request.message());
         if (containsSensitiveData(input)) {
-            saveMessage(c, "SYSTEM", "For your security, that message was not stored. Remove passwords, OTPs, PINs, API keys and full card details, then try again.", null, null, null, creator, false, request.idempotencyKey());
-            markEscalated(c, "HIGH"); return detail(c, false);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "For your security, remove passwords, OTPs, PINs, API keys and full card details before sending.");
         }
         OpenAiHelpDeskClient.ModerationResult inputModeration = ai.moderate(input);
         if (!inputModeration.available() || inputModeration.flagged()) {
@@ -265,11 +267,13 @@ public class HelpDeskService {
     private HelpConversation owned(long id) { return conversations.findByIdAndUserIdAndActiveTrue(id, requireUser()).orElseThrow(); }
     private HelpConversation active(long id) { return conversations.findByIdAndActiveTrue(id).orElseThrow(); }
     private HelpConversation guestOwned(String ticket, String token) {
-        HelpConversation c = conversations.findByTicketNumberAndGuestTokenHashAndActiveTrue(ticket, hash(requireToken(token))).orElseThrow();
+        HelpConversation c = conversations.findByTicketNumberAndGuestTokenHashAndActiveTrue(ticket, hash(requireToken(token)))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Help session not found."));
         ensureGuestActive(c); return c;
     }
     private void ensureGuestActive(HelpConversation c) {
-        if (c.getGuestExpiresAt() == null || !c.getGuestExpiresAt().isAfter(LocalDateTime.now())) throw new IllegalArgumentException("This guest help session has expired.");
+        if (c.getGuestExpiresAt() == null || !c.getGuestExpiresAt().isAfter(LocalDateTime.now()))
+            throw new ResponseStatusException(HttpStatus.GONE, "This guest help session has expired.");
     }
     private void ensureAgentOwns(HelpConversation c, long agent) {
         if (c.getAssignedToUserId() == null) c.setAssignedToUserId(agent);
@@ -337,7 +341,7 @@ public class HelpDeskService {
     private Duration slaFor(String p) { return switch(p){case "URGENT"->urgentSla;case "HIGH"->highSla;case "LOW"->lowSla;default->normalSla;}; }
     private String normalizeCategory(String c) { String v=Objects.toString(c,"GENERAL").trim().toUpperCase(Locale.ROOT).replace(' ','_'); return CATEGORIES.contains(v)?v:"GENERAL"; }
     private String safeContext(String c) { if(c==null||c.isBlank())return null; String v=c.trim().replaceAll("[\\r\\n\\t]"," "); return v.length()>255?v.substring(0,255):v; }
-    private String cleanInput(String input) { String v=Objects.toString(input,"").trim(); if(v.isBlank())throw new IllegalArgumentException("Message is required."); if(v.length()>maxInputChars)throw new IllegalArgumentException("Message is too long."); return v; }
+    private String cleanInput(String input) { String v=Objects.toString(input,"").trim(); if(v.isBlank())throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Message is required."); if(v.length()>maxInputChars)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Message is too long."); return v; }
     private boolean containsSensitiveData(String input) { return SECRET_PATTERN.matcher(input).find(); }
     private String newGuestToken() { byte[] b=new byte[32]; secureRandom.nextBytes(b); return Base64.getUrlEncoder().withoutPadding().encodeToString(b); }
     private String ticketNumber() {
@@ -345,6 +349,6 @@ public class HelpDeskService {
         throw new IllegalStateException("Could not allocate a help case number.");
     }
     private String hash(String value) { try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException("Unable to protect the help session.",e);} }
-    private String requireToken(String token) { if(token==null||token.length()<32||token.length()>128)throw new IllegalArgumentException("Invalid help session."); return token; }
+    private String requireToken(String token) { if(token==null||token.length()<32||token.length()>128)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid help session."); return token; }
     private String blankToNull(String value) { return value==null||value.isBlank()?null:value; }
 }
