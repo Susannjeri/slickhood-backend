@@ -12,8 +12,8 @@ public class InsuranceRenewalOffer extends BaseCreatorEntity {
  @Column(nullable=false) private BigDecimal basePremium;
  @Column(nullable=false) private BigDecimal taxesLevies;
  @Column(nullable=false) private BigDecimal totalPremium;
- @Column(nullable=false,length=12000) private String coverageSummary;
- @Column(length=12000) private String exclusions;
+ @Lob @Column(nullable=false,columnDefinition="TEXT") private String coverageSummary;
+ @Lob @Column(columnDefinition="TEXT") private String exclusions;
  @Column(nullable=false) private LocalDate validUntil;
  @Column(nullable=false) private LocalDate coverStartDate;
  @Column(nullable=false) private LocalDate coverEndDate;

@@ -1,0 +1,7 @@
+management:
+  endpoint:
+    health:
+      group:
+        production-readiness:
+          include: productionReadiness
+          show-details: always
