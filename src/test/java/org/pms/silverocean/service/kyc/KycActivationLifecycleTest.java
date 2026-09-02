@@ -389,6 +389,21 @@ class KycActivationLifecycleTest {
         assertThat(view.documents()).noneMatch(document -> document.id() == 102L || document.id() == 100L);
     }
 
+    @Test void currentViewUsesTheVerifiedUserPhoneWhenTheCaseSnapshotIsStale() {
+        Users subject = customer(12);
+        subject.setPhoneVerified(true);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        kycCase.setPhoneVerified(false);
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of());
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of());
+
+        KycCaseView view = service.current();
+
+        assertThat(view.phoneVerified()).isTrue();
+    }
+
     @Test void cleanReplacementSupersedesRejectedAlternativesWithoutFalseIdentityConflict() throws Exception {
         Users subject = customer(12);
         subject.setFullName("Collectable Class");

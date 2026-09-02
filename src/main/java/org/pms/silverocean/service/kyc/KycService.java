@@ -584,7 +584,7 @@ public class KycService {
         Set<KycDocumentType> uploadedTypes = docs.stream()
                 .map(doc -> KycDocumentType.valueOf(doc.documentType())).collect(Collectors.toSet());
         return new KycCaseView(kycCase.getId(), kycCase.getStatus(), user.getAccountStatus(),
-                currentConsentVersion, kycCase.getReviewNotes(), kycCase.isPhoneVerified(), user.getPhoneNumber(),
+                currentConsentVersion, kycCase.getReviewNotes(), user.isPhoneVerified(), user.getPhoneNumber(),
                 timestamp(user.getPhoneVerifiedAt()), kycCase.getRegistryStatus(), ocrProvider.enabled(),
                 effectiveRequirements(user, uploadedTypes), missingRequirements(kycCase, user), docs);
     }
