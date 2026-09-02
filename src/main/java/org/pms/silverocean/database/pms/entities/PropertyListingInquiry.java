@@ -30,7 +30,7 @@ public class PropertyListingInquiry extends BaseActiveEntity {
     private String message;
     @Column(nullable = false, length = 20)
     private String status;
-    @Column(nullable = false, length = 64)
+    @Column(nullable = false, columnDefinition = "CHAR(64)")
     private String fingerprintHash;
     @Column(nullable = false, length = 40)
     private String consentVersion;
