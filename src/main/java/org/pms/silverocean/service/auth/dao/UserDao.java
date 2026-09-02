@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.Set;
+import java.util.List;
 
 import static org.pms.silverocean.service.users.UserSpecifications.searchUsers;
 
@@ -71,6 +72,8 @@ public class UserDao {
     public Optional<Users> findById(long id) {
         return userCache.getUnchecked(id);
     }
+
+    public List<Users> findAllById(Iterable<Long> ids) { return userRepo.findAllById(ids); }
 
     public Users save(Users user) {
         userCache.invalidate(user.getEmail());

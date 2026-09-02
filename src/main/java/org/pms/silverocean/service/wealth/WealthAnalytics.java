@@ -43,7 +43,7 @@ public final class WealthAnalytics {
         List<Insight> insights=insights(assets,performance,obligations);
         List<ProjectionYear> projection=project(summary,Math.max(1,Math.min(years,30)),valueGrowthPct,incomeGrowthPct,expenseGrowthPct);
         List<GoalProgress> progress=goals.stream().map(g->goal(g,summary)).toList();
-        return new Dashboard(summary,performance,obligations,goals,progress,insights,projection);
+        return new Dashboard(summary,performance,obligations,goals,progress,insights,projection,null);
     }
     private static AssetPerformance performance(WealthAsset a,List<WealthCashFlow> flows,BigDecimal debt,BigDecimal annualDebtService,BigDecimal total,OperatingInput operating){
         BigDecimal income=sum(flows.stream().filter(f->"INCOME".equals(f.getFlowType())).map(WealthCashFlow::getAmount).toList());

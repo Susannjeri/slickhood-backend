@@ -46,6 +46,10 @@ public class SokoOrder extends BaseCreatorEntity {
     private String courierVehiclePlate;
     @JsonIgnore
     private String deliveryCode;
+    @JsonIgnore
+    private byte[] encryptedDeliveryCode;
+    @JsonIgnore
+    private String checkoutIdempotencyKey;
     private boolean deliveryCodeVerified;
     private int deliveryCodeAttempts;
     private ZonedDateTime reservationExpiresAt;
@@ -59,6 +63,10 @@ public class SokoOrder extends BaseCreatorEntity {
     private String settlementReference;
     private BigDecimal settledAmount;
     private String deliveryRecipientName;
+    @JsonIgnore
     private String deliveryProofReference;
     private ZonedDateTime deliveryProofAt;
+    private ZonedDateTime expectedArrivalAt;
+    private String deliveryProofContentType;
+    private Long deliveryProofSize;
 }

@@ -8,5 +8,7 @@ import java.util.Optional;
 
 public interface InsuranceCompanyRepo extends JpaRepository<InsuranceCompany, Long> {
     List<InsuranceCompany> findByActiveTrueOrderByNameAsc();
+    List<InsuranceCompany> findAllByOrderByNameAsc();
     Optional<InsuranceCompany> findByCodeIgnoreCaseAndActiveTrue(String code);
+    Optional<InsuranceCompany> findByCodeIgnoreCase(String code);
 }

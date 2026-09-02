@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.List;
 
 @Service
 public class ProviderProfileDao {
@@ -38,6 +39,8 @@ public class ProviderProfileDao {
     public Optional<ProviderProfile> findById(long id) {
         return repo.findById(id);
     }
+
+    public List<ProviderProfile> findAllById(Iterable<Long> ids) { return repo.findAllById(ids); }
 
     public Page<ProviderProfile> findAll(Pageable pageable) {
         return repo.findAll(pageable);

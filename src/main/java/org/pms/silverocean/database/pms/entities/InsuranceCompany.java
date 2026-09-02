@@ -12,6 +12,9 @@ import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;
 @Getter
 @Setter
 public class InsuranceCompany extends BaseCreatorEntity {
+    @Column(nullable = false)
+    private long agencyId;
+
     @Column(nullable = false, unique = true, length = 50)
     private String code;
 

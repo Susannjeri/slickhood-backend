@@ -21,4 +21,7 @@ public interface SokoProductRepo extends JpaRepository<SokoProduct, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from SokoProduct p where p.id=:id and p.active=true")
     Optional<SokoProduct> findByIdForUpdate(long id);
+    Page<SokoProduct> findAllByActiveTrue(Pageable pageable);
+    long countByActiveTrue();
+    long countByStatusAndActiveTrue(String status);
 }

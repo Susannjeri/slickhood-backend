@@ -4,6 +4,9 @@ import lombok.RequiredArgsConstructor;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.InsuranceCompanyRepo;
 import org.pms.silverocean.database.pms.InsuranceEmailExchangeRepo;
+import org.pms.silverocean.database.pms.InsuranceCaseRepo;
+import org.pms.silverocean.database.pms.InsuranceClaimRepo;
+import org.pms.silverocean.database.pms.InsurancePolicyRepo;
 import org.pms.silverocean.database.pms.entities.InsuranceCompany;
 import org.pms.silverocean.database.pms.entities.InsuranceEmailExchange;
 import org.pms.silverocean.service.PMSCustomException;
@@ -28,11 +31,14 @@ import static org.pms.silverocean.service.insurance.InsuranceModels.*;
 public class InsuranceCorrespondenceService {
     private final InsuranceCompanyRepo companyRepo;
     private final InsuranceEmailExchangeRepo exchangeRepo;
+    private final InsuranceCaseRepo caseRepo;
+    private final InsuranceClaimRepo claimRepo;
+    private final InsurancePolicyRepo policyRepo;
     private final EncryptionService encryptionService;
     private final InsuranceEmailSender emailSender;
     private final DomainEventOutboxPublisher outboxPublisher;
     private final UserDao userDao;
-    @Value("${app.insurance.mail.from:info@silverwoodinsurance.com}") private String senderAddress;
+    @Value("${app.insurance.mail.from:${INSURANCE_MAIL_FROM:info@silverwoodinsurance.com}}") private String senderAddress;
 
     @Transactional("pmsDBTransactionManager")
     public EmailExchangeView queue(InsurerEmailRequest request) {
@@ -42,6 +48,7 @@ public class InsuranceCorrespondenceService {
         if (recipient == null || recipient.isBlank()) throw new PMSCustomException(ResponseCode.INVALID_EMAIL);
 
         String caseReference = normalizeReference(request.caseReference());
+        validateReference(caseReference, request.messageType());
         String correlationId = UUID.randomUUID().toString();
         String subject = "[SILVERWOOD " + caseReference + "] " + request.subject().trim();
         String body = request.body() + "<hr><p><strong>Silverwood reference:</strong> " + caseReference +
@@ -77,6 +84,15 @@ public class InsuranceCorrespondenceService {
 
     @Transactional("pmsDBTransactionManager")
     public EmailExchangeView recordResponse(InsurerEmailResponse response) {
+        return recordResponse(response, false);
+    }
+
+    @Transactional("pmsDBTransactionManager")
+    public EmailExchangeView recordMailboxResponse(InsurerEmailResponse response) {
+        return recordResponse(response, true);
+    }
+
+    private EmailExchangeView recordResponse(InsurerEmailResponse response, boolean trustedMailbox) {
         InsuranceEmailExchange outbound = exchangeRepo.findByCorrelationId(response.correlationId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND));
         InsuranceCompany company = companyRepo.findById(outbound.getCompanyId())
@@ -84,11 +100,16 @@ public class InsuranceCorrespondenceService {
         InsuranceEmailExchange inbound = new InsuranceEmailExchange();
         inbound.setCompanyId(company.getId()); inbound.setCaseReference(outbound.getCaseReference());
         inbound.setCorrelationId(UUID.randomUUID().toString()); inbound.setInReplyTo(outbound.getCorrelationId());
-        inbound.setMessageType(outbound.getMessageType()); inbound.setDirection("INBOUND"); inbound.setStatus("RECEIVED_UNVERIFIED");
+        String externalId = trimToNull(response.externalMessageId());
+        if (externalId != null && exchangeRepo.existsByCompanyIdAndExternalMessageId(company.getId(), externalId)) return view(company, outbound);
+        boolean senderMatches = response.fromAddress().trim().equalsIgnoreCase(outbound.getRecipientAddress());
+        inbound.setMessageType(outbound.getMessageType()); inbound.setDirection("INBOUND"); inbound.setStatus(trustedMailbox && senderMatches ? "RECEIVED_VERIFIED" : "RECEIVED_UNVERIFIED");
         inbound.setSenderAddress(response.fromAddress().trim()); inbound.setRecipientAddress(senderAddress);
         inbound.setSubject(response.subject().trim()); inbound.setEncryptedBody(encryptionService.encrypt(response.body()));
-        inbound.setBodyHash(hash(response.body())); inbound.setExternalMessageId(trimToNull(response.externalMessageId()));
-        inbound.setReceivedAt(LocalDateTime.now()); inbound.setCreatedBy(userDao.getUserId()); inbound.setActive(true);
+        inbound.setBodyHash(hash(response.body())); inbound.setExternalMessageId(externalId);
+        // Mailbox polling runs without an authenticated web request. Preserve the initiating
+        // staff actor for audit instead of attempting to resolve a nonexistent scheduler user.
+        inbound.setReceivedAt(LocalDateTime.now()); inbound.setCreatedBy(outbound.getCreatedBy()); inbound.setActive(true);
         return view(company, exchangeRepo.save(inbound));
     }
 
@@ -107,6 +128,16 @@ public class InsuranceCorrespondenceService {
             case "RENEWAL_REQUEST" -> company.getRenewalsEmail();
             default -> throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         };
+    }
+
+    private void validateReference(String reference, String messageType) {
+        boolean valid = switch (messageType) {
+            case "QUOTATION_REQUEST" -> caseRepo.existsByReferenceAndActiveTrue(reference);
+            case "CLAIM_NOTIFICATION" -> claimRepo.existsByReferenceAndActiveTrue(reference);
+            case "RENEWAL_REQUEST" -> policyRepo.existsByPolicyNumberAndActiveTrue(reference);
+            default -> false;
+        };
+        if (!valid) throw new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND);
     }
 
     private EmailExchangeView view(InsuranceCompany company, InsuranceEmailExchange e) {

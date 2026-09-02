@@ -7,6 +7,7 @@ import org.pms.silverocean.database.pms.entities.ProviderService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.sp.dao.ProviderDocumentDao;
 import org.pms.silverocean.service.sp.dao.ProviderProfileDao;
 import org.springframework.data.domain.PageRequest;
@@ -29,6 +30,7 @@ class ProviderDocumentServiceAuthorizationTest {
     private ProviderServiceDao serviceDao;
     private UserDao userDao;
     private GarageService garageService;
+    private UploadMalwarePolicy malwarePolicy;
     private ProviderDocumentService service;
 
     @BeforeEach
@@ -38,7 +40,8 @@ class ProviderDocumentServiceAuthorizationTest {
         serviceDao = mock(ProviderServiceDao.class);
         userDao = mock(UserDao.class);
         garageService = mock(GarageService.class);
-        service = new ProviderDocumentService(documentDao, profileDao, serviceDao, userDao, garageService);
+        malwarePolicy = mock(UploadMalwarePolicy.class);
+        service = new ProviderDocumentService(documentDao, profileDao, serviceDao, userDao, garageService, malwarePolicy);
 
         ProviderProfile profile = new ProviderProfile();
         profile.setId(10L);
@@ -76,12 +79,12 @@ class ProviderDocumentServiceAuthorizationTest {
             ((org.pms.silverocean.database.pms.entities.ProviderDocument) invocation.getArgument(0)).setId(1L);
             return null;
         }).when(documentDao).save(any(), any());
-        var file = new MockMultipartFile("file", "../../certificate.PDF", "application/pdf", "clean".getBytes());
+        var file = new MockMultipartFile("file", "../../certificate.PDF", "application/pdf", new byte[]{'%','P','D','F','-'});
 
-        service.uploadDocument(12L, file, "CERTIFICATE", null);
+        service.uploadDocument(12L, file, "PROFESSIONAL_CERTIFICATE", null);
 
         verify(garageService).uploadBytes(
-                org.mockito.ArgumentMatchers.matches("sp/documents/12/[0-9a-f-]{36}\\.pdf"),
+                org.mockito.ArgumentMatchers.matches("sp/documents/12/professional_certificate-[0-9a-f-]{36}\\.pdf"),
                 any(byte[].class),
                 org.mockito.ArgumentMatchers.eq("application/pdf"));
     }

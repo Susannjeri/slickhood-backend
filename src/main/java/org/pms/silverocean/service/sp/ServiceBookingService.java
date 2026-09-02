@@ -29,6 +29,9 @@ import org.pms.silverocean.service.sp.wrappers.ServiceBookingDTO;
 import org.pms.silverocean.service.sp.wrappers.MarketplaceFinanceRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +39,10 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.nio.charset.StandardCharsets;
 import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.web.util.HtmlUtils;
 
 @Service
@@ -163,12 +170,12 @@ public class ServiceBookingService {
         if (!java.util.Objects.equals(service.getCreatedBy(), userDao.getUserId())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND);
         }
-        return bookingDao.findByServiceId(pageable, serviceId).map(this::toDTO);
+        return hydrate(bookingDao.findByServiceId(bounded(pageable), serviceId));
     }
 
     public Page<ServiceBookingDTO> listMyBookings(Pageable pageable) {
         long userId = userDao.getUserId();
-        return bookingDao.findByCreatedByOrBookedServiceProvider(pageable, userId).map(this::toDTO);
+        return hydrate(bookingDao.findByCreatedByOrBookedServiceProvider(bounded(pageable), userId));
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -179,6 +186,11 @@ public class ServiceBookingService {
                 booking.setProviderReference(providerReference);
                 booking.setStatus(BookingStatus.PAID.name());
                 bookingDao.save(booking, "SYSTEM_SP_BOOKING_PAYMENT_CONFIRMED");
+            } else if (BookingStatus.CANCELLED.name().equals(booking.getStatus()) && !"PAID".equals(booking.getPaymentStatus())) {
+                booking.setPaymentStatus("PAID");
+                booking.setProviderReference(providerReference);
+                booking.setRefundStatus("REQUESTED");
+                bookingDao.save(booking, "SYSTEM_SP_LATE_PAYMENT_REFUND_REQUESTED");
             }
         });
     }
@@ -256,6 +268,20 @@ public class ServiceBookingService {
     private ServiceBookingDTO toDTO(ServiceBooking booking) {
         var service = serviceDao.findById(booking.getServiceId()).orElse(null);
         return toDTO(booking, service);
+    }
+
+    private Pageable bounded(Pageable pageable) {
+        Sort sort=pageable.getSort().isSorted()?pageable.getSort():Sort.by(Sort.Direction.DESC,"createdOn");
+        return PageRequest.of(Math.max(0,pageable.getPageNumber()),Math.min(100,Math.max(1,pageable.getPageSize())),sort);
+    }
+
+    private Page<ServiceBookingDTO> hydrate(Page<ServiceBooking> page) {
+        if(page.isEmpty())return new PageImpl<>(List.of(),page.getPageable(),page.getTotalElements());
+        Map<Long,ProviderService> services=serviceDao.findAllById(page.stream().map(ServiceBooking::getServiceId).distinct().toList()).stream().collect(Collectors.toMap(ProviderService::getId,Function.identity()));
+        Map<Long,ProviderProfile> profiles=profileDao.findAllById(services.values().stream().map(ProviderService::getProfileId).distinct().toList()).stream().collect(Collectors.toMap(ProviderProfile::getId,Function.identity()));
+        Map<Long,Users> users=userDao.findAllById(page.stream().map(ServiceBooking::getCreatedBy).distinct().toList()).stream().collect(Collectors.toMap(Users::getId,Function.identity()));
+        List<ServiceBookingDTO> content=page.stream().map(booking->{ProviderService service=services.get(booking.getServiceId());ProviderProfile profile=service==null?null:profiles.get(service.getProfileId());Users user=users.get(booking.getCreatedBy());return new ServiceBookingDTO(booking,service==null?null:service.getCategoryName(),profile==null?null:profile.getBusinessName(),user==null?null:user.getFullName());}).toList();
+        return new PageImpl<>(content,page.getPageable(),page.getTotalElements());
     }
 
     private ServiceBookingDTO toDTO(ServiceBooking booking, ProviderService service) {
