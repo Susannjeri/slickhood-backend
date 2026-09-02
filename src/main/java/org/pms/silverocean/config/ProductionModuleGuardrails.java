@@ -40,8 +40,10 @@ public class ProductionModuleGuardrails {
 
         require(failures, "garage.s3.access.key");
         require(failures, "garage.s3.secret.key");
-        requireHttps(failures, "garage.presigner.url");
-        rejectLocal(failures, "garage.s3.url");
+        require(failures, "garage.s3.bucket");
+        require(failures, "garage.s3.region");
+        rejectUnsafeEndpointIfConfigured(failures, "garage.presigner.url");
+        rejectUnsafeEndpointIfConfigured(failures, "garage.s3.url");
 
         require(failures, "spring.mail.host");
         require(failures, "spring.mail.username");
@@ -56,12 +58,12 @@ public class ProductionModuleGuardrails {
         requireTrue(failures, "wealth.vault.antivirus.required");
         require(failures, "wealth.vault.antivirus.host");
 
-        requireTrue(failures, "app.insurance.imap.enabled");
-        require(failures, "app.insurance.imap.host");
-        require(failures, "app.insurance.imap.username");
-        require(failures, "app.insurance.imap.password");
-        require(failures, "app.insurance.mail.from");
-        require(failures, "app.insurance.mail.reply-to");
+        requireTrueEither(failures, "app.insurance.imap.enabled", "INSURANCE_IMAP_ENABLED");
+        requireEither(failures, "app.insurance.imap.host", "INSURANCE_IMAP_HOST");
+        requireEither(failures, "app.insurance.imap.username", "INSURANCE_IMAP_USERNAME");
+        requireEither(failures, "app.insurance.imap.password", "INSURANCE_IMAP_PASSWORD");
+        requireEither(failures, "app.insurance.mail.from", "INSURANCE_MAIL_FROM");
+        requireEither(failures, "app.insurance.mail.reply-to", "INSURANCE_REPLY_TO");
 
         requireExplicit(failures, "affiliate.commission-rate");
         requireExplicit(failures, "affiliate.minimum-payout");
@@ -97,9 +99,28 @@ public class ProductionModuleGuardrails {
         if (!isHttps(configured)) failures.add(key + " (HTTPS required)");
     }
 
-    private void rejectLocal(List<String> failures, String key) {
+    private void rejectUnsafeEndpointIfConfigured(List<String> failures, String key) {
         String configured = environment.getProperty(key);
-        if (!hasText(key) || isLocal(configured)) failures.add(key + " (non-local endpoint required)");
+        if (configured != null && !configured.isBlank() && !isHttps(configured)) {
+            failures.add(key + " (HTTPS non-local endpoint required when configured)");
+        }
+    }
+
+    private void requireEither(List<String> failures, String canonicalKey, String environmentKey) {
+        if (!hasText(canonicalKey) && !hasText(environmentKey)) failures.add(canonicalKey);
+    }
+
+    private void requireTrueEither(List<String> failures, String canonicalKey, String environmentKey) {
+        if (!Boolean.parseBoolean(firstValue(canonicalKey, environmentKey, "false"))) {
+            failures.add(canonicalKey + "=true");
+        }
+    }
+
+    private String firstValue(String canonicalKey, String environmentKey, String fallback) {
+        String canonical = environment.getProperty(canonicalKey);
+        if (canonical != null && !canonical.isBlank()) return canonical;
+        String directEnvironment = environment.getProperty(environmentKey);
+        return directEnvironment == null || directEnvironment.isBlank() ? fallback : directEnvironment;
     }
 
     private void requireHttpsOrigins(List<String> failures, String key) {

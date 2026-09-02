@@ -30,6 +30,27 @@ class ProductionModuleGuardrailsTest {
     }
 
     @Test
+    void acceptsAwsSdkEndpointResolutionAndInsuranceEnvironmentAliases() {
+        var environment = completeEnvironment()
+                .withProperty("garage.s3.url", "")
+                .withProperty("garage.presigner.url", "")
+                .withProperty("app.insurance.imap.enabled", "")
+                .withProperty("app.insurance.imap.host", "")
+                .withProperty("app.insurance.imap.username", "")
+                .withProperty("app.insurance.imap.password", "")
+                .withProperty("app.insurance.mail.from", "")
+                .withProperty("app.insurance.mail.reply-to", "")
+                .withProperty("INSURANCE_IMAP_ENABLED", "true")
+                .withProperty("INSURANCE_IMAP_HOST", "imap.example.com")
+                .withProperty("INSURANCE_IMAP_USERNAME", "insurance@example.com")
+                .withProperty("INSURANCE_IMAP_PASSWORD", "configured")
+                .withProperty("INSURANCE_MAIL_FROM", "insurance@example.com")
+                .withProperty("INSURANCE_REPLY_TO", "insurance@example.com");
+
+        assertThat(new ProductionModuleGuardrails(environment).assess().ready()).isTrue();
+    }
+
+    @Test
     void rejectsUnsafeSchedulerAndBatchConfigurationAtStartup() {
         var environment = new MockEnvironment().withProperty("wealth.market.batch-size", "1000");
 
@@ -42,7 +63,9 @@ class ProductionModuleGuardrailsTest {
         return new MockEnvironment()
                 .withProperty("garage.s3.access.key", "configured")
                 .withProperty("garage.s3.secret.key", "configured")
-                .withProperty("garage.s3.url", "http://garage.internal:3900")
+                .withProperty("garage.s3.bucket", "slickhood-production-documents")
+                .withProperty("garage.s3.region", "ca-central-1")
+                .withProperty("garage.s3.url", "https://garage.internal:3900")
                 .withProperty("garage.presigner.url", "https://files.slickhood.com")
                 .withProperty("spring.mail.host", "smtp.example.com")
                 .withProperty("spring.mail.username", "mailer")
