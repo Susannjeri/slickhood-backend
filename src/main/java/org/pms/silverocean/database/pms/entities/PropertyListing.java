@@ -22,7 +22,7 @@ import java.time.ZonedDateTime;
 })
 @Getter @Setter
 public class PropertyListing extends BaseCreatorEntity implements Auditable {
-    @Column(nullable = false, unique = true)
+    @Column(name = "unit_id", nullable = false, unique = true)
     private long unitId;
     @Column(nullable = false, unique = true, length = 180)
     private String publicSlug;
