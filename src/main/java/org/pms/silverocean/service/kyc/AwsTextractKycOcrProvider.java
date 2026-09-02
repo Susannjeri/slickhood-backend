@@ -28,7 +28,9 @@ public class AwsTextractKycOcrProvider implements KycOcrProvider {
     private static final Pattern PASSPORT = Pattern.compile("\\b[A-Z]{1,2}[0-9]{6,8}\\b");
     private static final Pattern DATE = Pattern.compile("\\b(?:[0-3]?[0-9][./-][01]?[0-9][./-](?:19|20)[0-9]{2}|(?:19|20)[0-9]{2}[./-][01]?[0-9][./-][0-3]?[0-9])\\b");
     private static final Set<String> ID_LABELS = Set.of("ID NO", "ID NUMBER", "IDENTITY NUMBER", "NATIONAL ID");
-    private static final Set<String> NAME_LABELS = Set.of("FULL NAME", "NAME OF HOLDER", "SURNAME", "OTHER NAMES", "NAME");
+    private static final Set<String> NAME_LABELS = Set.of(
+            "FULL NAME", "NAME OF HOLDER", "HOLDER NAME", "HOLDER'S NAME", "SURNAME", "OTHER NAMES",
+            "TAXPAYER NAME", "BUSINESS NAME", "COMPANY NAME", "ORGANIZATION NAME");
     private static final Set<String> DOB_LABELS = Set.of("DATE OF BIRTH", "BIRTH DATE", "DOB");
     private static final Set<String> EXPIRY_LABELS = Set.of("DATE OF EXPIRY", "EXPIRY DATE", "EXPIRES");
     private final TextractClient client;
@@ -59,7 +61,9 @@ public class AwsTextractKycOcrProvider implements KycOcrProvider {
                     .ifPresent(value -> put(fields, evidenceConfidence, "documentNumber", value));
             labelled(DOB_LABELS, DATE, lines).ifPresent(value -> put(fields, evidenceConfidence, "dateOfBirth", value));
         }
-        labelledText(NAME_LABELS, lines).ifPresent(value -> put(fields, evidenceConfidence, "fullName", value));
+        if (documentType != KycDocumentType.SELFIE) {
+            labelledText(NAME_LABELS, lines).ifPresent(value -> put(fields, evidenceConfidence, "fullName", value));
+        }
 
         List<String> missing = requiredMissing(documentType, fields);
         fields.put("_validationStatus", missing.isEmpty() ? "PASSED" : "REVIEW_REQUIRED");

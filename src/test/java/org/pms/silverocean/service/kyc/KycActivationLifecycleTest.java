@@ -71,12 +71,18 @@ class KycActivationLifecycleTest {
     @Test void submissionMovesCustomerIntoReviewGate() {
         Users customer = customer(12); customer.setPhoneVerified(true);
         KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        kycCase.setReviewNotes("Stale correction message");
+        kycCase.setReviewedAt(java.time.ZonedDateTime.now());
+        kycCase.setReviewedBy(99L);
         when(users.getUserObject()).thenReturn(customer); when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
 
         KycCaseView view = service.submit();
 
         assertThat(view.status()).isEqualTo("SUBMITTED");
         assertThat(customer.getAccountStatus()).isEqualTo(AccountStatus.KYC_UNDER_REVIEW.name());
+        assertThat(kycCase.getReviewNotes()).isNull();
+        assertThat(kycCase.getReviewedAt()).isNull();
+        assertThat(kycCase.getReviewedBy()).isNull();
         verify(users).save(customer);
     }
 
@@ -267,6 +273,28 @@ class KycActivationLifecycleTest {
         assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
         assertThat(result.qualityStatus()).isEqualTo("REVIEW_REQUIRED");
         assertThat(result.extractedFields().get("_validationWarnings")).contains("Image quality");
+    }
+
+    @Test void supportingDocumentWithNoMachineReadableFieldsCanReachHumanReview() throws Exception {
+        Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("GOOD_CONDUCT", "Good conduct", false,
+                        Set.of(KycDocumentType.GOOD_CONDUCT_CERTIFICATE))));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.GOOD_CONDUCT_CERTIFICATE)).thenReturn(
+                new OcrResult("TEST_OCR", 0, Map.of("_validationStatus", "PASSED")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        KycDocumentView result = service.upload(KycDocumentType.GOOD_CONDUCT_CERTIFICATE,
+                new MockMultipartFile("file", "good-conduct.jpg", "image/jpeg", image));
+
+        assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
+        verify(garage).uploadBytes(any(), any(), any());
     }
 
     @Test void advisoryModeStillBlocksCorruptImagesBeforeOcr() {

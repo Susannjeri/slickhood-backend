@@ -3,6 +3,7 @@ package org.pms.silverocean.service.kyc;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.KycCaseRepo;
 import org.pms.silverocean.database.pms.KycDocumentRepo;
@@ -40,6 +41,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class KycService {
     private static final Set<String> ALLOWED_TYPES = Set.of("image/jpeg", "image/png", "application/pdf");
     private final KycCaseRepo caseRepo;
@@ -162,6 +164,8 @@ public class KycService {
         try {
             ocr = ocrProvider.extract(bytes, file.getContentType(), documentType);
         } catch (RuntimeException providerFailure) {
+            log.warn("KYC OCR provider failed for document type {} ({})", documentType,
+                    providerFailure.getClass().getSimpleName());
             throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
         }
         List<KycDocument> superseded = activeDocuments(kycCase.getId()).stream()
@@ -204,6 +208,9 @@ public class KycService {
         kycCase.setPhoneVerified(user.isPhoneVerified());
         if (!kycCase.isPhoneVerified()) throw new PMSCustomException(ResponseCode.KYC_PHONE_VERIFICATION_REQUIRED);
         kycCase.setStatus(KycStatus.SUBMITTED.name()); kycCase.setSubmittedAt(ZonedDateTime.now());
+        kycCase.setReviewNotes(null);
+        kycCase.setReviewedAt(null);
+        kycCase.setReviewedBy(null);
         caseRepo.save(kycCase);
         user.setAccountStatus(AccountStatus.KYC_UNDER_REVIEW.name());
         userDao.save(user);
@@ -416,6 +423,8 @@ public class KycService {
             try {
                 ocr = ocrProvider.extract(stored.bytes(), contentType, type);
             } catch (RuntimeException providerFailure) {
+                log.warn("KYC OCR reprocessing failed for document type {} ({})", type,
+                        providerFailure.getClass().getSimpleName());
                 throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
             }
             Map<String, String> fields = validateExtractedEvidence(ocr.fields(), user, kycCase, Set.of(), type);
@@ -465,10 +474,20 @@ public class KycService {
     }
 
     private boolean ocrAccepted(KycDocumentType type, OcrResult ocr, Map<String, String> fields) {
-        if (type == KycDocumentType.SELFIE) return !fields.containsKey("_validationWarnings");
-        boolean confidenceAccepted = ocr.confidence() >= minOcrConfidence;
+        if (type == KycDocumentType.SELFIE) return true;
+        boolean confidenceAccepted = !requiresMachineReadableEvidence(type)
+                || ocr.confidence() >= minOcrConfidence;
         boolean warningsAccepted = !rejectOcrValidationWarnings || !fields.containsKey("_validationWarnings");
         return confidenceAccepted && warningsAccepted;
+    }
+
+    private boolean requiresMachineReadableEvidence(KycDocumentType type) {
+        return type == KycDocumentType.KRA_PIN_CERTIFICATE
+                || type == KycDocumentType.PASSPORT
+                || type == KycDocumentType.NATIONAL_ID_FRONT
+                || type == KycDocumentType.NATIONAL_ID_BACK
+                || type == KycDocumentType.ALIEN_ID_FRONT
+                || type == KycDocumentType.ALIEN_ID_BACK;
     }
 
     private String ocrRejectionReason(Map<String, String> fields) {
@@ -616,7 +635,8 @@ public class KycService {
 
     private boolean organizationDocument(KycDocumentType documentType) {
         return documentType == KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE
-                || documentType == KycDocumentType.CR12;
+                || documentType == KycDocumentType.CR12
+                || documentType == KycDocumentType.KRA_PIN_CERTIFICATE;
     }
 
     private void addValidationWarning(Map<String, String> fields, String warning) {
