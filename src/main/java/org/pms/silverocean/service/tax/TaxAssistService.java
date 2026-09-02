@@ -30,17 +30,20 @@ public class TaxAssistService {
     private final TaxRuleVersionRepo rules;
     private final TaxCalculationRepo calculations;
     private final TaxConnectionRequestRepo connections;
+    private final TaxAssistConfigurationRepo configurations;
     private final UserDao users;
     private final ObjectMapper json;
 
     public TaxAssistService(TaxRuleVersionRepo rules, TaxCalculationRepo calculations,
-                            TaxConnectionRequestRepo connections, UserDao users, ObjectMapper json) {
+                            TaxConnectionRequestRepo connections, TaxAssistConfigurationRepo configurations,
+                            UserDao users, ObjectMapper json) {
         this.rules = rules; this.calculations = calculations; this.connections = connections;
-        this.users = users; this.json = json;
+        this.configurations = configurations; this.users = users; this.json = json;
     }
 
     @Transactional
     public CalculationView estimateMri(MriEstimateRequest input) {
+        requireEstimatesEnabled();
         LocalDate periodEnd = input.period().atEndOfMonth();
         TaxRuleVersion rule = effective(MRI, periodEnd);
         String outcome;
@@ -82,6 +85,7 @@ public class TaxAssistService {
 
     @Transactional
     public CalculationView estimateCgt(CgtEstimateRequest input) {
+        requireEstimatesEnabled();
         TaxRuleVersion rule = effective(CGT, input.transferDate());
         BigDecimal gross = input.transferValue().setScale(2, RoundingMode.HALF_UP);
         BigDecimal netTransfer = gross.subtract(input.transferCosts());
@@ -122,6 +126,7 @@ public class TaxAssistService {
 
     @Transactional
     public ConnectionView requestConnection(ConnectionRequest request) {
+        if (!configurationEntity().isConnectionRequestsEnabled()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "KRA connection requests are currently paused by the Slickhood system owner.");
         validateScopes(request.provider(), request.requestedScopes());
         long ownerId = users.getUserId();
         if (connections.existsByOwnerUserIdAndProviderAndActiveTrue(ownerId, request.provider())) throw bad("An active request already exists for this provider.");
@@ -151,6 +156,17 @@ public class TaxAssistService {
 
     @Transactional(readOnly = true)
     public List<RuleView> rules() { return rules.findAllByOrderByRuleCodeAscEffectiveFromDesc().stream().map(this::ruleView).toList(); }
+
+    @Transactional(readOnly = true)
+    public ConfigurationView configuration() { return configurationView(configurationEntity()); }
+
+    @Transactional
+    public ConfigurationView updateConfiguration(ConfigurationRequest request) {
+        TaxAssistConfiguration c = configurationEntity();
+        c.setEstimatesEnabled(request.estimatesEnabled()); c.setConnectionRequestsEnabled(request.connectionRequestsEnabled());
+        c.setLegalNoticeVersion(request.legalNoticeVersion()); c.setUpdatedBy(users.getUserId());
+        return configurationView(configurations.save(c));
+    }
 
     @Transactional
     public RuleView createRule(RuleRequest request) {
@@ -217,6 +233,16 @@ public class TaxAssistService {
     private static void validateScopes(String provider, Set<String> scopes) {
         Set<String> allowed = provider.equals("ETIMS") ? Set.of("ISSUE_TAX_INVOICES", "QUERY_INVOICE_STATUS") : Set.of("FILE_TAX_RETURN", "CREATE_PAYMENT_REFERENCE", "QUERY_SUBMISSION_STATUS");
         if (!allowed.containsAll(scopes)) throw bad("A requested scope is not available for this provider.");
+    }
+    private TaxAssistConfiguration configurationEntity() {
+        return configurations.findById(1L).orElseThrow(() -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Tax Assist configuration is unavailable"));
+    }
+    private void requireEstimatesEnabled() {
+        if (!configurationEntity().isEstimatesEnabled()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Tax estimates are temporarily paused by the Slickhood system owner.");
+    }
+    private static ConfigurationView configurationView(TaxAssistConfiguration c) {
+        return new ConfigurationView(c.isEstimatesEnabled(), c.isConnectionRequestsEnabled(), false,
+                c.getLegalNoticeVersion(), c.getUpdatedBy(), c.getUpdatedAt());
     }
     private static ResponseStatusException bad(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
     private static ResponseStatusException notFound() { return new ResponseStatusException(HttpStatus.NOT_FOUND, "Tax Assist record not found"); }

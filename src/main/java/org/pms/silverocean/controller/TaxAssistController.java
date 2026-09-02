@@ -36,12 +36,19 @@ public class TaxAssistController {
     @GetMapping("/connections")
     public ResponseEntity<ResponseDTO> connections() { return ok(service.myConnections()); }
 
+    @GetMapping("/configuration")
+    public ResponseEntity<ResponseDTO> configuration() { return ok(service.configuration()); }
+
     @DeleteMapping("/connections/{id}")
     public ResponseEntity<ResponseDTO> disconnect(@PathVariable long id) { service.disconnect(id); return ok(null); }
 
     @GetMapping("/admin/rules")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ResponseDTO> rules() { return ok(service.rules()); }
+
+    @PutMapping("/admin/configuration")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ResponseDTO> updateConfiguration(@Valid @RequestBody ConfigurationRequest request) { return ok(service.updateConfiguration(request)); }
 
     @PostMapping("/admin/rules")
     @PreAuthorize("hasRole('SUPER_ADMIN')")

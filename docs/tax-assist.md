@@ -11,6 +11,17 @@ The service stops rather than presenting a definitive estimate for non-residents
 
 Every saved estimate includes immutable input and rule snapshots. Tax rules are effective-dated and can only be governed through super-admin endpoints. The calculation list is owner-scoped and bounded to 50 records per request.
 
+## System-owner release controls
+
+Migration `V62` creates a singleton configuration with fail-safe controls. Only a `SUPER_ADMIN` can update them:
+
+- `estimatesEnabled` pauses or releases MRI and property CGT estimates without altering historical rules.
+- `connectionRequestsEnabled` controls new consent-backed KRA onboarding requests and defaults to `false`.
+- `legalNoticeVersion` identifies the currently approved customer guidance wording.
+- `liveKraTransmissionEnabled` is read-only and always `false`; neither a user nor an administrator can activate transmission through this module.
+
+If the configuration row is missing or unavailable, estimates and connection requests return `503 Service Unavailable`. Existing calculation history, connection history and disconnect operations remain available.
+
 ## External connection boundary
 
 Connection requests retain only a masked KRA PIN, explicit consent version, requested scopes and review state. The module does not accept an iTax password and contains no outbound KRA client.
@@ -25,8 +36,10 @@ Before an external adapter can be added, Slickhood must complete the relevant KR
 
 ## Deployment
 
-1. Deploy the backend and verify Flyway migration `V61`.
-2. Confirm both seeded rule versions and their official-source URLs.
-3. Deploy the frontend.
-4. Verify owner calculation isolation, super-admin rule access and connection masking in staging.
-5. Keep all external KRA networking disabled; connection requests are onboarding records only.
+1. Deploy the backend and verify Flyway migrations `V61` and `V62` both succeed.
+2. In Tax Administration, confirm both seeded rule versions, effective dates, rates and official-source URLs against the approved legal position.
+3. Confirm the approved `legalNoticeVersion`; enable estimates only after the rule check.
+4. Keep connection requests disabled until Slickhood has a staffed onboarding/review process. Enabling them still cannot transmit tax data.
+5. Deploy the frontend and verify its configuration request succeeds.
+6. Verify owner calculation isolation, super-admin-only controls, paused-state behaviour, PIN masking and disconnect behaviour in staging.
+7. Keep all external KRA networking disabled; connection requests are onboarding records only.

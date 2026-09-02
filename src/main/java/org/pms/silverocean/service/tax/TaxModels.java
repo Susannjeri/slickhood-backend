@@ -65,4 +65,11 @@ public final class TaxModels {
 
     public record ConnectionReview(@NotBlank @Pattern(regexp = "AWAITING_KRA_APPROVAL|SANDBOX_READY|SUSPENDED|REJECTED") String status,
                                    @NotBlank @Size(max = 1000) String reviewNote) {}
+
+    public record ConfigurationRequest(boolean estimatesEnabled, boolean connectionRequestsEnabled,
+                                       @NotBlank @Pattern(regexp = "[a-z0-9-]{6,40}") String legalNoticeVersion) {}
+
+    public record ConfigurationView(boolean estimatesEnabled, boolean connectionRequestsEnabled,
+                                    boolean liveKraTransmissionEnabled, String legalNoticeVersion,
+                                    Long updatedBy, ZonedDateTime updatedAt) {}
 }

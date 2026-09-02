@@ -11,7 +11,7 @@ class TaxAssistSecurityContractTest {
         PreAuthorize root = TaxAssistController.class.getAnnotation(PreAuthorize.class);
         assertThat(root).isNotNull();
         assertThat(root.value()).isEqualTo("isAuthenticated()");
-        for (String method : new String[]{"rules", "createRule", "closeRule", "adminConnections", "review"}) {
+        for (String method : new String[]{"rules", "updateConfiguration", "createRule", "closeRule", "adminConnections", "review"}) {
             PreAuthorize guard = java.util.Arrays.stream(TaxAssistController.class.getDeclaredMethods())
                     .filter(candidate -> candidate.getName().equals(method)).findFirst().orElseThrow().getAnnotation(PreAuthorize.class);
             assertThat(guard).as(method).isNotNull();

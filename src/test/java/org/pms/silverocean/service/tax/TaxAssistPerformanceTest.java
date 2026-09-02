@@ -25,11 +25,14 @@ class TaxAssistPerformanceTest {
         rule.setCurrency("KES"); rule.setSourceUrl("https://new.kenyalaw.org/"); rule.setSourceNote("Current law"); rule.setActive(true);
         TaxRuleVersionRepo rules = mock(TaxRuleVersionRepo.class); TaxCalculationRepo calculations = mock(TaxCalculationRepo.class);
         TaxConnectionRequestRepo connections = mock(TaxConnectionRequestRepo.class); UserDao users = mock(UserDao.class);
+        TaxAssistConfigurationRepo configurations = mock(TaxAssistConfigurationRepo.class);
+        TaxAssistConfiguration configuration = new TaxAssistConfiguration(); configuration.setId(1L); configuration.setEstimatesEnabled(true); configuration.setLegalNoticeVersion("tax-guidance-2026-09");
+        when(configurations.findById(1L)).thenReturn(Optional.of(configuration));
         when(users.getUserId()).thenReturn(42L);
         when(rules.effectiveCandidates(eq("KENYA_MRI"), any(), any(Pageable.class))).thenReturn(List.of(rule));
         when(rules.findById(1L)).thenReturn(Optional.of(rule));
         when(calculations.save(any())).thenAnswer(call -> { TaxCalculation value = call.getArgument(0); value.setId(1L); return value; });
-        TaxAssistService service = new TaxAssistService(rules, calculations, connections, users, new ObjectMapper().findAndRegisterModules());
+        TaxAssistService service = new TaxAssistService(rules, calculations, connections, configurations, users, new ObjectMapper().findAndRegisterModules());
         MriEstimateRequest request = new MriEstimateRequest(YearMonth.of(2026, 8), true, true, false,
                 new BigDecimal("1200000"), new BigDecimal("100000"), BigDecimal.ZERO);
         assertTimeout(Duration.ofSeconds(5), () -> { for (int i = 0; i < 1_000; i++) service.estimateMri(request); });

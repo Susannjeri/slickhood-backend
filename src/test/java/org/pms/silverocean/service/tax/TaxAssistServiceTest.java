@@ -11,6 +11,8 @@ import org.pms.silverocean.database.pms.entities.*;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.tax.TaxModels.*;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.*;
@@ -26,6 +28,7 @@ class TaxAssistServiceTest {
     @Mock TaxRuleVersionRepo rules;
     @Mock TaxCalculationRepo calculations;
     @Mock TaxConnectionRequestRepo connections;
+    @Mock TaxAssistConfigurationRepo configurations;
     @Mock UserDao users;
     TaxAssistService service;
     TaxRuleVersion mri;
@@ -33,7 +36,10 @@ class TaxAssistServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new TaxAssistService(rules, calculations, connections, users, new ObjectMapper().findAndRegisterModules());
+        service = new TaxAssistService(rules, calculations, connections, configurations, users, new ObjectMapper().findAndRegisterModules());
+        TaxAssistConfiguration configuration = new TaxAssistConfiguration(); configuration.setId(1L); configuration.setEstimatesEnabled(true); configuration.setConnectionRequestsEnabled(true); configuration.setLegalNoticeVersion("tax-guidance-2026-09");
+        lenient().when(configurations.findById(1L)).thenReturn(Optional.of(configuration));
+        lenient().when(configurations.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(users.getUserId()).thenReturn(42L);
         lenient().when(calculations.save(any())).thenAnswer(invocation -> {
             TaxCalculation value = invocation.getArgument(0); value.setId(91L); return value;
@@ -103,6 +109,32 @@ class TaxAssistServiceTest {
         assertThatThrownBy(() -> service.disconnect(8L))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class).hasMessageContaining("not found");
         verify(connections, never()).save(any());
+    }
+
+    @Test
+    void adminCanPauseEstimatesWithoutChangingTaxRules() {
+        TaxAssistConfiguration configuration = new TaxAssistConfiguration(); configuration.setId(1L); configuration.setEstimatesEnabled(false); configuration.setLegalNoticeVersion("tax-guidance-2026-09");
+        when(configurations.findById(1L)).thenReturn(Optional.of(configuration));
+        assertThatThrownBy(() -> service.estimateMri(new MriEstimateRequest(
+                YearMonth.of(2026, 8), true, true, false, bd("1200000"), bd("100000"), bd("0"))))
+                .isInstanceOfSatisfying(ResponseStatusException.class, error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+        verifyNoInteractions(rules, calculations);
+    }
+
+    @Test
+    void connectionRequestsFailClosedUntilAdminEnablesThem() {
+        TaxAssistConfiguration configuration = new TaxAssistConfiguration(); configuration.setId(1L); configuration.setEstimatesEnabled(true); configuration.setConnectionRequestsEnabled(false); configuration.setLegalNoticeVersion("tax-guidance-2026-09");
+        when(configurations.findById(1L)).thenReturn(Optional.of(configuration));
+        assertThatThrownBy(() -> service.requestConnection(new ConnectionRequest("GAVACONNECT", "A123456789B", Set.of("FILE_TAX_RETURN"), true)))
+                .isInstanceOfSatisfying(ResponseStatusException.class, error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+        verifyNoInteractions(connections);
+    }
+
+    @Test
+    void liveKraTransmissionCannotBeEnabledByConfiguration() {
+        ConfigurationView result = service.updateConfiguration(new ConfigurationRequest(true, true, "tax-guidance-2026-10"));
+        assertThat(result.liveKraTransmissionEnabled()).isFalse();
+        assertThat(result.legalNoticeVersion()).isEqualTo("tax-guidance-2026-10");
     }
 
     private static TaxRuleVersion rule(long id, String code, String rate, String lower, String upper) {
