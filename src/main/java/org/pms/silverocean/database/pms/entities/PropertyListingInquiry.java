@@ -18,7 +18,7 @@ import java.time.ZonedDateTime;
 })
 @Getter @Setter
 public class PropertyListingInquiry extends BaseActiveEntity {
-    @Column(nullable = false)
+    @Column(name = "listing_id", nullable = false)
     private long listingId;
     @Column(nullable = false, length = 120)
     private String name;
