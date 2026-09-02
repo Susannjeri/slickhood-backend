@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.pms.silverocean.common.ResponseCode;
+import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.helpdesk.HelpDeskModels;
@@ -13,7 +14,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-import java.util.Objects;
 
 @RestController
 @RequestMapping("/helpdesk")
@@ -21,7 +21,7 @@ import java.util.Objects;
 public class HelpDeskController {
     private final HelpDeskService service;
     private final I18NService i18n;
-    @PostMapping("/public/conversations") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> startGuest(@Valid @RequestBody HelpDeskModels.GuestStart r,HttpServletRequest request){return ok(service.startGuest(r,request.getRemoteAddr()+"|"+Objects.toString(request.getHeader("User-Agent"),"unknown")));}
+    @PostMapping("/public/conversations") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> startGuest(@Valid @RequestBody HelpDeskModels.GuestStart r,HttpServletRequest request){return ok(service.startGuest(r,PMSUtils.getIPAddress(request)+"|"+java.util.Objects.toString(request.getHeader("User-Agent"),"unknown")));}
     @GetMapping("/public/conversations/{ticketNumber}") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> getGuest(@PathVariable String ticketNumber,@RequestHeader("X-Help-Token") String token){return ok(service.getGuest(ticketNumber,token));}
     @PostMapping("/public/conversations/{ticketNumber}/messages") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> sendGuest(@PathVariable String ticketNumber,@RequestHeader("X-Help-Token") String token,@Valid @RequestBody HelpDeskModels.SendMessage r){return ok(service.sendGuest(ticketNumber,token,r));}
     @PostMapping("/public/conversations/{ticketNumber}/escalate") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> escalateGuest(@PathVariable String ticketNumber,@RequestHeader("X-Help-Token") String token){return ok(service.escalateGuest(ticketNumber,token));}
