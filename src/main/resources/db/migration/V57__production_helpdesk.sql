@@ -27,7 +27,11 @@ ALTER TABLE pms_help_conversation
     ADD UNIQUE KEY uk_help_conversation_ticket (ticket_number),
     ADD KEY idx_help_guest_token (guest_token_hash, guest_expires_at),
     ADD KEY idx_help_queue_sla (status, priority_rank, waiting_since, sla_due_at),
-    DROP FOREIGN KEY fk_help_conversation_user,
+    DROP FOREIGN KEY fk_help_conversation_user;
+
+-- MySQL validates foreign-key names before applying all clauses in a single
+-- ALTER statement. Re-adding the same name must therefore happen separately.
+ALTER TABLE pms_help_conversation
     ADD CONSTRAINT fk_help_conversation_user FOREIGN KEY (user_id) REFERENCES pms_users(id);
 
 ALTER TABLE pms_help_message
