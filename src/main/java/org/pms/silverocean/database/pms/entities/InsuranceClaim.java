@@ -12,11 +12,11 @@ public class InsuranceClaim extends BaseCreatorEntity {
  @Column(nullable=false,length=24) private String status;
  @Column(nullable=false) private LocalDateTime incidentAt;
  @Column(length=300) private String incidentLocation;
- @Lob @Column(nullable=false) private String description;
+ @Lob @Column(nullable=false,columnDefinition="TEXT") private String description;
  private BigDecimal estimatedAmount;
  private Long assignedAdviserId;
  @Column(length=120) private String insurerReference;
- @Lob private String resolutionNotes;
+ @Lob @Column(columnDefinition="TEXT") private String resolutionNotes;
  private LocalDateTime submittedAt;
  private LocalDateTime closedAt;
  @Version private long version;

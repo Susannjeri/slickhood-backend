@@ -15,8 +15,8 @@ public class InsuranceQuote extends BaseCreatorEntity {
  @Column(nullable=false) private BigDecimal taxesLevies;
  @Column(nullable=false) private BigDecimal totalPremium;
  @Column(length=1000) private String excessDetails;
- @Lob private String coverageSummary;
- @Lob private String exclusions;
+ @Lob @Column(columnDefinition="TEXT") private String coverageSummary;
+ @Lob @Column(columnDefinition="TEXT") private String exclusions;
  @Column(nullable=false) private LocalDate validUntil;
  @Column(nullable=false) private long preparedBy;
  private Long approvedBy;

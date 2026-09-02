@@ -19,7 +19,7 @@ public class InsuranceCase extends BaseCreatorEntity {
  private BigDecimal sumInsured;
  @Column(nullable=false,length=3) private String currency;
  private LocalDate coverStartDate;
- @Lob private String riskDetails;
+ @Lob @Column(columnDefinition="TEXT") private String riskDetails;
  @Column(nullable=false) private LocalDateTime consentAt;
  private Long assignedAdviserId;
  private LocalDateTime submittedAt;
