@@ -9,10 +9,10 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "pms_help_rate_limit", uniqueConstraints =
-        @UniqueConstraint(name = "uk_help_rate_subject_window", columnNames = {"subjectHash", "windowStart"}))
+        @UniqueConstraint(name = "uk_help_rate_subject_window", columnNames = {"subject_hash", "window_start"}))
 @Getter @Setter
 public class HelpRateLimit extends BaseActiveEntity {
-    @Column(name = "subject_hash", nullable = false, length = 64)
+    @Column(name = "subject_hash", nullable = false, columnDefinition = "CHAR(64)")
     private String subjectHash;
     @Column(name = "window_start", nullable = false)
     private LocalDateTime windowStart;

@@ -17,5 +17,6 @@ public class HelpMessage extends BaseCreatorEntity {
     private String providerResponseId;
     private String sourceArticleIds;
     private boolean internalNote;
+    @Column(length = 64)
     private String idempotencyKey;
 }

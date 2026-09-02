@@ -12,14 +12,22 @@ import java.time.LocalDateTime;
 @Getter @Setter
 public class HelpConversation extends BaseCreatorEntity {
     private Long userId;
+    @Column(length = 24, nullable = false)
     private String ticketNumber;
+    @Column(columnDefinition = "CHAR(64)")
     private String guestTokenHash;
     private LocalDateTime guestExpiresAt;
+    @Column(length = 60, nullable = false)
     private String activeRole;
+    @Column(length = 180, nullable = false)
     private String subject;
+    @Column(length = 60, nullable = false)
     private String category;
+    @Column(length = 255)
     private String pageContext;
+    @Column(length = 30, nullable = false)
     private String status;
+    @Column(length = 20, nullable = false)
     private String priority;
     private int priorityRank;
     private Long assignedToUserId;
