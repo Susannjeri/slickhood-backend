@@ -42,8 +42,10 @@ public class GoogleAuthService {
                 String name = String.valueOf(payload.get("name"));
                 return Optional.of(Users.builder().googleId(userId).email(email).fullName(name).source(RegistrationChannel.GOOGLE.name()).build());
             }
-        } catch (GeneralSecurityException | IOException e) {
-            log.error("Google ID Token verification failed: {}", e.getMessage());
+        } catch (GeneralSecurityException | IOException | IllegalArgumentException e) {
+            // Malformed or unverifiable bearer tokens are an authentication
+            // rejection, not an application failure. Never log the token.
+            log.warn("Google ID token verification rejected: {}", e.getClass().getSimpleName());
         }
         return Optional.empty();
     }
