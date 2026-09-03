@@ -144,7 +144,7 @@ public class KycService {
         String sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
         List<KycDocument> active = activeDocuments(kycCase.getId());
         List<KycDocument> superseded = active.stream()
-                .filter(existing -> sameEvidenceSlot(user, existing, documentType))
+                .filter(existing -> sameEvidenceSlot(user, active, existing, documentType))
                 .toList();
         Optional<KycDocument> duplicate = active.stream()
                 .filter(existing -> sha256.equals(existing.getSha256()))
@@ -803,11 +803,32 @@ public class KycService {
         return documentRepo.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(caseId);
     }
 
-    private boolean sameEvidenceSlot(Users user, KycDocument existing, KycDocumentType replacement) {
+    private boolean sameEvidenceSlot(Users user, List<KycDocument> active,
+                                     KycDocument existing, KycDocumentType replacement) {
         KycDocumentType existingType = documentType(existing);
-        return requirements(user).stream().anyMatch(requirement ->
+        if (existingType == replacement) return true;
+
+        Set<KycRequirement> resolved = requirements(user);
+        boolean interchangeable = resolved.stream().anyMatch(requirement ->
                 requirement.acceptedTypes().contains(existingType)
                         && requirement.acceptedTypes().contains(replacement));
+        if (!interchangeable) return false;
+
+        Set<KycDocumentType> remainingTypes = active.stream()
+                .filter(document -> document.getId() != existing.getId())
+                .filter(document -> !DocumentStatus.REJECTED.name().equals(document.getStatus()))
+                .map(this::documentType)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        remainingTypes.add(replacement);
+
+        // Overlapping alternatives are not necessarily one logical slot. For example,
+        // a business certificate may cover company registration and management, while
+        // an appointment letter covers management and sales. Replacing the former with
+        // the latter must not silently reopen the company-registration requirement.
+        return resolved.stream()
+                .filter(KycRequirement::required)
+                .filter(requirement -> requirement.acceptedTypes().contains(existingType))
+                .allMatch(requirement -> requirement.acceptedTypes().stream().anyMatch(remainingTypes::contains));
     }
 
     private KycDocumentType documentType(KycDocument document) {

@@ -692,6 +692,55 @@ class KycActivationLifecycleTest {
         verify(garage).uploadBytes(any(), eq(image), eq("image/jpeg"));
     }
 
+    @Test void appointmentDoesNotRetireBusinessCertificateNeededByOtherCompanyRequirements() throws Exception {
+        Users subject = customer(12);
+        subject.setFullName("Susan Njeri");
+        subject.setProfileType(ProfileType.COMPANY.name());
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        KycRequirement organizationRegistration = new KycRequirement(
+                "ORGANIZATION_REGISTRATION", "Company registration", true,
+                Set.of(KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE, KycDocumentType.CR12));
+        KycRequirement managementAuthority = new KycRequirement(
+                "MANAGEMENT_AUTHORITY", "Management appointment or business registration", true,
+                Set.of(KycDocumentType.APPOINTMENT_LETTER,
+                        KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE));
+        KycRequirement salesAuthority = new KycRequirement(
+                "SALES_AUTHORITY", "Sales appointment or professional certificate", true,
+                Set.of(KycDocumentType.APPOINTMENT_LETTER,
+                        KycDocumentType.PROFESSIONAL_CERTIFICATE));
+        KycRequirement professionalEvidence = new KycRequirement(
+                "PROFESSIONAL_EVIDENCE", "Professional or business certificate", true,
+                Set.of(KycDocumentType.PROFESSIONAL_CERTIFICATE,
+                        KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE));
+        byte[] existingImage = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        byte[] appointmentImage = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 2};
+        KycDocument businessCertificate = document(91, 12);
+        businessCertificate.setCaseId(40);
+        businessCertificate.setDocumentType(KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE.name());
+        businessCertificate.setStatus(DocumentStatus.OCR_COMPLETE.name());
+        businessCertificate.setSha256(HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(existingImage)));
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                organizationRegistration, managementAuthority, salesAuthority, professionalEvidence));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L))
+                .thenReturn(List.of(businessCertificate));
+        when(quality.inspect(appointmentImage, "image/jpeg"))
+                .thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(appointmentImage, "image/jpeg", KycDocumentType.APPOINTMENT_LETTER))
+                .thenReturn(new OcrResult("TEST_OCR", 96, Map.of("fullName", "Susan Njeri")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        KycDocumentView appointment = service.upload(KycDocumentType.APPOINTMENT_LETTER,
+                new MockMultipartFile("file", "appointment.jpg", "image/jpeg", appointmentImage));
+
+        assertThat(appointment.documentType()).isEqualTo(KycDocumentType.APPOINTMENT_LETTER.name());
+        assertThat(businessCertificate.isActive()).isTrue();
+        verify(documents, never()).save(businessCertificate);
+    }
+
     @Test void unrelatedCustomerCannotReadAnotherCustomersDocument() {
         when(users.getUserId()).thenReturn(99L); when(users.hasPermission(any())).thenReturn(false);
         when(documents.findById(81L)).thenReturn(Optional.of(document(81,12)));
