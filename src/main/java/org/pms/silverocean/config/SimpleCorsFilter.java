@@ -26,6 +26,9 @@ public class SimpleCorsFilter {
     @Value("${app.cors.allowed-headers:Authorization,Content-Type,X-Slickhood-Role,X-Correlation-Id}")
     private String[] allowedHeaders;
 
+    @Value("${app.cors.exposed-headers:Content-Disposition,X-Report-Truncated,X-Report-Row-Limit}")
+    private String[] exposedHeaders;
+
     @Value("${app.cors.require-https:false}")
     private boolean requireHttps;
 
@@ -45,6 +48,7 @@ public class SimpleCorsFilter {
         config.setAllowedOrigins(origins);
         config.setAllowedMethods(Arrays.asList(allowedMethods));
         config.setAllowedHeaders(Arrays.asList(allowedHeaders));
+        config.setExposedHeaders(Arrays.asList(exposedHeaders));
         config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
