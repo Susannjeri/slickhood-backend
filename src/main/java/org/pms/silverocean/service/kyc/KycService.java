@@ -45,6 +45,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class KycService {
     private static final Set<String> ALLOWED_TYPES = Set.of("image/jpeg", "image/png", "application/pdf");
+    private static final Set<String> REVIEWER_EDITABLE_FIELDS = Set.of(
+            "fullName", "documentNumber", "taxPin", "dateOfBirth", "expiryDate");
     private final KycCaseRepo caseRepo;
     private final KycDocumentRepo documentRepo;
     private final UserRoleRepo userRoleRepo;
@@ -153,7 +155,7 @@ public class KycService {
         }
         if (duplicate.isPresent() && !DocumentStatus.REJECTED.name().equals(duplicate.get().getStatus())) {
             // Upload controls must be idempotent: a double click or retry must not create a new version.
-            return KycDocumentView.from(duplicate.get(), decrypt(duplicate.get()), null);
+            return documentView(duplicate.get());
         }
         ImageQualityResult quality = qualityService.inspect(bytes, contentType);
         if (!quality.accepted() && (rejectImageQualityFailures || uninspectable(quality))) {
@@ -208,7 +210,7 @@ public class KycService {
             documentRepo.save(previous);
         });
         kycCase.setStatus(KycStatus.IN_PROGRESS.name()); caseRepo.save(kycCase);
-        return KycDocumentView.from(document, extractedFields, null);
+        return KycDocumentView.from(document, extractedFields, Map.of(), null);
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -261,8 +263,11 @@ public class KycService {
             String identificationNumber = null;
             String taxPin = null;
             for (KycDocument document : currentDocuments) {
-                if (DocumentStatus.REJECTED.name().equals(document.getStatus())) continue;
-                Map<String, String> fields = decrypt(document);
+                KycDocumentReviewRequest decision = documentDecisions.get(document.getId());
+                Map<String, String> originalFields = decrypt(document);
+                Map<String, String> corrections = validateReviewerCorrections(document, decision, originalFields);
+                persistReviewerCorrections(document, corrections, decision.correctionReason(), reviewer);
+                Map<String, String> fields = effectiveFields(originalFields, corrections);
                 if (identificationNumber == null) identificationNumber = cleanVerifiedValue(fields.get("documentNumber"));
                 if (taxPin == null) taxPin = cleanVerifiedValue(fields.get("taxPin"));
             }
@@ -306,8 +311,10 @@ public class KycService {
             KycReviewRequest request, List<KycDocument> currentDocuments) {
         List<KycDocumentReviewRequest> submitted = request.documentsOrEmpty();
         if (submitted.isEmpty()) {
-            // Compatibility for older clients: an approval accepts every current document,
-            // while a rejection returns every current document with the case-level reason.
+            if (!currentDocuments.isEmpty()) {
+                // A KYC decision must be an explicit, complete review of the current evidence.
+                throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+            }
             return currentDocuments.stream().collect(Collectors.toMap(KycDocument::getId,
                     document -> new KycDocumentReviewRequest(document.getId(),
                             request.decision() == KycStatus.APPROVED, request.notes())));
@@ -320,6 +327,9 @@ public class KycService {
             if (!decision.approved() && (decision.reason() == null || decision.reason().isBlank())) {
                 throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
             }
+            if (!decision.approved() && !decision.verifiedFieldsOrEmpty().isEmpty()) {
+                throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+            }
         }
         Set<Long> currentIds = currentDocuments.stream().map(KycDocument::getId).collect(Collectors.toSet());
         if (!decisions.keySet().equals(currentIds)) {
@@ -330,7 +340,69 @@ public class KycService {
                 || (request.decision() == KycStatus.REJECTED && !hasRejectedDocument)) {
             throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
         }
+        if (request.decision() == KycStatus.APPROVED && currentDocuments.stream()
+                .anyMatch(document -> DocumentStatus.REJECTED.name().equals(document.getStatus()))) {
+            // Reviewer corrections may fix OCR transcription, never a file rejected by upload controls.
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
         return decisions;
+    }
+
+    private Map<String, String> validateReviewerCorrections(KycDocument document,
+                                                             KycDocumentReviewRequest decision,
+                                                             Map<String, String> originalFields) {
+        Map<String, String> submitted = decision == null ? Map.of() : decision.verifiedFieldsOrEmpty();
+        if (submitted.size() > REVIEWER_EDITABLE_FIELDS.size()) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        Map<String, String> corrections = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : submitted.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue() == null ? "" : entry.getValue().trim();
+            if (!REVIEWER_EDITABLE_FIELDS.contains(key) || !fieldAllowedForDocument(documentType(document), key)
+                    || value.isBlank() || value.length() > 255) {
+                throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+            }
+            String original = originalFields.get(key);
+            if (!value.equals(original == null ? "" : original.trim())) corrections.put(key, value);
+        }
+        if (!corrections.isEmpty()
+                && (decision.correctionReason() == null || decision.correctionReason().isBlank())) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        return corrections;
+    }
+
+    private boolean fieldAllowedForDocument(KycDocumentType type, String field) {
+        if (type == KycDocumentType.KRA_PIN_CERTIFICATE) {
+            return Set.of("taxPin", "fullName").contains(field);
+        }
+        if (type == KycDocumentType.PASSPORT || type == KycDocumentType.NATIONAL_ID_FRONT
+                || type == KycDocumentType.NATIONAL_ID_BACK || type == KycDocumentType.ALIEN_ID_FRONT
+                || type == KycDocumentType.ALIEN_ID_BACK) {
+            return Set.of("fullName", "documentNumber", "dateOfBirth", "expiryDate").contains(field);
+        }
+        return "fullName".equals(field);
+    }
+
+    private void persistReviewerCorrections(KycDocument document, Map<String, String> corrections,
+                                             String reason, long reviewer) {
+        try {
+            document.setEncryptedReviewerVerifiedData(corrections.isEmpty() ? null
+                    : encryptionService.encrypt(objectMapper.writeValueAsString(corrections)));
+        } catch (Exception ignored) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        document.setReviewerCorrectionReason(corrections.isEmpty() ? null : reason.trim());
+        document.setReviewedBy(reviewer);
+        document.setReviewedAt(ZonedDateTime.now());
+        documentRepo.save(document);
+    }
+
+    private Map<String, String> effectiveFields(Map<String, String> original, Map<String, String> corrections) {
+        Map<String, String> effective = new LinkedHashMap<>(original);
+        effective.putAll(corrections);
+        return effective;
     }
 
     private String rejectionReason(KycDocumentReviewRequest decision, String fallback) {
@@ -370,7 +442,7 @@ public class KycService {
                 ? request.reverificationDueAt() : request.expiresAt());
         document.setMaintenanceReason(request.reason() == null ? null : request.reason().trim());
         documentRepo.save(document);
-        return KycDocumentView.from(document, decrypt(document), null);
+        return documentView(document);
     }
 
     @Scheduled(cron = "${kyc.reverification.cron:0 15 1 * * *}")
@@ -616,7 +688,7 @@ public class KycService {
 
     private KycCaseView view(KycCase kycCase, Users user) {
         List<KycDocumentView> docs = currentDocuments(kycCase, user).stream()
-                .map(doc -> KycDocumentView.from(doc, decrypt(doc), null)).toList();
+                .map(this::documentView).toList();
         Set<KycDocumentType> uploadedTypes = docs.stream()
                 .map(doc -> KycDocumentType.valueOf(doc.documentType())).collect(Collectors.toSet());
         return new KycCaseView(kycCase.getId(), kycCase.getStatus(), user.getAccountStatus(),
@@ -633,6 +705,19 @@ public class KycService {
             var decrypted = encryptionService.decrypt(document.getEncryptedExtractedData());
             return decrypted == null ? Map.of() : objectMapper.readValue(decrypted.decryptedValue(), new TypeReference<>() {});
         } catch (Exception ignored) { return Map.of(); }
+    }
+
+    private Map<String, String> decryptReviewerVerified(KycDocument document) {
+        try {
+            if (document.getEncryptedReviewerVerifiedData() == null) return Map.of();
+            var decrypted = encryptionService.decrypt(document.getEncryptedReviewerVerifiedData());
+            return decrypted == null ? Map.of() : objectMapper.readValue(
+                    decrypted.decryptedValue(), new TypeReference<>() {});
+        } catch (Exception ignored) { return Map.of(); }
+    }
+
+    private KycDocumentView documentView(KycDocument document) {
+        return KycDocumentView.from(document, decrypt(document), decryptReviewerVerified(document), null);
     }
 
     private Map<String,String> validateExtractedEvidence(Map<String,String> source, Users user, KycCase kycCase,

@@ -102,7 +102,9 @@ class KycActivationLifecycleTest {
         when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"12345678\"}"));
         when(encryption.decrypt(new byte[]{2})).thenReturn(new DecryptDTO(false, "{\"taxPin\":\"A123456789B\"}"));
 
-        service.review(40, new KycReviewRequest(KycStatus.APPROVED, "Documents matched"));
+        service.review(40, new KycReviewRequest(KycStatus.APPROVED, "Documents matched", List.of(
+                new KycDocumentReviewRequest(81, true, null),
+                new KycDocumentReviewRequest(82, true, null))));
 
         assertThat(subject.isVerified()).isTrue();
         assertThat(subject.getAccountStatus()).isEqualTo(AccountStatus.ACTIVE.name());
@@ -280,6 +282,66 @@ class KycActivationLifecycleTest {
         assertThat(result.extractedFields().get("_validationWarnings")).contains("Image quality");
     }
 
+    @Test void reviewerCorrectionActivatesWithVerifiedValueAndRetainsOriginalOcrEvidence() {
+        Users reviewer = customer(1); Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
+        KycDocument identity = document(81, 12); identity.setCaseId(40);
+        identity.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        identity.setStatus(DocumentStatus.OCR_COMPLETE.name());
+        identity.setEncryptedExtractedData(new byte[]{1});
+        when(users.getUserObject()).thenReturn(reviewer); when(users.findById(12)).thenReturn(Optional.of(subject));
+        when(cases.findById(40L)).thenReturn(Optional.of(kycCase));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity));
+        when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false,
+                "{\"documentNumber\":\"12B45678\",\"fullName\":\"User Twelve\"}"));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        service.review(40, new KycReviewRequest(KycStatus.APPROVED, "Compared with original", List.of(
+                new KycDocumentReviewRequest(81, true, null,
+                        Map.of("documentNumber", "12345678"),
+                        "OCR read the third digit as the letter B"))));
+
+        assertThat(subject.getIdentificationNumber()).isEqualTo("12345678");
+        assertThat(identity.getEncryptedExtractedData()).containsExactly(1);
+        assertThat(identity.getEncryptedReviewerVerifiedData()).containsExactly(9);
+        assertThat(identity.getReviewerCorrectionReason()).isEqualTo("OCR read the third digit as the letter B");
+        assertThat(identity.getReviewedBy()).isEqualTo(1L);
+        assertThat(identity.getReviewedAt()).isNotNull();
+    }
+
+    @Test void reviewerCannotChangeOcrDataWithoutRecordingAReason() {
+        Users reviewer = customer(1); Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
+        KycDocument identity = document(81, 12); identity.setCaseId(40);
+        identity.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        identity.setStatus(DocumentStatus.OCR_COMPLETE.name()); identity.setEncryptedExtractedData(new byte[]{1});
+        when(users.getUserObject()).thenReturn(reviewer); when(users.findById(12)).thenReturn(Optional.of(subject));
+        when(cases.findById(40L)).thenReturn(Optional.of(kycCase));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity));
+        when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"12B45678\"}"));
+
+        assertThatThrownBy(() -> service.review(40, new KycReviewRequest(KycStatus.APPROVED, "", List.of(
+                new KycDocumentReviewRequest(81, true, null,
+                        Map.of("documentNumber", "12345678"), null)))))
+                .isInstanceOf(PMSCustomException.class);
+    }
+
+    @Test void rejectedUploadCannotBeOverriddenWithReviewerEnteredData() {
+        Users reviewer = customer(1); Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
+        KycDocument identity = document(81, 12); identity.setCaseId(40);
+        identity.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        identity.setStatus(DocumentStatus.REJECTED.name()); identity.setEncryptedExtractedData(new byte[]{1});
+        when(users.getUserObject()).thenReturn(reviewer); when(users.findById(12)).thenReturn(Optional.of(subject));
+        when(cases.findById(40L)).thenReturn(Optional.of(kycCase));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity));
+
+        assertThatThrownBy(() -> service.review(40, new KycReviewRequest(KycStatus.APPROVED, "", List.of(
+                new KycDocumentReviewRequest(81, true, null,
+                        Map.of("documentNumber", "12345678"), "Manual correction")))))
+                .isInstanceOf(PMSCustomException.class);
+    }
+
     @Test void supportingDocumentWithNoMachineReadableFieldsCanReachHumanReview() throws Exception {
         Users subject = customer(12);
         KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
@@ -421,7 +483,8 @@ class KycActivationLifecycleTest {
         when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity));
         when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"P1234567\"}"));
 
-        service.review(40, new KycReviewRequest(KycStatus.APPROVED, "Passport matched"));
+        service.review(40, new KycReviewRequest(KycStatus.APPROVED, "Passport matched", List.of(
+                new KycDocumentReviewRequest(81, true, null))));
 
         assertThat(subject.isVerified()).isTrue();
         assertThat(subject.getIdentificationNumber()).isEqualTo("P1234567");

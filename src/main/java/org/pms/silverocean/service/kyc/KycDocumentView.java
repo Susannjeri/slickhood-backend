@@ -13,15 +13,24 @@ import java.util.Set;
 public record KycDocumentView(long id, String documentType, String originalFileName, String contentType,
                               String status, String qualityStatus,
                               Double qualityScore, Double ocrConfidence, Map<String, String> extractedFields,
+                              Map<String, String> reviewerVerifiedFields, String reviewerCorrectionReason,
+                              Long reviewerVerifiedBy, ZonedDateTime reviewerVerifiedAt,
                               List<KycValidationIssue> validationIssues,
                               String rejectionReason, ZonedDateTime uploadedAt, String downloadUrl,
                               int versionNo, ZonedDateTime issuedAt, ZonedDateTime expiresAt,
                               ZonedDateTime reverificationDueAt, String maintenanceReason) {
     static KycDocumentView from(KycDocument document, Map<String, String> extractedFields, String downloadUrl) {
+        return from(document, extractedFields, Map.of(), downloadUrl);
+    }
+
+    static KycDocumentView from(KycDocument document, Map<String, String> extractedFields,
+                                Map<String, String> reviewerVerifiedFields, String downloadUrl) {
         return new KycDocumentView(document.getId(), document.getDocumentType(), document.getOriginalFileName(),
                 document.getContentType(), document.getStatus(),
                 document.getQualityStatus(), document.getQualityScore(), document.getOcrConfidence(),
-                extractedFields, issues(extractedFields, document.getRejectionReason(),
+                extractedFields, reviewerVerifiedFields, document.getReviewerCorrectionReason(),
+                document.getReviewedBy(), document.getReviewedAt(),
+                issues(extractedFields, document.getRejectionReason(),
                         document.getOcrConfidence(), document.getStatus()),
                 document.getRejectionReason(), document.getCreatedOn(), downloadUrl,
                 Math.max(1, document.getVersionNo()), document.getIssuedAt(), document.getExpiresAt(),

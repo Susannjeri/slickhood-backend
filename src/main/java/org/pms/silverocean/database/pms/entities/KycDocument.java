@@ -34,6 +34,10 @@ public class KycDocument extends BaseActiveEntity {
     private String ocrProvider;
     private Double ocrConfidence;
     @Lob private byte[] encryptedExtractedData;
+    /** Reviewer-entered values are stored separately so the original OCR evidence remains immutable. */
+    @Lob private byte[] encryptedReviewerVerifiedData;
+    @Column(columnDefinition = "TEXT")
+    private String reviewerCorrectionReason;
     @Column(columnDefinition = "TEXT")
     private String rejectionReason;
     private Long supersedesDocumentId;
