@@ -653,6 +653,45 @@ class KycActivationLifecycleTest {
         verify(garage, never()).uploadBytes(any(), any(), any());
     }
 
+    @Test void sameFileCanBeReclassifiedWithinASharedRequirementSlot() throws Exception {
+        Users subject = customer(12);
+        subject.setFullName("Susan Njeri");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        KycRequirement managementAuthority = new KycRequirement(
+                "MANAGEMENT_AUTHORITY", "Management appointment or business registration", true,
+                Set.of(KycDocumentType.APPOINTMENT_LETTER,
+                        KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE));
+        KycRequirement salesAuthority = new KycRequirement(
+                "SALES_AUTHORITY", "Sales appointment or professional certificate", true,
+                Set.of(KycDocumentType.APPOINTMENT_LETTER,
+                        KycDocumentType.PROFESSIONAL_CERTIFICATE));
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(image));
+        KycDocument misclassified = document(91, 12);
+        misclassified.setCaseId(40);
+        misclassified.setDocumentType(KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE.name());
+        misclassified.setStatus(DocumentStatus.VERIFIED.name());
+        misclassified.setSha256(hash);
+        misclassified.setEncryptedExtractedData(new byte[]{1});
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(managementAuthority, salesAuthority));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(misclassified));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.APPOINTMENT_LETTER)).thenReturn(
+                new OcrResult("TEST_OCR", 96, Map.of("fullName", "Susan Njeri")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        KycDocumentView replacement = service.upload(KycDocumentType.APPOINTMENT_LETTER,
+                new MockMultipartFile("file", "appointment.jpg", "image/jpeg", image));
+
+        assertThat(replacement.documentType()).isEqualTo(KycDocumentType.APPOINTMENT_LETTER.name());
+        assertThat(replacement.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
+        assertThat(misclassified.isActive()).isFalse();
+        verify(garage).uploadBytes(any(), eq(image), eq("image/jpeg"));
+    }
+
     @Test void unrelatedCustomerCannotReadAnotherCustomersDocument() {
         when(users.getUserId()).thenReturn(99L); when(users.hasPermission(any())).thenReturn(false);
         when(documents.findById(81L)).thenReturn(Optional.of(document(81,12)));

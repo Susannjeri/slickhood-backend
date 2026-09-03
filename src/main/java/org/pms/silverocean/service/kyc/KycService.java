@@ -153,7 +153,9 @@ public class KycService {
             // Reusing one physical document for two different evidence requirements is unsafe.
             throw new PMSCustomException(ResponseCode.KYC_DUPLICATE_DOCUMENT);
         }
-        if (duplicate.isPresent() && !DocumentStatus.REJECTED.name().equals(duplicate.get().getStatus())) {
+        if (duplicate.isPresent()
+                && documentType(duplicate.get()) == documentType
+                && !DocumentStatus.REJECTED.name().equals(duplicate.get().getStatus())) {
             // Upload controls must be idempotent: a double click or retry must not create a new version.
             return documentView(duplicate.get());
         }
