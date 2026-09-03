@@ -1,0 +1,11 @@
+module slickhood_pms_clamd 1.0;
+
+require {
+    type init_t;
+    type clamd_port_t;
+    class tcp_socket name_connect;
+}
+
+# The systemd-managed SlickHood backend submits upload streams to local clamd.
+# Keep the ClamAV port labelled clamd_port_t and grant only this connection.
+allow init_t clamd_port_t:tcp_socket name_connect;

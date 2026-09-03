@@ -18,6 +18,12 @@ WEALTH_VAULT_ANTIVIRUS_PORT=3310
 WEALTH_VAULT_ANTIVIRUS_TIMEOUT_MS=5000
 ```
 
+On SELinux-enforcing hosts where the backend runs in `init_t`, install the
+version-controlled `config/selinux/slickhood_pms_clamd.te` policy module. Do
+not relabel TCP 3310, disable SELinux, or make the scanner optional. Verify the
+backend service context can submit both a clean INSTREAM sample and the EICAR
+test signature before enabling customer uploads.
+
 Confirm the object-storage bucket enforces server-side encryption, blocks public access, versions objects, and applies the approved backup and retention policy.
 
 ## Deployment order
