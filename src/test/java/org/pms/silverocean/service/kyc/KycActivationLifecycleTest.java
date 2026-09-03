@@ -30,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -299,6 +300,29 @@ class KycActivationLifecycleTest {
 
         assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
         verify(garage).uploadBytes(any(), any(), any());
+    }
+
+    @Test void browserGenericMimeTypeIsNormalizedFromVerifiedFileSignature() throws Exception {
+        Users subject = customer(12);
+        subject.setFullName("Collectable Class");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("IDENTITY", "Identity document", true,
+                        Set.of(KycDocumentType.NATIONAL_ID_FRONT))));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT)).thenReturn(
+                new OcrResult("TEST_OCR", 96, Map.of("documentNumber", "12345678", "fullName", "Collectable Class")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        KycDocumentView result = service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "phone-upload.jpg", "application/octet-stream", image));
+
+        assertThat(result.contentType()).isEqualTo("image/jpeg");
+        verify(garage).uploadBytes(any(), eq(image), eq("image/jpeg"));
     }
 
     @Test void advisoryModeStillBlocksCorruptImagesBeforeOcr() {

@@ -259,6 +259,7 @@ public class ApiErrorHandler extends ResponseEntityExceptionHandler {
             response.setData(data instanceof Collection ? List.copyOf((Collection<?>) data) : List.of(data));
         }
         HttpStatus status = ex.getResponseCode() == ResponseCode.KYC_OCR_PROVIDER_UNAVAILABLE
+                || ex.getResponseCode() == ResponseCode.UPLOAD_SCAN_UNAVAILABLE
                 ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.CONFLICT;
         return ResponseEntity.status(status).body(response);
     }

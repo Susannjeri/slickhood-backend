@@ -136,7 +136,9 @@ public class KycService {
         if (requirements(user).stream().noneMatch(requirement -> requirement.acceptedTypes().contains(documentType))) {
             throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
         }
-        byte[] bytes = validateAndRead(file);
+        ValidatedUpload upload = validateAndRead(file);
+        byte[] bytes = upload.bytes();
+        String contentType = upload.contentType();
         String sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
         List<KycDocument> active = activeDocuments(kycCase.getId());
         List<KycDocument> superseded = active.stream()
@@ -153,18 +155,18 @@ public class KycService {
             // Upload controls must be idempotent: a double click or retry must not create a new version.
             return KycDocumentView.from(duplicate.get(), decrypt(duplicate.get()), null);
         }
-        ImageQualityResult quality = qualityService.inspect(bytes, file.getContentType());
+        ImageQualityResult quality = qualityService.inspect(bytes, contentType);
         if (!quality.accepted() && (rejectImageQualityFailures || uninspectable(quality))) {
             throw new PMSCustomException(ResponseCode.KYC_DOCUMENT_QUALITY_FAILED, quality.reason());
         }
 
-        String extension = "application/pdf".equals(file.getContentType()) ? ".pdf" :
-                ("image/png".equals(file.getContentType()) ? ".png" : ".jpg");
+        String extension = "application/pdf".equals(contentType) ? ".pdf" :
+                ("image/png".equals(contentType) ? ".png" : ".jpg");
         String fileRef = "kyc/" + user.getId() + "/" + UUID.randomUUID() + extension;
         KycDocument document = new KycDocument();
         document.setCaseId(kycCase.getId()); document.setUserId(user.getId());
         document.setDocumentType(documentType.name()); document.setOriginalFileName(safeName(file.getOriginalFilename()));
-        document.setContentType(file.getContentType()); document.setFileRef(fileRef); document.setFileSize(file.getSize());
+        document.setContentType(contentType); document.setFileRef(fileRef); document.setFileSize((long) bytes.length);
         document.setSha256(sha256); document.setWidth(quality.width()); document.setHeight(quality.height());
         document.setQualityScore(quality.sharpness());
         document.setQualityStatus(quality.accepted() ? "PASSED" : "REVIEW_REQUIRED");
@@ -175,7 +177,7 @@ public class KycService {
         }
         OcrResult ocr;
         try {
-            ocr = ocrProvider.extract(bytes, file.getContentType(), documentType);
+            ocr = ocrProvider.extract(bytes, contentType, documentType);
         } catch (RuntimeException providerFailure) {
             log.warn("KYC OCR provider failed for document type {} ({})", documentType,
                     providerFailure.getClass().getSimpleName());
@@ -199,7 +201,7 @@ public class KycService {
             document.setStatus(DocumentStatus.REJECTED.name());
             document.setRejectionReason(ocrRejectionReason(extractedFields));
         }
-        garageService.uploadBytes(fileRef, bytes, file.getContentType());
+        garageService.uploadBytes(fileRef, bytes, contentType);
         documentRepo.save(document);
         superseded.forEach(previous -> {
             previous.setActive(false);
@@ -530,28 +532,34 @@ public class KycService {
                 stored.contentLength() == null ? stored.bytes().length : stored.contentLength());
     }
 
-    private byte[] validateAndRead(MultipartFile file) throws Exception {
+    private ValidatedUpload validateAndRead(MultipartFile file) throws Exception {
         if (file == null || file.isEmpty()) {
             throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
         }
         if (file.getSize() > maxFileBytes) {
             throw new PMSCustomException(ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED);
         }
-        if (!ALLOWED_TYPES.contains(file.getContentType())) {
-            throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
-        }
         byte[] bytes = file.getBytes();
-        if (bytes.length == 0 || !signatureMatches(bytes, file.getContentType())) {
+        String detectedType = detectContentType(bytes);
+        if (bytes.length == 0 || detectedType == null) {
             throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
         }
-        return bytes;
+        String declaredType = file.getContentType() == null ? "" : file.getContentType().toLowerCase(Locale.ROOT);
+        if (ALLOWED_TYPES.contains(declaredType) && !declaredType.equals(detectedType)) {
+            throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
+        }
+        return new ValidatedUpload(bytes, detectedType);
     }
 
-    private boolean signatureMatches(byte[] b, String type) {
-        if ("application/pdf".equals(type)) return b.length > 4 && b[0] == '%' && b[1] == 'P' && b[2] == 'D' && b[3] == 'F';
-        if ("image/png".equals(type)) return b.length > 8 && (b[0] & 255) == 137 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G';
-        return b.length > 3 && (b[0] & 255) == 255 && (b[1] & 255) == 216 && (b[2] & 255) == 255;
+    private String detectContentType(byte[] b) {
+        if (b.length > 4 && b[0] == '%' && b[1] == 'P' && b[2] == 'D' && b[3] == 'F') return "application/pdf";
+        if (b.length > 8 && (b[0] & 255) == 137 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G'
+                && b[4] == 13 && b[5] == 10 && b[6] == 26 && b[7] == 10) return "image/png";
+        if (b.length > 3 && (b[0] & 255) == 255 && (b[1] & 255) == 216 && (b[2] & 255) == 255) return "image/jpeg";
+        return null;
     }
+
+    private record ValidatedUpload(byte[] bytes, String contentType) { }
 
     private KycCase ownCase() {
         return caseRepo.findByUserId(currentUser().getId()).orElseThrow(() -> new PMSCustomException(ResponseCode.KYC_CASE_NOT_FOUND));
