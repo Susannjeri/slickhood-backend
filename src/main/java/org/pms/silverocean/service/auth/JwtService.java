@@ -17,6 +17,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.security.Key;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -27,6 +29,7 @@ import java.util.Set;
 public class JwtService {
     public static final String ROLES = "roles";
     public static final String PERMISSIONS = "permissions";
+    public static final String SESSION_ID = "sid";
 
     @Value("${spring.application.name}")
     private String SPRING_APPLICATION_NAME;
@@ -57,6 +60,10 @@ public class JwtService {
     }
 
     private String generateToken(String subject, Set<RoleWrapper> roles) {
+        String sessionId = userDao.findByEmail(subject)
+                .map(Users::getRefreshToken)
+                .filter(value -> !value.isBlank())
+                .orElseThrow(() -> new IllegalStateException("An active session is required before issuing an access token"));
         List<Map<String, Object>> rolesClaim = roles.stream()
                 .map(role -> {
                     Map<String, Object> roleJson = new HashMap<>();
@@ -72,6 +79,7 @@ public class JwtService {
                 .setIssuer(SPRING_APPLICATION_NAME)
                 .setIssuedAt(new Date())
                 .claim(ROLES, rolesClaim)
+                .claim(SESSION_ID, sessionId)
                 .setExpiration(new Date(System.currentTimeMillis() + (getJwtValidityInSeconds() * 1000L)))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
@@ -87,6 +95,20 @@ public class JwtService {
 
     public boolean checkIfRefreshTokenIsPresent(String email) {
         return userDao.findByEmail(email).map(Users::getRefreshToken).isPresent();
+    }
+
+    /**
+     * Access tokens are bound to the one refresh session currently stored for the user.
+     * A newer sign-in or refresh immediately invalidates access tokens from the prior session.
+     */
+    public boolean isCurrentSession(String email, String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return false;
+        return userDao.findByEmail(email)
+                .map(Users::getRefreshToken)
+                .filter(value -> !value.isBlank())
+                .map(current -> MessageDigest.isEqual(current.getBytes(StandardCharsets.UTF_8),
+                        sessionId.getBytes(StandardCharsets.UTF_8)))
+                .orElse(false);
     }
 
     private int getJwtValidityInSeconds() {

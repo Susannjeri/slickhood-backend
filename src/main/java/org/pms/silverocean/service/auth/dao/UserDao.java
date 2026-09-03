@@ -61,6 +61,10 @@ public class UserDao {
         return userRepo.findFirstByRefreshToken(refreshToken);
     }
 
+    public Optional<Users> findByRefreshTokenForUpdate(String refreshToken) {
+        return userRepo.findByRefreshTokenForUpdate(refreshToken);
+    }
+
     public Optional<Users> findByPhone(String phoneNumber) {
         Optional<Users> unSanitizedSearch = userRepo.findFirstByPhoneNumber(phoneNumber);
         if (unSanitizedSearch.isPresent()) {

@@ -14,6 +14,14 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
 
     @Override public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String path = request.getRequestURI();
+        // Gate devices authenticate with their own timestamped HMAC signature in the
+        // controller/service. They do not have a user subscription session.
+        if (path.startsWith("/smart-gate/device/")) return true;
+        if (path.startsWith("/smart-gate")) {
+            entitlements.requireFeatureOrAddOn(entitlements.sessionBusinessProduct(),
+                    "GATE_MANAGEMENT_INCLUDED_UNITS", SubscriptionProduct.GATE_MANAGEMENT_ADDON);
+            return true;
+        }
         SubscriptionProduct product = product(path);
         if (product != null) {
             entitlements.requireProduct(product);
@@ -25,7 +33,6 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
 
     private SubscriptionProduct product(String path) {
         if (path.startsWith("/wealth")) return SubscriptionProduct.MY_WEALTH;
-        if (path.startsWith("/smart-gate")) return SubscriptionProduct.GATE_MANAGEMENT_ADDON;
         if (path.startsWith("/soko/store") || path.startsWith("/soko/product")
                 || path.startsWith("/soko/rider") || path.equals("/soko/order/merchant")
                 || path.matches("/soko/order/[^/]+/(status|finance)")) return SubscriptionProduct.SOKO;

@@ -12,12 +12,13 @@ import org.pms.silverocean.service.payment.PaymentReceiptService;
 import org.pms.silverocean.service.payment.invoice.InvoiceService;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -48,10 +49,11 @@ class PaymentControllerIT {
         when(invoiceService.initInvoicePayment(INVOICE_REF, PaymentChannel.MPESA, null, ACCOUNT_ID))
                 .thenReturn(new PaymentResponse(true, ResponseCode.MPESA_PAYMENT_INITIALIZED));
 
-        mockMvc.perform(get("/payment/init")
-                        .param("invoiceRef", INVOICE_REF)
-                        .param("paymentChannel", PaymentChannel.MPESA.name())
-                        .param("accountId", String.valueOf(ACCOUNT_ID)))
+        mockMvc.perform(post("/payment/init")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"invoiceRef":"INV-TEST-001","paymentChannel":"MPESA","accountId":1}
+                                """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
 
@@ -63,11 +65,12 @@ class PaymentControllerIT {
         when(invoiceService.initInvoicePayment(INVOICE_REF, PaymentChannel.MPESA, CUSTOM_PHONE_NUMBER, ACCOUNT_ID))
                 .thenReturn(new PaymentResponse(true, ResponseCode.MPESA_PAYMENT_INITIALIZED));
 
-        mockMvc.perform(get("/payment/init")
-                        .param("invoiceRef", INVOICE_REF)
-                        .param("paymentChannel", PaymentChannel.MPESA.name())
-                        .param("phoneNumber", CUSTOM_PHONE_NUMBER)
-                        .param("accountId", String.valueOf(ACCOUNT_ID)))
+        mockMvc.perform(post("/payment/init")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"invoiceRef":"INV-TEST-001","paymentChannel":"MPESA",\
+                                "phoneNumber":"+254799999999","accountId":1}
+                                """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
 

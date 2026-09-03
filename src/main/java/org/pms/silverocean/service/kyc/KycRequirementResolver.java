@@ -5,8 +5,10 @@ import org.pms.silverocean.service.users.ProfileType;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
 
 @Component
 public class KycRequirementResolver {
@@ -49,7 +51,8 @@ public class KycRequirementResolver {
                 PMSRole.SERVICE_PROVIDER, PMSRole.ASSET_PORTFOLIO_MANAGER, PMSRole.AFFILIATE).contains(role))) {
             add(requirements, "TAX", "KRA PIN certificate", true, Set.of(KycDocumentType.KRA_PIN_CERTIFICATE));
         }
-        return Set.copyOf(requirements.values());
+        // Preserve a predictable customer journey: identity, selfie, organisation/role evidence, then tax.
+        return Collections.unmodifiableSet(new LinkedHashSet<>(requirements.values()));
     }
 
     private void add(Map<String, KycRequirement> target, String code, String label, boolean required,

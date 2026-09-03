@@ -18,8 +18,8 @@ public class DefaultFreePlanCodeResolver {
 
     public DefaultFreePlanCodeResolver(
             @Value("${subscription.tier.landlord.starter:LANDLORD_BRONZE}") String landlordStarter,
-            @Value("${subscription.tier.serviceprovider.standard:STANDARD}") String serviceProviderStandard,
-            @Value("${subscription.tier.affiliate.standard:STANDARD_AFFILIATE}") String affiliateStandard,
+            @Value("${subscription.tier.serviceprovider.standard:SERVICES_FREE}") String serviceProviderStandard,
+            @Value("${subscription.tier.affiliate.standard:AFFILIATE_FREE}") String affiliateStandard,
             @Value("${subscription.tier.assetmanager.basic:WEALTH_BRONZE}") String assetManagerBasic,
             @Value("${subscription.tier.estate.starter:ESTATE_BRONZE}") String estateStarter,
             @Value("${subscription.tier.sales.starter:SALE_BRONZE}") String salesStarter

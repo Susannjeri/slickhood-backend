@@ -7,5 +7,6 @@ public record InvoiceDTO(long id, ZonedDateTime createdOn, String propertyDetail
                          String propertyName, String unitRef, String tenantName, String ref,
                          String currency, double amount, double pendingAmount, boolean paid,
                          Long paymentAccountId, String billingType, LocalDate dueDate,
-                         String issuerName, String issuerType, String issuerLogoUrl) {
+                         String issuerName, String issuerType, String issuerLogoUrl,
+                         boolean payableByCurrentUser, boolean recordableByCurrentUser) {
 }

@@ -110,13 +110,27 @@ class UserAuthenticationServiceTest {
     void inactiveAccountCannotRotateARefreshToken() {
         Users inactive = Users.builder().email("inactive@example.com").build();
         inactive.setActive(false);
-        when(userDao.findByRefreshToken(anyString())).thenReturn(Optional.of(inactive));
+        when(userDao.findByRefreshTokenForUpdate(anyString())).thenReturn(Optional.of(inactive));
 
         var response = service.loginByRefreshToken("refresh-token");
 
         assertFalse(response.isSuccess());
         assertEquals(ResponseCode.LOGIN_FAILURE_INACTIVE_USER.getCode(), response.getCode());
         verify(userDao, never()).save(inactive);
+    }
+
+    @Test
+    void replacedOrExpiredRefreshTokenReturnsActionableMessage() {
+        when(userDao.findByRefreshTokenForUpdate(anyString())).thenReturn(Optional.empty());
+        when(i18NService.getLocalizedMessage(ResponseCode.SESSION_REPLACED_OR_EXPIRED))
+                .thenReturn("This session is no longer active. It may have been replaced by a newer sign-in. Please sign in again.");
+
+        var response = service.loginByRefreshToken("old-refresh-token");
+
+        assertFalse(response.isSuccess());
+        assertEquals(ResponseCode.SESSION_REPLACED_OR_EXPIRED.getCode(), response.getCode());
+        assertEquals("This session is no longer active. It may have been replaced by a newer sign-in. Please sign in again.",
+                response.getDescription());
     }
 
     @Test
@@ -232,6 +246,18 @@ class UserAuthenticationServiceTest {
         verify(roleService).saveUserAndAssignRoleOnRegistration(org.mockito.ArgumentMatchers.eq(1L), user.capture());
         assertEquals(ProfileType.INDIVIDUAL.name(), user.getValue().getProfileType());
         assertEquals(null, user.getValue().getOrganizationName());
+    }
+
+    @Test
+    void passwordResetPersistsTheNewPasswordBeforeReturning() {
+        Users user = Users.builder().email("owner@example.com").password("old-hash").build();
+        when(userDao.findByEmail("owner@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("NewPassword1!" )).thenReturn("new-hash");
+
+        service.updatePassword("  OWNER@EXAMPLE.COM ", "NewPassword1!");
+
+        assertEquals("new-hash", user.getPassword());
+        verify(userDao).save(user);
     }
 
     private RegistrationDTO registration(String email, String password) {

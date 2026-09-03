@@ -24,7 +24,11 @@ import java.util.List;
 @Slf4j
 public class LandlordPlanCatalogSeedService {
     private static final List<String> COMMON_FEATURES = List.of(
-            "MPESA_PAYMENTS", "CARD_PAYMENTS", "RECEIPTS_AND_STATEMENTS", "ANALYTICS_AND_REPORTS");
+            "BRANDED_INVOICES", "MPESA_PAYMENTS", "CARD_PAYMENTS", "RECEIPTS_AND_STATEMENTS",
+            "ANALYTICS_AND_REPORTS", "MULTIPLE_USER_ROLES", "CUSTOM_PAYMENT_SPLIT_RULES",
+            "PRIORITY_SUPPORT", "DEDICATED_ONBOARDING", "WHITE_LABEL_BRANDING",
+            "SLA_UPTIME_GUARANTEE", "CUSTOM_INTEGRATIONS_AT_COST",
+            "PHONE_AND_CHAT_SUPPORT_24_7", "DEDICATED_ACCOUNT_MANAGER");
 
     private final SubscriptionPlanRepo planRepo;
     private final PlanFeatureRepo featureRepo;
@@ -55,7 +59,7 @@ public class LandlordPlanCatalogSeedService {
         seedPermanentFreeProducts();
         seedSalesManagedAddOns();
         deactivateLegacyStarterIfUntouched();
-        log.info("Rental, estate, property-sale and Wealth Bronze/Silver/Gold/Platinum catalogs are available; existing admin edits were preserved.");
+        log.info("Canonical subscription plans are available; existing Super Admin catalogue edits were preserved.");
     }
 
     private void seedFamily(String prefix, PlanCategory category, PMSRole role) {
@@ -75,22 +79,15 @@ public class LandlordPlanCatalogSeedService {
         createIfMissing(prefix + "_SILVER_ANNUAL", "Silver", category, role, BillingCycle.YEARLY, "37800", 50L, 20, false, areaFeature, product);
         createIfMissing(prefix + "_GOLD_ANNUAL", "Gold", category, role, BillingCycle.YEARLY, "75600", 100L, 30, false, areaFeature, product);
         createIfMissing(prefix + "_PLATINUM_ANNUAL_CUSTOM", "Platinum", category, role, BillingCycle.YEARLY, "0", -1L, 40, true, areaFeature, product);
-        if (role == PMSRole.LANDLORD || role == PMSRole.ESTATE_MANAGER || role == PMSRole.SALES_AGENT) {
-            ensureQuotaIfMissing(prefix + "_BRONZE", "TEAM_SEATS", 2L);
-            ensureQuotaIfMissing(prefix + "_SILVER", "TEAM_SEATS", 5L);
-            ensureQuotaIfMissing(prefix + "_GOLD", "TEAM_SEATS", 15L);
-            ensureQuotaIfMissing(prefix + "_PLATINUM_CUSTOM", "TEAM_SEATS", -1L);
-            ensureQuotaIfMissing(prefix + "_BRONZE_ANNUAL", "TEAM_SEATS", 2L);
-            ensureQuotaIfMissing(prefix + "_SILVER_ANNUAL", "TEAM_SEATS", 5L);
-            ensureQuotaIfMissing(prefix + "_GOLD_ANNUAL", "TEAM_SEATS", 15L);
-            ensureQuotaIfMissing(prefix + "_PLATINUM_ANNUAL_CUSTOM", "TEAM_SEATS", -1L);
-        }
     }
 
     private void createIfMissing(String code, String name, PlanCategory category, PMSRole role, BillingCycle cycle, String price,
                                  long unitLimit, int tierRank, boolean customPricing, String areaFeature,
                                  SubscriptionProduct product) {
-        SubscriptionPlan plan = planRepo.findByCode(code).orElseGet(SubscriptionPlan::new);
+        if (planRepo.findByCode(code).isPresent()) {
+            return;
+        }
+        SubscriptionPlan plan = new SubscriptionPlan();
         plan.setCode(code);
         plan.setDisplayName(name);
         plan.setPlanCategory(category);
@@ -117,18 +114,32 @@ public class LandlordPlanCatalogSeedService {
         upsertQuota(plan, "UNITS", unitLimit);
         upsertQuota(plan, "TRIAL_DAYS", trialDays);
         upsertQuota(plan, "ANNUAL_SAVING_PERCENT", customPricing ? -1L : 10L);
+        if (role == PMSRole.LANDLORD || role == PMSRole.ESTATE_MANAGER || role == PMSRole.SALES_AGENT) {
+            upsertQuota(plan, "TEAM_SEATS", switch (tierRank) {
+                case 10 -> 2L;
+                case 20 -> 5L;
+                case 30 -> 15L;
+                default -> -1L;
+            });
+        }
     }
 
     private List<String> areaFeatures(PlanCategory category) {
         return switch (category) {
             case LANDLORD -> List.of("PROPERTY_AND_UNIT_MANAGEMENT", "LEASE_MANAGEMENT", "TENANT_ONBOARDING",
-                    "RENT_INVOICING", "RENT_RECONCILIATION");
+                    "RENT_INVOICING", "RENT_RECONCILIATION", "LANDLORD_PAYMENT_SETUP",
+                    "PER_PROPERTY_PAYMENT_ACCOUNT", "AUTOMATED_RENT_REMINDERS", "LATE_FEE_RULES",
+                    "GATE_MANAGEMENT_INCLUDED_UNITS", "UNIT_LISTING_INCLUDED_UNITS", "PROPERTY_LISTINGS",
+                    "WEALTH_INCLUDED_UNITS", "TENANT_SERVICE_PROVIDER_ACCESS");
             case ESTATE_MANAGEMENT -> List.of("ESTATE_AND_HOMEOWNER_MANAGEMENT", "SERVICE_CHARGE_BILLING",
-                    "COMMUNITY_FUNDS", "VISITOR_MANAGEMENT", "ESTATE_OPERATIONS");
+                    "COMMUNITY_FUNDS", "VISITOR_MANAGEMENT", "ESTATE_OPERATIONS",
+                    "PER_PROPERTY_PAYMENT_ACCOUNT", "GATE_MANAGEMENT_INCLUDED_UNITS",
+                    "TENANT_SERVICE_PROVIDER_ACCESS");
             case PROPERTY_SALES -> List.of("PROPERTY_LISTINGS", "BUYER_PIPELINE", "OFFERS_AND_DUE_DILIGENCE",
-                    "SALE_MILESTONES", "SALES_REPORTING");
+                    "SALE_MILESTONES", "SALES_REPORTING", "PER_PROPERTY_PAYMENT_ACCOUNT",
+                    "UNIT_LISTING_INCLUDED_UNITS");
             case ASSET_PORTFOLIO_MANAGER -> List.of("ASSET_REGISTER", "LIABILITY_REGISTER", "NET_WORTH",
-                    "WEALTH_GOALS", "WEALTH_PERFORMANCE");
+                    "WEALTH_GOALS", "WEALTH_PERFORMANCE", "WEALTH_INCLUDED_UNITS");
             default -> List.of();
         };
     }
@@ -155,7 +166,10 @@ public class LandlordPlanCatalogSeedService {
 
     private void createFreeProduct(String code, String name, PlanCategory category, PMSRole role,
                                    SubscriptionProduct product, String feature) {
-        SubscriptionPlan plan = planRepo.findByCode(code).orElseGet(SubscriptionPlan::new);
+        if (planRepo.findByCode(code).isPresent()) {
+            return;
+        }
+        SubscriptionPlan plan = new SubscriptionPlan();
         plan.setCode(code); plan.setDisplayName(name); plan.setPlanCategory(category); plan.setRoleFamily(role);
         plan.setBillingCycle(BillingCycle.MONTHLY); plan.setPrice(BigDecimal.ZERO); plan.setCurrency(currency);
         plan.setProductKey(product); plan.setPurchaseMode(SubscriptionPurchaseMode.FREE); plan.setTierRank(0);
@@ -173,7 +187,10 @@ public class LandlordPlanCatalogSeedService {
     }
 
     private void createAddOn(String code, String name, SubscriptionProduct product, String feature) {
-        SubscriptionPlan plan = planRepo.findByCode(code).orElseGet(SubscriptionPlan::new);
+        if (planRepo.findByCode(code).isPresent()) {
+            return;
+        }
+        SubscriptionPlan plan = new SubscriptionPlan();
         plan.setCode(code); plan.setDisplayName(name); plan.setPlanCategory(PlanCategory.LANDLORD);
         plan.setRoleFamily(PMSRole.LANDLORD); plan.setBillingCycle(BillingCycle.MONTHLY);
         plan.setPrice(BigDecimal.ZERO); plan.setCurrency(currency); plan.setProductKey(product);
@@ -216,11 +233,4 @@ public class LandlordPlanCatalogSeedService {
         quotaRepo.save(quota);
     }
 
-    private void ensureQuotaIfMissing(String planCode, String key, long value) {
-        planRepo.findByCode(planCode).ifPresent(plan -> {
-            if (quotaRepo.findTopBySubscriptionPlanAndMetricKeyOrderByIdDesc(plan, key).isEmpty()) {
-                upsertQuota(plan, key, value);
-            }
-        });
-    }
 }

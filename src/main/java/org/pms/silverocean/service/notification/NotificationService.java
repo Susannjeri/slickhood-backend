@@ -1,6 +1,5 @@
 package org.pms.silverocean.service.notification;
 
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.pms.silverocean.database.pms.entities.Notification;
 import org.pms.silverocean.database.pms.entities.Users;
@@ -16,8 +15,6 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 import java.time.LocalDateTime;
 
 @Service
@@ -28,14 +25,6 @@ public class NotificationService {
     private final UserDao userDao;
     private final Map<String, NotificationSender> senders;
     private final ApplicationEventPublisher events;
-    private Set<String> superAdminEmails;
-
-
-    @PostConstruct
-    public void init() {
-        superAdminEmails = userDao.findActiveSuperAdminAccounts().stream().map(Users::getEmail).collect(Collectors.toSet());
-    }
-
     @Async
     public void sendNotification(NotificationDTO notificationDTO) {
         queueNotification(notificationDTO);
@@ -56,7 +45,10 @@ public class NotificationService {
 
     public void sendEmailToSuperAdmin(NotificationType notificationType, String formattedMessage) {
         if (NotificationChannel.EMAIL.equals(notificationType.getChannel())) {
-            superAdminEmails.forEach(email -> sendNotification(new NotificationDTO(formattedMessage, email, notificationType)));
+            // Staff membership can change without restarting the application.
+            // Resolve active recipients at dispatch time so escalation never uses a stale startup cache.
+            userDao.findActiveSuperAdminAccounts().stream().map(Users::getEmail)
+                    .forEach(email -> sendNotification(new NotificationDTO(formattedMessage, email, notificationType)));
         }
     }
 

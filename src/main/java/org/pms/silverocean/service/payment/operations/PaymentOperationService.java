@@ -15,7 +15,6 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.payment.PaymentDao;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.payment.ledger.FinancialLedgerService;
-import org.pms.silverocean.service.affiliate.AffiliateService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
@@ -29,7 +28,7 @@ public class PaymentOperationService {
     private final PaymentOperationRepo operations; private final PaymentDao payments; private final InvoiceDao invoices;
     private final FinancialLedgerService ledger; private final UserDao users; private final AffiliateService affiliates;
 
-    @Transactional public PaymentOperation append(PaymentOperationModels.Create request){
+    @Transactional(transactionManager = "pmsDBTransactionManager") public PaymentOperation append(PaymentOperationModels.Create request){
         requireFinance(); String key=request.idempotencyKey().trim();
         return operations.findByIdempotencyKey(key).map(existing->{if(!sameRequest(existing,request))throw invalid();return existing;}).orElseGet(()->create(request,key));
     }

@@ -49,9 +49,9 @@ public class JWTFilter extends GenericFilter {
             try {
                 Claims claims = jwtService.validateToken(token).getBody();
                 String user = claims.getSubject();
-                boolean refreshTokenPresent = jwtService.checkIfRefreshTokenIsPresent(user);
-                if (!refreshTokenPresent) {
-                    throw new RuntimeException("User is not logged In");
+                String sessionId = claims.get(JwtService.SESSION_ID, String.class);
+                if (!jwtService.isCurrentSession(user, sessionId)) {
+                    throw new RuntimeException("Session was replaced or ended");
                 }
 
                 List<Map<String, Object>> roles = claims.get(JwtService.ROLES, List.class);

@@ -2,6 +2,7 @@ package org.pms.silverocean.database.pms;
 
 import org.pms.silverocean.database.pms.entities.Users;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -11,6 +12,7 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import jakarta.persistence.LockModeType;
 
 public interface UserRepo extends JpaRepository<Users, Long>, JpaSpecificationExecutor<Users> {
     Optional<Users> findByEmail(String email);
@@ -25,6 +27,10 @@ public interface UserRepo extends JpaRepository<Users, Long>, JpaSpecificationEx
 
     Optional<Users> findFirstByPhoneNumber(String phoneNumber);
     Optional<Users> findFirstByRefreshToken(String refreshToken);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM Users u WHERE u.refreshToken=:refreshToken")
+    Optional<Users> findByRefreshTokenForUpdate(@Param("refreshToken") String refreshToken);
 
     @Modifying
     @Query("UPDATE Users  u SET u.refreshToken=null WHERE u.email=:username")

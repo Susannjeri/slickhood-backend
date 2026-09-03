@@ -3,6 +3,7 @@ package org.pms.silverocean.database.pms.entities;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
 import jakarta.persistence.Lob;
+import jakarta.persistence.Column;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
@@ -33,6 +34,7 @@ public class KycDocument extends BaseActiveEntity {
     private String ocrProvider;
     private Double ocrConfidence;
     @Lob private byte[] encryptedExtractedData;
+    @Column(columnDefinition = "TEXT")
     private String rejectionReason;
     private Long supersedesDocumentId;
     private ZonedDateTime reviewedAt;

@@ -9,6 +9,8 @@ import org.pms.silverocean.database.pms.UserRoleRepo;
 import org.pms.silverocean.database.pms.entities.KycCase;
 import org.pms.silverocean.database.pms.entities.KycDocument;
 import org.pms.silverocean.database.pms.entities.Users;
+import org.pms.silverocean.common.ResponseCode;
+import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.security.EncryptionService;
@@ -17,6 +19,8 @@ import org.pms.silverocean.service.users.ProfileType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -357,6 +361,70 @@ class KycActivationLifecycleTest {
         verify(garage, never()).uploadBytes(any(), any(), any());
     }
 
+    @Test void providerFailureIsReportedAsTemporaryAndDoesNotStoreDocument() {
+        Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("IDENTITY", "Identity document", true,
+                        Set.of(KycDocumentType.NATIONAL_ID_FRONT))));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT))
+                .thenThrow(new IllegalStateException("provider unavailable"));
+
+        assertThatThrownBy(() -> service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "id.jpg", "image/jpeg", image)))
+                .isInstanceOfSatisfying(PMSCustomException.class, error ->
+                        assertThat(error.getResponseCode()).isEqualTo(ResponseCode.KYC_OCR_PROVIDER_UNAVAILABLE));
+        verify(garage, never()).uploadBytes(any(), any(), any());
+        verify(documents, never()).save(any(KycDocument.class));
+    }
+
+    @Test void approvalDoesNotRequireTaxForRoleWhoseKycDoesNotRequireIt() {
+        Users reviewer = customer(1); Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
+        KycRequirement identityRequirement = new KycRequirement("IDENTITY", "Identity document", true,
+                Set.of(KycDocumentType.PASSPORT));
+        KycDocument identity = document(81, 12); identity.setCaseId(40);
+        identity.setDocumentType(KycDocumentType.PASSPORT.name());
+        identity.setEncryptedExtractedData(new byte[]{1});
+        when(users.getUserObject()).thenReturn(reviewer); when(users.findById(12)).thenReturn(Optional.of(subject));
+        when(cases.findById(40L)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(identityRequirement));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity));
+        when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"P1234567\"}"));
+
+        service.review(40, new KycReviewRequest(KycStatus.APPROVED, "Passport matched"));
+
+        assertThat(subject.isVerified()).isTrue();
+        assertThat(subject.getIdentificationNumber()).isEqualTo("P1234567");
+        assertThat(subject.getTaxPin()).isNull();
+    }
+
+    @Test void nationalIdFrontCannotBePairedWithAlienIdBack() {
+        Users subject = customer(12); subject.setPhoneVerified(true);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        KycRequirement identity = new KycRequirement("IDENTITY", "Identity document", true,
+                Set.of(KycDocumentType.NATIONAL_ID_FRONT, KycDocumentType.ALIEN_ID_FRONT));
+        KycRequirement identityBack = new KycRequirement("IDENTITY_BACK", "Identity document back", true,
+                Set.of(KycDocumentType.NATIONAL_ID_BACK, KycDocumentType.ALIEN_ID_BACK));
+        KycDocument nationalFront = document(81, 12); nationalFront.setCaseId(40);
+        nationalFront.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        KycDocument alienBack = document(82, 12); alienBack.setCaseId(40);
+        alienBack.setDocumentType(KycDocumentType.ALIEN_ID_BACK.name());
+        when(users.getUserObject()).thenReturn(subject); when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(identity, identityBack));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(nationalFront, alienBack));
+
+        assertThatThrownBy(service::submit)
+                .isInstanceOfSatisfying(PMSCustomException.class, error ->
+                        assertThat(error.getResponseCode()).isEqualTo(ResponseCode.KYC_MISSING_DOCUMENTS));
+        assertThat(kycCase.getStatus()).isEqualTo(KycStatus.IN_PROGRESS.name());
+    }
+
     @Test void resubmissionViewShowsOnlyLatestEvidenceForEachRequirement() {
         Users subject = customer(12);
         KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
@@ -438,6 +506,64 @@ class KycActivationLifecycleTest {
         assertThat(replacement.extractedFields()).doesNotContainKey("_validationWarnings");
         assertThat(rejectedPassport.isActive()).isFalse();
         assertThat(rejectedId.isActive()).isFalse();
+    }
+
+    @Test void retryingTheSameRejectedFileReprocessesItInsteadOfReportingADuplicate() throws Exception {
+        Users subject = customer(12);
+        subject.setFullName("Collectable Class");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        KycRequirement identity = new KycRequirement("IDENTITY", "Identity document", true,
+                Set.of(KycDocumentType.NATIONAL_ID_FRONT));
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        KycDocument rejected = document(91, 12);
+        rejected.setCaseId(40);
+        rejected.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        rejected.setStatus(DocumentStatus.REJECTED.name());
+        rejected.setSha256(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(image)));
+        rejected.setEncryptedExtractedData(new byte[]{1});
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(identity));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(rejected));
+        when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"OLD-ID\"}"));
+        when(quality.inspect(image, "image/jpeg")).thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT)).thenReturn(
+                new OcrResult("TEST_OCR", 96, Map.of("documentNumber", "12345678", "fullName", "Collectable Class")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        KycDocumentView replacement = service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "same-id.jpg", "image/jpeg", image));
+
+        assertThat(replacement.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
+        assertThat(rejected.isActive()).isFalse();
+        verify(ocr).extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT);
+    }
+
+    @Test void retryingAnAlreadyAcceptedFileIsIdempotent() throws Exception {
+        Users subject = customer(12);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        KycRequirement identity = new KycRequirement("IDENTITY", "Identity document", true,
+                Set.of(KycDocumentType.NATIONAL_ID_FRONT));
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        KycDocument accepted = document(91, 12);
+        accepted.setCaseId(40);
+        accepted.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        accepted.setStatus(DocumentStatus.OCR_COMPLETE.name());
+        accepted.setSha256(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(image)));
+        accepted.setEncryptedExtractedData(new byte[]{1});
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(identity));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(accepted));
+        when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"12345678\"}"));
+
+        KycDocumentView result = service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "same-id.jpg", "image/jpeg", image));
+
+        assertThat(result.id()).isEqualTo(91L);
+        verify(ocr, never()).extract(any(), any(), any());
+        verify(garage, never()).uploadBytes(any(), any(), any());
     }
 
     @Test void unrelatedCustomerCannotReadAnotherCustomersDocument() {

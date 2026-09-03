@@ -119,9 +119,11 @@ class InvoiceServiceSubscriptionPaymentTest {
     }
 
     @Test
-    void rejectsPropertyInvoiceInitializationByAUserWhoIsNotBilled() {
+    void rejectsPropertyInvoiceInitializationByAnIssuerWhoCanViewButIsNotBilled() {
+        PMSInvoice invoice = subscriptionInvoice(7L, 8L);
+        invoice.setSubscriptionPlanCode(null);
         when(userDao.getUserId()).thenReturn(8L);
-        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 8L)).thenReturn(Optional.empty());
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 8L)).thenReturn(Optional.of(invoice));
 
         assertThrows(PaymentRequestException.class,
                 () -> service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 12L));

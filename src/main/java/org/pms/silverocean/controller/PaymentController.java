@@ -14,9 +14,9 @@ import org.pms.silverocean.service.payment.PaymentReceiptService;
 import org.pms.silverocean.service.payment.invoice.InvoiceService;
 import org.pms.silverocean.service.payment.invoice.wrappers.InvoiceDTO;
 import org.pms.silverocean.service.payment.wrappers.ManualPaymentDTO;
-import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannelDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentDTO;
+import org.pms.silverocean.service.payment.wrappers.PaymentInitRequest;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -113,12 +113,13 @@ public class PaymentController extends OutputStreamErrorHandler {
         return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.ACCOUNT_LIST.getCode(),i18NService.getLocalizedMessage(ResponseCode.ACCOUNT_LIST),invoiceService.getInvoicePaymentAccount(invoiceId)));
     }
 
-    @GetMapping("/init")
-    public ResponseEntity<ResponseDTO> initPayment(@RequestParam String invoiceRef, @RequestParam PaymentChannel paymentChannel, @RequestParam(required = false) Optional<String> phoneNumber,
-                                                   @RequestParam long accountId) {
+    @PostMapping("/init")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ResponseDTO> initPayment(@RequestBody @Valid PaymentInitRequest request) {
         try {
-            log.info("Invoice {} , channel {} , phone {} ", invoiceRef, paymentChannel.getName(), phoneNumber.orElse("null"));
-            PaymentResponse paymentResponse = invoiceService.initInvoicePayment(invoiceRef, paymentChannel, phoneNumber.orElse(null), accountId);
+            log.info("Payment initialization requested for invoice {} via {}", request.invoiceRef(), request.paymentChannel().getName());
+            PaymentResponse paymentResponse = invoiceService.initInvoicePayment(request.invoiceRef(), request.paymentChannel(),
+                    request.phoneNumber(), request.accountId());
             if (paymentResponse.success()) {
                 return paymentResponse.body() == null ? ResponseEntity.ok(new ResponseDTO(true, paymentResponse.responseCode().getCode(), i18NService.getLocalizedMessage(paymentResponse.responseCode())))
                         : ResponseEntity.ok(new ResponseDTO(true, paymentResponse.responseCode().getCode(), i18NService.getLocalizedMessage(paymentResponse.responseCode()), paymentResponse.body()));

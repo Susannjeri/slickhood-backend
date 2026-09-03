@@ -38,6 +38,10 @@ public class NotificationDao {
         return notificationRepo.findById(id);
     }
 
+    public Notification saveEntity(Notification notification) {
+        return notificationRepo.save(notification);
+    }
+
     public Page<Notification> getNotificationsForRecipients(Pageable pageable, Collection<String> recipients) {
         return notificationRepo.findAllForRecipients(pageable, recipients);
     }

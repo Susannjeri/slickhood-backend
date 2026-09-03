@@ -2,6 +2,8 @@ package org.pms.silverocean.database;
 
 import jakarta.transaction.Transactional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.pms.silverocean.database.pms.*;
 import org.pms.silverocean.database.pms.entities.*;
 import org.pms.silverocean.service.I18NService;
@@ -19,8 +21,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.DockerClientFactory;
 
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
@@ -32,10 +33,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Opt-in persistence certification. It never connects to a configured SlickHood database: Testcontainers
- * creates and destroys a dedicated MySQL database. With no Docker runtime the suite is explicitly skipped.
+ * Opt-in persistence and migration certification. It never reads the application's configured datasource.
+ * CI normally gets a disposable database from Testcontainers. A release runner without Docker can provide
+ * an explicitly isolated database through SLICKHOOD_TEST_MYSQL_* environment variables. With neither option
+ * available the test is explicitly skipped.
  */
-@Testcontainers(disabledWithoutDocker = true)
+@EnabledIf("mysqlAvailable")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @DataJpaTest(properties = {
         "spring.flyway.enabled=false",
@@ -44,25 +47,54 @@ import static org.mockito.Mockito.when;
 })
 @Transactional
 class RentalPaymentMySqlIT {
-    @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4")
-            .withDatabaseName("slickhood_integration")
-            .withUsername("slickhood_test")
-            .withPassword("slickhood_test_only");
+    private static final String EXTERNAL_URL = setting("SLICKHOOD_TEST_MYSQL_URL");
+    private static final String EXTERNAL_USERNAME = setting("SLICKHOOD_TEST_MYSQL_USERNAME");
+    private static final String EXTERNAL_PASSWORD = setting("SLICKHOOD_TEST_MYSQL_PASSWORD");
+    private static MySQLContainer<?> mysql;
+
+    static boolean mysqlAvailable() {
+        return EXTERNAL_URL != null && !EXTERNAL_URL.isBlank()
+                || DockerClientFactory.instance().isDockerAvailable();
+    }
+
+    private static String setting(String name) {
+        String value = System.getProperty(name);
+        return value == null || value.isBlank() ? System.getenv(name) : value;
+    }
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
-        registry.add("spring.datasource.driverClassName", MYSQL::getDriverClassName);
-        registry.add("audit.datasource.mysql.url", MYSQL::getJdbcUrl);
-        registry.add("audit.datasource.mysql.username", MYSQL::getUsername);
-        registry.add("audit.datasource.mysql.password", MYSQL::getPassword);
-        registry.add("audit.datasource.mysql.driverClassName", MYSQL::getDriverClassName);
+        if (EXTERNAL_URL == null || EXTERNAL_URL.isBlank()) {
+            mysql = new MySQLContainer<>("mysql:8.4")
+                    .withDatabaseName("slickhood_integration")
+                    .withUsername("slickhood_test")
+                    .withPassword("slickhood_test_only");
+            mysql.start();
+        }
+
+        String url = mysql == null ? EXTERNAL_URL : mysql.getJdbcUrl();
+        String username = mysql == null ? EXTERNAL_USERNAME : mysql.getUsername();
+        String password = mysql == null ? EXTERNAL_PASSWORD : mysql.getPassword();
+        String driver = mysql == null ? "org.mariadb.jdbc.Driver" : mysql.getDriverClassName();
+        registry.add("spring.datasource.url", () -> url);
+        registry.add("spring.datasource.username", () -> username);
+        registry.add("spring.datasource.password", () -> password);
+        registry.add("spring.datasource.driverClassName", () -> driver);
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> mysql == null ? "validate" : "create-drop");
+        registry.add("audit.datasource.mysql.url", () -> url);
+        registry.add("audit.datasource.mysql.username", () -> username);
+        registry.add("audit.datasource.mysql.password", () -> password);
+        registry.add("audit.datasource.mysql.driverClassName", () -> driver);
         registry.add("whatsapp.phoneNumberId", () -> "test");
         registry.add("whatsapp.accessToken", () -> "test");
         registry.add("whatsapp.verifyToken", () -> "test");
+    }
+
+    @AfterAll
+    static void stopContainer() {
+        if (mysql != null) {
+            mysql.stop();
+        }
     }
 
     @Autowired UserRepo users;

@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -137,8 +138,20 @@ public class KycService {
         }
         byte[] bytes = validateAndRead(file);
         String sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        if (documentRepo.existsByUserIdAndSha256AndActiveTrue(user.getId(), sha256)) {
+        List<KycDocument> active = activeDocuments(kycCase.getId());
+        List<KycDocument> superseded = active.stream()
+                .filter(existing -> sameEvidenceSlot(user, existing, documentType))
+                .toList();
+        Optional<KycDocument> duplicate = active.stream()
+                .filter(existing -> sha256.equals(existing.getSha256()))
+                .findFirst();
+        if (duplicate.isPresent() && !superseded.contains(duplicate.get())) {
+            // Reusing one physical document for two different evidence requirements is unsafe.
             throw new PMSCustomException(ResponseCode.KYC_DUPLICATE_DOCUMENT);
+        }
+        if (duplicate.isPresent() && !DocumentStatus.REJECTED.name().equals(duplicate.get().getStatus())) {
+            // Upload controls must be idempotent: a double click or retry must not create a new version.
+            return KycDocumentView.from(duplicate.get(), decrypt(duplicate.get()), null);
         }
         ImageQualityResult quality = qualityService.inspect(bytes, file.getContentType());
         if (!quality.accepted() && (rejectImageQualityFailures || uninspectable(quality))) {
@@ -158,7 +171,7 @@ public class KycService {
         document.setActive(true);
 
         if (!ocrProvider.enabled()) {
-            throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+            throw new PMSCustomException(ResponseCode.KYC_OCR_PROVIDER_UNAVAILABLE);
         }
         OcrResult ocr;
         try {
@@ -166,11 +179,8 @@ public class KycService {
         } catch (RuntimeException providerFailure) {
             log.warn("KYC OCR provider failed for document type {} ({})", documentType,
                     providerFailure.getClass().getSimpleName());
-            throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+            throw new PMSCustomException(ResponseCode.KYC_OCR_PROVIDER_UNAVAILABLE);
         }
-        List<KycDocument> superseded = activeDocuments(kycCase.getId()).stream()
-                .filter(existing -> sameEvidenceSlot(user, existing, documentType))
-                .toList();
         document.setVersionNo(superseded.stream().mapToInt(existing -> Math.max(1, existing.getVersionNo()))
                 .max().orElse(0) + 1);
         document.setMaintenanceReason(superseded.isEmpty() ? "INITIAL_UPLOAD" : "CUSTOMER_REPLACEMENT");
@@ -254,14 +264,15 @@ public class KycService {
                 if (identificationNumber == null) identificationNumber = cleanVerifiedValue(fields.get("documentNumber"));
                 if (taxPin == null) taxPin = cleanVerifiedValue(fields.get("taxPin"));
             }
-            if (identificationNumber == null || taxPin == null) {
+            boolean taxRequired = taxRequired(subject);
+            if (identificationNumber == null || (taxRequired && taxPin == null)) {
                 throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
             }
             if (!userDao.isValidIDAndTaxPin(subject.getId(), subject.getCountry(), identificationNumber, taxPin)) {
                 throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
             }
             subject.setIdentificationNumber(identificationNumber.toUpperCase(Locale.ROOT));
-            subject.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
+            if (taxPin != null) subject.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
             subject.setVerified(true);
             subject.setAccountStatus(AccountStatus.ACTIVE.name());
             currentDocuments.forEach(document -> {
@@ -372,7 +383,9 @@ public class KycService {
             }
             documentRepo.save(document);
             caseRepo.findById(document.getCaseId()).ifPresent(kycCase -> {
-                kycCase.setStatus(KycStatus.REVIEW_REQUIRED.name());
+                // An expired document needs customer action, not a passive
+                // "under review" screen that prevents replacement uploads.
+                kycCase.setStatus(KycStatus.EXPIRED.name());
                 kycCase.setReviewNotes(document.getMaintenanceReason());
                 caseRepo.save(kycCase);
             });
@@ -392,7 +405,7 @@ public class KycService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public KycCaseView reprocessOwnDocuments() throws Exception {
-        if (!ocrProvider.enabled()) throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+        if (!ocrProvider.enabled()) throw new PMSCustomException(ResponseCode.KYC_OCR_PROVIDER_UNAVAILABLE);
         Users user = currentUser();
         KycCase kycCase = ownCase();
         if (KycStatus.APPROVED.name().equals(kycCase.getStatus())) {
@@ -403,7 +416,7 @@ public class KycService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public KycCaseView reprocessCase(long caseId) throws Exception {
-        if (!ocrProvider.enabled()) throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+        if (!ocrProvider.enabled()) throw new PMSCustomException(ResponseCode.KYC_OCR_PROVIDER_UNAVAILABLE);
         KycCase kycCase = caseRepo.findById(caseId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.KYC_CASE_NOT_FOUND));
         if (KycStatus.APPROVED.name().equals(kycCase.getStatus())) {
@@ -425,7 +438,7 @@ public class KycService {
             } catch (RuntimeException providerFailure) {
                 log.warn("KYC OCR reprocessing failed for document type {} ({})", type,
                         providerFailure.getClass().getSimpleName());
-                throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
+                throw new PMSCustomException(ResponseCode.KYC_OCR_PROVIDER_UNAVAILABLE);
             }
             Map<String, String> fields = validateExtractedEvidence(ocr.fields(), user, kycCase, Set.of(), type);
             document.setOcrProvider(ocr.provider());
@@ -450,10 +463,10 @@ public class KycService {
             if (taxPin == null) taxPin = cleanVerifiedValue(fields.get("taxPin"));
         }
         boolean complete = missingRequirements(kycCase, user).isEmpty()
-                && identificationNumber != null && taxPin != null;
+                && identificationNumber != null && (!taxRequired(user) || taxPin != null);
         if (complete && userDao.isValidIDAndTaxPin(user.getId(), user.getCountry(), identificationNumber, taxPin)) {
             user.setIdentificationNumber(identificationNumber.toUpperCase(Locale.ROOT));
-            user.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
+            if (taxPin != null) user.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
             user.setVerified(false);
             user.setAccountStatus(AccountStatus.KYC_UNDER_REVIEW.name());
             kycCase.setStatus(KycStatus.SUBMITTED.name());
@@ -561,10 +574,20 @@ public class KycService {
     private Set<String> missingRequirements(KycCase kycCase, Users user) {
         Set<KycDocumentType> uploaded = currentDocuments(kycCase, user).stream()
                 .filter(doc -> !DocumentStatus.REJECTED.name().equals(doc.getStatus()))
+                .filter(doc -> !DocumentStatus.REVIEW_REQUIRED.name().equals(doc.getStatus()))
+                .filter(doc -> !DocumentStatus.SUPERSEDED.name().equals(doc.getStatus()))
                 .map(doc -> KycDocumentType.valueOf(doc.getDocumentType())).collect(Collectors.toSet());
-        return effectiveRequirements(user, uploaded).stream().filter(KycRequirement::required)
+        Set<KycRequirement> effective = effectiveRequirements(user, uploaded);
+        Set<String> missing = effective.stream().filter(KycRequirement::required)
                 .filter(req -> req.acceptedTypes().stream().noneMatch(uploaded::contains))
                 .map(KycRequirement::code).collect(Collectors.toSet());
+        boolean backRequired = effective.stream().anyMatch(requirement -> requirement.required()
+                && "IDENTITY_BACK".equals(requirement.code()));
+        if (backRequired && uploaded.contains(KycDocumentType.NATIONAL_ID_FRONT)
+                && !uploaded.contains(KycDocumentType.NATIONAL_ID_BACK)) missing.add("IDENTITY_BACK");
+        if (backRequired && uploaded.contains(KycDocumentType.ALIEN_ID_FRONT)
+                && !uploaded.contains(KycDocumentType.ALIEN_ID_BACK)) missing.add("IDENTITY_BACK");
+        return missing;
     }
 
     private Set<String> missingRequirements(KycCase kycCase) {
@@ -576,6 +599,11 @@ public class KycService {
         if (!uploaded.contains(KycDocumentType.PASSPORT)) return resolved;
         return resolved.stream().filter(requirement -> !"IDENTITY_BACK".equals(requirement.code()))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private boolean taxRequired(Users user) {
+        return requirements(user).stream().anyMatch(requirement -> requirement.required()
+                && "TAX".equals(requirement.code()));
     }
 
     private KycCaseView view(KycCase kycCase, Users user) {

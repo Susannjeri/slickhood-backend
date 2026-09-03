@@ -31,4 +31,5 @@ public class Notification extends BaseActiveEntity {
     private boolean retry;
     private int retries;
     private LocalDateTime updatedOn;
+    private LocalDateTime viewedOn;
 }

@@ -5,6 +5,7 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.users.ProfileType;
 
 import java.util.Set;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,5 +41,11 @@ class KycRequirementResolverTest {
     @Test void individualAccountDoesNotReceiveOrganizationRegistrationRequirement() {
         Set<KycRequirement> requirements = resolver.resolve(Set.of(PMSRole.LANDLORD), ProfileType.INDIVIDUAL);
         assertTrue(requirements.stream().noneMatch(r -> r.code().equals("ORGANIZATION_REGISTRATION")));
+    }
+
+    @Test void requirementsRemainInCustomerJourneyOrder() {
+        List<String> codes = resolver.resolve(Set.of(PMSRole.LANDLORD), ProfileType.INDIVIDUAL)
+                .stream().map(KycRequirement::code).toList();
+        assertEquals(List.of("IDENTITY_FRONT", "IDENTITY_BACK", "SELFIE", "OWNERSHIP", "TAX"), codes);
     }
 }

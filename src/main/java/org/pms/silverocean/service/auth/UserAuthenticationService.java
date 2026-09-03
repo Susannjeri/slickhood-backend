@@ -24,9 +24,9 @@ import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.users.ProfileType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.i18n.LocaleContextHolder;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.ZonedDateTime;
 import java.util.Collections;
@@ -308,19 +308,26 @@ public class UserAuthenticationService {
         }
     }
 
-    @Async
     public void updatePassword(String email, String password) {
-        userDao.findByEmail(email).ifPresent(user -> {
-            user.setPassword(passwordEncoder.encode(password));
-            userDao.save(user);
-        });
+        String normalizedEmail = StringUtils.trimToEmpty(email).toLowerCase(Locale.ROOT);
+        Users user = userDao.findByEmail(normalizedEmail)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LOGIN_FAILURE_INVALID_USER));
+        // Password reset must complete before a new authenticated session is returned.
+        // The former asynchronous update allowed an immediate sign-in to race the database write.
+        user.setPassword(passwordEncoder.encode(password));
+        userDao.save(user);
     }
 
+    @Transactional(transactionManager = "pmsDBTransactionManager")
     public ResponseDTO loginByRefreshToken(String refreshToken) {
         String hashedToken = PMSUtils.hashToken(refreshToken);
-        Optional<Users> checkIfUserExists = userDao.findByRefreshToken(hashedToken);
+        // Serialize refresh-token rotation. Without a row lock, concurrent browser
+        // requests can both consume one token and leave the client with a mismatched
+        // access/refresh pair.
+        Optional<Users> checkIfUserExists = userDao.findByRefreshTokenForUpdate(hashedToken);
         if (checkIfUserExists.isEmpty()) {
-            return new ResponseDTO(false, ResponseCode.LOAD_USER_ERROR.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOAD_USER_ERROR));
+            return new ResponseDTO(false, ResponseCode.SESSION_REPLACED_OR_EXPIRED.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.SESSION_REPLACED_OR_EXPIRED));
         }
         Users users = checkIfUserExists.get();
         if (!users.isActive()) {

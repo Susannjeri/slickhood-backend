@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 
 import java.util.Optional;
 
@@ -63,5 +65,13 @@ public class NotificationController {
         body.setTotalPages(notifications.getTotalPages());
         body.setTotalElements(notifications.getTotalElements());
         return ResponseEntity.ok(body);
+    }
+
+    @PatchMapping("/mine/{id}/read")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_MY_NOTIFICATIONS)")
+    public ResponseEntity<ResponseDTO> markMyNotificationRead(@PathVariable long id) {
+        MyNotificationDTO notification = notificationReportService.markMyNotificationRead(id);
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.NOTIFICATION_LIST), notification));
     }
 }

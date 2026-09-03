@@ -20,6 +20,7 @@ import java.util.Collection;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationReportServiceTest {
@@ -49,11 +50,50 @@ class NotificationReportServiceTest {
         assertThat(result.getContent()).singleElement().satisfies(item -> {
             assertThat(item.id()).isEqualTo(7L);
             assertThat(item.message()).isEqualTo("Your service charge is due");
+            assertThat(item.read()).isFalse();
         });
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Collection<String>> recipients = ArgumentCaptor.forClass(Collection.class);
         org.mockito.Mockito.verify(notifications).getNotificationsForRecipients(any(), recipients.capture());
         assertThat(recipients.getValue()).containsExactlyInAnyOrder(
                 "Owner@Example.com", "owner@example.com", "+254700000001", "254700000001");
+    }
+
+    @Test
+    void userCanMarkOnlyTheirOwnNotificationRead() {
+        Users user = new Users();
+        user.setEmail("owner@example.com");
+        Notification notification = new Notification();
+        notification.setId(8L);
+        notification.setActive(true);
+        notification.setRecipient("owner@example.com");
+        notification.setMessage(new byte[]{2});
+        when(users.getUserObject()).thenReturn(user);
+        when(notifications.findById(8L)).thenReturn(java.util.Optional.of(notification));
+        when(notifications.saveEntity(notification)).thenReturn(notification);
+        when(encryption.decrypt(notification.getMessage())).thenReturn(new DecryptDTO(false, "Read me"));
+
+        var result = new NotificationReportService(notifications, sms, users, encryption)
+                .markMyNotificationRead(8L);
+
+        assertThat(result.read()).isTrue();
+        assertThat(notification.getViewedOn()).isNotNull();
+        verify(notifications).saveEntity(notification);
+    }
+
+    @Test
+    void userCannotMarkAnotherRecipientsNotificationRead() {
+        Users user = new Users();
+        user.setEmail("owner@example.com");
+        Notification notification = new Notification();
+        notification.setId(9L);
+        notification.setActive(true);
+        notification.setRecipient("another@example.com");
+        when(users.getUserObject()).thenReturn(user);
+        when(notifications.findById(9L)).thenReturn(java.util.Optional.of(notification));
+
+        var service = new NotificationReportService(notifications, sms, users, encryption);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.markMyNotificationRead(9L))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
     }
 }

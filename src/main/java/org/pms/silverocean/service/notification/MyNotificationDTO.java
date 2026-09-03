@@ -4,5 +4,5 @@ import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 
 public record MyNotificationDTO(long id, String channel, String notificationType, String message,
-                                boolean delivered, ZonedDateTime createdOn, LocalDateTime lastUpdatedOn) {
+                                boolean delivered, boolean read, ZonedDateTime createdOn, LocalDateTime lastUpdatedOn) {
 }

@@ -282,7 +282,11 @@ public class InvoiceService {
                 propertyName, unitRef, tenantName, invoice.getRef(), invoice.getCurrency(), invoice.getAmount(),
                 invoice.getPendingAmount(), invoice.isPaid(), invoice.getPaymentAccountId(),
                 resolveBillingType(invoice), invoice.getDueDate(), resolveIssuerName(invoice),
-                resolveIssuerType(invoice), isSlickHoodInvoice(invoice) ? "/slicklogo.svg" : null);
+                resolveIssuerType(invoice), isSlickHoodInvoice(invoice) ? "/slicklogo.svg" : null,
+                !invoice.isPaid() && invoice.isActive() && invoice.getBilledUserId() == userDao.getUserId(),
+                !invoice.isPaid() && invoice.isActive()
+                        && userDao.hasPermission(org.pms.silverocean.service.auth.roles.enums.Permission.RECORD_MANUAL_PAYMENT)
+                        && invoice.getBilledUserId() != userDao.getUserId());
     }
 
     private String resolveBillingType(PMSInvoice invoice) {
@@ -336,6 +340,11 @@ public class InvoiceService {
                 ? invoiceDao.getInvoiceByRef(invoiceRef).orElseThrow(() -> new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER))
                 : invoiceDao.getInvoiceForOwnerOrTenantView(invoiceRef, userId)
                 .orElseThrow(() -> new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER));
+        // Viewing an invoice as its issuer, manager or administrator must never
+        // imply authority to initiate a charge on behalf of the billed customer.
+        if (invoice.getBilledUserId() != userId) {
+            throw new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER);
+        }
         if (invoice.isPaid()) {
             return new PaymentResponse(false, ResponseCode.INVOICE_ALREADY_PAID);
         } else if (!invoice.isActive()) {

@@ -94,13 +94,18 @@ public class GarageService {
     }
 
     public void uploadFile(String path, MultipartFile multipartFile) throws IOException {
-        String fileName = (path + multipartFile.getOriginalFilename()).replaceAll("\\s+", "_");
-        try {
-            fileName = PMSUtils.saveFile(path, multipartFile);
-            uploadFile(fileName, Path.of(fileName).toFile());
-        } finally {
-            PMSUtils.deleteFileAndParents(fileName);
+        String suppliedName = StringUtils.defaultString(multipartFile.getOriginalFilename()).replace('\\', '/');
+        String safeName = Path.of(suppliedName).getFileName().toString().replaceAll("\\s+", "_");
+        String contentType = multipartFile.getContentType();
+        if (safeName.isBlank() || ".".equals(safeName) || "..".equals(safeName)
+                || StringUtils.isBlank(contentType)) {
+            throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
         }
+        String key = (StringUtils.defaultString(path) + safeName).replace('\\', '/');
+        if (key.startsWith("/") || List.of(key.split("/")).contains("..")) {
+            throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
+        }
+        uploadBytes(key, multipartFile.getBytes(), contentType);
     }
 
     /** Stores an object under an exact, server-generated key. */

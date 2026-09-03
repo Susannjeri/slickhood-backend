@@ -267,8 +267,16 @@ public class PMSUtils {
     }
 
     public static String saveFile(String destination, MultipartFile file) throws IOException {
-        String filename = Objects.requireNonNull(file.getOriginalFilename()).replaceAll("\\s+", "_");
-        Path target = Paths.get(destination, filename);
+        String suppliedName = Objects.requireNonNull(file.getOriginalFilename()).replace('\\', '/');
+        String filename = Paths.get(suppliedName).getFileName().toString().replaceAll("\\s+", "_");
+        if (filename.isBlank() || ".".equals(filename) || "..".equals(filename)) {
+            throw new IOException("Upload filename is invalid");
+        }
+        Path root = Paths.get(destination).toAbsolutePath().normalize();
+        Path target = root.resolve(filename).normalize();
+        if (!target.startsWith(root)) {
+            throw new IOException("Upload path escaped its destination");
+        }
 
         Files.createDirectories(target.getParent());
         Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
@@ -281,30 +289,7 @@ public class PMSUtils {
         }
 
         Path path = Paths.get(filename);
-        boolean fileDeleted = Files.deleteIfExists(path);
-
-        // We want to climb up exactly 3 levels: unitId -> propertyId -> createdBy
-        Path currentFolder = path.getParent();
-        for (int i = 0; i < 3; i++) {
-            if (currentFolder == null || currentFolder.getNameCount() == 0) {
-                break;
-            }
-
-            try (var entries = Files.newDirectoryStream(currentFolder)) {
-                if (!entries.iterator().hasNext()) {
-                    Files.delete(currentFolder);
-                    log.info("Cleaned up empty folder: {}", currentFolder);
-                    currentFolder = currentFolder.getParent();
-                } else {
-                    // Folder is not empty (contains other units or properties), stop here
-                    break;
-                }
-            } catch (IOException e) {
-                log.warn("Could not delete folder {}: {}", currentFolder, e.getMessage());
-                break;
-            }
-        }
-        log.info("Image directory clean up success {}", fileDeleted);
+        Files.deleteIfExists(path);
     }
 
     public static String formatInviteLink(String url, String token) {

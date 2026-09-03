@@ -1,5 +1,8 @@
 package org.pms.silverocean.service.kyc;
 
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.rendering.ImageType;
+import org.apache.pdfbox.rendering.PDFRenderer;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.core.SdkBytes;
@@ -9,6 +12,9 @@ import software.amazon.awssdk.services.textract.model.BlockType;
 import software.amazon.awssdk.services.textract.model.DetectDocumentTextRequest;
 import software.amazon.awssdk.services.textract.model.Document;
 
+import javax.imageio.ImageIO;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +29,8 @@ import java.util.regex.Pattern;
 @Component
 @ConditionalOnProperty(name = "kyc.ocr.provider", havingValue = "aws-textract")
 public class AwsTextractKycOcrProvider implements KycOcrProvider {
+    private static final int MAX_PDF_PAGES_TO_SCAN = 3;
+    private static final float PDF_RENDER_DPI = 180f;
     private static final Pattern KRA_PIN = Pattern.compile("\\b[A-Z][0-9]{9}[A-Z]\\b");
     private static final Pattern NATIONAL_ID = Pattern.compile("\\b[0-9]{7,9}\\b");
     private static final Pattern PASSPORT = Pattern.compile("\\b[A-Z]{1,2}[0-9]{6,8}\\b");
@@ -39,9 +47,7 @@ public class AwsTextractKycOcrProvider implements KycOcrProvider {
 
     @Override
     public OcrResult extract(byte[] document, String contentType, KycDocumentType documentType) {
-        var response = client.detectDocumentText(DetectDocumentTextRequest.builder()
-                .document(Document.builder().bytes(SdkBytes.fromByteArray(document)).build()).build());
-        List<DetectedLine> lines = response.blocks().stream()
+        List<DetectedLine> lines = textractPages(document, contentType).stream()
                 .filter(block -> block.blockType() == BlockType.LINE && block.text() != null)
                 .map(this::line).toList();
         String text = lines.stream().map(DetectedLine::normalized).reduce("", (left, right) -> left + "\n" + right);
@@ -73,6 +79,46 @@ public class AwsTextractKycOcrProvider implements KycOcrProvider {
                 .orElseGet(() -> lines.stream().mapToDouble(DetectedLine::confidence).average().orElse(0));
         if (!missing.isEmpty()) confidence = Math.min(confidence, 74.0);
         return new OcrResult("AWS_TEXTRACT_KENYA_V2", confidence, fields);
+    }
+
+    /**
+     * Textract's synchronous bytes endpoint is image-oriented. Render a bounded
+     * number of PDF pages to PNG before submission while keeping the original
+     * PDF unchanged in protected storage.
+     */
+    private List<Block> textractPages(byte[] bytes, String contentType) {
+        List<byte[]> pages = "application/pdf".equalsIgnoreCase(contentType)
+                ? renderPdfPages(bytes) : List.of(bytes);
+        List<Block> blocks = new ArrayList<>();
+        for (byte[] page : pages) {
+            var response = client.detectDocumentText(DetectDocumentTextRequest.builder()
+                    .document(Document.builder().bytes(SdkBytes.fromByteArray(page)).build()).build());
+            blocks.addAll(response.blocks());
+        }
+        return blocks;
+    }
+
+    private List<byte[]> renderPdfPages(byte[] pdf) {
+        try (PDDocument document = PDDocument.load(pdf)) {
+            if (document.isEncrypted() || document.getNumberOfPages() == 0) {
+                throw new IllegalArgumentException("The PDF is encrypted or contains no pages");
+            }
+            PDFRenderer renderer = new PDFRenderer(document);
+            int pageCount = Math.min(document.getNumberOfPages(), MAX_PDF_PAGES_TO_SCAN);
+            List<byte[]> pages = new ArrayList<>(pageCount);
+            for (int page = 0; page < pageCount; page++) {
+                var image = renderer.renderImageWithDPI(page, PDF_RENDER_DPI, ImageType.RGB);
+                try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                    if (!ImageIO.write(image, "png", output)) {
+                        throw new IOException("No PNG encoder is available");
+                    }
+                    pages.add(output.toByteArray());
+                }
+            }
+            return pages;
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("The PDF could not be rendered for OCR", exception);
+        }
     }
 
     private List<String> requiredMissing(KycDocumentType type, Map<String, String> fields) {
