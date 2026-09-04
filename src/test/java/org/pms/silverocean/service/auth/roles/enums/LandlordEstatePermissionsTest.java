@@ -46,4 +46,13 @@ class LandlordEstatePermissionsTest {
                 Permission.CREATE_PROPERTY, Permission.CREATE_UNIT, Permission.MANAGE_SALE_PIPELINE
         );
     }
+
+    @Test
+    void superAdminCanAuditEstateAndSaleWorkflows() {
+        assertThat(PMSPermission.SUPER_ADMIN.getPermissions()).contains(
+                Permission.VIEW_ESTATE, Permission.MANAGE_ESTATE,
+                Permission.VIEW_SERVICE_CHARGE,
+                Permission.VIEW_SALE_PIPELINE, Permission.MANAGE_SALE_PIPELINE
+        );
+    }
 }

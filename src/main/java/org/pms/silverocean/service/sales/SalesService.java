@@ -18,12 +18,15 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
+import org.pms.silverocean.service.payment.invoice.InvoiceService;
 import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.math.BigDecimal;
 import java.util.EnumSet;
 import java.util.Map;
 import java.util.Locale;
@@ -50,14 +53,19 @@ public class SalesService {
     private final NotificationService notifications;
     private final I18NService i18n;
     private final LeaseDocumentRepo documents;
+    private final PMSInvoiceRepo invoices;
+    private final InvoiceService invoiceService;
 
     public SalesService(SaleTransactionRepo sales, PropertyRepo properties, UnitRepo units, UserDao users,
                         EstateService estates, SaleMilestoneRepo milestones, InviteService invites,
-                        NotificationService notifications, I18NService i18n, LeaseDocumentRepo documents) {
+                        NotificationService notifications, I18NService i18n, LeaseDocumentRepo documents,
+                        PMSInvoiceRepo invoices, InvoiceService invoiceService) {
         this.sales = sales; this.properties = properties; this.units = units; this.users = users;
         this.estates = estates; this.milestones = milestones; this.invites = invites;
         this.notifications = notifications; this.i18n = i18n;
         this.documents = documents;
+        this.invoices = invoices;
+        this.invoiceService = invoiceService;
     }
 
     @Transactional
@@ -120,14 +128,59 @@ public class SalesService {
     }
 
     @Transactional
+    public EscrowInvoiceModels.View createEscrowInvoice(long saleId, EscrowInvoiceModels.Create request) {
+        SaleTransaction sale = managedForUpdate(saleId);
+        if (sale.getBuyerUserId() == null || sale.getOfferAmount() == null
+                || sale.getStatus() == SaleStatus.LEAD || sale.getStatus() == SaleStatus.VIEWING
+                || sale.getStatus() == SaleStatus.OFFERED || sale.getStatus() == SaleStatus.CANCELLED
+                || sale.getStatus() == SaleStatus.COMPLETED
+                || request.amount().compareTo(sale.getOfferAmount()) > 0) {
+            throw invalidTransition();
+        }
+        if (sale.getEscrowInvoiceId() != null) {
+            PMSInvoice existing = invoices.findById(sale.getEscrowInvoiceId()).filter(PMSInvoice::isActive)
+                    .orElseThrow(this::invalid);
+            if (sale.getEscrowRequiredAmount() == null || sale.getEscrowRequiredAmount().compareTo(request.amount()) != 0) {
+                throw new PMSCustomException(ResponseCode.DATA_INTEGRITY_VIOLATION);
+            }
+            return escrowView(existing);
+        }
+
+        PMSInvoice invoice = invoiceService.createPropertyInvoice(sale.getUnitId(), sale.getBuyerUserId(),
+                Map.of("Contractual property sale escrow", request.amount().doubleValue()),
+                "SALE", LocalDate.now().plusDays(7));
+        sale.setEscrowRequiredAmount(request.amount());
+        sale.setEscrowInvoiceId(invoice.getId());
+        sales.save(sale);
+        return escrowView(invoice);
+    }
+
+    @Transactional
     public SaleMilestone addMilestone(long saleId, SaleMilestoneModels.Create request) {
         SaleTransaction sale = managedForUpdate(saleId);
         if (sale.getStatus() == SaleStatus.COMPLETED || sale.getStatus() == SaleStatus.CANCELLED) throw invalidTransition();
         if (request.status() == SaleMilestoneModels.Status.COMPLETED
                 && milestones.existsBySaleIdAndMilestoneTypeAndStatus(saleId, request.type().name(), request.status().name()))
             throw new PMSCustomException(ResponseCode.DATA_INTEGRITY_VIOLATION);
-        if (request.type() == SaleMilestoneModels.Type.ESCROW_FUNDED && request.status() == SaleMilestoneModels.Status.COMPLETED
-                && (request.amount() == null || StringUtils.isBlank(request.externalReference()))) throw invalid();
+        PMSInvoice verifiedEscrowInvoice = null;
+        if (request.type() == SaleMilestoneModels.Type.ESCROW_FUNDED
+                && request.status() == SaleMilestoneModels.Status.COMPLETED) {
+            if (request.amount() != null || StringUtils.isNotBlank(request.externalReference())
+                    || request.evidenceDocumentId() != null || sale.getEscrowInvoiceId() == null
+                    || sale.getEscrowRequiredAmount() == null || sale.getBuyerUserId() == null) throw invalid();
+            verifiedEscrowInvoice = invoices.findByIdForUpdate(sale.getEscrowInvoiceId())
+                    .filter(PMSInvoice::isActive).orElseThrow(this::invalid);
+            BigDecimal invoiceAmount = BigDecimal.valueOf(verifiedEscrowInvoice.getAmount());
+            boolean matchesSale = "SALE".equals(verifiedEscrowInvoice.getBillingType())
+                    && verifiedEscrowInvoice.getPropertyId() == sale.getPropertyId()
+                    && verifiedEscrowInvoice.getUnitId() == sale.getUnitId()
+                    && verifiedEscrowInvoice.getBilledUserId() == sale.getBuyerUserId()
+                    && sale.getCurrency().equalsIgnoreCase(verifiedEscrowInvoice.getCurrency())
+                    && sale.getEscrowRequiredAmount().compareTo(invoiceAmount) == 0;
+            if (!matchesSale || !verifiedEscrowInvoice.isPaid() || verifiedEscrowInvoice.getPendingAmount() > 0) {
+                throw invalidTransition();
+            }
+        }
         if (request.status() == SaleMilestoneModels.Status.COMPLETED
                 && request.type() != SaleMilestoneModels.Type.ESCROW_FUNDED && request.evidenceDocumentId() == null) throw invalid();
         if (request.evidenceDocumentId() != null) {
@@ -138,10 +191,19 @@ public class SalesService {
                     || (sale.getBuyerUserId() != null && evidence.getRecipientUserId() == sale.getBuyerUserId());
             if (!involvedParty || !Objects.equals(evidence.getSaleId(), sale.getId())) throw invalid();
         }
-        return milestones.save(new SaleMilestone(saleId, request.type().name(), request.status().name(), request.amount(),
-                sale.getCurrency(), StringUtils.left(StringUtils.trimToNull(request.externalReference()), 120),
+        BigDecimal milestoneAmount = verifiedEscrowInvoice == null ? request.amount()
+                : BigDecimal.valueOf(verifiedEscrowInvoice.getAmount());
+        String milestoneReference = verifiedEscrowInvoice == null ? request.externalReference()
+                : verifiedEscrowInvoice.getRef();
+        return milestones.save(new SaleMilestone(saleId, request.type().name(), request.status().name(), milestoneAmount,
+                sale.getCurrency(), StringUtils.left(StringUtils.trimToNull(milestoneReference), 120),
                 request.evidenceDocumentId(), StringUtils.left(StringUtils.trimToNull(request.notes()), 1000),
                 java.time.ZonedDateTime.now(PMSUtils.getZoneId()), users.getUserId()));
+    }
+
+    private EscrowInvoiceModels.View escrowView(PMSInvoice invoice) {
+        return new EscrowInvoiceModels.View(invoice.getId(), invoice.getRef(), BigDecimal.valueOf(invoice.getAmount()),
+                invoice.getCurrency(), invoice.isPaid(), BigDecimal.valueOf(invoice.getPendingAmount()), invoice.getDueDate());
     }
 
     @Transactional(readOnly = true)
@@ -215,7 +277,9 @@ public class SalesService {
 
     private Property requireSaleProperty(long propertyId, long userId) {
         PMSRole role = users.getActiveRole();
-        return (role == PMSRole.LANDLORD || role == PMSRole.SALES_AGENT
+        return (role == PMSRole.SUPER_ADMIN
+                ? properties.findById(propertyId).filter(Property::isActive)
+                : role == PMSRole.LANDLORD || role == PMSRole.SALES_AGENT
                 ? properties.findByIdAndCreatedByAndActiveTrue(propertyId, userId)
                 : properties.findByIdAndManagerRole(propertyId, userId, role.name()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));

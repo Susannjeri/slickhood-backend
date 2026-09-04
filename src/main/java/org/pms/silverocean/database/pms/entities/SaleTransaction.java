@@ -24,6 +24,8 @@ public class SaleTransaction extends BaseCreatorEntity {
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 30) private SaleStatus status;
     @Column(nullable = false, precision = 19, scale = 2) private BigDecimal askingPrice;
     @Column(precision = 19, scale = 2) private BigDecimal offerAmount;
+    @Column(precision = 19, scale = 2) private BigDecimal escrowRequiredAmount;
+    private Long escrowInvoiceId;
     private String currency;
     private LocalDateTime offerAcceptedAt;
     private LocalDateTime completedAt;

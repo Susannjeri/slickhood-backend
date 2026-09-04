@@ -16,7 +16,7 @@ import java.time.ZonedDateTime;
 public interface SaleTransactionRepo extends JpaRepository<SaleTransaction, Long> {
     String VIEW_SELECT = "SELECT new org.pms.silverocean.service.sales.SaleView(" +
             "s.id,s.propertyId,p.name,s.unitId,u.ref,s.salesAgentUserId,a.fullName,s.buyerUserId,b.fullName," +
-            "COALESCE(b.email,s.invitedBuyerEmail),s.status,s.askingPrice,s.offerAmount,s.currency," +
+            "COALESCE(b.email,s.invitedBuyerEmail),s.status,s.askingPrice,s.offerAmount,s.escrowRequiredAmount,s.escrowInvoiceId,s.currency," +
             "s.offerAcceptedAt,s.completedAt,s.notes,s.createdOn) FROM SaleTransaction s " +
             "JOIN Property p ON p.id=s.propertyId JOIN Unit u ON u.id=s.unitId " +
             "JOIN Users a ON a.id=s.salesAgentUserId LEFT JOIN Users b ON b.id=s.buyerUserId ";
@@ -42,7 +42,7 @@ public interface SaleTransactionRepo extends JpaRepository<SaleTransaction, Long
     Page<SaleView> findViewPageByBuyer(long userId, Pageable pageable);
     @Query(value = "SELECT DISTINCT new org.pms.silverocean.service.sales.SaleView(" +
             "s.id,s.propertyId,p.name,s.unitId,u.ref,s.salesAgentUserId,a.fullName,s.buyerUserId,b.fullName," +
-            "COALESCE(b.email,s.invitedBuyerEmail),s.status,s.askingPrice,s.offerAmount,s.currency," +
+            "COALESCE(b.email,s.invitedBuyerEmail),s.status,s.askingPrice,s.offerAmount,s.escrowRequiredAmount,s.escrowInvoiceId,s.currency," +
             "s.offerAcceptedAt,s.completedAt,s.notes,s.createdOn) FROM SaleTransaction s " +
             "JOIN Property p ON p.id=s.propertyId JOIN Unit u ON u.id=s.unitId JOIN Users a ON a.id=s.salesAgentUserId " +
             "LEFT JOIN Users b ON b.id=s.buyerUserId WHERE s.active AND (p.createdBy=:userId OR EXISTS " +

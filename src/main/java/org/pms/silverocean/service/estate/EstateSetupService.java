@@ -10,6 +10,7 @@ import org.pms.silverocean.database.pms.PropertyRepo;
 import org.pms.silverocean.database.pms.UnitRepo;
 import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.springframework.stereotype.Service;
@@ -30,7 +31,9 @@ public class EstateSetupService {
 
     @Transactional(readOnly = true)
     public EstateSetupStatus getStatus(long propertyId) {
-        Property property = properties.findByIdAndStaffOrOwner(propertyId, users.getUserId())
+        Property property = (users.getActiveRole() == PMSRole.SUPER_ADMIN
+                ? properties.findById(propertyId).filter(Property::isActive)
+                : properties.findByIdAndStaffOrOwner(propertyId, users.getUserId()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
 
         long activeUnits = units.countAllByPropertyIdAndActiveTrue(propertyId);

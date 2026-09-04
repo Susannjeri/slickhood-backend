@@ -15,6 +15,7 @@ import org.pms.silverocean.database.pms.UnitRepo;
 import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 
 import java.time.Year;
@@ -41,11 +42,11 @@ class EstateSetupServiceTest {
     @BeforeEach
     void setUp() {
         service = new EstateSetupService(properties, units, managers, accounts, ownerships, budgets, users);
-        when(users.getUserId()).thenReturn(99L);
     }
 
     @Test
     void inaccessiblePropertyDoesNotExposeSetupInformation() {
+        when(users.getUserId()).thenReturn(99L);
         when(properties.findByIdAndStaffOrOwner(10L, 99L)).thenReturn(Optional.empty());
 
         PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.getStatus(10L));
@@ -93,7 +94,24 @@ class EstateSetupServiceTest {
         assertThat(status.activeHomeowners()).isEqualTo(20);
     }
 
+    @Test
+    void superAdminCanInspectActiveEstateSetupWithoutAStaffAssignment() {
+        Property property = new Property();
+        property.setId(10L);
+        property.setName("Green Court");
+        property.setManagementMode(PMSPropertyManagementMode.SERVICE_CHARGE);
+        property.setActive(true);
+        when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
+        when(properties.findById(10L)).thenReturn(Optional.of(property));
+
+        EstateSetupStatus status = service.getStatus(10L);
+
+        assertThat(status.propertyId()).isEqualTo(10L);
+        verify(properties, never()).findByIdAndStaffOrOwner(10L, 99L);
+    }
+
     private void stubProperty(PMSPropertyManagementMode mode) {
+        when(users.getUserId()).thenReturn(99L);
         Property property = new Property();
         property.setId(10L);
         property.setName("Green Court");

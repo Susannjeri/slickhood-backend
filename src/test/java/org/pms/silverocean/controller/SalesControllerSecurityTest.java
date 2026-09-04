@@ -2,6 +2,7 @@ package org.pms.silverocean.controller;
 
 import org.junit.jupiter.api.Test;
 import org.pms.silverocean.service.sales.CreateSaleRequest;
+import org.pms.silverocean.service.sales.EscrowInvoiceModels;
 import org.pms.silverocean.service.sales.SaleMilestoneModels;
 import org.pms.silverocean.service.sales.UpdateSaleRequest;
 import org.springframework.data.domain.Pageable;
@@ -15,6 +16,7 @@ class SalesControllerSecurityTest {
         assertPermission("create", "MANAGE_SALE_PIPELINE", CreateSaleRequest.class);
         assertPermission("update", "MANAGE_SALE_PIPELINE", long.class, UpdateSaleRequest.class);
         assertPermission("milestone", "MANAGE_SALE_PIPELINE", long.class, SaleMilestoneModels.Create.class);
+        assertPermission("escrowInvoice", "MANAGE_SALE_PIPELINE", long.class, EscrowInvoiceModels.Create.class);
     }
 
     @Test
