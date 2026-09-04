@@ -151,6 +151,63 @@ class UserAuthenticationServiceTest {
     }
 
     @Test
+    void pendingRegistrationPreservesAndAppliesBoundInvitationBeforeOtpRetry() {
+        Users pending = Users.builder().email("pending@example.com").password("encoded").build();
+        pending.setActive(false);
+        pending.setEmailVerified(false);
+        RegistrationDTO request = registration("pending@example.com", "Password1!");
+        request.setToken("bound-invite");
+        when(userDao.findByEmail("pending@example.com")).thenReturn(Optional.of(pending));
+        when(passwordEncoder.matches("Password1!", "encoded")).thenReturn(true);
+        when(totpService.generateOTPCode("pending@example.com")).thenReturn("Use OTP sent to email");
+
+        var response = service.register(request, "127.0.0.1");
+
+        assertTrue(response.isSuccess());
+        verify(roleService).assignRoleFromInvite("bound-invite", pending);
+        verify(totpService).generateOTPCode("pending@example.com");
+    }
+
+    @Test
+    void pendingRegistrationDoesNotReconsumeItsAlreadyAppliedInvitation() {
+        Users pending = Users.builder().email("pending@example.com").password("encoded").inviteId(91L).build();
+        pending.setActive(false);
+        pending.setEmailVerified(false);
+        RegistrationDTO request = registration("pending@example.com", "Password1!");
+        request.setToken("already-consumed-invite");
+        when(userDao.findByEmail("pending@example.com")).thenReturn(Optional.of(pending));
+        when(passwordEncoder.matches("Password1!", "encoded")).thenReturn(true);
+        when(totpService.generateOTPCode("pending@example.com")).thenReturn("Use OTP sent to email");
+
+        var response = service.register(request, "127.0.0.1");
+
+        assertTrue(response.isSuccess());
+        verify(roleService, never()).assignRoleFromInvite(anyString(), org.mockito.ArgumentMatchers.any(Users.class));
+        verify(totpService).generateOTPCode("pending@example.com");
+    }
+
+    @Test
+    void pendingAccountLoginAppliesBoundInvitationBeforeOtpHandoff() {
+        Users pending = Users.builder().email("pending@example.com").password("encoded").build();
+        pending.setActive(false);
+        pending.setEmailVerified(false);
+        EmailPasswordDTO request = new EmailPasswordDTO();
+        request.setEmail("pending@example.com");
+        request.setPassword("Password1!");
+        request.setToken("bound-invite");
+        when(userDao.findByEmail("pending@example.com")).thenReturn(Optional.of(pending));
+        when(passwordEncoder.matches("Password1!", "encoded")).thenReturn(true);
+        when(totpService.generateOTPCode("pending@example.com")).thenReturn("Use OTP sent to email");
+
+        var response = service.login(request);
+
+        assertTrue(response.isSuccess());
+        assertEquals(ResponseCode.EMAIL_OTP_GENERATED.getCode(), response.getCode());
+        verify(roleService).assignRoleFromInvite("bound-invite", pending);
+        verify(totpService).generateOTPCode("pending@example.com");
+    }
+
+    @Test
     void pendingRegistrationWithWrongPasswordRemainsDuplicate() {
         Users pending = Users.builder().email("pending@example.com").password("encoded").build();
         pending.setActive(false);

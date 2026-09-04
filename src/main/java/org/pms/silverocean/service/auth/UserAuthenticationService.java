@@ -93,6 +93,9 @@ public class UserAuthenticationService {
             if (!existingUser.isActive()
                     && !existingUser.isEmailVerified()
                     && passwordEncoder.matches(registrationDTO.getPassword(), existingUser.getPassword())) {
+                if (StringUtils.isNotBlank(registrationDTO.getToken()) && existingUser.getInviteId() == null) {
+                    roleService.assignRoleFromInvite(registrationDTO.getToken(), existingUser);
+                }
                 return sendRegistrationVerification(normalizedEmail);
             }
             return new ResponseDTO(false, ResponseCode.DUPLICATE_USER_DETAILS.getCode(), i18NService.getLocalizedMessage(ResponseCode.DUPLICATE_USER_DETAILS));
@@ -190,6 +193,9 @@ public class UserAuthenticationService {
                     return new ResponseDTO(false, ResponseCode.LOGIN_FAILURE_INACTIVE_USER.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_FAILURE_INACTIVE_USER));
                 } else {
                     try {
+                        if (StringUtils.isNotBlank(emailPasswordDTO.getToken()) && users.getInviteId() == null) {
+                            roleService.assignRoleFromInvite(emailPasswordDTO.getToken(), users);
+                        }
                         String message = totpService.generateOTPCode(normalizedEmail);
                         return new ResponseDTO(true, ResponseCode.EMAIL_OTP_GENERATED.getCode(), i18NService.getLocalizedMessage(ResponseCode.EMAIL_OTP_GENERATED), message);
                     } catch (Exception e) {
