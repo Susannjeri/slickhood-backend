@@ -45,7 +45,6 @@ public class SecurityConfig {
                         .requestMatchers("/smart-gate/device/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/invite/validate").permitAll()
-                        .requestMatchers("/lease/view/template").permitAll()
                         .requestMatchers("/otp/qrcode").authenticated()
                         .requestMatchers("/otp/**").permitAll()
                         .requestMatchers("/property/unit/charges").permitAll()

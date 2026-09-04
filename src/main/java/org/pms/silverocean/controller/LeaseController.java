@@ -191,7 +191,7 @@ public class LeaseController extends OutputStreamErrorHandler {
     }
 
     @GetMapping(value = "/view/template")
-    @PreAuthorize("#token.isPresent() || hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_LEASE_TEMPLATE)")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_LEASE_TEMPLATE)")
     public void viewLeaseTemplate(@RequestParam Optional<Long> templateId, @RequestParam Optional<Long> unitId, @RequestParam Optional<String> token, HttpServletResponse response) {
         try (ByteArrayOutputStream buffer = new ByteArrayOutputStream()) {
             if (templateId.isPresent()) {

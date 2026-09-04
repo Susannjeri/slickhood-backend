@@ -33,7 +33,10 @@ class LandlordEstatePermissionsTest {
     void participantRolesCannotCreateOrManageTheirHostBusinessArea() {
         assertThat(PMSPermission.TENANT.getPermissions()).doesNotContain(
                 Permission.CREATE_PROPERTY, Permission.CREATE_UNIT, Permission.MANAGE_ESTATE,
-                Permission.MANAGE_SALE_PIPELINE
+                Permission.MANAGE_SALE_PIPELINE, Permission.VIEW_PROPERTY_LIST,
+                Permission.VIEW_UNIT_LIST, Permission.VIEW_LEASE_TEMPLATE,
+                Permission.CREATE_LEASE_TEMPLATE, Permission.EDIT_LEASE_TEMPLATE,
+                Permission.DELETE_LEASE_TEMPLATE, Permission.LIST_LEASE_TEMPLATE
         );
         assertThat(PMSPermission.HOMEOWNER.getPermissions()).doesNotContain(
                 Permission.CREATE_PROPERTY, Permission.CREATE_UNIT, Permission.MANAGE_ESTATE,
