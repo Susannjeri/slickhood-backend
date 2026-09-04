@@ -27,6 +27,7 @@ import org.pms.silverocean.service.users.StaffInviteRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -74,6 +75,31 @@ public class InviteService {
     }
 
     public String createInviteLink(InviteType inviteType, Long entityId) {
+        if (inviteType == InviteType.TENANT || inviteType == InviteType.HOMEOWNER) {
+            // Occupant invitations contain access to a specific unit and must
+            // always be bound to, and delivered to, a verified recipient.
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
+        Invite invite = createOccupantInvite(inviteType, entityId, null);
+        return formatInviteLink(configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(), invite.getToken());
+    }
+
+    /**
+     * Creates an email-bound tenant/homeowner invitation and queues its delivery
+     * as one transaction. New customer-facing flows must use this instead of
+     * exposing an unbound reusable link before a recipient is known.
+     */
+    @Transactional
+    public void createAndSendEmailInvite(InviteType inviteType, Long entityId, String email) {
+        if (inviteType != InviteType.TENANT && inviteType != InviteType.HOMEOWNER) {
+            throw new PMSCustomException(ResponseCode.INVALID_INVITE_TYPE);
+        }
+        String recipient = normalizeAndValidateEmail(email);
+        Invite invite = createOccupantInvite(inviteType, entityId, recipient);
+        sendInvite(invite.getId(), recipient, NotificationChannel.EMAIL);
+    }
+
+    private Invite createOccupantInvite(InviteType inviteType, Long entityId, String recipient) {
         if (inviteType == InviteType.BUYER || inviteType == InviteType.SALES_AGENT
                 || inviteType == InviteType.ESTATE_MANAGER) {
             throw new PMSCustomException(ResponseCode.INVALID_INVITE_TYPE);
@@ -117,8 +143,9 @@ public class InviteService {
         invite.setEntityId(entityId);
         invite.setType(inviteType.name());
         invite.setRoleId(getRoleFromInviteType(inviteType));
+        invite.setRecipient(recipient);
         inviteDao.createInvite(invite);
-        return formatInviteLink(configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(), invite.getToken());
+        return invite;
     }
 
     public String createBuyerInvite(long saleId, String email) {

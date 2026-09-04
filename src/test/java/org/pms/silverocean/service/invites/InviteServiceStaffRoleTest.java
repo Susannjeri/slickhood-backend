@@ -40,4 +40,17 @@ class InviteServiceStaffRoleTest {
 
         assertEquals(ResponseCode.INVALID_USER_DETAILS, exception.getResponseCode());
     }
+
+    @Test
+    void occupantInvitationsCannotBeCreatedAsUnboundLinks() {
+        InviteService service = new InviteService(null, null, null, null, null, null, null, null, null);
+
+        PMSCustomException tenant = assertThrows(PMSCustomException.class,
+                () -> service.createInviteLink(InviteType.TENANT, 42L));
+        PMSCustomException homeowner = assertThrows(PMSCustomException.class,
+                () -> service.createInviteLink(InviteType.HOMEOWNER, 42L));
+
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, tenant.getResponseCode());
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, homeowner.getResponseCode());
+    }
 }

@@ -3,6 +3,7 @@ package org.pms.silverocean.controller;
 import jakarta.validation.Valid;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.InviteLinkDTO;
+import org.pms.silverocean.controller.wrappers.EmailOccupantInviteDTO;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.controller.wrappers.ShareInviteDTO;
 import org.pms.silverocean.service.I18NService;
@@ -48,6 +49,16 @@ public class InviteController {
         String link = inviteService.createInviteLink(inviteLinkDTO.inviteType(), inviteLinkDTO.entityId());
         return ResponseEntity.created(new URI(link)).body(new ResponseDTO(true, ResponseCode.INVITE_CREATED_SUCCESSFULLY.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.INVITE_CREATED_SUCCESSFULLY), link));
+    }
+
+    @PostMapping("/email")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_INVITE) " +
+            "and hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SHARE_INVITE)")
+    public ResponseEntity<ResponseDTO> createAndEmailOccupantInvite(
+            @Valid @RequestBody EmailOccupantInviteDTO request) {
+        inviteService.createAndSendEmailInvite(request.inviteType(), request.entityId(), request.email());
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.LINK_SENT_TO_RECIPIENT.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.LINK_SENT_TO_RECIPIENT)));
     }
 
     @PostMapping("/share")
