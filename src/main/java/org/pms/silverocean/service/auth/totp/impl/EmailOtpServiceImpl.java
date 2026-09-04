@@ -14,6 +14,7 @@ import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.ZonedDateTime;
@@ -33,6 +34,9 @@ public class EmailOtpServiceImpl implements TotpService {
 
     private final I18NService i18NService;
 
+    @Value("${security.otp.resend-cooldown-seconds:60}")
+    private int resendCooldownSeconds;
+
 
     public static final String NAME = "EMAIL";
 
@@ -49,6 +53,13 @@ public class EmailOtpServiceImpl implements TotpService {
     public String generateOTPCode(String username) {
         if (!PMSUtils.isValidEmail(username)) {
             throw new PMSCustomException(ResponseCode.EMAIL_OTP_GENERATION_FAILED);
+        }
+        // Keep the currently valid code during the resend cooldown. Creating a new
+        // record here would invalidate a code that may still be travelling through
+        // the recipient's mail system and makes delayed messages appear incorrect.
+        if (encryptionService.hasRecentlyIssuedOTP(username, username, OtpType.EMAIL,
+                resendCooldownSeconds)) {
+            return "Use the most recently issued OTP";
         }
         String secret = PMSUtils.generateRandomOTP();
         encryptionService.saveOTP(username, secret, OtpType.EMAIL, username);

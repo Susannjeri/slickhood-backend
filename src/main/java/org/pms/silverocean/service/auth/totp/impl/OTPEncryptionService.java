@@ -56,6 +56,17 @@ public class OTPEncryptionService {
         return otpDao.getActiveOTP(userId);
     }
 
+    public boolean hasRecentlyIssuedOTP(String username, String contact, OtpType verificationOption,
+                                        int cooldownSeconds) {
+        return userDao.findByEmail(username)
+                .flatMap(user -> otpDao.getActiveOTP(user.getId()))
+                .filter(otp -> contact.equalsIgnoreCase(otp.getContact()))
+                .filter(otp -> verificationOption.name().equals(otp.getChannel()))
+                .filter(otp -> otp.getCreatedOn() != null)
+                .filter(otp -> ZonedDateTime.now().isBefore(otp.getCreatedOn().plusSeconds(cooldownSeconds)))
+                .isPresent();
+    }
+
     public boolean verifyOTPAgainstValueInDB(String username, String code, OtpType otpType) {
         Optional<Users> userByMail = userDao.findByEmail(username);
         if (userByMail.isPresent()) {
