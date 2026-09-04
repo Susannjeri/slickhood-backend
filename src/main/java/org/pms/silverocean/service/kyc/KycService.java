@@ -199,7 +199,7 @@ public class KycService {
         document.setOcrProvider(ocr.provider()); document.setOcrConfidence(ocr.confidence());
         document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(extractedFields)));
         superseded.stream().findFirst().map(KycDocument::getId).ifPresent(document::setSupersedesDocumentId);
-        if (ocrAccepted(documentType, ocr, extractedFields)) {
+        if (ocrAccepted(documentType, ocr, extractedFields, tenantOnly(user))) {
             document.setStatus(DocumentStatus.OCR_COMPLETE.name());
         } else {
             document.setStatus(DocumentStatus.REJECTED.name());
@@ -212,7 +212,51 @@ public class KycService {
             documentRepo.save(previous);
         });
         kycCase.setStatus(KycStatus.IN_PROGRESS.name()); caseRepo.save(kycCase);
-        return KycDocumentView.from(document, extractedFields, Map.of(), null);
+        return KycDocumentView.from(document, extractedFields, Map.of(), Map.of(), null);
+    }
+
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public KycDocumentView confirmRegistrantData(long documentId, KycRegistrantConfirmationRequest request) {
+        Users user = currentUser();
+        KycCase kycCase = ownCase();
+        if (!Set.of(KycStatus.IN_PROGRESS.name(), KycStatus.REJECTED.name(), KycStatus.EXPIRED.name())
+                .contains(kycCase.getStatus())) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        KycDocument document = documentRepo.findById(documentId)
+                .filter(KycDocument::isActive)
+                .filter(candidate -> candidate.getCaseId() == kycCase.getId() && candidate.getUserId() == user.getId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND));
+        if (DocumentStatus.REJECTED.name().equals(document.getStatus())) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        Set<String> required = registrantRequiredFields(documentType(document));
+        if (required.isEmpty()) throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        Map<String, String> submitted = request.confirmedFields() == null ? Map.of() : request.confirmedFields();
+        if (!submitted.keySet().containsAll(required) || submitted.size() > REVIEWER_EDITABLE_FIELDS.size()) {
+            throw new PMSCustomException(ResponseCode.KYC_CONFIRMATION_REQUIRED);
+        }
+        Map<String, String> confirmed = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : submitted.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue() == null ? "" : entry.getValue().trim();
+            if (!REVIEWER_EDITABLE_FIELDS.contains(key)
+                    || !fieldAllowedForDocument(documentType(document), key)
+                    || value.isBlank() || value.length() > 255) {
+                throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+            }
+            confirmed.put(key, value);
+        }
+        try {
+            document.setEncryptedRegistrantConfirmedData(
+                    encryptionService.encrypt(objectMapper.writeValueAsString(confirmed)));
+        } catch (Exception ignored) {
+            throw new PMSCustomException(ResponseCode.KYC_INVALID_STATE);
+        }
+        document.setRegistrantConfirmedAt(ZonedDateTime.now());
+        document.setRegistrantConfirmedBy(user.getId());
+        documentRepo.save(document);
+        return documentView(document);
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -223,6 +267,15 @@ public class KycService {
         Users user = currentUser();
         kycCase.setPhoneVerified(user.isPhoneVerified());
         if (!kycCase.isPhoneVerified()) throw new PMSCustomException(ResponseCode.KYC_PHONE_VERIFICATION_REQUIRED);
+        List<KycDocument> documents = currentDocuments(kycCase, user);
+        boolean confirmationMissing = documents.stream()
+                .filter(document -> !registrantRequiredFields(documentType(document)).isEmpty())
+                .anyMatch(document -> !decryptRegistrantConfirmed(document).keySet()
+                        .containsAll(registrantRequiredFields(documentType(document))));
+        if (confirmationMissing) throw new PMSCustomException(ResponseCode.KYC_CONFIRMATION_REQUIRED);
+        if (tenantCanAutoApprove(documents, user)) {
+            return autoApproveTenant(kycCase, user, documents);
+        }
         kycCase.setStatus(KycStatus.SUBMITTED.name()); kycCase.setSubmittedAt(ZonedDateTime.now());
         kycCase.setReviewNotes(null);
         kycCase.setReviewedAt(null);
@@ -231,6 +284,75 @@ public class KycService {
         user.setAccountStatus(AccountStatus.KYC_UNDER_REVIEW.name());
         userDao.save(user);
         return view(kycCase, user);
+    }
+
+    private KycCaseView autoApproveTenant(KycCase kycCase, Users user, List<KycDocument> documents) {
+        String identificationNumber = null;
+        String taxPin = null;
+        for (KycDocument document : documents) {
+            Map<String, String> fields = decryptRegistrantConfirmed(document);
+            if (identificationNumber == null) identificationNumber = cleanVerifiedValue(fields.get("documentNumber"));
+            if (taxPin == null) taxPin = cleanVerifiedValue(fields.get("taxPin"));
+        }
+        if (identificationNumber == null || taxPin == null
+                || !userDao.isValidIDAndTaxPin(user.getId(), user.getCountry(), identificationNumber, taxPin)) {
+            throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+        }
+        ZonedDateTime now = ZonedDateTime.now();
+        user.setIdentificationNumber(identificationNumber.toUpperCase(Locale.ROOT));
+        user.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
+        user.setVerified(true);
+        user.setAccountStatus(AccountStatus.ACTIVE.name());
+        userDao.save(user);
+        documents.forEach(document -> {
+            document.setStatus(DocumentStatus.VERIFIED.name());
+            document.setReviewedAt(now);
+            document.setReviewedBy(null);
+            documentRepo.save(document);
+        });
+        kycCase.setStatus(KycStatus.APPROVED.name());
+        kycCase.setSubmittedAt(now);
+        kycCase.setReviewedAt(now);
+        kycCase.setReviewedBy(null);
+        kycCase.setReviewNotes("Automatically approved after tenant-confirmed data matched OCR and upload controls.");
+        caseRepo.save(kycCase);
+        return view(kycCase, user);
+    }
+
+    private boolean tenantCanAutoApprove(List<KycDocument> documents, Users user) {
+        if (!tenantOnly(user)) return false;
+        for (KycDocument document : documents) {
+            if (DocumentStatus.REJECTED.name().equals(document.getStatus())
+                    || DocumentStatus.REVIEW_REQUIRED.name().equals(document.getStatus())) return false;
+            Map<String, String> ocr = decrypt(document);
+            if (ocr.containsKey("_validationWarnings")) return false;
+            Map<String, String> confirmed = decryptRegistrantConfirmed(document);
+            for (String field : registrantRequiredFields(documentType(document))) {
+                if (!sameConfirmedValue(field, ocr.get(field), confirmed.get(field))) return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean sameConfirmedValue(String field, String ocr, String confirmed) {
+        if ("fullName".equals(field)) return normalizeName(ocr).equals(normalizeName(confirmed));
+        return cleanVerifiedValue(ocr) != null && cleanVerifiedValue(ocr)
+                .equalsIgnoreCase(cleanVerifiedValue(confirmed));
+    }
+
+    private Set<String> registrantRequiredFields(KycDocumentType type) {
+        if (type == KycDocumentType.KRA_PIN_CERTIFICATE) return Set.of("fullName", "taxPin");
+        if (type == KycDocumentType.PASSPORT || type == KycDocumentType.NATIONAL_ID_FRONT
+                || type == KycDocumentType.ALIEN_ID_FRONT) return Set.of("fullName", "documentNumber");
+        if (type == KycDocumentType.NATIONAL_ID_BACK || type == KycDocumentType.ALIEN_ID_BACK) {
+            return Set.of("documentNumber");
+        }
+        return Set.of();
+    }
+
+    private boolean tenantOnly(Users user) {
+        Set<PMSRole> assigned = roles(user.getId());
+        return assigned.size() == 1 && assigned.contains(PMSRole.TENANT);
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -267,9 +389,11 @@ public class KycService {
             for (KycDocument document : currentDocuments) {
                 KycDocumentReviewRequest decision = documentDecisions.get(document.getId());
                 Map<String, String> originalFields = decrypt(document);
-                Map<String, String> corrections = validateReviewerCorrections(document, decision, originalFields);
+                Map<String, String> registrantFields = decryptRegistrantConfirmed(document);
+                Map<String, String> reviewBase = effectiveFields(originalFields, registrantFields);
+                Map<String, String> corrections = validateReviewerCorrections(document, decision, reviewBase);
                 persistReviewerCorrections(document, corrections, decision.correctionReason(), reviewer);
-                Map<String, String> fields = effectiveFields(originalFields, corrections);
+                Map<String, String> fields = effectiveFields(reviewBase, corrections);
                 if (identificationNumber == null) identificationNumber = cleanVerifiedValue(fields.get("documentNumber"));
                 if (taxPin == null) taxPin = cleanVerifiedValue(fields.get("taxPin"));
             }
@@ -520,7 +644,7 @@ public class KycService {
             document.setOcrProvider(ocr.provider());
             document.setOcrConfidence(ocr.confidence());
             document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(fields)));
-            if (ocrAccepted(type, ocr, fields)) {
+            if (ocrAccepted(type, ocr, fields, tenantOnly(user))) {
                 document.setStatus(DocumentStatus.OCR_COMPLETE.name());
                 document.setRejectionReason(null);
             } else {
@@ -562,11 +686,13 @@ public class KycService {
         return view(kycCase, user);
     }
 
-    private boolean ocrAccepted(KycDocumentType type, OcrResult ocr, Map<String, String> fields) {
+    private boolean ocrAccepted(KycDocumentType type, OcrResult ocr, Map<String, String> fields,
+                                boolean tenantConfirmationAllowed) {
         if (type == KycDocumentType.SELFIE) return true;
         boolean confidenceAccepted = !requiresMachineReadableEvidence(type)
                 || ocr.confidence() >= minOcrConfidence;
-        boolean warningsAccepted = !rejectOcrValidationWarnings || !fields.containsKey("_validationWarnings");
+        boolean warningsAccepted = tenantConfirmationAllowed || !rejectOcrValidationWarnings
+                || !fields.containsKey("_validationWarnings");
         return confidenceAccepted && warningsAccepted;
     }
 
@@ -718,8 +844,18 @@ public class KycService {
         } catch (Exception ignored) { return Map.of(); }
     }
 
+    private Map<String, String> decryptRegistrantConfirmed(KycDocument document) {
+        try {
+            if (document.getEncryptedRegistrantConfirmedData() == null) return Map.of();
+            var decrypted = encryptionService.decrypt(document.getEncryptedRegistrantConfirmedData());
+            return decrypted == null ? Map.of() : objectMapper.readValue(
+                    decrypted.decryptedValue(), new TypeReference<>() {});
+        } catch (Exception ignored) { return Map.of(); }
+    }
+
     private KycDocumentView documentView(KycDocument document) {
-        return KycDocumentView.from(document, decrypt(document), decryptReviewerVerified(document), null);
+        return KycDocumentView.from(document, decrypt(document), decryptRegistrantConfirmed(document),
+                decryptReviewerVerified(document), null);
     }
 
     private Map<String,String> validateExtractedEvidence(Map<String,String> source, Users user, KycCase kycCase,

@@ -23,10 +23,12 @@ class KycRequirementResolverTest {
         assertEquals(1, requirements.stream().filter(r -> r.code().equals("TAX")).count());
     }
 
-    @Test void tenantStillReceivesIdentityAndSelfieRequirements() {
+    @Test void tenantReceivesIdentitySelfieAndTaxRequirements() {
         Set<KycRequirement> requirements = resolver.resolve(Set.of(PMSRole.TENANT));
         assertTrue(requirements.stream().anyMatch(r -> r.code().equals("IDENTITY_FRONT") && r.required()));
         assertTrue(requirements.stream().anyMatch(r -> r.code().equals("SELFIE") && r.required()));
+        assertTrue(requirements.stream().anyMatch(r -> r.code().equals("TAX") && r.required()
+                && r.acceptedTypes().contains(KycDocumentType.KRA_PIN_CERTIFICATE)));
     }
 
     @Test void organizationAccountRequiresLegalRegistrationEvidenceInAdditionToRepresentativeIdentity() {

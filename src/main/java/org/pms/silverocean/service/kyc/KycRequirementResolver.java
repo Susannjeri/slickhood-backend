@@ -47,8 +47,9 @@ public class KycRequirementResolver {
             add(requirements, "PROFESSIONAL", "Professional or business certificate", true,
                     Set.of(KycDocumentType.PROFESSIONAL_CERTIFICATE, KycDocumentType.BUSINESS_REGISTRATION_CERTIFICATE));
         }
-        if (roles.stream().anyMatch(role -> Set.of(PMSRole.LANDLORD, PMSRole.ESTATE_MANAGER, PMSRole.SALES_AGENT,
-                PMSRole.SERVICE_PROVIDER, PMSRole.ASSET_PORTFOLIO_MANAGER, PMSRole.AFFILIATE).contains(role))) {
+        if (roles.stream().anyMatch(role -> Set.of(PMSRole.LANDLORD, PMSRole.TENANT, PMSRole.ESTATE_MANAGER,
+                PMSRole.SALES_AGENT, PMSRole.SERVICE_PROVIDER, PMSRole.ASSET_PORTFOLIO_MANAGER,
+                PMSRole.AFFILIATE).contains(role))) {
             add(requirements, "TAX", "KRA PIN certificate", true, Set.of(KycDocumentType.KRA_PIN_CERTIFICATE));
         }
         // Preserve a predictable customer journey: identity, selfie, organisation/role evidence, then tax.

@@ -8,10 +8,12 @@ import org.pms.silverocean.database.pms.KycDocumentRepo;
 import org.pms.silverocean.database.pms.UserRoleRepo;
 import org.pms.silverocean.database.pms.entities.KycCase;
 import org.pms.silverocean.database.pms.entities.KycDocument;
+import org.pms.silverocean.database.pms.entities.Role;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.pms.silverocean.service.security.DecryptDTO;
@@ -280,6 +282,79 @@ class KycActivationLifecycleTest {
         assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
         assertThat(result.qualityStatus()).isEqualTo("REVIEW_REQUIRED");
         assertThat(result.extractedFields().get("_validationWarnings")).contains("Image quality");
+    }
+
+    @Test void tenantIsAutomaticallyApprovedOnlyWhenConfirmedDataMatchesOcr() {
+        Users tenant = customer(12); tenant.setPhoneVerified(true); tenant.setFullName("Mama Njeri");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        Role tenantRole = new Role(PMSRole.TENANT.getName(), PMSRole.TENANT.getDescription(), false);
+        when(roles.findByUserId(12L)).thenReturn(Set.of(tenantRole));
+        Set<KycRequirement> tenantRequirements = Set.of(
+                new KycRequirement("IDENTITY_FRONT", "Identity", true, Set.of(KycDocumentType.NATIONAL_ID_FRONT)),
+                new KycRequirement("IDENTITY_BACK", "Identity back", true, Set.of(KycDocumentType.NATIONAL_ID_BACK)),
+                new KycRequirement("SELFIE", "Selfie", true, Set.of(KycDocumentType.SELFIE)),
+                new KycRequirement("TAX", "Tax", true, Set.of(KycDocumentType.KRA_PIN_CERTIFICATE)));
+        when(requirements.resolve(any(), any())).thenReturn(tenantRequirements);
+        when(users.getUserObject()).thenReturn(tenant);
+        when(cases.findByUserId(12L)).thenReturn(Optional.of(kycCase));
+
+        KycDocument front = confirmedDocument(81, KycDocumentType.NATIONAL_ID_FRONT, new byte[]{1}, new byte[]{11});
+        KycDocument back = confirmedDocument(82, KycDocumentType.NATIONAL_ID_BACK, new byte[]{2}, new byte[]{12});
+        KycDocument selfie = confirmedDocument(83, KycDocumentType.SELFIE, new byte[]{3}, null);
+        KycDocument tax = confirmedDocument(84, KycDocumentType.KRA_PIN_CERTIFICATE, new byte[]{4}, new byte[]{14});
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(front, back, selfie, tax));
+        when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false, "{\"fullName\":\"MAMA NJERI\",\"documentNumber\":\"000000001\"}"));
+        when(encryption.decrypt(new byte[]{11})).thenReturn(new DecryptDTO(false, "{\"fullName\":\"Mama Njeri\",\"documentNumber\":\"000000001\"}"));
+        when(encryption.decrypt(new byte[]{2})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"000000001\"}"));
+        when(encryption.decrypt(new byte[]{12})).thenReturn(new DecryptDTO(false, "{\"documentNumber\":\"000000001\"}"));
+        when(encryption.decrypt(new byte[]{3})).thenReturn(new DecryptDTO(false, "{}"));
+        when(encryption.decrypt(new byte[]{4})).thenReturn(new DecryptDTO(false, "{\"fullName\":\"MAMA NJERI\",\"taxPin\":\"A000000001Z\"}"));
+        when(encryption.decrypt(new byte[]{14})).thenReturn(new DecryptDTO(false, "{\"fullName\":\"Mama Njeri\",\"taxPin\":\"A000000001Z\"}"));
+
+        KycCaseView result = service.submit();
+
+        assertThat(result.status()).isEqualTo(KycStatus.APPROVED.name());
+        assertThat(tenant.getAccountStatus()).isEqualTo(AccountStatus.ACTIVE.name());
+        assertThat(tenant.getIdentificationNumber()).isEqualTo("000000001");
+        assertThat(tenant.getTaxPin()).isEqualTo("A000000001Z");
+        assertThat(front.getStatus()).isEqualTo(DocumentStatus.VERIFIED.name());
+    }
+
+    @Test void tenantMismatchIsSentToAdministratorInsteadOfAutoApproved() {
+        Users tenant = customer(12); tenant.setPhoneVerified(true);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        Role tenantRole = new Role(PMSRole.TENANT.getName(), PMSRole.TENANT.getDescription(), false);
+        when(roles.findByUserId(12L)).thenReturn(Set.of(tenantRole));
+        when(users.getUserObject()).thenReturn(tenant);
+        when(cases.findByUserId(12L)).thenReturn(Optional.of(kycCase));
+        KycDocument identity = confirmedDocument(81, KycDocumentType.NATIONAL_ID_FRONT,
+                new byte[]{1}, new byte[]{11});
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity));
+        when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false,
+                "{\"fullName\":\"MAMA NJERI\",\"documentNumber\":\"000000001\"}"));
+        when(encryption.decrypt(new byte[]{11})).thenReturn(new DecryptDTO(false,
+                "{\"fullName\":\"Mama Njeri\",\"documentNumber\":\"000000009\"}"));
+
+        KycCaseView result = service.submit();
+
+        assertThat(result.status()).isEqualTo(KycStatus.SUBMITTED.name());
+        assertThat(tenant.getAccountStatus()).isEqualTo(AccountStatus.KYC_UNDER_REVIEW.name());
+        assertThat(tenant.isVerified()).isFalse();
+    }
+
+    @Test void everyRegistrantMustConfirmKeyIdentityDataBeforeSubmission() {
+        Users customer = customer(12); customer.setPhoneVerified(true);
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        KycDocument identity = confirmedDocument(81, KycDocumentType.NATIONAL_ID_FRONT,
+                new byte[]{1}, null);
+        when(users.getUserObject()).thenReturn(customer);
+        when(cases.findByUserId(12L)).thenReturn(Optional.of(kycCase));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity));
+
+        assertThatThrownBy(service::submit)
+                .isInstanceOfSatisfying(PMSCustomException.class, error ->
+                        assertThat(error.getResponseCode()).isEqualTo(ResponseCode.KYC_CONFIRMATION_REQUIRED));
+        assertThat(kycCase.getStatus()).isEqualTo(KycStatus.IN_PROGRESS.name());
     }
 
     @Test void reviewerCorrectionActivatesWithVerifiedValueAndRetainsOriginalOcrEvidence() {
@@ -761,5 +836,19 @@ class KycActivationLifecycleTest {
     private KycDocument document(long id,long userId) {
         KycDocument value = new KycDocument(); value.setId(id); value.setUserId(userId); value.setActive(true);
         value.setFileRef("kyc/12/id.jpg"); value.setOriginalFileName("id.jpg"); value.setContentType("image/jpeg"); return value;
+    }
+
+    private KycDocument confirmedDocument(long id, KycDocumentType type, byte[] ocrData, byte[] confirmedData) {
+        KycDocument value = document(id, 12);
+        value.setCaseId(40);
+        value.setDocumentType(type.name());
+        value.setStatus(DocumentStatus.OCR_COMPLETE.name());
+        value.setEncryptedExtractedData(ocrData);
+        value.setEncryptedRegistrantConfirmedData(confirmedData);
+        if (confirmedData != null) {
+            value.setRegistrantConfirmedBy(12L);
+            value.setRegistrantConfirmedAt(java.time.ZonedDateTime.now());
+        }
+        return value;
     }
 }

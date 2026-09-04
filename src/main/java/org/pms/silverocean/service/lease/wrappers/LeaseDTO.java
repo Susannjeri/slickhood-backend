@@ -20,11 +20,13 @@ public record LeaseDTO(Long id,
                        LocalDateTime tenantSignDate,
                        LocalDateTime ownerSignDate,
                        String ownerSignName,
+                       boolean governedDocumentRequired,
                        String lifecycleStatus,
                        LocalDate terminationEffectiveDate) {
     public LeaseDTO(Lease lease, String tenantName, String ownerSignName) {
         this(lease.getId(), lease.getName(), PMSLeaseMode.valueOf(lease.getLeaseMode()), lease.isSelfRenew(), lease.getMoveOutDate(),
                 lease.isSigned(), tenantName, lease.getLastModifiedDate(), lease.getCreatedOn(), lease.getTenantSignedDate(),
-                lease.getManagerSignedDate(), ownerSignName, lease.getLifecycleStatus(), lease.getTerminationEffectiveDate());
+                lease.getManagerSignedDate(), ownerSignName, lease.isGovernedDocumentRequired(),
+                lease.getLifecycleStatus(), lease.getTerminationEffectiveDate());
     }
 }

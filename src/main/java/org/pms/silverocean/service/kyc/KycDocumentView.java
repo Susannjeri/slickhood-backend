@@ -13,6 +13,8 @@ import java.util.Set;
 public record KycDocumentView(long id, String documentType, String originalFileName, String contentType,
                               String status, String qualityStatus,
                               Double qualityScore, Double ocrConfidence, Map<String, String> extractedFields,
+                              Map<String, String> registrantConfirmedFields, Long registrantConfirmedBy,
+                              ZonedDateTime registrantConfirmedAt,
                               Map<String, String> reviewerVerifiedFields, String reviewerCorrectionReason,
                               Long reviewerVerifiedBy, ZonedDateTime reviewerVerifiedAt,
                               List<KycValidationIssue> validationIssues,
@@ -20,15 +22,17 @@ public record KycDocumentView(long id, String documentType, String originalFileN
                               int versionNo, ZonedDateTime issuedAt, ZonedDateTime expiresAt,
                               ZonedDateTime reverificationDueAt, String maintenanceReason) {
     static KycDocumentView from(KycDocument document, Map<String, String> extractedFields, String downloadUrl) {
-        return from(document, extractedFields, Map.of(), downloadUrl);
+        return from(document, extractedFields, Map.of(), Map.of(), downloadUrl);
     }
 
     static KycDocumentView from(KycDocument document, Map<String, String> extractedFields,
+                                Map<String, String> registrantConfirmedFields,
                                 Map<String, String> reviewerVerifiedFields, String downloadUrl) {
         return new KycDocumentView(document.getId(), document.getDocumentType(), document.getOriginalFileName(),
                 document.getContentType(), document.getStatus(),
                 document.getQualityStatus(), document.getQualityScore(), document.getOcrConfidence(),
-                extractedFields, reviewerVerifiedFields, document.getReviewerCorrectionReason(),
+                extractedFields, registrantConfirmedFields, document.getRegistrantConfirmedBy(),
+                document.getRegistrantConfirmedAt(), reviewerVerifiedFields, document.getReviewerCorrectionReason(),
                 document.getReviewedBy(), document.getReviewedAt(),
                 issues(extractedFields, document.getRejectionReason(),
                         document.getOcrConfidence(), document.getStatus()),

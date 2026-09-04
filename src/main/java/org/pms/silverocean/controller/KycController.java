@@ -9,6 +9,7 @@ import org.pms.silverocean.service.kyc.KycDocumentType;
 import org.pms.silverocean.service.kyc.KycDocumentContent;
 import org.pms.silverocean.service.kyc.KycDocumentMaintenanceRequest;
 import org.pms.silverocean.service.kyc.KycReviewRequest;
+import org.pms.silverocean.service.kyc.KycRegistrantConfirmationRequest;
 import org.pms.silverocean.service.kyc.KycService;
 import org.pms.silverocean.service.kyc.StartKycRequest;
 import org.springframework.http.HttpStatus;
@@ -45,6 +46,12 @@ public class KycController {
 
     @PostMapping("/submit")
     public ResponseEntity<ResponseDTO> submit() { return ok(ResponseCode.KYC_SUBMITTED, service.submit()); }
+
+    @PostMapping("/documents/{documentId}/confirm")
+    public ResponseEntity<ResponseDTO> confirm(@PathVariable long documentId,
+                                               @Valid @RequestBody KycRegistrantConfirmationRequest request) {
+        return ok(ResponseCode.KYC_DETAILS, service.confirmRegistrantData(documentId, request));
+    }
 
     @PostMapping("/reprocess")
     public ResponseEntity<ResponseDTO> reprocess() throws Exception {
