@@ -38,6 +38,11 @@ public class InviteDao {
         return inviteRepo.findByTokenAndActive(token, active);
     }
 
+    public Optional<Invite> getLatestActiveRoleInviteForRecipient(String recipient) {
+        return inviteRepo.findFirstByRecipientIgnoreCaseAndActiveTrueAndExpiryDateAfterAndRoleIdIsNotNullOrderByCreatedOnDesc(
+                recipient, LocalDateTime.now());
+    }
+
     public Page<Invite> listUserInvites(Pageable pageable, long createdBy) {
         return inviteRepo.findByCreator(pageable, createdBy);
     }

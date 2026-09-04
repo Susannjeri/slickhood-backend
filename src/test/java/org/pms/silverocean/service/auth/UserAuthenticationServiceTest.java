@@ -306,6 +306,44 @@ class UserAuthenticationServiceTest {
     }
 
     @Test
+    void emailBoundInvitationRecoversWhenBrowserLosesTheToken() {
+        RegistrationDTO request = registration("invited@example.com", "Password1!");
+        request.setRoleId(null);
+        when(roleService.activeInviteTokenForRecipient("invited@example.com"))
+                .thenReturn(Optional.of("recovered-invite"));
+        when(userDao.findByEmail("invited@example.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode("Password1!")).thenReturn("encoded");
+        when(totpService.generateOTPCode("invited@example.com")).thenReturn("OTP sent");
+
+        var response = service.register(request, "127.0.0.1");
+
+        assertTrue(response.isSuccess());
+        assertEquals("recovered-invite", request.getToken());
+        verify(roleService).saveUserAndAssignRoleFromInvite(
+                org.mockito.ArgumentMatchers.eq("recovered-invite"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any(Users.class));
+    }
+
+    @Test
+    void registrationWithoutRoleOrMatchingInvitationStillFailsClosed() {
+        RegistrationDTO request = registration("unknown@example.com", "Password1!");
+        request.setRoleId(null);
+        when(roleService.activeInviteTokenForRecipient("unknown@example.com"))
+                .thenReturn(Optional.empty());
+        when(userDao.findByEmail("unknown@example.com")).thenReturn(Optional.empty());
+
+        var response = service.register(request, "127.0.0.1");
+
+        assertFalse(response.isSuccess());
+        assertEquals(ResponseCode.REGISTRATION_FAILED.getCode(), response.getCode());
+        verify(roleService, never()).saveUserAndAssignRoleFromInvite(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(Users.class));
+    }
+
+    @Test
     void passwordResetPersistsTheNewPasswordBeforeReturning() {
         Users user = Users.builder().email("owner@example.com").password("old-hash").build();
         when(userDao.findByEmail("owner@example.com")).thenReturn(Optional.of(user));

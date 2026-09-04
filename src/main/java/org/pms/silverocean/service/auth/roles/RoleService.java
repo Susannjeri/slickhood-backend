@@ -74,6 +74,17 @@ public class RoleService {
         this.saleTransactionRepo = saleTransactionRepo;
     }
 
+    /**
+     * Recovers an email-bound invitation when a browser loses its query/local-storage
+     * handoff. The invitation remains subject to the normal expiry, active-state and
+     * recipient checks when it is consumed.
+     */
+    public Optional<String> activeInviteTokenForRecipient(String email) {
+        if (email == null || email.isBlank()) return Optional.empty();
+        return inviteDao.getLatestActiveRoleInviteForRecipient(email.trim())
+                .map(Invite::getToken);
+    }
+
     @Transactional
     public ResponseDTO selfAssignRole(long roleId) {
         Users user = userDao.getUserObject();

@@ -11,9 +11,12 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 public interface InviteRepo extends JpaRepository<Invite, Long> {
     Optional<Invite> findByTokenAndActive(String token, boolean active);
+    Optional<Invite> findFirstByRecipientIgnoreCaseAndActiveTrueAndExpiryDateAfterAndRoleIdIsNotNullOrderByCreatedOnDesc(
+            String recipient, LocalDateTime now);
     Optional<Invite> findByIdAndActiveTrueAndCreatedBy(long inviteId, long createdBy);
     @Query("SELECT li.id as inviteId, li.entityId as entityId, u.ref as unitRef, p.name as propertyName," +
             " li.lastModifiedDate as lastAccessed, li.expiryDate as expiryDate, li.visits as visits, li.token as token" +

@@ -71,6 +71,7 @@ public class UserAuthenticationService {
     public ResponseDTO register(RegistrationDTO registrationDTO, String ipAddress) {
         String normalizedEmail = StringUtils.trimToEmpty(registrationDTO.getEmail()).toLowerCase(Locale.ROOT);
         registrationDTO.setEmail(normalizedEmail);
+        recoverEmailBoundInvitation(registrationDTO, normalizedEmail);
         if (accountType(registrationDTO.getProfileType()) == ProfileType.COMPANY
                 && StringUtils.isBlank(registrationDTO.getOrganizationName())) {
             return new ResponseDTO(false, ResponseCode.REGISTRATION_FAILED.getCode(),
@@ -322,6 +323,11 @@ public class UserAuthenticationService {
         // The former asynchronous update allowed an immediate sign-in to race the database write.
         user.setPassword(passwordEncoder.encode(password));
         userDao.save(user);
+    }
+
+    private void recoverEmailBoundInvitation(RegistrationDTO registrationDTO, String normalizedEmail) {
+        if (registrationDTO.getRoleId() != null || StringUtils.isNotBlank(registrationDTO.getToken())) return;
+        roleService.activeInviteTokenForRecipient(normalizedEmail).ifPresent(registrationDTO::setToken);
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
