@@ -22,6 +22,23 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
                     "GATE_MANAGEMENT_INCLUDED_UNITS", SubscriptionProduct.GATE_MANAGEMENT_ADDON);
             return true;
         }
+        if (path.startsWith("/property")) {
+            entitlements.requireSessionFeatureIfApplicable("PROPERTY_AND_UNIT_MANAGEMENT",
+                    "ESTATE_AND_HOMEOWNER_MANAGEMENT", "PROPERTY_SALES");
+            return true;
+        }
+        if (path.startsWith("/lease")) {
+            entitlements.requireSessionFeatureIfApplicable("LEASE_MANAGEMENT", null, null);
+            return true;
+        }
+        if (path.startsWith("/estate")) {
+            entitlements.requireSessionFeatureIfApplicable(null, "ESTATE_MANAGEMENT", null);
+            return true;
+        }
+        if (path.startsWith("/sales")) {
+            entitlements.requireSessionFeatureIfApplicable(null, null, "PROPERTY_SALES");
+            return true;
+        }
         SubscriptionProduct product = product(path);
         if (product != null) {
             entitlements.requireProduct(product);

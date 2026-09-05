@@ -131,6 +131,22 @@ class AccountServiceSecurityTest {
     }
 
     @Test
+    void estateManagerCanCreateAnEstateOperatingAccount() {
+        when(userDao.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(accountDao.createAccount(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(paymentPlatformFactory.getChannelImage(PaymentChannel.MPESA)).thenReturn("icon");
+
+        service.createAccount(new CreateAccountRequestDTO(
+                PaymentChannel.MPESA, "Service charge collections", AccountCategory.ESTATE_MANAGEMENT));
+
+        ArgumentCaptor<PaymentAccount> saved = ArgumentCaptor.forClass(PaymentAccount.class);
+        verify(accountDao).createAccount(saved.capture());
+        assertThat(saved.getValue().getCreatedBy()).isEqualTo(7L);
+        assertThat(saved.getValue().getCategory()).isEqualTo(AccountCategory.ESTATE_MANAGEMENT);
+    }
+
+    @Test
     void salesAgentCannotCreateALandlordAccount() {
         when(userDao.getActiveRole()).thenReturn(PMSRole.SALES_AGENT);
 

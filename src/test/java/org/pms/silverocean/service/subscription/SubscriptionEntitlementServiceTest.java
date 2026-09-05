@@ -8,6 +8,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.*;
 import org.pms.silverocean.database.pms.entities.SubscriptionPlan;
+import org.pms.silverocean.database.pms.entities.PlanFeature;
 import org.pms.silverocean.database.pms.entities.UserSubscription;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -100,6 +101,30 @@ class SubscriptionEntitlementServiceTest {
     @Test void anonymousSessionMayUsePublicBusinessCatalogues() {
         when(users.getUserId()).thenReturn(null);
         service.requireSessionBusinessProductIfApplicable();
+    }
+
+    @Test void activeLandlordPropertyRouteRequiresItsIncludedFeature() {
+        when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
+        UserSubscription subscription = subscription("LANDLORD_BRONZE", SubscriptionProduct.LANDLORD, null);
+        SubscriptionPlan plan = SubscriptionPlan.builder().code("LANDLORD_BRONZE").build();
+        plan.setActive(true);
+        PlanFeature feature = new PlanFeature();
+        feature.setActive(true);
+        feature.setEnabled(true);
+        when(subscriptions.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
+                7L, SubscriptionProduct.LANDLORD, SubscriptionStatus.ACTIVE)).thenReturn(Optional.of(subscription));
+        when(plans.findByCodeAndActiveTrue("LANDLORD_BRONZE")).thenReturn(Optional.of(plan));
+        when(features.findTopBySubscriptionPlanAndFeatureKeyOrderByIdDesc(plan, "PROPERTY_AND_UNIT_MANAGEMENT"))
+                .thenReturn(Optional.of(feature));
+
+        service.requireSessionFeatureIfApplicable("PROPERTY_AND_UNIT_MANAGEMENT",
+                "ESTATE_AND_HOMEOWNER_MANAGEMENT", "PROPERTY_SALES");
+    }
+
+    @Test void tenantSharedPropertyJourneyDoesNotRequireAnOwnersFeature() {
+        when(users.getActiveRole()).thenReturn(PMSRole.TENANT);
+        service.requireSessionFeatureIfApplicable("PROPERTY_AND_UNIT_MANAGEMENT",
+                "ESTATE_AND_HOMEOWNER_MANAGEMENT", "PROPERTY_SALES");
     }
 
     private UserSubscription subscription(String code, SubscriptionProduct product, ZonedDateTime endAt) {

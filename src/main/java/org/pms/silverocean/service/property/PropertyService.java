@@ -21,6 +21,7 @@ import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
+import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
@@ -820,12 +821,18 @@ public class PropertyService {
 
     public void attachAccountToProperty(long accountId, long propertyId) {
         Long userId = userDao.getUserId();
-        PaymentAccount paymentAccount = propertyDao.findIfAccountIsAttachable(accountId, userId)
+        Property property = propertyDao.findByIdAndCreatedBy(propertyId, userId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
+        AccountCategory expectedCategory = switch (property.getManagementMode()) {
+            case RENTAL -> AccountCategory.LANDLORD;
+            case SERVICE_CHARGE -> AccountCategory.ESTATE_MANAGEMENT;
+            case SALE -> AccountCategory.PROPERTY_SALES;
+        };
+        PaymentAccount paymentAccount = propertyDao.findIfAccountIsAttachable(accountId, userId, expectedCategory)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND));
         if (!paymentAccount.isVerified()) {
             throw new PMSCustomException(ResponseCode.ERROR_ATTACHING_PARAM_TO_PROPERTY_UNVERIFIED);
         }
-        propertyDao.findByIdAndCreatedBy(propertyId, userId).orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
 
         propertyDao.findPropertyAccountByIdAndProperty(accountId, propertyId).ifPresent(__ -> {
             throw new PMSCustomException(ResponseCode.PARAM_ATTACHED_TO_PROPERTY);

@@ -162,8 +162,8 @@ public class PropertyDao {
         return propertyAccountRepo.findPropertyAccountByIdAndProperty(accountId, propertyId);
     }
 
-    public Optional<PaymentAccount> findIfAccountIsAttachable(long accountId, long userId) {
-        return propertyAccountRepo.findByActiveAndCreatedByAndLandlordCategory(accountId, userId, AccountCategory.LANDLORD);
+    public Optional<PaymentAccount> findIfAccountIsAttachable(long accountId, long userId, AccountCategory category) {
+        return propertyAccountRepo.findByActiveAndCreatedByAndCategory(accountId, userId, category);
     }
 
     public void saveAccount(PropertyAccount propertyAccount) {

@@ -15,6 +15,7 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 import org.pms.silverocean.service.subscription.enums.SubscriptionStatus;
 import org.pms.silverocean.service.teamaccess.TeamMembershipStatus;
+import org.pms.silverocean.service.teamaccess.TeamMembershipRole;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -113,25 +114,31 @@ public class SubscriptionEntitlementService {
 
     @Transactional(readOnly = true)
     public SubscriptionProduct sessionBusinessProduct() {
-        var memberWorkspace = memberships.findFirstByUserIdAndStatusInAndActiveTrueOrderByCreatedOnDesc(
-                        users.getUserId(), LIVE_MEMBERSHIPS)
-                .flatMap(membership -> workspaces.findById(membership.getWorkspaceId()));
-        if (memberWorkspace.isPresent()) {
-            return switch (memberWorkspace.get().getBusinessArea()) {
-                case LANDLORD -> SubscriptionProduct.LANDLORD;
-                case ESTATE_MANAGEMENT -> SubscriptionProduct.ESTATE_MANAGEMENT;
-                case PROPERTY_SALE_MANAGEMENT -> SubscriptionProduct.PROPERTY_SALES;
-            };
-        }
-        return switch (users.getActiveRole()) {
-            case LANDLORD -> SubscriptionProduct.LANDLORD;
-            case ESTATE_MANAGER -> SubscriptionProduct.ESTATE_MANAGEMENT;
-            case SALES_AGENT -> SubscriptionProduct.PROPERTY_SALES;
-            case ASSET_PORTFOLIO_MANAGER -> SubscriptionProduct.MY_WEALTH;
-            case SERVICE_PROVIDER -> SubscriptionProduct.SERVICES;
-            case AFFILIATE -> SubscriptionProduct.AFFILIATE;
-            default -> throw new PMSCustomException(ResponseCode.SUBSCRIPTION_ACCESS_REQUIRED);
+        Long userId = users.getUserId();
+        SubscriptionProduct product = userId == null ? null : sessionBusinessProductIfApplicable(userId);
+        if (product == null) throw new PMSCustomException(ResponseCode.SUBSCRIPTION_ACCESS_REQUIRED);
+        return product;
+    }
+
+    /**
+     * Applies the feature belonging to the active business area while leaving tenant,
+     * homeowner and buyer access to their shared read journeys unchanged.
+     */
+    @Transactional(readOnly = true)
+    public void requireSessionFeatureIfApplicable(String landlordFeature, String estateFeature,
+                                                  String salesFeature) {
+        Long userId = users.getUserId();
+        if (userId == null || internalStaff()) return;
+        SubscriptionProduct product = sessionBusinessProductIfApplicable(userId);
+        if (product == null) return;
+        String featureKey = switch (product) {
+            case LANDLORD -> landlordFeature;
+            case ESTATE_MANAGEMENT -> estateFeature;
+            case PROPERTY_SALES -> salesFeature;
+            default -> null;
         };
+        if (featureKey == null) requireProduct(product);
+        else requireFeature(product, featureKey);
     }
 
     /**
@@ -145,34 +152,52 @@ public class SubscriptionEntitlementService {
         Long userId = users.getUserId();
         if (userId == null) return;
         if (internalStaff()) return;
-        var memberWorkspace = memberships.findFirstByUserIdAndStatusInAndActiveTrueOrderByCreatedOnDesc(
-                        userId, LIVE_MEMBERSHIPS)
-                .flatMap(membership -> workspaces.findById(membership.getWorkspaceId()))
-                .filter(workspace -> workspace.isActive());
-        if (memberWorkspace.isPresent()) {
-            requireProduct(switch (memberWorkspace.get().getBusinessArea()) {
-                case LANDLORD -> SubscriptionProduct.LANDLORD;
-                case ESTATE_MANAGEMENT -> SubscriptionProduct.ESTATE_MANAGEMENT;
-                case PROPERTY_SALE_MANAGEMENT -> SubscriptionProduct.PROPERTY_SALES;
-            });
-            return;
-        }
-        SubscriptionProduct product = switch (users.getActiveRole()) {
-            case LANDLORD -> SubscriptionProduct.LANDLORD;
-            case ESTATE_MANAGER -> SubscriptionProduct.ESTATE_MANAGEMENT;
-            case SALES_AGENT -> SubscriptionProduct.PROPERTY_SALES;
-            case ASSET_PORTFOLIO_MANAGER -> SubscriptionProduct.MY_WEALTH;
-            default -> null;
-        };
+        SubscriptionProduct product = sessionBusinessProductIfApplicable(userId);
         if (product != null) requireProduct(product);
     }
 
     private long subscriptionOwner(long userId) {
-        return memberships.findFirstByUserIdAndStatusInAndActiveTrueOrderByCreatedOnDesc(userId, LIVE_MEMBERSHIPS)
+        if (primaryRoleProduct() != null) return userId;
+        return sessionMembership(userId)
                 .flatMap(membership -> workspaces.findById(membership.getWorkspaceId()))
                 .filter(workspace -> workspace.isActive())
                 .map(workspace -> workspace.getOwnerUserId())
                 .orElse(userId);
+    }
+
+    private SubscriptionProduct sessionBusinessProductIfApplicable(long userId) {
+        SubscriptionProduct primaryProduct = primaryRoleProduct();
+        if (primaryProduct != null) return primaryProduct;
+        return sessionMembership(userId)
+                .flatMap(membership -> workspaces.findById(membership.getWorkspaceId()))
+                .filter(workspace -> workspace.isActive())
+                .map(workspace -> switch (workspace.getBusinessArea()) {
+                    case LANDLORD -> SubscriptionProduct.LANDLORD;
+                    case ESTATE_MANAGEMENT -> SubscriptionProduct.ESTATE_MANAGEMENT;
+                    case PROPERTY_SALE_MANAGEMENT -> SubscriptionProduct.PROPERTY_SALES;
+                }).orElse(null);
+    }
+
+    private java.util.Optional<org.pms.silverocean.database.pms.entities.WorkspaceMembership> sessionMembership(long userId) {
+        return TeamMembershipRole.fromPlatformRole(users.getActiveRole())
+                .flatMap(role -> memberships.findFirstByUserIdAndMembershipRoleAndStatusAndActiveTrue(
+                        userId, role, TeamMembershipStatus.ACTIVE))
+                .or(() -> memberships.findFirstByUserIdAndStatusInAndActiveTrueOrderByCreatedOnDesc(
+                        userId, LIVE_MEMBERSHIPS));
+    }
+
+    private SubscriptionProduct primaryRoleProduct() {
+        PMSRole activeRole = users.getActiveRole();
+        if (activeRole == null) return null;
+        return switch (activeRole) {
+            case LANDLORD -> SubscriptionProduct.LANDLORD;
+            case ESTATE_MANAGER -> SubscriptionProduct.ESTATE_MANAGEMENT;
+            case SALES_AGENT -> SubscriptionProduct.PROPERTY_SALES;
+            case ASSET_PORTFOLIO_MANAGER -> SubscriptionProduct.MY_WEALTH;
+            case SERVICE_PROVIDER -> SubscriptionProduct.SERVICES;
+            case AFFILIATE -> SubscriptionProduct.AFFILIATE;
+            default -> null;
+        };
     }
 
     private java.util.Optional<UserSubscription> activeSubscription(long payerId, SubscriptionProduct product) {

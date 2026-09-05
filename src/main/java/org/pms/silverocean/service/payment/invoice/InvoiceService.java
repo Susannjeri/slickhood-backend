@@ -400,7 +400,8 @@ public class InvoiceService {
     private AccountCategory expectedAccountCategory(PMSInvoice invoice) {
         if (invoice.getSubscriptionPlanCode() != null) return AccountCategory.SLICKHOOD;
         return switch (StringUtils.defaultString(invoice.getBillingType())) {
-            case "RENTAL", "SERVICE_CHARGE" -> AccountCategory.LANDLORD;
+            case "RENTAL" -> AccountCategory.LANDLORD;
+            case "SERVICE_CHARGE" -> AccountCategory.ESTATE_MANAGEMENT;
             case "SALE" -> AccountCategory.PROPERTY_SALES;
             case "COMMUNITY_FUND" -> AccountCategory.COMMUNITY_FUND;
             case "SOKO", "SERVICE_MARKETPLACE" -> AccountCategory.MERCHANT;

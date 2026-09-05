@@ -4,9 +4,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
+import org.pms.silverocean.database.pms.entities.PaymentAccount;
+import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
+import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.config.ConfigService;
@@ -26,6 +29,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.any;
 
 class PropertyServiceAuthorizationTest {
 
@@ -91,5 +95,22 @@ class PropertyServiceAuthorizationTest {
                 () -> propertyService.listUnitLandlordAndManagers(11L));
 
         assertEquals(ResponseCode.UNIT_NOT_FOUND, error.getResponseCode());
+    }
+
+    @Test
+    void estatePropertyOnlyAcceptsEstateManagementPaymentAccount() {
+        Property property = new Property();
+        property.setManagementMode(PMSPropertyManagementMode.SERVICE_CHARGE);
+        PaymentAccount account = new PaymentAccount();
+        account.setVerified(true);
+        when(propertyDao.findByIdAndCreatedBy(9L, 7L)).thenReturn(Optional.of(property));
+        when(propertyDao.findIfAccountIsAttachable(12L, 7L, AccountCategory.ESTATE_MANAGEMENT))
+                .thenReturn(Optional.of(account));
+        when(propertyDao.findPropertyAccountByIdAndProperty(12L, 9L)).thenReturn(Optional.empty());
+
+        propertyService.attachAccountToProperty(12L, 9L);
+
+        verify(propertyDao).saveAccount(any());
+        verify(propertyDao, never()).findIfAccountIsAttachable(12L, 7L, AccountCategory.LANDLORD);
     }
 }

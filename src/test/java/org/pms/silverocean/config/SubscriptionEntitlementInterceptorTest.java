@@ -40,4 +40,15 @@ class SubscriptionEntitlementInterceptorTest {
         verify(entitlements).requireFeatureOrAddOn(SubscriptionProduct.ESTATE_MANAGEMENT,
                 "GATE_MANAGEMENT_INCLUDED_UNITS", SubscriptionProduct.GATE_MANAGEMENT_ADDON);
     }
+
+    @Test void propertyRoutesRequireTheFeatureForTheActiveBusinessArea() {
+        when(request.getRequestURI()).thenReturn("/property/list");
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements).requireSessionFeatureIfApplicable("PROPERTY_AND_UNIT_MANAGEMENT",
+                "ESTATE_AND_HOMEOWNER_MANAGEMENT", "PROPERTY_SALES");
+        verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
+    }
 }

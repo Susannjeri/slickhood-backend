@@ -160,6 +160,34 @@ class InvoiceServiceSubscriptionPaymentTest {
         assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 12L));
     }
 
+    @Test
+    void initializesServiceChargeOnlyThroughItsFixedVerifiedEstateAccount() {
+        PMSInvoice invoice = propertyInvoice("SERVICE_CHARGE", 12L);
+        PaymentAccount account = paymentAccount(AccountCategory.ESTATE_MANAGEMENT, PaymentChannel.MPESA, 99L);
+        PaymentResponse expected = new PaymentResponse(true, ResponseCode.MPESA_PAYMENT_INITIALIZED);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(accountDao.getAccountById(12L)).thenReturn(account);
+        when(paymentPlatformFactory.getPlatform(PaymentChannel.MPESA)).thenReturn(paymentPlatform);
+        when(paymentPlatform.processPayment(invoice, null, 12L)).thenReturn(expected);
+
+        assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 12L));
+    }
+
+    @Test
+    void rejectsLandlordAccountForServiceChargeInvoice() {
+        PMSInvoice invoice = propertyInvoice("SERVICE_CHARGE", 12L);
+        PaymentAccount account = paymentAccount(AccountCategory.LANDLORD, PaymentChannel.MPESA, 99L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(accountDao.getAccountById(12L)).thenReturn(account);
+
+        assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 12L));
+
+        verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.MPESA);
+    }
+
     private static PMSInvoice subscriptionInvoice(long billedUserId, long payeeUserId) {
         PMSInvoice invoice = new PMSInvoice();
         invoice.setRef("INV-SUB");
