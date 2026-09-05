@@ -75,12 +75,15 @@ class RentalPaymentMySqlIT {
         String url = mysql == null ? EXTERNAL_URL : mysql.getJdbcUrl();
         String username = mysql == null ? EXTERNAL_USERNAME : mysql.getUsername();
         String password = mysql == null ? EXTERNAL_PASSWORD : mysql.getPassword();
-        String driver = mysql == null ? "org.mariadb.jdbc.Driver" : mysql.getDriverClassName();
+        String driver = mysql == null ? externalDriver(url) : mysql.getDriverClassName();
         registry.add("spring.datasource.url", () -> url);
         registry.add("spring.datasource.username", () -> username);
         registry.add("spring.datasource.password", () -> password);
         registry.add("spring.datasource.driverClassName", () -> driver);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> mysql == null ? "validate" : "create-drop");
+        // Both Testcontainers and the explicitly supplied release database are disposable.
+        // Let Hibernate create the complete persistence model so this test exercises repository
+        // behaviour independently of the separate production-schema migration rehearsal.
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
         registry.add("audit.datasource.mysql.url", () -> url);
         registry.add("audit.datasource.mysql.username", () -> username);
         registry.add("audit.datasource.mysql.password", () -> password);
@@ -88,6 +91,12 @@ class RentalPaymentMySqlIT {
         registry.add("whatsapp.phoneNumberId", () -> "test");
         registry.add("whatsapp.accessToken", () -> "test");
         registry.add("whatsapp.verifyToken", () -> "test");
+    }
+
+    private static String externalDriver(String url) {
+        return url != null && url.startsWith("jdbc:mysql:")
+                ? "com.mysql.cj.jdbc.Driver"
+                : "org.mariadb.jdbc.Driver";
     }
 
     @AfterAll

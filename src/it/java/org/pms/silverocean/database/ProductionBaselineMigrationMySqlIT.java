@@ -34,6 +34,14 @@ class ProductionBaselineMigrationMySqlIT {
 
     @Test
     void productionV67SchemaMigratesCleanlyToTheCandidateVersion() throws Exception {
+        // The release rehearsal imports schema only, so Flyway's production history table exists
+        // without its rows. Remove that empty copy and let Flyway create an explicit V67 baseline;
+        // otherwise it incorrectly attempts V1 against an already-populated production schema.
+        try (var connection = DriverManager.getConnection(URL, USERNAME, PASSWORD);
+             var statement = connection.createStatement()) {
+            statement.execute("drop table if exists flyway_schema_history");
+        }
+
         Flyway flyway = Flyway.configure()
                 .dataSource(URL, USERNAME, PASSWORD)
                 .locations("classpath:db/migration")
