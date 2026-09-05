@@ -14,8 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 /**
  * Release-only migration rehearsal against a disposable copy of the schema at the currently deployed
  * production version. SlickHood's core schema predates Flyway, so an empty-schema migration is not a
- * faithful production test. The release runner first creates the V63 schema from commit b698c72, then
- * this test baselines that non-empty database at V63 and applies every pending migration.
+ * faithful production test. The release runner imports a data-free schema from the deployed V67 database,
+ * then this test baselines that non-empty database at V67 and applies every pending migration.
  */
 @EnabledIf("externalMysqlAvailable")
 class ProductionBaselineMigrationMySqlIT {
@@ -33,20 +33,20 @@ class ProductionBaselineMigrationMySqlIT {
     }
 
     @Test
-    void productionV63SchemaMigratesCleanlyToTheCandidateVersion() throws Exception {
+    void productionV67SchemaMigratesCleanlyToTheCandidateVersion() throws Exception {
         Flyway flyway = Flyway.configure()
                 .dataSource(URL, USERNAME, PASSWORD)
                 .locations("classpath:db/migration")
                 .baselineOnMigrate(true)
-                .baselineVersion(MigrationVersion.fromVersion("63"))
-                .baselineDescription("deployed-production-v63")
+                .baselineVersion(MigrationVersion.fromVersion("67"))
+                .baselineDescription("deployed-production-v67")
                 .load();
 
         flyway.migrate();
         flyway.validate();
 
         MigrationInfo current = flyway.info().current();
-        assertEquals("66", current.getVersion().getVersion());
+        assertEquals("70", current.getVersion().getVersion());
         assertFalse(flyway.info().pending().length > 0, "all candidate migrations must be applied");
 
         try (var connection = DriverManager.getConnection(URL, USERNAME, PASSWORD);
