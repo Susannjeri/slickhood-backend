@@ -50,8 +50,8 @@ public class AccountDao {
     }
 
     @Transactional("pmsDBTransactionManager")
-    public void verifyAccount(PaymentAccount account) {
-        account.setVerified(true);
+    public void updateVerification(PaymentAccount account, boolean verified) {
+        account.setVerified(verified);
         accountRepo.save(account);
         auditLogService.createAuditLog(account, Permission.VERIFY_ACCOUNT);
     }

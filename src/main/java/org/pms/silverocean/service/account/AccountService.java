@@ -21,6 +21,7 @@ import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.payment.PaymentPlatformFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.pms.silverocean.service.payment.wrappers.AccountPropertyDefinition;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.security.DecryptDTO;
@@ -46,25 +47,11 @@ public class AccountService {
     private final PaymentPlatformFactory paymentPlatformFactory;
     private final NotificationService notificationService;
     private final CommunityFundRepo communityFundRepo;
+    private final ApplicationEventPublisher eventPublisher;
 
 
     public AccountDTO createAccount(CreateAccountRequestDTO dto) {
-        if (userDao.getActiveRole() == PMSRole.ESTATE_MANAGER && dto.category() != AccountCategory.COMMUNITY_FUND) {
-            throw new PMSCustomException(ResponseCode.ACCOUNT_INSUFFICIENT_PERMISSIONS);
-        }
-        if (AccountCategory.SLICKHOOD.equals(dto.category()) && !userDao.hasRole(PMSRole.SUPER_ADMIN)) {
-            throw new PMSCustomException(ResponseCode.ACCOUNT_INSUFFICIENT_PERMISSIONS);
-        }
-        if (AccountCategory.AFFILIATE.equals(dto.category()) &&
-                !userDao.hasRole(PMSRole.AFFILIATE) && !userDao.hasRole(PMSRole.SUPER_ADMIN)) {
-            throw new PMSCustomException(ResponseCode.ACCOUNT_INSUFFICIENT_PERMISSIONS);
-        }
-        if (AccountCategory.INSURANCE.equals(dto.category()) &&
-                !userDao.hasPermission(org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_INSURANCE_PAYMENT_CONFIG)) {
-            throw new PMSCustomException(ResponseCode.ACCOUNT_INSUFFICIENT_PERMISSIONS);
-        }
-        if (AccountCategory.COMMUNITY_FUND.equals(dto.category()) &&
-                !userDao.hasPermission(org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_COMMUNITY_FUNDS)) {
+        if (!canCreateCategory(userDao.getActiveRole(), dto.category())) {
             throw new PMSCustomException(ResponseCode.ACCOUNT_INSUFFICIENT_PERMISSIONS);
         }
         PaymentAccount account = new PaymentAccount();
@@ -121,7 +108,7 @@ public class AccountService {
         String email = userDao.findById(account.getCreatedBy()).map(Users::getEmail)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_EMAIL));
         if (verify) {
-            accountDao.verifyAccount(account);
+            accountDao.updateVerification(account, true);
             String message = String.format(i18NService.getLocalizedMessage(NotificationType.ACCOUNT_VERIFICATION_SUCCESS_EMAIL.getBody()),
                     account.getName());
             notification = new NotificationDTO(message, email, NotificationType.ACCOUNT_VERIFICATION_SUCCESS_EMAIL);
@@ -129,6 +116,7 @@ public class AccountService {
             if (StringUtils.isBlank(comments)) {
                 throw new PMSCustomException(ResponseCode.ACCOUNT_VERIFICATION_INVALID_COMMENTS);
             }
+            accountDao.updateVerification(account, false);
             String message = String.format(i18NService.getLocalizedMessage(NotificationType.ACCOUNT_VERIFICATION_FAILED_EMAIL.getBody()),
                     account.getName(), comments);
             notification = new NotificationDTO(message, email, NotificationType.ACCOUNT_VERIFICATION_FAILED_EMAIL);
@@ -148,8 +136,37 @@ public class AccountService {
 
     public AccountDTO getAccount(Long accountId) {
         PaymentAccount account = accountDao.getAccountById(accountId);
+        assertOwnerOrAdmin(account);
         List<AccountPropertyDTO> properties = buildPropertyDTOs(account);
         return new AccountDTO(account, properties, paymentPlatformFactory.getChannelImage(account.getChannel()));
+    }
+
+    /** Internal, secret-free account state for services validating configured destinations. */
+    public AccountDTO getAccountStatus(Long accountId) {
+        PaymentAccount account = accountDao.getAccountById(accountId);
+        return new AccountDTO(account, List.of(), paymentPlatformFactory.getChannelImage(account.getChannel()));
+    }
+
+    /** Internal account view containing only intentionally public, non-secret routing fields. */
+    public AccountDTO getAccountSafeDetails(Long accountId) {
+        PaymentAccount account = accountDao.getAccountById(accountId);
+        List<PaymentAccountProperty> storedProps = accountDao.getPropertiesForAccount(account.getId());
+        List<AccountPropertyDTO> safeProperties = account.getChannel().getAccountProperties().stream()
+                .filter(AccountPropertyDefinition::displayField)
+                .map(def -> {
+                    Optional<PaymentAccountProperty> stored = storedProps.stream()
+                            .filter(property -> property.getPropertyKey().equalsIgnoreCase(def.key()))
+                            .findFirst();
+                    String value = stored.map(property -> def.encrypted()
+                                    ? "*****"
+                                    : new String(property.getValue(), StandardCharsets.UTF_8))
+                            .orElse("");
+                    return new AccountPropertyDTO(def.key(), i18NService.getLocalizedMessage(def.labelKey()),
+                            i18NService.getLocalizedMessage(def.descriptionKey()), value,
+                            def.encrypted(), true);
+                })
+                .toList();
+        return new AccountDTO(account, safeProperties, paymentPlatformFactory.getChannelImage(account.getChannel()));
     }
 
     public void updateAccountProperty(Long accountId, UpdateAccountPropertyRequestDTO dto) {
@@ -157,6 +174,12 @@ public class AccountService {
         assertOwnerOrAdmin(account);
 
         AccountPropertyDefinition definition = account.getChannel().findProperty(dto.key());
+
+        // A destination is verified as a complete set. Changing any constituent
+        // value invalidates that decision until an administrator reviews it again.
+        if (account.isVerified()) {
+            accountDao.updateVerification(account, false);
+        }
 
         PaymentAccountProperty prop = accountDao.getProperty(accountId, dto.key())
                 .orElseGet(() -> {
@@ -175,6 +198,7 @@ public class AccountService {
         }
         prop.setLastModifiedDate(LocalDateTime.now());
         accountDao.upsertProperty(prop);
+        eventPublisher.publishEvent(new PaymentAccountCredentialsChangedEvent(accountId, account.getChannel()));
     }
 
     public String decryptAccountProperty(Long accountId, String key) {
@@ -272,5 +296,20 @@ public class AccountService {
         if (!isOwner && !isSuperAdmin) {
             throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);
         }
+    }
+
+    private boolean canCreateCategory(PMSRole activeRole, AccountCategory category) {
+        if (activeRole == null) {
+            return false;
+        }
+        return switch (activeRole) {
+            case SUPER_ADMIN -> true;
+            case LANDLORD -> category == AccountCategory.LANDLORD || category == AccountCategory.COMMUNITY_FUND;
+            case SERVICE_PROVIDER -> category == AccountCategory.MERCHANT;
+            case AFFILIATE -> category == AccountCategory.AFFILIATE;
+            case INSURANCE_MANAGER -> category == AccountCategory.INSURANCE;
+            case ESTATE_MANAGER -> category == AccountCategory.COMMUNITY_FUND;
+            default -> false;
+        };
     }
 }

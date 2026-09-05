@@ -146,7 +146,7 @@ public class InsuranceService {
     }
 
     private PaymentConfigurationView paymentView(InsuranceCompany company, InsurancePaymentConfiguration c, boolean safeOnly) {
-        AccountDTO account = accountService.getAccount(c.getPaymentAccountId());
+        AccountDTO account = accountService.getAccountSafeDetails(c.getPaymentAccountId());
         var details = safeOnly ? account.properties().stream()
                 .filter(p -> p.displayField() && p.value() != null && !p.value().isBlank()).toList() : account.properties();
         return new PaymentConfigurationView(c.getId(), company.getCode(), company.getName(), account.id(), account.name(),
