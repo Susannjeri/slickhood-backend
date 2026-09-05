@@ -82,6 +82,19 @@ public class InvoiceService {
         return createScopedInvoice(unitId, billedUserId, invoiceAmounts, "COMMUNITY_FUND", dueDate, custodianUserId, paymentAccountId);
     }
 
+    public PMSInvoice createSaleInvoice(long unitId, long billedUserId, long salesRecipientUserId,
+                                        long paymentAccountId, Map<String, Double> invoiceAmounts,
+                                        LocalDate dueDate) {
+        PaymentAccount account = accountDao.getAccountById(paymentAccountId);
+        if (!account.isActive() || !account.isVerified()
+                || account.getCreatedBy() != salesRecipientUserId
+                || account.getCategory() != AccountCategory.PROPERTY_SALES) {
+            throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+        }
+        return createScopedInvoice(unitId, billedUserId, invoiceAmounts, "SALE", dueDate,
+                salesRecipientUserId, paymentAccountId);
+    }
+
     private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
                                            String billingType, LocalDate dueDate, Long payToUserId, Long paymentAccountId) {
         Unit unit = unitDao.findById(unitId).orElseThrow();
@@ -360,8 +373,10 @@ public class InvoiceService {
     private void validateSubscriptionPaymentAccount(PMSInvoice invoice, PaymentChannel paymentChannel, long accountId) {
         if (StringUtils.isBlank(invoice.getSubscriptionPlanCode())) {
             PaymentAccount account = accountDao.getAccountById(accountId);
+            AccountCategory expectedCategory = expectedAccountCategory(invoice);
             if (!account.isActive() || !account.isVerified() || account.getCreatedBy() != invoice.getPayToUserId()
                     || account.getChannel() != paymentChannel || account.getCategory() == AccountCategory.SLICKHOOD
+                    || expectedCategory != null && account.getCategory() != expectedCategory
                     || invoice.getPaymentAccountId()!=null&&!invoice.getPaymentAccountId().equals(accountId)) {
                 throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
             }
@@ -380,6 +395,17 @@ public class InvoiceService {
         if (!validPlatformAccount) {
             throw new PaymentRequestException(ResponseCode.PAYMENT_INITIALIZATION_FAILED);
         }
+    }
+
+    private AccountCategory expectedAccountCategory(PMSInvoice invoice) {
+        if (invoice.getSubscriptionPlanCode() != null) return AccountCategory.SLICKHOOD;
+        return switch (StringUtils.defaultString(invoice.getBillingType())) {
+            case "RENTAL", "SERVICE_CHARGE" -> AccountCategory.LANDLORD;
+            case "SALE" -> AccountCategory.PROPERTY_SALES;
+            case "COMMUNITY_FUND" -> AccountCategory.COMMUNITY_FUND;
+            case "SOKO", "SERVICE_MARKETPLACE" -> AccountCategory.MERCHANT;
+            default -> null;
+        };
     }
 
     public Set<PaymentChannelDTO> getPaymentTypes() {

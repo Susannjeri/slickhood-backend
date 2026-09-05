@@ -50,7 +50,9 @@ import org.springframework.context.annotation.DependsOn;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -357,6 +359,7 @@ public class MPesaService extends PaymentPlatform {
         }
     }
 
+    @Transactional("pmsDBTransactionManager")
     public MPesaPaymentResponseDTO stkCallBack(STKCallbackResponse stkCallbackResponse, String sourceIp) {
         HttpEvent event = new HttpEvent();
         event.setEventType(STKCallbackResponse.class.getSimpleName());
@@ -374,17 +377,70 @@ public class MPesaService extends PaymentPlatform {
                     updatePaymentService.setInvoiceTransactionStatusByBillRefNumber(pmsPayment.getBillReference(), false);
                     pmsPayment.setStatusDesc(stkCallbackResponse.body().stkCallback().resultDesc());
                     pmsPayment.setSourceIp(sourceIp);
-                    Optional.ofNullable(stkCallbackResponse.body().stkCallback().callbackMetadata())
-                            .ifPresent(stkCallbackMetadata -> stkCallbackMetadata.items().forEach(item -> {
-                                if (item.name().equals(MPESA_RECEIPT_NUMBER)) {
-                                    pmsPayment.setThirdPartyTransId(item.value().toString());
-                                    //set invoice to paid
-                                    updatePaymentService.setInvoiceToPaid(pmsPayment.getBillReference(), pmsPayment.getThirdPartyTransId(), pmsPayment.getAmount());
-                                }
-                            }));
+                    if (stkCallbackResponse.body().stkCallback().resultCode() == 0) {
+                        Optional<String> receipt = callbackValue(stkCallbackResponse, MPESA_RECEIPT_NUMBER)
+                                .map(Object::toString).map(String::trim).filter(StringUtils::isNotBlank);
+                        Optional<BigDecimal> callbackAmount = callbackValue(stkCallbackResponse, "Amount")
+                                .flatMap(this::moneyValue);
+                        Optional<PMSInvoice> invoice = updatePaymentService
+                                .getInvoicePayToIDUsingInvoiceRef(pmsPayment.getBillReference());
+                        boolean valid = receipt.isPresent() && callbackAmount.isPresent() && invoice.isPresent()
+                                && !paymentDao.providerReceiptAlreadyProcessed(
+                                PaymentChannel.MPESA.getName(), receipt.orElseThrow(), pmsPayment.getId())
+                                && money(pmsPayment.getAmount()).compareTo(callbackAmount.orElseThrow()) == 0
+                                && stkPaymentMatchesInvoiceDestination(pmsPayment, invoice.orElseThrow());
+                        if (valid) {
+                            pmsPayment.setProviderReceipt(receipt.orElseThrow());
+                            pmsPayment.setThirdPartyTransId(receipt.orElseThrow());
+                            paymentDao.savePMSPayment(pmsPayment);
+                            updatePaymentService.setInvoiceToPaid(invoice.orElseThrow(), receipt.orElseThrow(), callbackAmount.orElseThrow().doubleValue());
+                        } else {
+                            pmsPayment.setStatus(MPesaResultCodes.INVALID_AMOUNT.getCode());
+                            pmsPayment.setStatusDesc("M-Pesa callback failed settlement validation");
+                            log.warn("M-Pesa STK callback rejected for payment {} because its receipt, amount, or destination was invalid", pmsPayment.getId());
+                        }
+                    }
                     paymentDao.savePMSPayment(pmsPayment);
                 });
         eventService.saveEvent(event);
         return new MPesaPaymentResponseDTO(MPesaResultCodes.VALID);
+    }
+
+    private Optional<Object> callbackValue(STKCallbackResponse response, String name) {
+        return Optional.ofNullable(response.body().stkCallback().callbackMetadata())
+                .stream().flatMap(metadata -> metadata.items() == null ? java.util.stream.Stream.empty() : metadata.items().stream())
+                .filter(item -> name.equals(item.name()) && item.value() != null)
+                .map(item -> item.value()).findFirst();
+    }
+
+    private Optional<BigDecimal> moneyValue(Object value) {
+        try {
+            return Optional.of(new BigDecimal(value.toString()).setScale(2, java.math.RoundingMode.HALF_UP));
+        } catch (RuntimeException ex) {
+            return Optional.empty();
+        }
+    }
+
+    private BigDecimal money(Double value) {
+        return value == null ? BigDecimal.valueOf(-1) : BigDecimal.valueOf(value).setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
+    private boolean stkPaymentMatchesInvoiceDestination(PMSPayment payment, PMSInvoice invoice) {
+        if (!invoice.isActive() || invoice.isPaid() || payment.getAccountId() == null
+                || invoice.getPaymentAccountId() == null || !invoice.getPaymentAccountId().equals(payment.getAccountId())) {
+            return false;
+        }
+        try {
+            PaymentAccount account = accountDao.getAccountById(payment.getAccountId());
+            if (!account.isActive() || !account.isVerified() || account.getChannel() != PaymentChannel.MPESA
+                    || account.getCreatedBy() != invoice.getPayToUserId()) {
+                return false;
+            }
+            String expected = paramService.getParamByAccountIdAndType(account.getId(),
+                    PaymentChannel.MPESA.findProperty(PaymentPropertyKeys.PAYBILL), invoice.getPropertyId());
+            return StringUtils.equals(StringUtils.trim(expected), StringUtils.trim(payment.getReceivingAccountNumber()));
+        } catch (RuntimeException ex) {
+            return false;
+        }
     }
 }

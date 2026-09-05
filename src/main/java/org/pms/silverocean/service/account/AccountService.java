@@ -309,6 +309,7 @@ public class AccountService {
             case AFFILIATE -> category == AccountCategory.AFFILIATE;
             case INSURANCE_MANAGER -> category == AccountCategory.INSURANCE;
             case ESTATE_MANAGER -> category == AccountCategory.COMMUNITY_FUND;
+            case SALES_AGENT -> category == AccountCategory.PROPERTY_SALES;
             default -> false;
         };
     }

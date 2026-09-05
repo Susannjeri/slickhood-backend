@@ -30,6 +30,10 @@ public class PaymentDao {
                 thirdPartyTransId, billReference, category, successStatus);
     }
 
+    public boolean providerReceiptAlreadyProcessed(String channel, String providerReceipt, Long paymentId) {
+        return pmsPaymentRepo.existsByChannelAndProviderReceiptAndIdNot(channel, providerReceipt, paymentId);
+    }
+
     public Optional<PMSPayment> findPaymentByID(long paymentId) {
         return pmsPaymentRepo.findById(paymentId);
     }

@@ -202,12 +202,12 @@ class SalesServiceTest {
         when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
         when(properties.findByIdAndManagerRole(11L, 300L, PMSRole.SALES_COORDINATOR.name())).thenReturn(Optional.of(property));
-        when(invoiceService.createPropertyInvoice(eq(77L), eq(200L), anyMap(), eq("SALE"), any()))
+        when(invoiceService.createSaleInvoice(eq(77L), eq(200L), eq(100L), eq(81L), anyMap(), any()))
                 .thenReturn(invoice);
         when(sales.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         EscrowInvoiceModels.View created = service.createEscrowInvoice(1L,
-                new EscrowInvoiceModels.Create(new BigDecimal("1400000")));
+                new EscrowInvoiceModels.Create(new BigDecimal("1400000"), 81L));
 
         assertEquals(501L, created.invoiceId());
         assertEquals(501L, sale.getEscrowInvoiceId());

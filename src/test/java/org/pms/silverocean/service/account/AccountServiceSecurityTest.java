@@ -115,6 +115,32 @@ class AccountServiceSecurityTest {
     }
 
     @Test
+    void salesAgentCanCreateOnlyAPropertySalesAccount() {
+        when(userDao.getActiveRole()).thenReturn(PMSRole.SALES_AGENT);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(accountDao.createAccount(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(paymentPlatformFactory.getChannelImage(PaymentChannel.MPESA)).thenReturn("icon");
+
+        service.createAccount(new CreateAccountRequestDTO(
+                PaymentChannel.MPESA, "Completion proceeds", AccountCategory.PROPERTY_SALES));
+
+        ArgumentCaptor<PaymentAccount> saved = ArgumentCaptor.forClass(PaymentAccount.class);
+        verify(accountDao).createAccount(saved.capture());
+        assertThat(saved.getValue().getCreatedBy()).isEqualTo(7L);
+        assertThat(saved.getValue().getCategory()).isEqualTo(AccountCategory.PROPERTY_SALES);
+    }
+
+    @Test
+    void salesAgentCannotCreateALandlordAccount() {
+        when(userDao.getActiveRole()).thenReturn(PMSRole.SALES_AGENT);
+
+        assertThatThrownBy(() -> service.createAccount(new CreateAccountRequestDTO(
+                PaymentChannel.MPESA, "Wrong category", AccountCategory.LANDLORD)))
+                .isInstanceOf(PMSCustomException.class);
+        verify(accountDao, never()).createAccount(any());
+    }
+
+    @Test
     void changingAFieldRevokesVerificationAndPublishesCacheInvalidationEvent() {
         PaymentAccount account = account(42L, 7L, AccountCategory.LANDLORD, PaymentChannel.MPESA, true);
         when(accountDao.getAccountById(42L)).thenReturn(account);

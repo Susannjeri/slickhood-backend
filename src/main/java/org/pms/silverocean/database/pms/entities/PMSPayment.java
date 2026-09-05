@@ -42,6 +42,8 @@ public class PMSPayment extends BaseIDEntity {
     private String customerName;
 
     private String thirdPartyTransId;
+    /** Canonical provider settlement receipt. Kept separate from request IDs and globally de-duplicated per rail. */
+    private String providerReceipt;
     private String status;
     private String statusDesc;
     private long payToUserId;

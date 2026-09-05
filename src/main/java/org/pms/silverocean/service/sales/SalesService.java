@@ -146,9 +146,10 @@ public class SalesService {
             return escrowView(existing);
         }
 
-        PMSInvoice invoice = invoiceService.createPropertyInvoice(sale.getUnitId(), sale.getBuyerUserId(),
+        PMSInvoice invoice = invoiceService.createSaleInvoice(sale.getUnitId(), sale.getBuyerUserId(),
+                sale.getSalesAgentUserId(), request.paymentAccountId(),
                 Map.of("Contractual property sale escrow", request.amount().doubleValue()),
-                "SALE", LocalDate.now().plusDays(7));
+                LocalDate.now().plusDays(7));
         sale.setEscrowRequiredAmount(request.amount());
         sale.setEscrowInvoiceId(invoice.getId());
         sales.save(sale);

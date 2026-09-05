@@ -14,6 +14,8 @@ import java.util.Optional;
 public interface PMSPaymentRepo extends JpaRepository<PMSPayment, Long>, JpaSpecificationExecutor<PMSPayment> {
     Optional<PMSPayment> findByThirdPartyTransId(String thirdPartyTransId);
 
+    boolean existsByChannelAndProviderReceiptAndIdNot(String channel, String providerReceipt, Long id);
+
     boolean existsByThirdPartyTransIdAndBillReferenceAndCategoryAndStatus(
             String thirdPartyTransId, String billReference, String category, String status);
 

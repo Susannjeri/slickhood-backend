@@ -132,6 +132,34 @@ class InvoiceServiceSubscriptionPaymentTest {
         verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PAYSTACK);
     }
 
+    @Test
+    void rejectsLandlordAccountForPropertySaleInvoice() {
+        PMSInvoice invoice = propertyInvoice("SALE", 12L);
+        PaymentAccount account = paymentAccount(AccountCategory.LANDLORD, PaymentChannel.MPESA, 99L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(accountDao.getAccountById(12L)).thenReturn(account);
+
+        assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 12L));
+
+        verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.MPESA);
+    }
+
+    @Test
+    void initializesPropertySaleOnlyThroughItsFixedVerifiedSalesAccount() {
+        PMSInvoice invoice = propertyInvoice("SALE", 12L);
+        PaymentAccount account = paymentAccount(AccountCategory.PROPERTY_SALES, PaymentChannel.MPESA, 99L);
+        PaymentResponse expected = new PaymentResponse(true, ResponseCode.MPESA_PAYMENT_INITIALIZED);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(accountDao.getAccountById(12L)).thenReturn(account);
+        when(paymentPlatformFactory.getPlatform(PaymentChannel.MPESA)).thenReturn(paymentPlatform);
+        when(paymentPlatform.processPayment(invoice, null, 12L)).thenReturn(expected);
+
+        assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 12L));
+    }
+
     private static PMSInvoice subscriptionInvoice(long billedUserId, long payeeUserId) {
         PMSInvoice invoice = new PMSInvoice();
         invoice.setRef("INV-SUB");
@@ -151,5 +179,13 @@ class InvoiceServiceSubscriptionPaymentTest {
         account.setActive(true);
         account.setVerified(true);
         return account;
+    }
+
+    private static PMSInvoice propertyInvoice(String billingType, Long paymentAccountId) {
+        PMSInvoice invoice = subscriptionInvoice(7L, 99L);
+        invoice.setSubscriptionPlanCode(null);
+        invoice.setBillingType(billingType);
+        invoice.setPaymentAccountId(paymentAccountId);
+        return invoice;
     }
 }

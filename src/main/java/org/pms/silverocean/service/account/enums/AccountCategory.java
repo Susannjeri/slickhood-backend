@@ -6,6 +6,7 @@ import lombok.Getter;
 public enum AccountCategory {
     SLICKHOOD("SlickHood", "Platform-level master accounts"),
     LANDLORD("Landlord", "Landlord property payment accounts"),
+    PROPERTY_SALES("Property Sales", "Property-sale deposits and completion proceeds"),
     MERCHANT("Merchant", "Service and Soko merchant payment accounts"),
     AFFILIATE("Affiliate", "Verified affiliate commission payout destinations"),
     INSURANCE("Insurance", "Silverwood-managed insurer payment destinations"),
