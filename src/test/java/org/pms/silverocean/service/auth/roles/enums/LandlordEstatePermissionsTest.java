@@ -10,6 +10,7 @@ class LandlordEstatePermissionsTest {
         assertThat(PMSPermission.LANDLORD_PERMISSIONS.getPermissions()).contains(
                 Permission.VIEW_ESTATE,
                 Permission.MANAGE_ESTATE,
+                Permission.DUPLICATE_UNIT,
                 Permission.CREATE_SERVICE_CHARGE,
                 Permission.VIEW_SERVICE_CHARGE
         );
@@ -22,6 +23,7 @@ class LandlordEstatePermissionsTest {
                 Permission.EDIT_PROPERTY,
                 Permission.VIEW_PROPERTY,
                 Permission.CREATE_UNIT,
+                Permission.DUPLICATE_UNIT,
                 Permission.EDIT_UNIT,
                 Permission.VIEW_UNIT,
                 Permission.MANAGE_ESTATE,
@@ -30,20 +32,27 @@ class LandlordEstatePermissionsTest {
     }
 
     @Test
+    void primaryPropertyOperatorsCanCreateSimilarUnits() {
+        assertThat(PMSPermission.LANDLORD_PERMISSIONS.getPermissions()).contains(Permission.DUPLICATE_UNIT);
+        assertThat(PMSPermission.ESTATE_MANAGER.getPermissions()).contains(Permission.DUPLICATE_UNIT);
+        assertThat(PMSPermission.SALES_AGENT.getPermissions()).contains(Permission.DUPLICATE_UNIT);
+    }
+
+    @Test
     void participantRolesCannotCreateOrManageTheirHostBusinessArea() {
         assertThat(PMSPermission.TENANT.getPermissions()).doesNotContain(
-                Permission.CREATE_PROPERTY, Permission.CREATE_UNIT, Permission.MANAGE_ESTATE,
+                Permission.CREATE_PROPERTY, Permission.CREATE_UNIT, Permission.DUPLICATE_UNIT, Permission.MANAGE_ESTATE,
                 Permission.MANAGE_SALE_PIPELINE, Permission.VIEW_PROPERTY_LIST,
                 Permission.VIEW_UNIT_LIST, Permission.VIEW_LEASE_TEMPLATE,
                 Permission.CREATE_LEASE_TEMPLATE, Permission.EDIT_LEASE_TEMPLATE,
                 Permission.DELETE_LEASE_TEMPLATE, Permission.LIST_LEASE_TEMPLATE
         );
         assertThat(PMSPermission.HOMEOWNER.getPermissions()).doesNotContain(
-                Permission.CREATE_PROPERTY, Permission.CREATE_UNIT, Permission.MANAGE_ESTATE,
+                Permission.CREATE_PROPERTY, Permission.CREATE_UNIT, Permission.DUPLICATE_UNIT, Permission.MANAGE_ESTATE,
                 Permission.CREATE_SERVICE_CHARGE
         );
         assertThat(PMSPermission.BUYER.getPermissions()).doesNotContain(
-                Permission.CREATE_PROPERTY, Permission.CREATE_UNIT, Permission.MANAGE_SALE_PIPELINE
+                Permission.CREATE_PROPERTY, Permission.CREATE_UNIT, Permission.DUPLICATE_UNIT, Permission.MANAGE_SALE_PIPELINE
         );
     }
 

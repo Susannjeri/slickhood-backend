@@ -126,7 +126,7 @@ public class UnitController extends BasePropertyController {
     }
 
     @PatchMapping("/create/similar")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_UNIT)")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).DUPLICATE_UNIT)")
     public ResponseEntity<ResponseDTO> duplicateUnit(@RequestParam("unitId") long unitId, @RequestParam int count) {
         ResponseDTO responseDTO = propertyService.createDuplicateJob(unitId, count);
         return responseDTO.isSuccess() ? ResponseEntity.ok(responseDTO) : ResponseEntity.status(HttpStatus.CONFLICT).body(responseDTO);
