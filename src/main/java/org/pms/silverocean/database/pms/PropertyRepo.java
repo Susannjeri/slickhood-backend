@@ -37,6 +37,9 @@ public interface PropertyRepo extends JpaRepository<Property, Long>,  JpaSpecifi
     @Query("SELECT p FROM Property p WHERE p.active AND p.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.active)")
     Optional<Property> findByIdAndManagerRole(long id, long userId, String roleName);
 
+    @Query("SELECT p FROM Property p WHERE p.active AND p.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:inviteId AND pm.active)")
+    Optional<Property> findByIdAndManagerRoleAndInviteId(long id, long userId, String roleName, long inviteId);
+
     @Query("SELECT p FROM Property p WHERE p.active AND p.id=:id AND EXISTS (SELECT 1 FROM PropertyOwnership o WHERE o.propertyId=p.id AND o.homeownerUserId=:userId AND o.active)")
     Optional<Property> findByIdAndHomeowner(long id, long userId);
 

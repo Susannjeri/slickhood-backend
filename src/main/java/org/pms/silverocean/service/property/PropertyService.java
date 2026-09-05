@@ -139,6 +139,7 @@ public class PropertyService {
     private final AccountDao accountDao;
     private final org.pms.silverocean.service.subscription.SubscriptionEntitlementService subscriptionEntitlements;
     private final UnitReportDao unitReportDao;
+    private final org.pms.silverocean.service.teamaccess.WorkspaceSelectionService workspaceSelection;
 
     @Value("${min.upload.image.width:300}")
     private int imageWidth;
@@ -706,7 +707,9 @@ public class PropertyService {
     }
 
 
-    public ResponseDTO listProperty(Pageable pageable, Optional<String> searchParam, Optional<Long> propertyId, BiFunction<Property, Long, String> getUserRoleInProperty) {
+    public ResponseDTO listProperty(Pageable pageable, Optional<String> searchParam, Optional<Long> propertyId,
+                                    Optional<PMSPropertyManagementMode> managementMode,
+                                    BiFunction<Property, Long, String> getUserRoleInProperty) {
         Users user = userDao.getUserObject();
         if (!user.isCompletedProfile()) {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
@@ -715,20 +718,23 @@ public class PropertyService {
         if (propertyId != null && propertyId.isPresent()) {
             return getPropertyByIdAndOwnerOrStaff(propertyId.get());
         }
-        Page<PropertyDTO> filteredProperty = propertyDao.findAll(searchParam, true, user.getId(), userDao.getActiveRole(), pageable, getUserRoleInProperty, garageService::getPresignedUrl);
+        Long membershipId = workspaceSelection.selectedMembership(user.getId()).map(org.pms.silverocean.database.pms.entities.WorkspaceMembership::getId).orElse(null);
+        Page<PropertyDTO> filteredProperty = propertyDao.findAll(searchParam, managementMode, true, user.getId(), userDao.getActiveRole(), pageable, membershipId, getUserRoleInProperty, garageService::getPresignedUrl);
         return new ResponseDTO(true, ResponseCode.PROPERTY_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.PROPERTY_LIST), filteredProperty.toList(),
                 filteredProperty.getTotalPages(), filteredProperty.getTotalElements(), filteredProperty.getSize());
     }
 
-    public Page<IdNameDescDTO> listPropertyListForKeyValue(Pageable pageable, Optional<String> searchParam) {
+    public Page<IdNameDescDTO> listPropertyListForKeyValue(Pageable pageable, Optional<String> searchParam,
+                                                           Optional<PMSPropertyManagementMode> managementMode) {
         Users user = userDao.getUserObject();
         if (!user.isCompletedProfile()) {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
         }
         if (userDao.hasRole(PMSRole.SUPER_ADMIN)) {
-            return propertyDao.findAllForKeyValue(searchParam, true, null, PMSRole.SUPER_ADMIN, pageable);
+            return propertyDao.findAllForKeyValue(searchParam, managementMode, true, null, PMSRole.SUPER_ADMIN, pageable, null);
         }
-        return propertyDao.findAllForKeyValue(searchParam, true, user.getId(), userDao.getActiveRole(), pageable);
+        Long membershipId = workspaceSelection.selectedMembership(user.getId()).map(org.pms.silverocean.database.pms.entities.WorkspaceMembership::getId).orElse(null);
+        return propertyDao.findAllForKeyValue(searchParam, managementMode, true, user.getId(), userDao.getActiveRole(), pageable, membershipId);
     }
 
     private ResponseDTO getPropertyByIdAndOwnerOrStaff(long propertyId) {
@@ -738,7 +744,8 @@ public class PropertyService {
             case TENANT -> propertyDao.findByIdAndTenant(propertyId, userDao.getUserId());
             case PROPERTY_MANAGER, WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER,
                  ESTATE_OPERATIONS_MANAGER, SECURITY_SUPERVISOR, SALES_COORDINATOR,
-                 LISTING_AGENT, WORKSPACE_VIEWER, GUARD -> propertyDao.findByIdAndManagerRole(propertyId, userDao.getUserId(), activeRole.name());
+                 LISTING_AGENT, WORKSPACE_VIEWER, GUARD -> workspaceSelection.selectedMembership(userDao.getUserId())
+                    .flatMap(member -> propertyDao.findByIdAndManagerRoleAndMembership(propertyId, userDao.getUserId(), activeRole.name(), member.getId()));
             case HOMEOWNER -> propertyDao.findByIdAndHomeowner(propertyId, userDao.getUserId());
             case BUYER -> propertyDao.findByIdAndBuyer(propertyId, userDao.getUserId());
             case SUPER_ADMIN -> propertyDao.findById(propertyId).filter(Property::isActive);
@@ -914,7 +921,8 @@ public class PropertyService {
         if (unitId != null && unitId.isPresent()) {
             return getPropertyUnitByIdAndOwnerOrStaffOrTenant(unitId.get());
         }
-        Page<UnitDTO> filteredUnits = unitDao.findAll(unitRef, propertyId, leaseMode, userDao.getUserId(), userDao.getActiveRole(), pageable).map(unit -> toUnitDTO(new DbUnitDTO(unit), null));
+        Long membershipId = workspaceSelection.selectedMembership(userDao.getUserId()).map(org.pms.silverocean.database.pms.entities.WorkspaceMembership::getId).orElse(null);
+        Page<UnitDTO> filteredUnits = unitDao.findAll(unitRef, propertyId, leaseMode, userDao.getUserId(), userDao.getActiveRole(), pageable, membershipId).map(unit -> toUnitDTO(new DbUnitDTO(unit), null));
         return new ResponseDTO(true, ResponseCode.UNIT_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.UNIT_LIST), filteredUnits.toList(),
                 filteredUnits.getTotalPages(), filteredUnits.getTotalElements(), filteredUnits.getSize());
     }
@@ -929,7 +937,9 @@ public class PropertyService {
             userId = null;
         }
 
-        return unitDao.findAll(unitRef, Optional.of(propertyId), Optional.empty(), userId, userDao.getActiveRole(), pageable).map(unit -> new IdNameDescDTO(unit.getId(), unit.getRef()));
+        Long membershipId = userId == null ? null : workspaceSelection.selectedMembership(userId)
+                .map(org.pms.silverocean.database.pms.entities.WorkspaceMembership::getId).orElse(null);
+        return unitDao.findAll(unitRef, Optional.of(propertyId), Optional.empty(), userId, userDao.getActiveRole(), pageable, membershipId).map(unit -> new IdNameDescDTO(unit.getId(), unit.getRef()));
     }
 
     private ResponseDTO getPropertyUnitByIdAndOwnerOrStaffOrTenant(long unitId) {
@@ -941,7 +951,8 @@ public class PropertyService {
             case BUYER -> unitDao.findByIdAndBuyer(unitId, userDao.getUserId());
             case PROPERTY_MANAGER, WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER,
                  ESTATE_OPERATIONS_MANAGER, SECURITY_SUPERVISOR, SALES_COORDINATOR,
-                 LISTING_AGENT, WORKSPACE_VIEWER, GUARD -> unitDao.findByIdAndManagerRole(unitId, userDao.getUserId(), activeRole.name());
+                 LISTING_AGENT, WORKSPACE_VIEWER, GUARD -> workspaceSelection.selectedMembership(userDao.getUserId())
+                    .flatMap(member -> unitDao.findByIdAndManagerRoleAndMembership(unitId, userDao.getUserId(), activeRole.name(), member.getId()));
             case SUPER_ADMIN -> unitDao.findById(unitId).filter(Unit::isActive).map(DbUnitDTO::new);
             default -> Optional.empty();
         };

@@ -25,16 +25,26 @@ Docker Desktop or another Docker-compatible runtime must be running. If Docker i
 - Provider-reference idempotency when payment completion is replayed.
 - Canonical Paystack completion status and receipt eligibility.
 
-## Flyway limitation
+## Production-baseline Flyway rehearsal
 
-The repository currently contains incremental Flyway migrations `V1` through `V21`, but not the legacy base-schema migration that creates core tables such as users, properties, units, leases, invoices and payments. For that reason, the isolated repository fixture intentionally uses Hibernate `create-drop` and disables Flyway.
+The repository contains migrations through `V71`, but the legacy base schema predates Flyway. Use
+`ProductionBaselineMigrationMySqlIT` only against a disposable, data-free copy of the deployed schema.
+The test remains disabled unless both a JDBC URL and the explicit reset acknowledgement are present:
 
-Do not represent this test as Flyway certification. Before production migration rehearsal:
+```powershell
+$env:SLICKHOOD_TEST_MYSQL_URL='jdbc:mysql://<isolated-host>:3306/slickhood_release_test'
+$env:SLICKHOOD_TEST_MYSQL_USERNAME='<isolated-test-user>'
+$env:SLICKHOOD_TEST_MYSQL_PASSWORD='<secret>'
+$env:SLICKHOOD_TEST_MYSQL_ALLOW_RESET='true'
+$env:SLICKHOOD_TEST_MYSQL_BASELINE_VERSION='67'
+$env:SLICKHOOD_EXPECTED_FLYWAY_VERSION='71'
+.\mvnw.cmd "-Dit.test=ProductionBaselineMigrationMySqlIT" failsafe:integration-test failsafe:verify
+```
 
-1. Obtain a schema-only export from the authoritative pre-Flyway database or reconstruct and review a canonical `V0` baseline.
-2. Remove all data and secrets from the export.
-3. Apply the baseline and `V1`–`V21` to an empty disposable MySQL database.
-4. Run schema validation with `spring.jpa.hibernate.ddl-auto=validate`.
-5. Run the lifecycle fixture and the complete regression suite against that migrated database.
+The configured user must be restricted to the disposable schema. The test drops that schema's copied
+`flyway_schema_history` table, creates the configured baseline and applies all later migrations. Never
+set `SLICKHOOD_TEST_MYSQL_ALLOW_RESET=true` for a production or shared staging schema.
 
-Never generate the baseline from production and apply it back to the same database during certification.
+For a release based on a newer exported schema, update `SLICKHOOD_TEST_MYSQL_BASELINE_VERSION` to the
+actual deployed version. Update `SLICKHOOD_EXPECTED_FLYWAY_VERSION` to the immutable candidate's latest
+migration. A skipped rehearsal, a failed record or any pending migration blocks production promotion.

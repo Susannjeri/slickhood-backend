@@ -73,7 +73,8 @@ class UnitCreationHardeningTest {
                 mock(ParamDao.class), mock(AuditLogService.class), mock(ConfigService.class),
                 mock(PMSMeasurementUnitsConverter.class), mock(PropertyRoutines.class), storage,
                 mock(ThreadPoolBeans.class), mock(PaymentPlatformFactory.class), mock(AccountDao.class),
-                entitlements, mock(UnitReportDao.class));
+                entitlements, mock(UnitReportDao.class),
+                mock(org.pms.silverocean.service.teamaccess.WorkspaceSelectionService.class));
         ReflectionTestUtils.setField(service, "imageWidth", 300);
         ReflectionTestUtils.setField(service, "imageHeight", 200);
         ReflectionTestUtils.setField(service, "maxImageBytes", 10L * 1024 * 1024);

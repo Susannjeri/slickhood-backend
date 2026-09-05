@@ -12,13 +12,13 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 public class UnitSpecification extends CommonPropertySpecification {
-    public static List<Specification<Unit>> createGetUnitSpecification(Optional<String> ref, Optional<Long> propertyId, Long userId, PMSRole activeRole, Optional<PMSLeaseMode> leaseMode) {
+    public static List<Specification<Unit>> createGetUnitSpecification(Optional<String> ref, Optional<Long> propertyId, Long userId, PMSRole activeRole, Optional<PMSLeaseMode> leaseMode, Long workspaceMembershipId) {
         return Stream.<Specification<Unit>>of(
                         fetchPropertyWithUnit(),
                         ref.isPresent() ? refLike(ref) : null,
                         propertyId.isPresent() ? propertyIdEquals(propertyId) : null,
                         leaseMode.isPresent() ? leaseModeEquals(leaseMode) : null,
-                        accessibleForActiveRole(userId, activeRole),
+                        accessibleForActiveRole(userId, activeRole, workspaceMembershipId),
                         activeTrue(true)
                 )
                 .filter(Objects::nonNull)
@@ -39,7 +39,7 @@ public class UnitSpecification extends CommonPropertySpecification {
 
     private static Specification<Unit> refLike(Optional<String> name) {
         return name.<Specification<Unit>>map(s -> (document, query, criteriaBuilder) ->
-                        criteriaBuilder.like(document.get("ref"), "%" + s.toLowerCase() + "%"))
+                        criteriaBuilder.like(criteriaBuilder.lower(document.get("ref")), "%" + s.trim().toLowerCase() + "%"))
                 .orElse(null);
 
     }

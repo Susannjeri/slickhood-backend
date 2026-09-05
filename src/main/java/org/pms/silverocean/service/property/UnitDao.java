@@ -284,6 +284,10 @@ public class UnitDao {
         return unitRepo.findDTOByIdAndManagerRole(id, userId, roleName);
     }
 
+    public Optional<DbUnitDTO> findByIdAndManagerRoleAndMembership(Long id, long userId, String roleName, long membershipId) {
+        return unitRepo.findDTOByIdAndManagerRoleAndInviteId(id, userId, roleName, -membershipId);
+    }
+
     public Optional<DbUnitDTO> findByIdAndHomeowner(Long id, long userId) { return unitRepo.findDTOByIdAndHomeowner(id, userId); }
     public Optional<DbUnitDTO> findByIdAndBuyer(Long id, long userId) { return unitRepo.findDTOByIdAndBuyer(id, userId); }
 
@@ -295,8 +299,8 @@ public class UnitDao {
         return unitRepo.getAllByUserIdIsResident(userId);
     }
 
-    public Page<Unit> findAll(Optional<String> ref, Optional<Long> propertyId, Optional<PMSLeaseMode> leaseMode, Long userId, PMSRole activeRole, Pageable pageable) {
-        List<Specification<Unit>> specs = createGetUnitSpecification(ref, propertyId, userId, activeRole, leaseMode);
+    public Page<Unit> findAll(Optional<String> ref, Optional<Long> propertyId, Optional<PMSLeaseMode> leaseMode, Long userId, PMSRole activeRole, Pageable pageable, Long workspaceMembershipId) {
+        List<Specification<Unit>> specs = createGetUnitSpecification(ref, propertyId, userId, activeRole, leaseMode, workspaceMembershipId);
         return specs.isEmpty() ? unitRepo.findAll(pageable) : unitRepo.findAll(Specification.allOf(specs), pageable);
     }
 

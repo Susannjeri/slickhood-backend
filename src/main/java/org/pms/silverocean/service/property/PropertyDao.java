@@ -113,19 +113,27 @@ public class PropertyDao {
         return propertyRepo.findByIdAndManagerRole(id, userId, roleName);
     }
 
+    public Optional<Property> findByIdAndManagerRoleAndMembership(Long id, long userId, String roleName, long membershipId) {
+        return propertyRepo.findByIdAndManagerRoleAndInviteId(id, userId, roleName, -membershipId);
+    }
+
     public Optional<Property> findByIdAndHomeowner(Long id, long userId) { return propertyRepo.findByIdAndHomeowner(id, userId); }
     public Optional<Property> findByIdAndBuyer(Long id, long userId) { return propertyRepo.findByIdAndBuyer(id, userId); }
 
-    public Page<PropertyDTO> findAll(Optional<String> filter, boolean activeOnly, long userId, PMSRole activeRole, Pageable pageable,
+    public Page<PropertyDTO> findAll(Optional<String> filter, Optional<PMSPropertyManagementMode> managementMode,
+                                     boolean activeOnly, long userId, PMSRole activeRole, Pageable pageable,
+                                     Long workspaceMembershipId,
                                      BiFunction<Property, Long, String> getUserRoleInProperty, Function<String, String> getSignedImagePath) {
 
-        return propertyRepo.findAll(searchProperty(filter, activeOnly, userId, activeRole), pageable)
+        return propertyRepo.findAll(searchProperty(filter, managementMode, activeOnly, userId, activeRole, workspaceMembershipId), pageable)
                 .map(property -> new PropertyDTO(property, getUserRoleInProperty.apply(property, userId),
                         getSignedImagePath.apply(Objects.toString(property.getImagePath(), "") + "/" + Objects.toString(property.getThumbnail(), ""))));
     }
 
-    public Page<IdNameDescDTO> findAllForKeyValue(Optional<String> filter, boolean activeOnly, Long userId, PMSRole activeRole, Pageable pageable) {
-        return propertyRepo.findAll(searchProperty(filter, activeOnly, userId, activeRole), pageable)
+    public Page<IdNameDescDTO> findAllForKeyValue(Optional<String> filter, Optional<PMSPropertyManagementMode> managementMode,
+                                                  boolean activeOnly, Long userId, PMSRole activeRole, Pageable pageable,
+                                                  Long workspaceMembershipId) {
+        return propertyRepo.findAll(searchProperty(filter, managementMode, activeOnly, userId, activeRole, workspaceMembershipId), pageable)
                 .map(property -> new IdNameDescDTO(property.getId(), property.getName()));
     }
 

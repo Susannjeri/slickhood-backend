@@ -21,6 +21,10 @@ public class CommonPropertySpecification {
     }
 
     public static <T> Specification<T> accessibleForActiveRole(Long userId, PMSRole activeRole) {
+        return accessibleForActiveRole(userId, activeRole, null);
+    }
+
+    public static <T> Specification<T> accessibleForActiveRole(Long userId, PMSRole activeRole, Long workspaceMembershipId) {
         return (root, query, cb) -> {
             if (userId == null || activeRole == PMSRole.SUPER_ADMIN) return null;
             query.distinct(true);
@@ -33,15 +37,14 @@ public class CommonPropertySpecification {
             // 2. Manager Staff via subquery (PropertyManager)
             Subquery<Long> staffSubquery = query.subquery(Long.class);
             Root<PropertyManager> managerRoot = staffSubquery.from(PropertyManager.class);
-            staffSubquery
-                    .select(managerRoot.get("propertyId"))
-                    .where(
-                            cb.and(
-                                    cb.equal(managerRoot.get("userId"), userId),
-                                    cb.equal(managerRoot.get("roleName"), activeRole.name()),
-                                    cb.isTrue(managerRoot.get("active"))
-                            )
-                    );
+            Predicate staffAccess = cb.and(
+                    cb.equal(managerRoot.get("userId"), userId),
+                    cb.equal(managerRoot.get("roleName"), activeRole.name()),
+                    cb.isTrue(managerRoot.get("active")));
+            if (workspaceMembershipId != null) {
+                staffAccess = cb.and(staffAccess, cb.equal(managerRoot.get("inviteId"), -workspaceMembershipId));
+            }
+            staffSubquery.select(managerRoot.get("propertyId")).where(staffAccess);
 
             // The final predicate checks if the Property.id is in the list of managed property IDs
             Expression<Long> entityId =  root.getJavaType().equals(Unit.class) ? root.get("propertyId") : root.get("id");

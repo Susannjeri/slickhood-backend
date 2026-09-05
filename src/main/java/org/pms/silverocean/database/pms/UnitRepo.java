@@ -79,6 +79,9 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
     @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.active)")
     Optional<DbUnitDTO> findDTOByIdAndManagerRole(Long id, long userId, String roleName);
 
+    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:inviteId AND pm.active)")
+    Optional<DbUnitDTO> findDTOByIdAndManagerRoleAndInviteId(Long id, long userId, String roleName, long inviteId);
+
     @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyOwnership o WHERE o.unitId=u.id AND o.homeownerUserId=:userId AND o.active)")
     Optional<DbUnitDTO> findDTOByIdAndHomeowner(Long id, long userId);
 

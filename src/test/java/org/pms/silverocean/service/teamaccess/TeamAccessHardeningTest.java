@@ -39,7 +39,7 @@ class TeamAccessHardeningTest {
                 properties, propertyManagers, mock(UserSubscriptionRepo.class), mock(SubscriptionPlanRepo.class),
                 mock(PlanQuotaRepo.class), mock(RoleRepo.class), mock(UserRoleRepo.class), mock(UserDao.class),
                 mock(ConfigService.class), mock(NotificationService.class), mock(I18NService.class),
-                mock(AuditLogService.class), new ObjectMapper());
+                mock(AuditLogService.class), new ObjectMapper(), mock(WorkspaceSelectionService.class));
     }
 
     @Test

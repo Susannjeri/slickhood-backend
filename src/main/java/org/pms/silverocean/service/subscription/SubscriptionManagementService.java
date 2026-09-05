@@ -4,7 +4,9 @@ import org.apache.commons.lang3.StringUtils;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.SubscriptionBillingItemDTO;
 import org.pms.silverocean.controller.wrappers.SubscriptionCurrentDTO;
+import org.pms.silverocean.controller.wrappers.SubscriptionEffectiveAddOnDTO;
 import org.pms.silverocean.controller.wrappers.SubscriptionOverviewDTO;
+import org.pms.silverocean.database.pms.PlanFeatureRepo;
 import org.pms.silverocean.database.pms.PMSInvoiceRepo;
 import org.pms.silverocean.database.pms.SubscriptionEventRepo;
 import org.pms.silverocean.database.pms.SubscriptionPlanRepo;
@@ -29,12 +31,17 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.ZonedDateTime;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 @Service
 public class SubscriptionManagementService {
     private final UserDao userDao;
     private final UserSubscriptionRepo userSubscriptionRepo;
     private final SubscriptionPlanRepo subscriptionPlanRepo;
+    private final PlanFeatureRepo planFeatureRepo;
     private final SubscriptionEventRepo subscriptionEventRepo;
     private final PMSInvoiceRepo invoiceRepo;
     private final UnitReportDao unitReportDao;
@@ -44,6 +51,7 @@ public class SubscriptionManagementService {
 
     public SubscriptionManagementService(UserDao userDao, UserSubscriptionRepo userSubscriptionRepo,
                                          SubscriptionPlanRepo subscriptionPlanRepo,
+                                         PlanFeatureRepo planFeatureRepo,
                                          SubscriptionEventRepo subscriptionEventRepo,
                                          PMSInvoiceRepo invoiceRepo, UnitReportDao unitReportDao,
                                          SubscriptionProvisioningService provisioningService,
@@ -52,6 +60,7 @@ public class SubscriptionManagementService {
         this.userDao = userDao;
         this.userSubscriptionRepo = userSubscriptionRepo;
         this.subscriptionPlanRepo = subscriptionPlanRepo;
+        this.planFeatureRepo = planFeatureRepo;
         this.subscriptionEventRepo = subscriptionEventRepo;
         this.invoiceRepo = invoiceRepo;
         this.unitReportDao = unitReportDao;
@@ -68,8 +77,13 @@ public class SubscriptionManagementService {
         SubscriptionCurrentDTO current = product == null
                 ? provisioningService.getCurrentSubscriptionForSessionRole(role.name())
                 : provisioningService.getCurrentSubscriptionForSessionProduct(product.name());
+        List<SubscriptionEffectiveAddOnDTO> activeAddOns = activeAddOns(userId);
         if (current == null) {
-            return new SubscriptionOverviewDTO(null, 0, 0, false, null);
+            List<String> addOnFeatures = activeAddOns.stream()
+                    .flatMap(addOn -> addOn.features().stream())
+                    .distinct()
+                    .toList();
+            return new SubscriptionOverviewDTO(null, 0, 0, false, null, addOnFeatures, activeAddOns);
         }
         UserSubscription subscription = latest(userId, role, product);
         boolean cancelling = subscriptionEventRepo
@@ -87,7 +101,44 @@ public class SubscriptionManagementService {
                 ? unitReportDao.countPropertiesByOwner(userId) : 0;
         int unitsUsed = current.role().equals(PMSRole.LANDLORD.name())
                 ? unitReportDao.countUnitsByOwner(userId) : 0;
-        return new SubscriptionOverviewDTO(current, propertiesUsed, unitsUsed, cancelling, scheduledPlanCode);
+        Set<String> effectiveFeatures = new LinkedHashSet<>();
+        if (current.planDetails() != null && current.planDetails().features() != null) {
+            current.planDetails().features().stream()
+                    .filter(PlanFeatureDTO::enabled)
+                    .map(PlanFeatureDTO::featureKey)
+                    .forEach(effectiveFeatures::add);
+        }
+        activeAddOns.stream().flatMap(addOn -> addOn.features().stream()).forEach(effectiveFeatures::add);
+        return new SubscriptionOverviewDTO(current, propertiesUsed, unitsUsed, cancelling, scheduledPlanCode,
+                List.copyOf(effectiveFeatures), activeAddOns);
+    }
+
+    private List<SubscriptionEffectiveAddOnDTO> activeAddOns(long userId) {
+        ZonedDateTime now = ZonedDateTime.now();
+        return userSubscriptionRepo.findAllByCreatedByAndStatusAndActiveTrue(userId, SubscriptionStatus.ACTIVE).stream()
+                .filter(subscription -> isAddOn(subscription.getProductKey()))
+                .filter(subscription -> subscription.getEndAt() == null || subscription.getEndAt().isAfter(now))
+                .map(subscription -> subscriptionPlanRepo.findByCodeAndActiveTrue(subscription.getPlanCode())
+                        .map(plan -> new SubscriptionEffectiveAddOnDTO(
+                                subscription.getProductKey().name(),
+                                subscription.getPlanCode(),
+                                subscription.getEndAt(),
+                                planFeatureRepo.findBySubscriptionPlanAndActiveTrue(plan).stream()
+                                        .filter(feature -> feature.isEnabled())
+                                        .map(feature -> feature.getFeatureKey())
+                                        .distinct()
+                                        .sorted()
+                                        .toList()))
+                        .orElse(null))
+                .filter(java.util.Objects::nonNull)
+                .sorted(Comparator.comparing(SubscriptionEffectiveAddOnDTO::productKey))
+                .toList();
+    }
+
+    private boolean isAddOn(SubscriptionProduct product) {
+        return product == SubscriptionProduct.GATE_MANAGEMENT_ADDON
+                || product == SubscriptionProduct.LISTING_ADDON
+                || product == SubscriptionProduct.PORTFOLIO_MANAGEMENT_ADDON;
     }
 
     @Transactional(readOnly = true)

@@ -13,9 +13,11 @@ import org.springframework.web.bind.annotation.*;
 public class TeamAccessController {
     private final TeamAccessService service;
     private final TeamRoleDefinitionService roleDefinitions;
+    private final WorkspaceSelectionService workspaceSelection;
     private final I18NService i18n;
 
     @GetMapping public ResponseEntity<ResponseDTO> current() { return ok(service.current()); }
+    @GetMapping("/workspaces") public ResponseEntity<ResponseDTO> workspaces() { return ok(workspaceSelection.available()); }
     @PostMapping("/invitations") public ResponseEntity<ResponseDTO> invite(@Valid @RequestBody TeamAccessModels.InviteRequest request) { return ok(service.invite(request)); }
     @PostMapping("/invitations/{id}/resend") public ResponseEntity<ResponseDTO> resend(@PathVariable long id) { return ok(service.resend(id)); }
     @DeleteMapping("/invitations/{id}") public ResponseEntity<ResponseDTO> revokeInvite(@PathVariable long id) { service.revokeInvitation(id); return ok(null); }

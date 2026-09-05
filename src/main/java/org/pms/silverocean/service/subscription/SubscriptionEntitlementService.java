@@ -16,6 +16,7 @@ import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 import org.pms.silverocean.service.subscription.enums.SubscriptionStatus;
 import org.pms.silverocean.service.teamaccess.TeamMembershipStatus;
 import org.pms.silverocean.service.teamaccess.TeamMembershipRole;
+import org.pms.silverocean.service.teamaccess.WorkspaceSelectionService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,15 +33,17 @@ public class SubscriptionEntitlementService {
     private final SubscriptionPlanRepo plans;
     private final PlanFeatureRepo features;
     private final PlanQuotaRepo quotas;
-    private final WorkspaceMembershipRepo memberships;
     private final CustomerWorkspaceRepo workspaces;
+    private final WorkspaceSelectionService workspaceSelection;
 
     public SubscriptionEntitlementService(UserDao users, UserSubscriptionRepo subscriptions,
                                           SubscriptionPlanRepo plans, PlanFeatureRepo features,
                                           PlanQuotaRepo quotas, WorkspaceMembershipRepo memberships,
-                                          CustomerWorkspaceRepo workspaces) {
+                                          CustomerWorkspaceRepo workspaces,
+                                          WorkspaceSelectionService workspaceSelection) {
         this.users = users; this.subscriptions = subscriptions; this.plans = plans;
-        this.features = features; this.quotas = quotas; this.memberships = memberships; this.workspaces = workspaces;
+        this.features = features; this.quotas = quotas; this.workspaces = workspaces;
+        this.workspaceSelection = workspaceSelection;
     }
 
     @Transactional(readOnly = true)
@@ -179,11 +182,7 @@ public class SubscriptionEntitlementService {
     }
 
     private java.util.Optional<org.pms.silverocean.database.pms.entities.WorkspaceMembership> sessionMembership(long userId) {
-        return TeamMembershipRole.fromPlatformRole(users.getActiveRole())
-                .flatMap(role -> memberships.findFirstByUserIdAndMembershipRoleAndStatusAndActiveTrue(
-                        userId, role, TeamMembershipStatus.ACTIVE))
-                .or(() -> memberships.findFirstByUserIdAndStatusInAndActiveTrueOrderByCreatedOnDesc(
-                        userId, LIVE_MEMBERSHIPS));
+        return workspaceSelection.selectedMembership(userId);
     }
 
     private SubscriptionProduct primaryRoleProduct() {

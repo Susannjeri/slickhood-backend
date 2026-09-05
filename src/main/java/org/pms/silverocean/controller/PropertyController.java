@@ -128,14 +128,19 @@ public class PropertyController extends BasePropertyController {
 
     @GetMapping("/list")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_PROPERTY)")
-    public ResponseEntity<ResponseDTO> getPropertyList(@RequestParam Optional<String> search, @RequestParam Optional<Long> propertyId, Pageable pageable) {
-        return ResponseEntity.ok(propertyService.listProperty(pageable, search, propertyId, this::determineUserRoleInProperty));
+    public ResponseEntity<ResponseDTO> getPropertyList(@RequestParam Optional<String> search,
+                                                       @RequestParam Optional<Long> propertyId,
+                                                       @RequestParam Optional<PMSPropertyManagementMode> managementMode,
+                                                       Pageable pageable) {
+        return ResponseEntity.ok(propertyService.listProperty(pageable, search, propertyId, managementMode, this::determineUserRoleInProperty));
     }
 
     @GetMapping("/list/key/value")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_PROPERTY_LIST)")
-    public ResponseEntity<ResponseDTO> getPropertyListForKeyValue(@RequestParam Optional<String> search, Pageable pageable) {
-        Page<IdNameDescDTO> propertyKeyValueDTOS = propertyService.listPropertyListForKeyValue(pageable, search);
+    public ResponseEntity<ResponseDTO> getPropertyListForKeyValue(@RequestParam Optional<String> search,
+                                                                  @RequestParam Optional<PMSPropertyManagementMode> managementMode,
+                                                                  Pageable pageable) {
+        Page<IdNameDescDTO> propertyKeyValueDTOS = propertyService.listPropertyListForKeyValue(pageable, search, managementMode);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(), i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), propertyKeyValueDTOS.toList(),
                 propertyKeyValueDTOS.getTotalPages(), propertyKeyValueDTOS.getTotalElements(), propertyKeyValueDTOS.getSize()));
     }

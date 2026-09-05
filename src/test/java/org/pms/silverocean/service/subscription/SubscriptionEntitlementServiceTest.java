@@ -15,6 +15,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 import org.pms.silverocean.service.subscription.enums.SubscriptionStatus;
+import org.pms.silverocean.service.teamaccess.WorkspaceSelectionService;
 
 import java.time.ZonedDateTime;
 import java.util.Optional;
@@ -32,10 +33,11 @@ class SubscriptionEntitlementServiceTest {
     @Mock PlanQuotaRepo quotas;
     @Mock WorkspaceMembershipRepo memberships;
     @Mock CustomerWorkspaceRepo workspaces;
+    @Mock WorkspaceSelectionService workspaceSelection;
     SubscriptionEntitlementService service;
 
     @BeforeEach void setup() {
-        service = new SubscriptionEntitlementService(users, subscriptions, plans, features, quotas, memberships, workspaces);
+        service = new SubscriptionEntitlementService(users, subscriptions, plans, features, quotas, memberships, workspaces, workspaceSelection);
         when(users.getUserId()).thenReturn(7L);
     }
 
