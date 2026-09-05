@@ -14,10 +14,13 @@ import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.entities.HttpEvent;
 import org.pms.silverocean.database.pms.entities.PMSInvoice;
 import org.pms.silverocean.database.pms.entities.PMSPayment;
+import org.pms.silverocean.database.pms.entities.PaymentAccount;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.RestRequestException;
 import org.pms.silverocean.service.RestTemplateService;
+import org.pms.silverocean.service.account.PaymentAccountCredentialsChangedEvent;
+import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.config.enums.PMSConfigs;
@@ -39,10 +42,12 @@ import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.MpesaCallbac
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.STKCallbackResponse;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.STKResponseDTO;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.StkErrorResponse;
+import org.pms.silverocean.service.payment.wrappers.AccountPropertyDefinition;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.payment.wrappers.PaymentPropertyKeys;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
 import org.springframework.context.annotation.DependsOn;
+import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 
@@ -64,6 +69,7 @@ public class MPesaService extends PaymentPlatform {
     private final EventService eventService;
     private final UserDao userDao;
     private final PaymentDao paymentDao;
+    private final AccountDao accountDao;
     private final ObjectMapper objectMapper;
 
     private final DateTimeFormatter MPESA_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
@@ -79,7 +85,7 @@ public class MPesaService extends PaymentPlatform {
                 }
             });
 
-    public MPesaService(RestTemplateService restTemplateService, ConfigService configService, ParamService paramService, EventService eventService, UserDao userDao, PaymentDao paymentDao, UpdatePaymentService updatePaymentService, ObjectMapper objectMapper) {
+    public MPesaService(RestTemplateService restTemplateService, ConfigService configService, ParamService paramService, EventService eventService, UserDao userDao, PaymentDao paymentDao, AccountDao accountDao, UpdatePaymentService updatePaymentService, ObjectMapper objectMapper) {
         super(updatePaymentService);
         this.restTemplateService = restTemplateService;
         this.configService = configService;
@@ -87,6 +93,7 @@ public class MPesaService extends PaymentPlatform {
         this.eventService = eventService;
         this.userDao = userDao;
         this.paymentDao = paymentDao;
+        this.accountDao = accountDao;
         this.objectMapper = objectMapper;
     }
 
@@ -253,7 +260,8 @@ public class MPesaService extends PaymentPlatform {
         }
         payment.setInProgress(false);
         Optional<PMSInvoice> invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(mpesaPaymentDTO.billRefNumber());
-        if (invoice.isPresent() && invoice.get().isActive() && payment.getAmount() != null && payment.getAmount() > 0) {
+        if (invoice.isPresent() && invoice.get().isActive() && payment.getAmount() != null && payment.getAmount() > 0
+                && callbackMatchesInvoiceDestination(invoice.get(), mpesaPaymentDTO)) {
             payment.setStatus(MPesaResultCodes.COMPLETED.getCode());
             payment.setStatusDesc(MPesaResultCodes.COMPLETED.getDesc());
             payment.setPayToUserId(invoice.get().getPayToUserId());
@@ -261,7 +269,7 @@ public class MPesaService extends PaymentPlatform {
         } else {
             payment.setStatus(MPesaResultCodes.INVALID_ACCOUNT_NUMBER.getCode());
             payment.setStatusDesc(MPesaResultCodes.INVALID_ACCOUNT_NUMBER.getDesc());
-            log.warn("M-Pesa confirmation rejected for unknown/inactive invoice reference {}", mpesaPaymentDTO.billRefNumber());
+            log.warn("M-Pesa confirmation rejected for unknown, inactive, or mismatched invoice destination {}", mpesaPaymentDTO.billRefNumber());
         }
         paymentDao.savePMSPayment(payment);
         eventService.saveEvent(mpesaPaymentDTO, payment.getId());
@@ -277,7 +285,8 @@ public class MPesaService extends PaymentPlatform {
 
         MPesaPaymentResponseDTO mPesaPaymentResponseDTO;
 
-        if (paymentInvoice.isPresent() && paymentInvoice.get().isActive()) {
+        if (paymentInvoice.isPresent() && paymentInvoice.get().isActive()
+                && callbackMatchesInvoiceDestination(paymentInvoice.get(), mpesaPaymentDTO)) {
             PMSInvoice pmsInvoice = paymentInvoice.get();
             validatePayment.setPayToUserId(pmsInvoice.getPayToUserId());
             double amount = Double.parseDouble(mpesaPaymentDTO.transAmount());
@@ -308,6 +317,44 @@ public class MPesaService extends PaymentPlatform {
 
         eventService.flushByTId(validatePayment.getId());
         return mPesaPaymentResponseDTO;
+    }
+
+    @EventListener
+    public void invalidateCredentials(PaymentAccountCredentialsChangedEvent event) {
+        if (event.channel() == PaymentChannel.MPESA) {
+            tokenCache.asMap().keySet().removeIf(key -> key.accountId() == event.accountId());
+        }
+    }
+
+    /**
+     * Bind a C2B/bank callback to the verified payment account fixed on the invoice.
+     * A shared callback credential authenticates the sender, but it must never be
+     * sufficient to redirect a valid payment to a different recipient account.
+     */
+    private boolean callbackMatchesInvoiceDestination(PMSInvoice invoice, MPesaPaymentDTO callback) {
+        if (invoice.getPaymentAccountId() == null || StringUtils.isBlank(callback.businessShortCode())) {
+            return false;
+        }
+        try {
+            PaymentAccount account = accountDao.getAccountById(invoice.getPaymentAccountId());
+            if (!account.isActive() || !account.isVerified() || account.getCreatedBy() != invoice.getPayToUserId()) {
+                return false;
+            }
+            AccountPropertyDefinition destinationDefinition = switch (account.getChannel()) {
+                case MPESA -> PaymentChannel.MPESA.findProperty(PaymentPropertyKeys.PAYBILL);
+                case MPESA_BANK -> PaymentChannel.MPESA_BANK.findProperty(PaymentPropertyKeys.BANK_ACCOUNT);
+                default -> null;
+            };
+            if (destinationDefinition == null) {
+                return false;
+            }
+            String expected = paramService.getParamByAccountIdAndType(
+                    account.getId(), destinationDefinition, invoice.getPropertyId());
+            return StringUtils.equals(expected.trim(), callback.businessShortCode().trim());
+        } catch (RuntimeException ex) {
+            log.warn("M-Pesa callback destination could not be verified for invoice {}", invoice.getRef());
+            return false;
+        }
     }
 
     public MPesaPaymentResponseDTO stkCallBack(STKCallbackResponse stkCallbackResponse, String sourceIp) {
