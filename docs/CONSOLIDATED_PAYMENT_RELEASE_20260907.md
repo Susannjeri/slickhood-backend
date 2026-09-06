@@ -31,7 +31,7 @@ If a bank does not preserve invoice references or provide suitable notifications
 
 The user-provided `E:/sandbox_mpesa_slickhood.txt` and `E:/sandbox_paystack_slickhood.txt` are read only in memory and are NOT included in source, archives, logs or this document.
 
-- M-Pesa file contains a consumer key and secret but no STK shortcode or passkey. The first read-only OAuth probe timed out; a later retry returned HTTP 200 and authenticated successfully. This verifies the consumer pair, not STK checkout. Do not invent a shortcode/passkey or copy another recipient's credentials.
+- M-Pesa consumer credentials returned HTTP 200 and authenticated successfully during this session; other attempts timed out. The user then confirmed sandbox shortcode 174379 and added the matching passkey to the E-drive file. All required credential fields are now available, but no STK checkout/callback journey has been certified. Do not substitute another recipient's credentials.
 - Paystack file contains a test secret, not a live secret. A read-only authenticated API probe returned HTTP 403 without a classified reason. Key acceptance is NOT verified; investigate from the authorized host and Paystack dashboard/support before enabling the account.
 - No transaction, fund transfer, provider recipient creation or callback registration was performed by these probes.
 - Both dedicated SSH keys available for the approved host were rejected. No host configuration or deployment was changed. Initial Windows HTTPS diagnostics failed locally; subsequent TLS-verified Python requests reached the app, health and production-readiness endpoints with HTTP 200 and health UP. Hosted authenticated journeys remain outstanding.

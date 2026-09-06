@@ -27,23 +27,29 @@ Docker Desktop or another Docker-compatible runtime must be running. If Docker i
 
 ## Production-baseline Flyway rehearsal
 
-The repository contains migrations through `V71`, but the legacy base schema predates Flyway. Use
+The repository contains migrations through `V72`, but the legacy base schema predates Flyway. Use
 `ProductionBaselineMigrationMySqlIT` only against a disposable, data-free copy of the deployed schema.
 The test remains disabled unless both a JDBC URL and the explicit reset acknowledgement are present:
 
 ```powershell
-$env:SLICKHOOD_TEST_MYSQL_URL='jdbc:mysql://<isolated-host>:3306/slickhood_release_test'
-$env:SLICKHOOD_TEST_MYSQL_USERNAME='<isolated-test-user>'
-$env:SLICKHOOD_TEST_MYSQL_PASSWORD='<secret>'
-$env:SLICKHOOD_TEST_MYSQL_ALLOW_RESET='true'
-$env:SLICKHOOD_TEST_MYSQL_BASELINE_VERSION='67'
-$env:SLICKHOOD_EXPECTED_FLYWAY_VERSION='71'
+$env:SLICKHOOD_MIGRATION_MYSQL_URL='jdbc:mysql://127.0.0.1:3307/slickhood_rehearsal_v72'
+$env:SLICKHOOD_MIGRATION_MYSQL_USERNAME='<isolated-test-user>'
+$env:SLICKHOOD_MIGRATION_MYSQL_PASSWORD='<disposable-test-secret>'
+$env:SLICKHOOD_MIGRATION_MYSQL_ALLOW_RESET='true'
+$env:SLICKHOOD_TEST_MYSQL_BASELINE_VERSION='71'
+$env:SLICKHOOD_EXPECTED_FLYWAY_VERSION='72'
 .\mvnw.cmd "-Dit.test=ProductionBaselineMigrationMySqlIT" failsafe:integration-test failsafe:verify
 ```
 
 The configured user must be restricted to the disposable schema. The test drops that schema's copied
 `flyway_schema_history` table, creates the configured baseline and applies all later migrations. Never
-set `SLICKHOOD_TEST_MYSQL_ALLOW_RESET=true` for a production or shared staging schema.
+set `SLICKHOOD_MIGRATION_MYSQL_ALLOW_RESET=true` for a production or shared staging schema.
+
+The URL must use loopback with an explicit port and a database named `slickhood_rehearsal_*`.
+The imported Flyway history must be empty; non-empty history is never reset. A separate
+`SLICKHOOD_MIGRATION_MYSQL_*` namespace prevents repository tests from resetting this schema.
+For a combined `clean verify`, leave `SLICKHOOD_TEST_MYSQL_URL` unset so repository tests create
+their own Testcontainers database. The example above assumes an already imported, data-free V71 schema.
 
 For a release based on a newer exported schema, update `SLICKHOOD_TEST_MYSQL_BASELINE_VERSION` to the
 actual deployed version. Update `SLICKHOOD_EXPECTED_FLYWAY_VERSION` to the immutable candidate's latest
