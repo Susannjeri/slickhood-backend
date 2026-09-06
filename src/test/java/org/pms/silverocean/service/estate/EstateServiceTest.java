@@ -163,7 +163,8 @@ class EstateServiceTest {
     void ownershipCannotBeEndedInTheFuture() {
         PropertyOwnership ownership = new PropertyOwnership();
         ownership.setId(88L); ownership.setPropertyId(11L); ownership.setHomeownerUserId(200L);
-        ownership.setOwnershipStart(LocalDate.now().minusYears(1)); ownership.setActive(true);
+        LocalDate today = LocalDate.now(org.pms.silverocean.common.PMSUtils.getZoneId());
+        ownership.setOwnershipStart(today.minusYears(1)); ownership.setActive(true);
         when(ownerships.findActiveForUpdate(88L)).thenReturn(Optional.of(ownership));
         when(users.getUserId()).thenReturn(999L);
         when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
@@ -171,7 +172,7 @@ class EstateServiceTest {
         when(properties.findByIdAndCreatedByAndActiveTrue(11L, 999L)).thenReturn(Optional.of(estate()));
 
         PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.end(88L,
-                new OwnershipTerminationRequest(LocalDate.now().plusDays(1), "Sale completed")));
+                new OwnershipTerminationRequest(today.plusDays(1), "Sale completed")));
 
         assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
         verify(ownerships, never()).save(ownership);

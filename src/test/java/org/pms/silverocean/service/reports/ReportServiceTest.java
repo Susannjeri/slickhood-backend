@@ -135,8 +135,9 @@ class ReportServiceTest {
 
     @Test
     void historicalReportsRejectFutureDates() {
+        LocalDate today = LocalDate.now(org.pms.silverocean.common.PMSUtils.getZoneId());
         assertThrows(PMSCustomException.class,
-                () -> service.generate("INVOICE_COLLECTIONS", LocalDate.now(), LocalDate.now().plusDays(1)));
+                () -> service.generate("INVOICE_COLLECTIONS", today, today.plusDays(1)));
     }
 
     private PMSInvoice invoice(String reference) {
