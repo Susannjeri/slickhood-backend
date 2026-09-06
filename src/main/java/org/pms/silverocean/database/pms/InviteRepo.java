@@ -15,6 +15,9 @@ import java.time.LocalDateTime;
 
 public interface InviteRepo extends JpaRepository<Invite, Long> {
     Optional<Invite> findByTokenAndActive(String token, boolean active);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM Invite i WHERE i.token=:token AND i.active")
+    Optional<Invite> findActiveTokenForUpdate(String token);
     Optional<Invite> findFirstByRecipientIgnoreCaseAndActiveTrueAndExpiryDateAfterAndRoleIdIsNotNullOrderByCreatedOnDesc(
             String recipient, LocalDateTime now);
     Optional<Invite> findByIdAndActiveTrueAndCreatedBy(long inviteId, long createdBy);

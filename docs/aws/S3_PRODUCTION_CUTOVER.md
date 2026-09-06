@@ -6,10 +6,12 @@ Region: `ca-central-1`
 
 Bucket-owner account: `603455138904`
 
-Runtime account: `603455138904`
+Runtime storage principal: `arn:aws:iam::603455138904:user/slickhood-storage-prod`
 
-Amazon Lightsail exposes an AWS-managed internal instance identity but does not
-provide a customer-managed EC2 instance profile on this instance. Use a
+Amazon Lightsail exposes an AWS-managed internal instance identity (the current
+host reports account `672626785173`), but that identity is not a customer-managed
+instance profile in the bucket-owner account and must not be trusted by the
+document bucket. Use a
 dedicated `slickhood-storage-prod` IAM user with only the runtime policy in this
 directory. Store its access key only in the root-readable production secret
 file; never commit it or place it in the systemd unit.
@@ -17,8 +19,9 @@ file; never commit it or place it in the systemd unit.
 ## Mandatory release gates
 
 1. Resolve the bucket with `GetBucketLocation` from the production instance.
-   The bucket and customer workload are in account `603455138904`. Do not grant
-   access to the AWS-managed Lightsail internal role from another account.
+   The bucket and dedicated storage principal are in account `603455138904`.
+   Do not grant access to the AWS-managed Lightsail internal role from another
+   account.
 2. Apply and read back Block Public Access, bucket-owner-enforced ownership,
    SSE-S3 encryption, versioning, lifecycle rules and the HTTPS-only bucket
    policy.

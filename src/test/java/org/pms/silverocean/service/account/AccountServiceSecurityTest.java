@@ -187,6 +187,15 @@ class AccountServiceSecurityTest {
         verify(accountDao).updateVerification(account, false);
     }
 
+    @Test
+    void slickhoodPaystackAccountDoesNotAskForAMerchantSubaccount() {
+        PaymentAccount account = account(42L, 7L, AccountCategory.SLICKHOOD, PaymentChannel.PAYSTACK, false);
+        when(accountDao.getAccountById(42L)).thenReturn(account);
+        when(userDao.getUserId()).thenReturn(7L);
+        assertThat(service.getAccount(42L).properties()).isEmpty();
+        verify(accountDao, never()).getPropertiesForAccount(42L);
+    }
+
     private static PaymentAccount account(long id, long ownerId, AccountCategory category,
                                           PaymentChannel channel, boolean verified) {
         PaymentAccount account = new PaymentAccount();

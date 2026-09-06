@@ -42,6 +42,7 @@ class SalesServiceTest {
     @Mock LeaseDocumentRepo documents;
     @Mock PMSInvoiceRepo invoices;
     @Mock InvoiceService invoiceService;
+    @Mock SalesAccessService access;
     SalesService service;
     Property property;
     Unit unit;
@@ -50,7 +51,7 @@ class SalesServiceTest {
     @BeforeEach
     void setUp() {
         service = new SalesService(sales, properties, units, users, estates, milestones, invites, notifications, i18n,
-                documents, invoices, invoiceService);
+                documents, invoices, invoiceService, access);
         property = new Property(); property.setId(11L); property.setActive(true); property.setCreatedBy(100L);
         property.setManagementMode(PMSPropertyManagementMode.SALE);
         unit = new Unit(); unit.setId(77L); unit.setPropertyId(11L); unit.setActive(true); unit.setLeaseMode("SALE"); unit.setCurrency("KES");
@@ -60,8 +61,8 @@ class SalesServiceTest {
     @Test
     void salesWorkspaceOwnerCreatesOnlySaleModeUnitTransactions() {
         when(users.getUserId()).thenReturn(100L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SALES_AGENT);
-        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 100L)).thenReturn(Optional.of(property));
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_AGENT);
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
         when(users.findById(200L)).thenReturn(Optional.of(buyer));
         when(units.findAndLockById(77L)).thenReturn(Optional.of(unit));
         when(sales.save(any())).thenAnswer(invocation -> {
@@ -80,8 +81,8 @@ class SalesServiceTest {
     @Test
     void secondActiveSaleForSameUnitIsRejectedWhileUnitIsLocked() {
         when(users.getUserId()).thenReturn(100L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SALES_AGENT);
-        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 100L)).thenReturn(Optional.of(property));
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_AGENT);
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
         when(users.findById(200L)).thenReturn(Optional.of(buyer));
         when(units.findAndLockById(77L)).thenReturn(Optional.of(unit));
         when(sales.existsByUnitIdAndActiveTrueAndStatusNot(77L, SaleStatus.CANCELLED)).thenReturn(true);
@@ -96,8 +97,8 @@ class SalesServiceTest {
     @Test
     void unregisteredBuyerIsStoredAsPendingAndReceivesBoundInvite() {
         when(users.getUserId()).thenReturn(100L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SALES_AGENT);
-        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 100L)).thenReturn(Optional.of(property));
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_AGENT);
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
         when(users.findByEmail("newbuyer@example.com")).thenReturn(Optional.empty());
         when(units.findAndLockById(77L)).thenReturn(Optional.of(unit));
         when(sales.save(any())).thenAnswer(invocation -> {
@@ -114,24 +115,25 @@ class SalesServiceTest {
 
     @Test
     void delegatedSalesEmployeeSeesSharedPropertyPipelineWithBoundedPaging() {
+        when(access.selectedAssignmentId()).thenReturn(null);
         PageRequest bounded = PageRequest.of(0, 100);
         when(users.getUserId()).thenReturn(300L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
         when(users.hasPermission(Permission.VIEW_SALE_PIPELINE)).thenReturn(true);
-        when(sales.findViewPageByPropertyAccess(300L, bounded)).thenReturn(new PageImpl<>(List.of(), bounded, 0));
+        when(sales.findViewPageBySalesScope(300L, false, PMSRole.SALES_COORDINATOR.name(), null, bounded)).thenReturn(new PageImpl<>(List.of(), bounded, 0));
 
         service.list(PageRequest.of(0, 500));
 
-        verify(sales).findViewPageByPropertyAccess(300L, bounded);
+        verify(sales).findViewPageBySalesScope(300L, false, PMSRole.SALES_COORDINATOR.name(), null, bounded);
     }
 
     @Test
     void delegatedSalesEmployeeCanRecordOfferButCannotAcceptForBuyer() {
         SaleTransaction sale = sale(SaleStatus.LEAD);
         when(users.getUserId()).thenReturn(300L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
-        when(properties.findByIdAndManagerRole(11L, 300L, PMSRole.SALES_COORDINATOR.name())).thenReturn(Optional.of(property));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
         when(sales.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         SaleTransaction offered = service.update(1L, new UpdateSaleRequest(SaleStatus.OFFERED, new BigDecimal("14000000"), "Buyer offer"));
@@ -146,6 +148,7 @@ class SalesServiceTest {
     void buyerAcceptanceRequiresTheSignedSaleLetterOfOffer() {
         SaleTransaction sale = sale(SaleStatus.OFFERED); sale.setOfferAmount(new BigDecimal("14000000"));
         when(users.getUserId()).thenReturn(200L);
+        when(users.getActiveRole()).thenReturn(PMSRole.BUYER);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
         when(documents.existsBySaleIdAndDocumentTypeAndStatusAndActiveTrue(1L,
                 org.pms.silverocean.service.leasedocument.LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER,
@@ -162,9 +165,9 @@ class SalesServiceTest {
     void milestoneCannotReferenceAnUnrelatedDocument() {
         SaleTransaction sale = sale(SaleStatus.DUE_DILIGENCE);
         when(users.getUserId()).thenReturn(300L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
-        when(properties.findByIdAndManagerRole(11L, 300L, PMSRole.SALES_COORDINATOR.name())).thenReturn(Optional.of(property));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
         when(documents.findByIdAndPropertyIdAndUnitIdAndActiveTrue(999L, 11L, 77L)).thenReturn(Optional.empty());
 
         PMSCustomException exception = assertThrows(PMSCustomException.class, () -> service.addMilestone(1L,
@@ -178,10 +181,11 @@ class SalesServiceTest {
     @Test
     void completionRequiresEvidenceAndTransfersOwnershipInSameTransaction() {
         SaleTransaction sale = sale(SaleStatus.COMPLETION);
+        stubSettledEscrow(sale);
         when(users.getUserId()).thenReturn(300L);
-        when(users.getActiveRole()).thenReturn(PMSRole.LISTING_AGENT);
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.LISTING_AGENT);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
-        when(properties.findByIdAndManagerRole(11L, 300L, PMSRole.LISTING_AGENT.name())).thenReturn(Optional.of(property));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
         when(milestones.existsBySaleIdAndMilestoneTypeAndStatus(eq(1L), anyString(), eq("COMPLETED"))).thenReturn(true);
         when(sales.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -199,9 +203,9 @@ class SalesServiceTest {
         invoice.setAmount(1400000); invoice.setPendingAmount(1400000); invoice.setCurrency("KES");
         invoice.setDueDate(java.time.LocalDate.now().plusDays(7)); invoice.setActive(true);
         when(users.getUserId()).thenReturn(300L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
-        when(properties.findByIdAndManagerRole(11L, 300L, PMSRole.SALES_COORDINATOR.name())).thenReturn(Optional.of(property));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
         when(invoiceService.createSaleInvoice(eq(77L), eq(200L), eq(100L), eq(81L), anyMap(), any()))
                 .thenReturn(invoice);
         when(sales.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -218,9 +222,9 @@ class SalesServiceTest {
     void manuallyTypedEscrowReferenceCannotCompleteTheMilestone() {
         SaleTransaction sale = sale(SaleStatus.AGREEMENT);
         when(users.getUserId()).thenReturn(300L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
-        when(properties.findByIdAndManagerRole(11L, 300L, PMSRole.SALES_COORDINATOR.name())).thenReturn(Optional.of(property));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
 
         assertThrows(PMSCustomException.class, () -> service.addMilestone(1L,
                 new SaleMilestoneModels.Create(SaleMilestoneModels.Type.ESCROW_FUNDED,
@@ -239,9 +243,9 @@ class SalesServiceTest {
         invoice.setPropertyId(11L); invoice.setUnitId(77L); invoice.setBilledUserId(200L);
         invoice.setBillingType("SALE"); invoice.setPaid(true); invoice.setActive(true);
         when(users.getUserId()).thenReturn(300L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
-        when(properties.findByIdAndManagerRole(11L, 300L, PMSRole.SALES_COORDINATOR.name())).thenReturn(Optional.of(property));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
         when(invoices.findByIdForUpdate(501L)).thenReturn(Optional.of(invoice));
         when(milestones.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -262,9 +266,9 @@ class SalesServiceTest {
         invoice.setPropertyId(11L); invoice.setUnitId(77L); invoice.setBilledUserId(200L);
         invoice.setBillingType("SALE"); invoice.setPaid(false); invoice.setActive(true);
         when(users.getUserId()).thenReturn(300L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
-        when(properties.findByIdAndManagerRole(11L, 300L, PMSRole.SALES_COORDINATOR.name())).thenReturn(Optional.of(property));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
         when(invoices.findByIdForUpdate(501L)).thenReturn(Optional.of(invoice));
 
         assertThrows(PMSCustomException.class, () -> service.addMilestone(1L,
@@ -278,9 +282,9 @@ class SalesServiceTest {
     void superAdminCanCorrectAPropertySaleWithoutAWorkspaceAssignment() {
         SaleTransaction sale = sale(SaleStatus.LEAD);
         when(users.getUserId()).thenReturn(1L);
-        when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
-        when(properties.findById(11L)).thenReturn(Optional.of(property));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
         when(sales.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         SaleTransaction updated = service.update(1L,
@@ -288,6 +292,62 @@ class SalesServiceTest {
 
         assertEquals(SaleStatus.VIEWING, updated.getStatus());
         verify(properties, never()).findByIdAndManagerRole(anyLong(), anyLong(), anyString());
+    }
+
+    @Test void signedOfferAcceptanceIsRetrySafeAfterAutomaticReservation() {
+        SaleTransaction sale = sale(SaleStatus.RESERVED);
+        when(users.getUserId()).thenReturn(200L); when(users.getActiveRole()).thenReturn(PMSRole.BUYER);
+        when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
+        when(documents.existsBySaleIdAndDocumentTypeAndStatusAndActiveTrue(eq(1L),any(),any())).thenReturn(true);
+        assertSame(sale,service.acceptOffer(1L)); verify(sales,never()).save(any());
+    }
+
+    @Test void unsignedOfferCannotBePassedOffAsSignedSaleAgreement() {
+        SaleTransaction sale = sale(SaleStatus.AGREEMENT);
+        when(users.getUserId()).thenReturn(100L);
+        when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
+        when(access.require(11L,Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        LeaseDocument draft = new LeaseDocument();draft.setSaleId(1L);draft.setRecipientUserId(200L);
+        draft.setStatus(org.pms.silverocean.service.leasedocument.LeaseDocumentStatus.DRAFT);
+        draft.setDocumentType(org.pms.silverocean.service.leasedocument.LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER);
+        when(documents.findByIdAndPropertyIdAndUnitIdAndActiveTrue(99L,11L,77L)).thenReturn(Optional.of(draft));
+        assertThrows(PMSCustomException.class,()->service.addMilestone(1,new SaleMilestoneModels.Create(
+                SaleMilestoneModels.Type.AGREEMENT_SIGNED,SaleMilestoneModels.Status.COMPLETED,null,null,99L,null)));
+        verify(milestones,never()).save(any());
+    }
+
+    @Test void activeEscrowInvoiceMustBeResolvedBeforeSaleCancellation() {
+        SaleTransaction sale=sale(SaleStatus.AGREEMENT);sale.setEscrowInvoiceId(99L);
+        when(users.getUserId()).thenReturn(100L);
+        when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
+        when(access.require(11L,Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        PMSInvoice invoice=new PMSInvoice();invoice.setActive(true);
+        when(invoices.findById(99L)).thenReturn(Optional.of(invoice));
+        assertThrows(PMSCustomException.class,()->service.update(1,new UpdateSaleRequest(SaleStatus.CANCELLED,null,"Buyer withdrawal")));
+        assertEquals(SaleStatus.AGREEMENT,sale.getStatus());
+    }
+
+    @Test void refundedInvoiceCannotBeHiddenBehindAnEarlierFundedMilestone() {
+        SaleTransaction sale = sale(SaleStatus.COMPLETION);
+        PMSInvoice invoice = stubSettledEscrow(sale);
+        invoice.setPaid(false); invoice.setPendingAmount(invoice.getAmount());
+        when(users.getUserId()).thenReturn(100L);
+        when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        when(milestones.existsBySaleIdAndMilestoneTypeAndStatus(eq(1L), anyString(), eq("COMPLETED"))).thenReturn(true);
+        assertThrows(PMSCustomException.class, () -> service.update(1L, new UpdateSaleRequest(SaleStatus.COMPLETED, null, null)));
+        assertEquals(SaleStatus.COMPLETION, sale.getStatus());
+        verifyNoInteractions(estates);
+        verify(sales, never()).save(any());
+    }
+
+    private PMSInvoice stubSettledEscrow(SaleTransaction sale) {
+        sale.setEscrowInvoiceId(501L); sale.setEscrowRequiredAmount(new BigDecimal("1400000"));
+        PMSInvoice invoice = new PMSInvoice(); invoice.setId(501L); invoice.setActive(true); invoice.setPaid(true);
+        invoice.setBillingType("SALE"); invoice.setPropertyId(11L); invoice.setUnitId(77L); invoice.setBilledUserId(200L);
+        invoice.setCurrency("KES"); invoice.setAmount(1400000); invoice.setPendingAmount(0);
+        when(invoices.findByIdForUpdate(501L)).thenReturn(Optional.of(invoice));
+        return invoice;
     }
 
     private SaleTransaction sale(SaleStatus status) {

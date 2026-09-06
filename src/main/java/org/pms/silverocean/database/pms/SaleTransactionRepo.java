@@ -14,6 +14,10 @@ import java.util.Optional;
 import java.time.ZonedDateTime;
 
 public interface SaleTransactionRepo extends JpaRepository<SaleTransaction, Long> {
+    @Query(VIEW_SELECT + "WHERE s.active AND p.active AND p.managementMode=org.pms.silverocean.service.property.PMSPropertyManagementMode.SALE AND " +
+            "((:owner=true AND p.createdBy=:userId) OR (:owner=false AND EXISTS (SELECT 1 FROM PropertyManager pm " +
+            "WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active AND pm.roleName=:roleName AND pm.inviteId=:assignmentId))) ORDER BY s.createdOn DESC,s.id DESC")
+    Page<SaleView> findViewPageBySalesScope(long userId, boolean owner, String roleName, Long assignmentId, Pageable pageable);
     String VIEW_SELECT = "SELECT new org.pms.silverocean.service.sales.SaleView(" +
             "s.id,s.propertyId,p.name,s.unitId,u.ref,s.salesAgentUserId,a.fullName,s.buyerUserId,b.fullName," +
             "COALESCE(b.email,s.invitedBuyerEmail),s.status,s.askingPrice,s.offerAmount,s.escrowRequiredAmount,s.escrowInvoiceId,s.currency," +

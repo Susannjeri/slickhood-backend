@@ -9,6 +9,10 @@ import org.pms.silverocean.database.pms.entities.*;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
+import org.pms.silverocean.service.auth.roles.enums.Permission;
+import org.pms.silverocean.service.estate.EstateAccessService;
+import org.pms.silverocean.service.sales.SalesAccessService;
+import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.service.lease.LeaseDao;
 import org.pms.silverocean.service.lease.LeaseService;
 import org.pms.silverocean.service.mustache.RenderService;
@@ -45,12 +49,14 @@ public class LeaseDocumentService {
     private final SalesService salesService;
     private final DocumentBrandingService brandingService;
     private final PropertyOwnershipRepo ownershipRepo;
+    private final EstateAccessService estateAccess;
+    private final SalesAccessService salesAccess;
 
     public LeaseDocumentService(LeaseDocumentRepo documentRepo, LeaseDocumentTemplateRepo templateRepo,
             LeaseDao leaseDao, PropertyRepo propertyRepo, UnitRepo unitRepo, UserDao userDao,
             RenderService renderService, EmailService emailService, LeaseService leaseService,
             SaleTransactionRepo saleRepo, SalesService salesService, DocumentBrandingService brandingService,
-            PropertyOwnershipRepo ownershipRepo) {
+            PropertyOwnershipRepo ownershipRepo, EstateAccessService estateAccess, SalesAccessService salesAccess) {
         this.documentRepo = documentRepo;
         this.templateRepo = templateRepo;
         this.leaseDao = leaseDao;
@@ -64,6 +70,8 @@ public class LeaseDocumentService {
         this.salesService = salesService;
         this.brandingService = brandingService;
         this.ownershipRepo = ownershipRepo;
+        this.estateAccess = estateAccess;
+        this.salesAccess = salesAccess;
     }
 
     @Transactional
@@ -71,6 +79,11 @@ public class LeaseDocumentService {
         long currentUserId = userDao.getUserId();
         LeaseDocumentType type = request.documentType();
         if (type.isLegacy()) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        if ((type.requiresLease() && (request.saleId() != null || request.ownershipId() != null))
+                || (type.isSaleDocument() && (request.leaseId() != null || request.ownershipId() != null))
+                || (type.isEstateDocument() && (request.leaseId() != null || request.saleId() != null))) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
         Context context = type.requiresLease() ? leaseContext(request, currentUserId)
                 : type.isSaleDocument() ? saleContext(request, currentUserId) : propertyContext(request, currentUserId);
         validateDocumentSequence(request, context);
@@ -138,24 +151,35 @@ public class LeaseDocumentService {
     }
 
     public Page<LeaseDocumentDTO> list(Pageable pageable) {
+        return list(pageable, null, null, null);
+    }
+
+    public Page<LeaseDocumentDTO> list(Pageable pageable, Long leaseId, Long saleId, Long propertyId) {
         Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize())), pageable.getSort());
-        return documentRepo.findAllAccessible(userDao.getUserId(), bounded).map(LeaseDocumentDTO::new);
+        return documentRepo.findAccessiblePage(userDao.getUserId(), leaseId, saleId, propertyId, bounded).map(d -> new LeaseDocumentDTO(d, userDao.getUserId()));
     }
 
     public void renderPdf(long id, ByteArrayOutputStream output) throws IOException {
         LeaseDocument document = accessible(id);
-        renderService.toPdf(document.getRenderedHtml(), output);
+        // Keep the immutable agreement snapshot; append the recorded execution status to its PDF.
+        String audit = "<section><h2>Electronic execution record</h2><p>Document #" + document.getId()
+                + " — " + document.getStatus() + "</p><p>Issuer #" + document.getIssuerUserId() + ": "
+                + value(document.getIssuerSignedAt()) + "</p><p>Recipient #" + document.getRecipientUserId() + ": "
+                + value(document.getRecipientSignedAt()) + "</p></section>";
+        String html = document.getRenderedHtml();
+        renderService.toPdf(html.contains("</body>") ? html.replace("</body>", audit + "</body>") : html + audit, output);
     }
 
     @Transactional
     public LeaseDocumentDTO issue(long id) {
-        LeaseDocument document = accessible(id);
+        LeaseDocument document = mutable(id);
         if (document.getIssuerUserId() != userDao.getUserId() || document.getStatus() != LeaseDocumentStatus.DRAFT) {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         }
         if (document.isLegalReviewRequired()) {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         }
+        validateCurrentContext(document);
         Users recipient = userDao.findById(document.getRecipientUserId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
@@ -173,10 +197,11 @@ public class LeaseDocumentService {
 
     @Transactional
     public LeaseDocumentDTO acknowledge(long id) {
-        LeaseDocument document = accessible(id);
+        LeaseDocument document = mutable(id);
         if (document.getRecipientUserId() != userDao.getUserId() || document.getStatus() != LeaseDocumentStatus.ISSUED) {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         }
+        validateCurrentContext(document);
         document.setAcknowledgedAt(LocalDateTime.now());
         document.setStatus(LeaseDocumentStatus.ACKNOWLEDGED);
         return new LeaseDocumentDTO(documentRepo.save(document));
@@ -184,19 +209,35 @@ public class LeaseDocumentService {
 
     @Transactional
     public LeaseDocumentDTO sign(long id) {
-        LeaseDocument document = accessible(id);
+        LeaseDocument document = mutable(id);
+        long userId = userDao.getUserId();
+        if (document.getStatus() == LeaseDocumentStatus.SIGNED) return new LeaseDocumentDTO(document);
         if (document.getStatus() != LeaseDocumentStatus.ISSUED && document.getStatus() != LeaseDocumentStatus.ACKNOWLEDGED
                 && document.getStatus() != LeaseDocumentStatus.PARTIALLY_SIGNED) {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         }
-        long userId = userDao.getUserId();
+        if (document.isLegalReviewRequired()) throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        validateCurrentContext(document);
+        if (document.getDocumentType().isTenancyAgreement() && document.getIssuerUserId() == userId
+                && document.getRecipientSignedAt() == null) {
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        }
         LocalDateTime now = LocalDateTime.now();
-        if (document.getIssuerUserId() == userId) document.setIssuerSignedAt(now);
-        else if (document.getRecipientUserId() == userId) document.setRecipientSignedAt(now);
+        if (document.getIssuerUserId() == userId) {
+            if (document.getIssuerSignedAt() != null) return new LeaseDocumentDTO(document);
+            document.setIssuerSignedAt(now);
+        } else if (document.getRecipientUserId() == userId) {
+            if (document.getRecipientSignedAt() != null) return new LeaseDocumentDTO(document);
+            document.setRecipientSignedAt(now);
+        }
         else throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_NOT_FOUND);
         document.setStatus(document.getIssuerSignedAt() != null && document.getRecipientSignedAt() != null
                 ? LeaseDocumentStatus.SIGNED : LeaseDocumentStatus.PARTIALLY_SIGNED);
         LeaseDocument saved = documentRepo.save(document);
+        if (saved.getStatus() == LeaseDocumentStatus.PARTIALLY_SIGNED && saved.getDocumentType().isTenancyAgreement()
+                && saved.getRecipientSignedAt() != null) {
+            leaseService.recordGovernedTenantSignature(saved.getLeaseId(), saved.getRecipientUserId(), saved.getRecipientSignedAt());
+        }
         if (saved.getStatus() == LeaseDocumentStatus.SIGNED && saved.getDocumentType().isTenancyAgreement()) {
             leaseService.activateFromGovernedAgreement(saved.getLeaseId(), saved.getIssuerUserId(), saved.getRecipientUserId(),
                     saved.getIssuerSignedAt(), saved.getRecipientSignedAt());
@@ -206,6 +247,62 @@ public class LeaseDocumentService {
             salesService.acceptSignedOffer(saved.getSaleId(), saved.getId(), saved.getAmount());
         }
         return new LeaseDocumentDTO(saved);
+    }
+
+    @Transactional
+    public LeaseDocumentDTO cancelDraft(long id) {
+        LeaseDocument document = mutable(id);
+        if (document.getIssuerUserId() != userDao.getUserId() || document.getStatus() != LeaseDocumentStatus.DRAFT)
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        document.setStatus(LeaseDocumentStatus.CANCELLED);
+        return new LeaseDocumentDTO(documentRepo.save(document));
+    }
+
+    private LeaseDocument mutable(long id) {
+        return documentRepo.findAccessibleForUpdate(id, userDao.getUserId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_DOCUMENT_NOT_FOUND));
+    }
+
+    private void validateCurrentContext(LeaseDocument document) {
+        if (document.getIssuerUserId() == document.getRecipientUserId())
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        if (document.getDocumentType().isSaleDocument()) {
+            SaleTransaction sale = saleRepo.findByIdForUpdate(document.getSaleId())
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
+            if (!java.util.Objects.equals(sale.getBuyerUserId(), document.getRecipientUserId())
+                    || !java.util.Objects.equals(sale.getUnitId(), document.getUnitId()))
+                throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+            if (document.getDocumentType() == LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER
+                    && (document.getResponseDueDate() == null || document.getResponseDueDate().isBefore(LocalDate.now(PMSUtils.getZoneId()))
+                    || sale.getStatus() != SaleStatus.OFFERED))
+                throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+            if (document.getDocumentType() == LeaseDocumentType.PROPERTY_SALE_AGREEMENT && sale.getStatus() != SaleStatus.AGREEMENT)
+                throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+            if (document.getAmount() == null || sale.getOfferAmount() == null || document.getAmount().compareTo(sale.getOfferAmount()) != 0
+                    || !StringUtils.equalsIgnoreCase(document.getCurrency(), sale.getCurrency()))
+                throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+            if (userDao.getUserId() == document.getIssuerUserId()) salesAccess.require(sale.getPropertyId(), Permission.CREATE_LEASE_DOCUMENT);
+        } else if (document.getDocumentType().isTenancyAgreement()) {
+            Lease lease = leaseDao.getLeaseForUpdate(document.getLeaseId())
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+            leaseService.checkDocumentLeaseAccess(lease);
+            if (lease.isSigned() || !java.util.Objects.equals(lease.getMoveInDate(), document.getEffectiveDate())
+                    || document.getAmount() == null || document.getAmount().compareTo(java.math.BigDecimal.valueOf(lease.getPrice())) != 0
+                    || !StringUtils.equalsIgnoreCase(lease.getCurrency(), document.getCurrency()))
+                throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        } else if (document.getDocumentType().isEstateDocument()) {
+            PropertyOwnership current = ownershipRepo.findAllByPropertyIdAndActiveTrue(document.getPropertyId()).stream()
+                    .filter(o -> o.getHomeownerUserId() == document.getRecipientUserId()
+                            && java.util.Objects.equals(o.getUnitId(), document.getUnitId()))
+                    .findFirst().flatMap(o -> ownershipRepo.findActiveForUpdate(o.getId()))
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.OWNERSHIP_NOT_FOUND));
+            if (document.getEffectiveDate() == null || current.getOwnershipStart() == null
+                    || document.getEffectiveDate().isBefore(current.getOwnershipStart())
+                    || document.getCreatedOn() == null || current.getCreatedOn() == null
+                    || document.getCreatedOn().isBefore(current.getCreatedOn()))
+                throw new PMSCustomException(ResponseCode.OWNERSHIP_NOT_FOUND);
+            if (userDao.getUserId() == document.getIssuerUserId()) estateAccess.require(document.getPropertyId(), Permission.CREATE_LEASE_DOCUMENT);
+        }
     }
 
     @Transactional
@@ -253,6 +350,8 @@ public class LeaseDocumentService {
                     ? leaseDao.getLeaseByIdAndOwner(request.leaseId(), userId)
                     : leaseDao.getLeaseByIdAndManagerRole(request.leaseId(), userId, role.name()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        lease = leaseDao.getLeaseForUpdate(lease.getId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        leaseService.checkDocumentLeaseAccess(lease);
         UnitTenant tenancy = leaseDao.getUnitTenantByTenantId(lease.getTenantId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
         Unit unit = unitRepo.findById(tenancy.getUnitId()).filter(Unit::isActive)
@@ -270,31 +369,33 @@ public class LeaseDocumentService {
         if (request.propertyId() == null || request.recipientUserId() == null) {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         }
-        PMSRole role = userDao.getActiveRole();
-        Property property = (role == PMSRole.LANDLORD
-                ? propertyRepo.findByIdAndCreatedByAndActiveTrue(request.propertyId(), userId)
-                : propertyRepo.findByIdAndManagerRole(request.propertyId(), userId, role.name()))
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
+        Property property = estateAccess.require(request.propertyId(), Permission.CREATE_LEASE_DOCUMENT);
         Users recipient = userDao.findById(request.recipientUserId())
                 .filter(Users::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
-        if (request.documentType() == LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT
-                && !ownershipRepo.existsByPropertyIdAndHomeownerUserIdAndActiveTrue(property.getId(), recipient.getId())) {
+        List<PropertyOwnership> matches = ownershipRepo.findAllByPropertyIdAndActiveTrue(property.getId()).stream()
+                .filter(o -> o.getHomeownerUserId() == recipient.getId())
+                .filter(o -> request.ownershipId() == null || o.getId().equals(request.ownershipId())).toList();
+        if (matches.size() != 1 || request.effectiveDate() == null || recipient.getId() == userId)
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
-        }
-        return new Context(property, null, userDao.getUserObject(), recipient, null, null);
+        PropertyOwnership ownership = ownershipRepo.findActiveForUpdate(matches.getFirst().getId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.OWNERSHIP_NOT_FOUND));
+        if (request.effectiveDate().isBefore(ownership.getOwnershipStart())
+                || documentRepo.existsCurrentEstateAgreement(property.getId(), ownership.getUnitId(), recipient.getId(), ownership.getOwnershipStart(), ownership.getCreatedOn()))
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        Unit unit = ownership.getUnitId() == null ? null : unitRepo.findById(ownership.getUnitId())
+                .filter(u -> u.isActive() && u.getPropertyId() == property.getId() && "SERVICE_CHARGE".equals(u.getLeaseMode()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
+        return new Context(property, unit, userDao.getUserObject(), recipient, null, null);
     }
 
     private Context saleContext(GenerateLeaseDocumentRequest request, long userId) {
         if (request.saleId() == null) throw new PMSCustomException(ResponseCode.SALE_NOT_FOUND);
         PMSRole role = userDao.getActiveRole();
-        SaleTransaction sale = (role == PMSRole.BUYER
-                ? saleRepo.findByIdAndBuyerUserIdAndActiveTrue(request.saleId(), userId)
-                : role == PMSRole.SUPER_ADMIN
-                    ? saleRepo.findById(request.saleId()).filter(SaleTransaction::isActive)
-                    : saleRepo.findByIdAndPropertyAccess(request.saleId(), userId))
+        SaleTransaction sale = saleRepo.findByIdForUpdate(request.saleId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
         if (role == PMSRole.BUYER) throw new PMSCustomException(ResponseCode.INVALID_ROLE);
+        salesAccess.require(sale.getPropertyId(), Permission.CREATE_LEASE_DOCUMENT);
         if (sale.getBuyerUserId() == null) throw new PMSCustomException(ResponseCode.LOAD_USER_ERROR);
         Property property = propertyRepo.findById(sale.getPropertyId()).filter(Property::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
@@ -320,7 +421,7 @@ public class LeaseDocumentService {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         }
         if (type.isTenancyAgreement()) {
-            if (request.effectiveDate() == null
+            if (context.lease().isSigned() || documentRepo.existsCurrentAgreement(leaseId) || request.effectiveDate() == null
                     || !request.effectiveDate().equals(context.lease().getMoveInDate())
                     || request.amount() == null
                     || request.amount().compareTo(java.math.BigDecimal.valueOf(context.lease().getPrice())) != 0
@@ -333,18 +434,21 @@ public class LeaseDocumentService {
 
     private void validateSaleDocument(GenerateLeaseDocumentRequest request, SaleTransaction sale) {
         LeaseDocumentType type = request.documentType();
+        documentRepo.expireSaleOffers(sale.getId(), LocalDate.now(PMSUtils.getZoneId()));
         if (documentRepo.existsOpenForSale(sale.getId(), type)) {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         }
         if (type == LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER) {
             if (sale.getStatus() != SaleStatus.OFFERED || sale.getOfferAmount() == null
-                    || request.responseDueDate() == null || !request.responseDueDate().isAfter(java.time.LocalDate.now())
+                    || request.responseDueDate() == null || !request.responseDueDate().isAfter(LocalDate.now(PMSUtils.getZoneId()))
                     || request.amount() == null || request.amount().compareTo(sale.getOfferAmount()) != 0
                     || !StringUtils.defaultIfBlank(request.currency(), sale.getCurrency()).equalsIgnoreCase(sale.getCurrency())) {
                 throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA_CONSTRAINT);
             }
         } else if (type == LeaseDocumentType.PROPERTY_SALE_AGREEMENT
-                && (sale.getStatus() != SaleStatus.AGREEMENT
+                && (sale.getStatus() != SaleStatus.AGREEMENT || request.effectiveDate() == null
+                || request.amount() == null || sale.getOfferAmount() == null || request.amount().compareTo(sale.getOfferAmount()) != 0
+                || !StringUtils.defaultIfBlank(request.currency(), sale.getCurrency()).equalsIgnoreCase(sale.getCurrency())
                 || !documentRepo.existsBySaleIdAndDocumentTypeAndStatusAndActiveTrue(sale.getId(),
                     LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER, LeaseDocumentStatus.SIGNED))) {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);

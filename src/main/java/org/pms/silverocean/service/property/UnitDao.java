@@ -179,6 +179,14 @@ public class UnitDao {
         return bulkUnitJobRepo.findByCreatedBy(pageable, createdBy);
     }
 
+    public Optional<BulkUnitJob> findUnitCreationJob(long id, long createdBy) {
+        return bulkUnitJobRepo.findByIdAndCreatedBy(id, createdBy);
+    }
+
+    public long countPendingUnitCopiesByPropertyOwner(long ownerId) {
+        return bulkUnitJobRepo.sumPendingCountsByPropertyOwner(ownerId);
+    }
+
     public int countPendingBulkUnitJob(long createdBy) {
         Integer count = bulkUnitJobRepo.countBulkUnitJobByCreatedByAndActiveTrueAndCompletedFalse(createdBy);
         if (count == null) {

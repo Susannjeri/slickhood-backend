@@ -146,11 +146,17 @@ class RentalPaymentReconciliationJourneyTest {
         doReturn(initialized).when(http).sendPostRequest(anyString(), any(), any(), eq(PaystackPlatform.PaystackInitializeResponse.class));
         PaystackPlatform.PaystackVerifyResponse verified = new PaystackPlatform.PaystackVerifyResponse(
                 true, "Verified", new PaystackPlatform.PaystackTransaction(
-                998877L, "success", "601", 2_500_000L, "KES", "Approved"));
+                998877L, "success", "601", 2_500_000L, "KES", "Approved", "test"));
         doReturn(verified).when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
 
+        var accounts = mock(org.pms.silverocean.service.account.dao.AccountDao.class);
+        var destination = new org.pms.silverocean.database.pms.entities.PaymentAccount();
+        destination.setCreatedBy(LANDLORD_ID); destination.setActive(true); destination.setVerified(true);
+        destination.setChannel(PaymentChannel.PAYSTACK);
+        destination.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.LANDLORD);
+        when(accounts.getAccountById(71L)).thenReturn(destination);
         PaystackPlatform paystack = new PaystackPlatform(updater, users, payments, params, http,
-                mock(EventService.class), new com.fasterxml.jackson.databind.ObjectMapper());
+                mock(EventService.class), new com.fasterxml.jackson.databind.ObjectMapper(), accounts);
         ReflectionTestUtils.setField(paystack, "enabled", true);
         ReflectionTestUtils.setField(paystack, "secretKey", SECRET);
         ReflectionTestUtils.setField(paystack, "apiUrl", "https://api.paystack.test");

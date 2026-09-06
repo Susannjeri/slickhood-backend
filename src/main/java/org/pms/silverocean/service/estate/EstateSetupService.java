@@ -38,9 +38,15 @@ public class EstateSetupService {
 
         long activeUnits = units.countAllByPropertyIdAndActiveTrue(propertyId);
         long activeStaff = managers.countByPropertyIdAndActiveTrue(propertyId);
-        long operatingAccounts = accounts.countByPropertyIdAndActiveTrue(propertyId);
+        org.pms.silverocean.service.account.enums.AccountCategory category = switch (property.getManagementMode()) {
+            case SERVICE_CHARGE -> org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT;
+            case SALE -> org.pms.silverocean.service.account.enums.AccountCategory.PROPERTY_SALES;
+            default -> org.pms.silverocean.service.account.enums.AccountCategory.LANDLORD;
+        };
+        long operatingAccounts = accounts.countVerifiedOperatingAccounts(propertyId, category);
         long activeHomeowners = ownerships.countByPropertyIdAndActiveTrue(propertyId);
-        long currentBudgets = budgets.countByPropertyIdAndBudgetYearAndActiveTrue(propertyId, Year.now().getValue());
+        long currentBudgets = budgets.countByPropertyIdAndBudgetYearAndStatusAndActiveTrue(propertyId,
+                Year.now(org.pms.silverocean.common.PMSUtils.getZoneId()).getValue(), "APPROVED");
         boolean unitsConfigured = activeUnits > 0;
         boolean billingConfigured = operatingAccounts > 0;
         boolean serviceCharge = property.getManagementMode() == PMSPropertyManagementMode.SERVICE_CHARGE;

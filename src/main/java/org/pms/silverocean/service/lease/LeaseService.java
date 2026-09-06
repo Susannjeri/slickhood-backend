@@ -82,10 +82,12 @@ public class LeaseService {
 
     private final InviteDao inviteDao;
     private final LeaseTemplateDao leaseTemplateDao;
+    private final org.pms.silverocean.database.pms.LeaseDocumentRepo documents;
+    private final LeaseAccessService access;
 
     static final String DEFAULT_PREFIX = "DEFAULT_";
 
-    public LeaseService(LeaseDao leaseDao, UserDao userDao, UnitDao unitDao, LeaseMessageDao leaseMessageDao, ConfigService configService, I18NService i18NService, EncryptionService encryptionService, NotificationService notificationService, RenderService renderService, RoleService roleService, InviteDao inviteDao, LeaseTemplateDao leaseTemplateDao) {
+    public LeaseService(LeaseDao leaseDao, UserDao userDao, UnitDao unitDao, LeaseMessageDao leaseMessageDao, ConfigService configService, I18NService i18NService, EncryptionService encryptionService, NotificationService notificationService, RenderService renderService, RoleService roleService, InviteDao inviteDao, LeaseTemplateDao leaseTemplateDao, org.pms.silverocean.database.pms.LeaseDocumentRepo documents, LeaseAccessService access) {
         this.leaseDao = leaseDao;
         this.userDao = userDao;
         this.unitDao = unitDao;
@@ -98,6 +100,8 @@ public class LeaseService {
         this.roleService = roleService;
         this.inviteDao = inviteDao;
         this.leaseTemplateDao = leaseTemplateDao;
+        this.documents = documents;
+        this.access = access;
     }
 
     @PostConstruct
@@ -114,7 +118,7 @@ public class LeaseService {
         validateLeaseDates(moveInDate, moveOutDate);
         Lease lease = leaseDao.getLeaseByIdAndTenantId(leaseId, userDao.getUserId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
-        if (lease.isSigned()) {
+        if (hasFrozenTerms(lease)) {
             throw new PMSCustomException(ResponseCode.ERROR_LEASE_ALREADY_ACCEPTED);
         }
         lease.setMoveInDate(moveInDate);
@@ -126,7 +130,7 @@ public class LeaseService {
     public void deleteLease(long leaseId) {
         Lease lease = leaseDao.getLeaseByIdAndStaffOwnerOrTenantId(leaseId, userDao.getUserId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
-        if (lease.isSigned()) {
+        if (hasFrozenTerms(lease)) {
             throw new PMSCustomException(ResponseCode.ERROR_LEASE_ALREADY_ACCEPTED);
         }
         lease.setActive(false);
@@ -137,7 +141,7 @@ public class LeaseService {
     public void ownerEditLease(long leaseId, LeaseTemplateDTO leaseTemplateDTO) {
         Lease lease = leaseDao.getLeaseByIdAndStaffOwner(leaseId, userDao.getUserId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
-        if (lease.isSigned()) {
+        if (hasFrozenTerms(lease)) {
             throw new PMSCustomException(ResponseCode.ERROR_LEASE_ALREADY_ACCEPTED);
         }
 
@@ -165,7 +169,10 @@ public class LeaseService {
                     throw new PMSCustomException(ResponseCode.LEASE_ALREADY_EXISTS);
                 });
         Unit unit = unitDao.findByToken(token).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVITE_LINK));
-        Invite invite = inviteDao.getInviteByToken(token, true)
+        unit = unitDao.findByAndLockById(unit.getId())
+                .filter(u -> u.isActive() && !u.isOccupied() && "RENT".equals(u.getLeaseMode()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
+        Invite invite = inviteDao.getActiveTokenForUpdate(token)
                 .filter(candidate -> InviteType.TENANT.name().equals(candidate.getType()))
                 .filter(candidate -> candidate.getExpiryDate() == null || LocalDateTime.now().isBefore(candidate.getExpiryDate()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_OR_EXPIRED_TOKEN));
@@ -174,6 +181,7 @@ public class LeaseService {
         }
         LeaseTemplate leaseTemplate = leaseTemplateDao
                 .getTemplateById(unit.getTemplateId())
+                .filter(t -> "RENT".equals(t.getLeaseMode()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_TEMPLATE_NOT_FOUND));
 
         UnitTenant unitTenant = new UnitTenant();
@@ -217,14 +225,15 @@ public class LeaseService {
 
     public Page<LeaseDTO> getLeaseList(Pageable pageable) {
         long userId = userDao.getUserId();
-        boolean privileged = userDao.hasRole(PMSRole.SUPER_ADMIN);
-        return leaseDao.getLeaseList(userId, privileged, bounded(pageable));
+        PMSRole role = userDao.getActiveRole();
+        return leaseDao.getScopedLeaseList(userId, role.name(), role.isCustomerEmployeeRole() ? access.selectedAssignmentId() : null, bounded(pageable));
     }
 
     @Transactional
     public Page<LeaseMessageDTO> getLeaseMessageByLeaseId(Pageable pageable, long leaseId) {
         Lease lease = leaseDao.getLeaseByIdAndStaffOwnerOrTenantId(leaseId, userDao.getUserId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        access.check(lease);
         return leaseMessageDao.getLeaseMessagesByLeaseId(bounded(pageable), leaseId).map(leaseMessage -> {
             String decrypted = encryptionService.decrypt(leaseMessage.message().getBytes()).decryptedValue();
             return leaseMessage.withDecryptedMessage(decrypted);
@@ -234,6 +243,7 @@ public class LeaseService {
 
     @Transactional
     public void sendLeaseMessage(LeaseMessageRequest request) {
+        access.check(leaseDao.getLeaseForUpdate(request.leaseId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND)));
         Users currentUser = userDao.getUserObject();
         Long currentUserId = currentUser.getId();
 
@@ -304,9 +314,16 @@ public class LeaseService {
         return expectedPhone != null && expectedPhone.equals(actualPhone);
     }
 
+    private boolean hasFrozenTerms(Lease lease) {
+        access.check(lease);
+        return lease.isSigned() || lease.getTenantSignedDate() != null || lease.getManagerSignedDate() != null
+                || documents.existsCurrentAgreement(lease.getId());
+    }
+
     @Transactional
     public void signLease(long leaseId) {
         Lease lease = leaseDao.getLeaseByIdAndStaffOwnerOrTenantId(leaseId, userDao.getUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        access.check(lease);
 
         if (lease.isSigned()) {
             return;
@@ -314,6 +331,8 @@ public class LeaseService {
         if (lease.isGovernedDocumentRequired()) {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         }
+        if (userDao.getActiveRole() != PMSRole.TENANT && lease.getTenantSignedDate() == null)
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         UnitTenant unitTenant = leaseDao.getUnitTenantByTenantId(lease.getTenantId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
         Unit unit = unitDao.findByAndLockById(unitTenant.getUnitId()).orElseThrow(() -> new PMSCustomException(ResponseCode.GENERAL_FAILURE));
         long propertyId = unit.getPropertyId();
@@ -321,7 +340,7 @@ public class LeaseService {
                 roleWrapper.getProperty().contains(propertyId)
         ).toList();
 
-        permissionsForUser.forEach(roleWrapper -> {
+        permissionsForUser.stream().filter(r -> r.getRoleName().equals(userDao.getActiveRole().getName())).forEach(roleWrapper -> {
             if (PMSRole.LANDLORD.getName().equals(roleWrapper.getRoleName()) && lease.getManagerSignedDate() == null) {
                 lease.setSignedByManagerId(userDao.getUserId());
                 lease.setManagerSignedDate(LocalDateTime.now());
@@ -336,18 +355,32 @@ public class LeaseService {
         });
 
         activateWhenFullySigned(lease, unitTenant, unit);
-        leaseDao.deleteUnsignedLeaseAndUnitTenantsByUnitIdAndLeaseId(unit.getId(), lease.getId());
+        if (lease.isSigned()) leaseDao.deleteUnsignedLeaseAndUnitTenantsByUnitIdAndLeaseId(unit.getId(), lease.getId());
+        leaseDao.saveLease(lease, Permission.SIGN_LEASE);
+    }
+
+    @Transactional
+    public void recordGovernedTenantSignature(long leaseId, long recipientUserId, LocalDateTime signedAt) {
+        Lease lease = leaseDao.getLeaseForUpdate(leaseId).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        UnitTenant tenancy = leaseDao.getUnitTenantByTenantId(lease.getTenantId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        if (signedAt == null || tenancy.getUserId() != recipientUserId || lease.isSigned())
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        lease.setTenantSignedDate(signedAt);
         leaseDao.saveLease(lease, Permission.SIGN_LEASE);
     }
 
     @Transactional
     public void activateFromGovernedAgreement(long leaseId, long issuerUserId, long recipientUserId,
                                               LocalDateTime issuerSignedAt, LocalDateTime recipientSignedAt) {
-        Lease lease = leaseDao.getLeaseById(leaseId)
+        Lease lease = leaseDao.getLeaseForUpdate(leaseId)
                 .filter(Lease::isActive).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        if (lease.isSigned()) return;
+        if (issuerSignedAt == null || recipientSignedAt == null || issuerUserId == recipientUserId)
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         UnitTenant tenancy = leaseDao.getUnitTenantByTenantId(lease.getTenantId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
-        Unit unit = leaseDao.getUnitByTenantId(lease.getTenantId())
+        Unit unit = unitDao.findByAndLockById(tenancy.getUnitId())
+                .filter(u -> u.isActive() && "RENT".equals(u.getLeaseMode()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
         if (tenancy.getUserId() != recipientUserId || !roleService.checkIfStaffInProperty(issuerUserId, unit.getId())
                 && !unitDao.findPropertyOwnerId(unit.getId()).filter(id -> id == issuerUserId).isPresent()) {
@@ -363,6 +396,7 @@ public class LeaseService {
 
     private void activateWhenFullySigned(Lease lease, UnitTenant tenancy, Unit unit) {
         if (lease.getTenantSignedDate() == null || lease.getManagerSignedDate() == null) return;
+        if (unit.isOccupied()) throw new PMSCustomException(ResponseCode.LEASE_ALREADY_EXISTS);
         lease.setSigned(true);
         lease.setLifecycleStatus("ACTIVE");
         tenancy.setLeaseAccepted(true);
@@ -379,6 +413,7 @@ public class LeaseService {
         long userId = userDao.getUserId();
         Lease lease = leaseDao.getLeaseByIdAndStaffOwnerOrTenantId(leaseId, userId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        access.check(lease);
         if (!lease.isSigned() || "TERMINATED".equals(lease.getLifecycleStatus())) {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA_CONSTRAINT);
         }
@@ -484,6 +519,7 @@ public class LeaseService {
     @Transactional
     public void viewLease(long leaseId, OutputStream outputStream) {
         Lease lease = leaseDao.getLeaseByIdAndStaffOwnerOrTenantId(leaseId, userDao.getUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        access.check(lease);
 
         UnitTenant unitTenant = leaseDao.getUnitTenantByTenantId(lease.getTenantId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
 
@@ -500,6 +536,8 @@ public class LeaseService {
                 outputStream
         );
     }
+
+    public void checkDocumentLeaseAccess(Lease lease) { access.check(lease); }
 
     public void renderLeaseTemplateToPdfByUnit(Long unitId, OutputStream outputStream) throws IOException {
         Unit unit = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));

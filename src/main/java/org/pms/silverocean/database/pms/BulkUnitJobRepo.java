@@ -17,5 +17,16 @@ public interface BulkUnitJobRepo extends JpaRepository<BulkUnitJob, Long> {
 
     Page<BulkUnitJob> findByCreatedBy(Pageable pageable, long createdBy);
 
+    Optional<BulkUnitJob> findByIdAndCreatedBy(long id, long createdBy);
+
+    /**
+     * Pending duplicate jobs are reservations too.  Counting them with the
+     * existing inventory prevents two quick submissions from exceeding the
+     * subscription unit quota before the asynchronous workers finish.
+     */
+    @Query("SELECT COALESCE(SUM(j.count), 0) FROM BulkUnitJob j JOIN Unit u ON u.id=j.unitId JOIN Property p ON p.id=u.propertyId " +
+            "WHERE j.active AND NOT j.completed AND p.createdBy=:ownerId")
+    long sumPendingCountsByPropertyOwner(long ownerId);
+
     Integer countBulkUnitJobByCreatedByAndActiveTrueAndCompletedFalse(long createdBy);
 }

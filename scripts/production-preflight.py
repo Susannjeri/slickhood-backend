@@ -37,6 +37,7 @@ DEFAULT_FILES = (
     Path("/etc/slickhood/pms-ocr.env"),
     Path("/etc/slickhood/pms-release.env"),
     Path("/etc/slickhood/pms-storage.env"),
+    Path("/etc/slickhood/secrets/s3-credentials.env"),
     Path("/etc/slickhood/secrets/alpha-vantage.env"),
     Path("/etc/slickhood/secrets/insurance-imap.env"),
     Path("/home/silverocean/backend/config/application.properties"),

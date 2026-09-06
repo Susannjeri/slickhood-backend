@@ -42,8 +42,9 @@ public class LeaseDocumentController extends OutputStreamErrorHandler {
 
     @GetMapping
     @PreAuthorize("hasAuthority(" + PERMISSION + ".VIEW_LEASE_DOCUMENT)")
-    public ResponseEntity<ResponseDTO> list(@PageableDefault(size = 25, sort = "createdOn", direction = org.springframework.data.domain.Sort.Direction.DESC) Pageable pageable) {
-        return page(service.list(pageable));
+    public ResponseEntity<ResponseDTO> list(@PageableDefault(size = 25, sort = "createdOn", direction = org.springframework.data.domain.Sort.Direction.DESC) Pageable pageable,
+            @RequestParam(required=false) Long leaseId, @RequestParam(required=false) Long saleId, @RequestParam(required=false) Long propertyId) {
+        return page(service.list(pageable, leaseId, saleId, propertyId));
     }
 
     @GetMapping("/{id}/pdf")
@@ -52,6 +53,8 @@ public class LeaseDocumentController extends OutputStreamErrorHandler {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             service.renderPdf(id, output);
             response.setContentType(MediaType.APPLICATION_PDF_VALUE);
+            response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store, private");
+            response.setHeader("X-Content-Type-Options", "nosniff");
             response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
                     ContentDisposition.inline().filename("slickhood-document-" + id + ".pdf").build().toString());
             output.writeTo(response.getOutputStream());
@@ -74,6 +77,12 @@ public class LeaseDocumentController extends OutputStreamErrorHandler {
         return ok(ResponseCode.LEASE_DOCUMENT_ACKNOWLEDGED, service.acknowledge(id));
     }
 
+    @PostMapping("/{id}/cancel-draft")
+    @PreAuthorize("hasAuthority(" + PERMISSION + ".CREATE_LEASE_DOCUMENT)")
+    public ResponseEntity<ResponseDTO> cancelDraft(@PathVariable long id) {
+        return ok(ResponseCode.GENERAL_SUCCESS, service.cancelDraft(id));
+    }
+
     @PostMapping("/{id}/sign")
     @PreAuthorize("hasAuthority(" + PERMISSION + ".SIGN_LEASE_DOCUMENT)")
     public ResponseEntity<ResponseDTO> sign(@PathVariable long id) {
@@ -81,7 +90,7 @@ public class LeaseDocumentController extends OutputStreamErrorHandler {
     }
 
     @GetMapping("/templates")
-    @PreAuthorize("hasAuthority(" + PERMISSION + ".CREATE_LEASE_DOCUMENT)")
+    @PreAuthorize("hasAuthority(" + PERMISSION + ".CREATE_LEASE_DOCUMENT) or hasAuthority(" + PERMISSION + ".MANAGE_LEASE_DOCUMENT_TEMPLATE)")
     public ResponseEntity<ResponseDTO> templates() {
         return ok(ResponseCode.GENERAL_SUCCESS, service.templates());
     }

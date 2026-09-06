@@ -12,13 +12,24 @@ import java.util.Optional;
 import java.util.List;
 
 public interface PropertyListingRepo extends JpaRepository<PropertyListing, Long> {
+    String AVAILABLE_INVENTORY = "AND ((l.listingType='RENT' AND u.leaseMode='RENT' " +
+            "AND p.managementMode=org.pms.silverocean.service.property.PMSPropertyManagementMode.RENTAL) " +
+            "OR (l.listingType='SALE' AND u.leaseMode='SALE' " +
+            "AND p.managementMode=org.pms.silverocean.service.property.PMSPropertyManagementMode.SALE " +
+            "AND NOT EXISTS (SELECT 1 FROM SaleTransaction s WHERE s.unitId=u.id AND s.active " +
+            "AND s.status NOT IN ('LEAD','VIEWING','OFFERED','CANCELLED')))) ";
+
+    @Query("SELECT COUNT(s)>0 FROM SaleTransaction s WHERE s.unitId=:unitId AND s.active " +
+            "AND s.status NOT IN ('LEAD','VIEWING','OFFERED','CANCELLED')")
+    boolean hasReservedOrCompletedSale(long unitId);
+
     Optional<PropertyListing> findByUnitId(long unitId);
 
     @EntityGraph(attributePaths = {"unit", "unit.property"})
     @Query("SELECT l FROM PropertyListing l JOIN Unit u ON u.id=l.unitId JOIN Property p ON p.id=u.propertyId " +
             "WHERE l.active AND l.status='PUBLISHED' AND (l.expiresAt IS NULL OR l.expiresAt>:now) " +
             "AND u.active AND NOT u.occupied AND u.advertise AND p.active " +
-            "AND (:type IS NULL OR l.listingType=:type) " +
+            AVAILABLE_INVENTORY + "AND (:type IS NULL OR l.listingType=:type) " +
             "AND (:location IS NULL OR LOWER(p.address) LIKE LOWER(CONCAT('%',:location,'%'))) " +
             "AND (:unitType IS NULL OR LOWER(u.unitType)=LOWER(:unitType)) " +
             "AND (:minPrice IS NULL OR u.price>=:minPrice) AND (:maxPrice IS NULL OR u.price<=:maxPrice)")
@@ -28,13 +39,13 @@ public interface PropertyListingRepo extends JpaRepository<PropertyListing, Long
     @EntityGraph(attributePaths = {"unit", "unit.property"})
     @Query("SELECT l FROM PropertyListing l JOIN Unit u ON u.id=l.unitId JOIN Property p ON p.id=u.propertyId " +
             "WHERE l.publicSlug=:slug AND l.active AND l.status='PUBLISHED' " +
-            "AND (l.expiresAt IS NULL OR l.expiresAt>:now) AND u.active AND NOT u.occupied AND u.advertise AND p.active")
+            "AND (l.expiresAt IS NULL OR l.expiresAt>:now) AND u.active AND NOT u.occupied AND u.advertise AND p.active " + AVAILABLE_INVENTORY)
     Optional<PropertyListing> findPublicBySlug(String slug, ZonedDateTime now);
 
     @Query("SELECT DISTINCT u.unitType FROM PropertyListing l JOIN Unit u ON u.id=l.unitId JOIN Property p ON p.id=u.propertyId " +
             "WHERE l.active AND l.status='PUBLISHED' AND (l.expiresAt IS NULL OR l.expiresAt>:now) " +
             "AND u.active AND NOT u.occupied AND u.advertise AND p.active " +
-            "AND (:type IS NULL OR l.listingType=:type) ORDER BY u.unitType")
+            AVAILABLE_INVENTORY + "AND (:type IS NULL OR l.listingType=:type) ORDER BY u.unitType")
     List<String> findPublicUnitTypes(String type, ZonedDateTime now);
 
     @EntityGraph(attributePaths = {"unit", "unit.property"})

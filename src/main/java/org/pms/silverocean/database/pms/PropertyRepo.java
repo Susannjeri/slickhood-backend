@@ -16,6 +16,21 @@ public interface PropertyRepo extends JpaRepository<Property, Long>,  JpaSpecifi
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM Property p WHERE p.id=:id")
     Optional<Property> findAndLockById(@org.springframework.data.repository.query.Param("id") long id);
+
+    // An invitation is accepted in the homeowner's session. Revalidate the
+    // inviter's current authority, rather than any stale staff assignment.
+    @Query("SELECT p FROM Property p WHERE p.id=:id AND p.active " +
+            "AND EXISTS (SELECT 1 FROM Users u WHERE u.id=:userId AND u.active) AND (p.createdBy=:userId " +
+            "OR EXISTS (SELECT 1 FROM UserRole ur JOIN Role r ON r.id=ur.roleId " +
+            "WHERE ur.userId=:userId AND r.active AND r.name='Superadmin') " +
+            "OR EXISTS (SELECT 1 FROM PropertyManager pm JOIN WorkspaceMembership m ON pm.inviteId=-m.id " +
+            "JOIN CustomerWorkspace w ON w.id=m.workspaceId WHERE pm.propertyId=p.id AND pm.userId=:userId " +
+            "AND pm.active AND pm.roleName='ESTATE_OPERATIONS_MANAGER' AND m.userId=:userId AND m.active " +
+            "AND m.status=org.pms.silverocean.service.teamaccess.TeamMembershipStatus.ACTIVE " +
+            "AND m.membershipRole=org.pms.silverocean.service.teamaccess.TeamMembershipRole.ESTATE_OPERATIONS_MANAGER " +
+            "AND w.active AND w.ownerUserId=p.createdBy " +
+            "AND w.businessArea=org.pms.silverocean.service.teamaccess.TeamBusinessArea.ESTATE_MANAGEMENT))")
+    Optional<Property> findByIdAndHomeownerInviter(long id, long userId);
     Optional<Property> findByNameAndAddressAndCreatedBy(String name, String address, long createdBy);
     Optional<Property> findByIdAndCreatedByAndActiveTrue(long id, long createdBy);
     List<Property> findAllByCreatedByAndActiveTrue(long createdBy);

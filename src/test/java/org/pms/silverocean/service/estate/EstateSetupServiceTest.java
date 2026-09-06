@@ -69,7 +69,7 @@ class EstateSetupServiceTest {
     void serviceChargeSetupRequiresHomeownersAfterUnitsAndAccount() {
         stubProperty(PMSPropertyManagementMode.SERVICE_CHARGE);
         when(units.countAllByPropertyIdAndActiveTrue(10L)).thenReturn(20);
-        when(accounts.countByPropertyIdAndActiveTrue(10L)).thenReturn(1L);
+        when(accounts.countVerifiedOperatingAccounts(10L, org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT)).thenReturn(1L);
 
         EstateSetupStatus status = service.getStatus(10L);
 
@@ -82,9 +82,9 @@ class EstateSetupServiceTest {
     void serviceChargeSetupIsReadyOnlyAfterOwnershipAndCurrentBudget() {
         stubProperty(PMSPropertyManagementMode.SERVICE_CHARGE);
         when(units.countAllByPropertyIdAndActiveTrue(10L)).thenReturn(20);
-        when(accounts.countByPropertyIdAndActiveTrue(10L)).thenReturn(1L);
+        when(accounts.countVerifiedOperatingAccounts(10L, org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT)).thenReturn(1L);
         when(ownerships.countByPropertyIdAndActiveTrue(10L)).thenReturn(20L);
-        when(budgets.countByPropertyIdAndBudgetYearAndActiveTrue(10L, Year.now().getValue())).thenReturn(1L);
+        when(budgets.countByPropertyIdAndBudgetYearAndStatusAndActiveTrue(10L, Year.now(org.pms.silverocean.common.PMSUtils.getZoneId()).getValue(), "APPROVED")).thenReturn(1L);
         when(managers.countByPropertyIdAndActiveTrue(10L)).thenReturn(1L);
 
         EstateSetupStatus status = service.getStatus(10L);

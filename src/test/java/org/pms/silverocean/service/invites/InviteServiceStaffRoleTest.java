@@ -33,7 +33,7 @@ class InviteServiceStaffRoleTest {
     void customerOwnerCannotUseDormantPlatformOwnerAuthorityToInviteInternalStaff() {
         UserDao users = mock(UserDao.class);
         when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
-        InviteService service = new InviteService(null, null, users, null, null, null, null, null, null);
+        InviteService service = new InviteService(null, null, users, null, null, null, null, null, null, null);
 
         PMSCustomException exception = assertThrows(PMSCustomException.class,
                 () -> service.createInternalStaffInvite(new StaffInviteRequest("staff@slickhood.com", PMSRole.SUPPORT)));
@@ -43,7 +43,7 @@ class InviteServiceStaffRoleTest {
 
     @Test
     void occupantInvitationsCannotBeCreatedAsUnboundLinks() {
-        InviteService service = new InviteService(null, null, null, null, null, null, null, null, null);
+        InviteService service = new InviteService(null, null, null, null, null, null, null, null, null, null);
 
         PMSCustomException tenant = assertThrows(PMSCustomException.class,
                 () -> service.createInviteLink(InviteType.TENANT, 42L));

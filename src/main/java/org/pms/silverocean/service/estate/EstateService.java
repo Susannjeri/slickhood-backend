@@ -39,23 +39,29 @@ public class EstateService {
     private final InvoiceService invoiceService;
     private final NotificationService notificationService;
     private final I18NService i18n;
+    private final EstateAccessService access;
 
     public EstateService(PropertyOwnershipRepo ownershipRepo, PropertyRepo propertyRepo, UnitRepo unitRepo, UserDao userDao,
                          EstateServiceChargeRepo chargeRepo, InvoiceService invoiceService,
-                         NotificationService notificationService, I18NService i18n) {
+                         NotificationService notificationService, I18NService i18n, EstateAccessService access) {
         this.ownershipRepo = ownershipRepo; this.propertyRepo = propertyRepo; this.unitRepo = unitRepo; this.userDao = userDao;
         this.chargeRepo = chargeRepo; this.invoiceService = invoiceService;
         this.notificationService = notificationService; this.i18n = i18n;
+        this.access = access;
     }
 
     @Transactional
     public PropertyOwnership create(OwnershipRequest request) {
         long userId = userDao.getUserId();
         requireManagedProperty(request.propertyId(), userId);
+        if (request.ownershipStart() == null || request.ownershipStart().isAfter(LocalDate.now(PMSUtils.getZoneId()))) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
         Users homeowner = userDao.findById(request.homeownerUserId()).filter(Users::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
         if (request.unitId() != null) {
-            Unit unit = unitRepo.findAndLockById(request.unitId()).filter(u -> u.isActive() && u.getPropertyId() == request.propertyId())
+            Unit unit = unitRepo.findAndLockById(request.unitId()).filter(u -> u.isActive() && u.getPropertyId() == request.propertyId()
+                            && "SERVICE_CHARGE".equals(u.getLeaseMode()))
                     .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
             return createUnitOwnership(unit, homeowner.getId(), request.ownershipStart(), request.source(), userId);
         }
@@ -70,16 +76,17 @@ public class EstateService {
     public PropertyOwnership createOwnershipFromInvite(long unitId, long homeownerUserId, long inviterUserId) {
         Users homeowner = userDao.findById(homeownerUserId).filter(Users::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
-        Unit unit = unitRepo.findAndLockById(unitId).filter(Unit::isActive)
+        Unit unit = unitRepo.findAndLockById(unitId).filter(u -> u.isActive() && "SERVICE_CHARGE".equals(u.getLeaseMode()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
-        propertyRepo.findByIdAndStaffOrOwner(unit.getPropertyId(), inviterUserId)
+        propertyRepo.findByIdAndHomeownerInviter(unit.getPropertyId(), inviterUserId)
+                .filter(property -> property.getManagementMode() == org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
-        return createUnitOwnership(unit, homeowner.getId(), LocalDate.now(), "HOMEOWNER_INVITE", inviterUserId);
+        return createUnitOwnership(unit, homeowner.getId(), LocalDate.now(PMSUtils.getZoneId()), "HOMEOWNER_INVITE", inviterUserId);
     }
 
     private PropertyOwnership createUnitOwnership(Unit unit, long homeownerUserId, LocalDate ownershipStart,
                                                    String source, long createdBy) {
-        var current = ownershipRepo.findFirstByUnitIdAndActiveTrue(unit.getId());
+        var current = ownershipRepo.findCurrentForUpdate(unit.getId());
         if (current.isPresent() && current.get().getHomeownerUserId() == homeownerUserId) {
             return current.get();
         }
@@ -114,21 +121,21 @@ public class EstateService {
         Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize())));
         return switch (userDao.getActiveRole()) {
             case HOMEOWNER -> ownershipRepo.findPageByHomeowner(userId, propertyId, active, bounded);
-            case LANDLORD -> ownershipRepo.findPageByPropertyOwner(userId, propertyId, active, bounded);
+            case ESTATE_MANAGER -> ownershipRepo.findPageByEstateScope(userId, true, PMSRole.ESTATE_MANAGER.name(), null, propertyId, active, bounded);
             case SUPER_ADMIN -> ownershipRepo.findAllOwnershipViews(propertyId, active, bounded);
             default -> userDao.hasPermission(Permission.VIEW_ESTATE)
-                    ? ownershipRepo.findPageByPropertyStaff(userId, propertyId, active, bounded)
+                    ? ownershipRepo.findPageByEstateScope(userId, false, userDao.getActiveRole().name(), access.selectedAssignmentId(), propertyId, active, bounded)
                     : Page.empty(bounded);
         };
     }
 
     @Transactional
     public PropertyOwnership end(long id, OwnershipTerminationRequest request) {
-        PropertyOwnership ownership = ownershipRepo.findById(id).filter(PropertyOwnership::isActive)
+        PropertyOwnership ownership = ownershipRepo.findActiveForUpdate(id)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.OWNERSHIP_NOT_FOUND));
         long actorId = userDao.getUserId();
         Property property = requireManagedProperty(ownership.getPropertyId(), actorId);
-        if (request.endDate().isBefore(ownership.getOwnershipStart()) || request.endDate().isAfter(LocalDate.now())) {
+        if (request.endDate().isBefore(ownership.getOwnershipStart()) || request.endDate().isAfter(LocalDate.now(PMSUtils.getZoneId()))) {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         }
         ownership.setOwnershipEnd(request.endDate());
@@ -180,11 +187,12 @@ public class EstateService {
 
     @Transactional
     public EstateServiceCharge createServiceCharge(ServiceChargeRequest request) {
-        PropertyOwnership ownership = ownershipRepo.findById(request.ownershipId()).filter(PropertyOwnership::isActive)
+        PropertyOwnership ownership = ownershipRepo.findActiveForUpdate(request.ownershipId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.OWNERSHIP_NOT_FOUND));
-        requireManagedProperty(ownership.getPropertyId(), userDao.getUserId());
+        access.require(ownership.getPropertyId(), Permission.CREATE_SERVICE_CHARGE);
         if (ownership.getUnitId() == null) throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
-        Unit unit = unitRepo.findById(ownership.getUnitId()).filter(Unit::isActive)
+        Unit unit = unitRepo.findById(ownership.getUnitId()).filter(candidate -> candidate.isActive()
+                        && candidate.getPropertyId() == ownership.getPropertyId() && "SERVICE_CHARGE".equals(candidate.getLeaseMode()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
         if (unit.getCurrency() == null || !unit.getCurrency().equalsIgnoreCase(request.currency())) {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
@@ -205,23 +213,15 @@ public class EstateService {
         Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize())));
         return switch (userDao.getActiveRole()) {
             case HOMEOWNER -> chargeRepo.findPageByHomeowner(userId, propertyId, bounded);
-            case LANDLORD -> chargeRepo.findPageByPropertyOwner(userId, propertyId, bounded);
+            case ESTATE_MANAGER -> chargeRepo.findPageByEstateScope(userId, true, PMSRole.ESTATE_MANAGER.name(), null, propertyId, bounded);
             case SUPER_ADMIN -> chargeRepo.findAllActive(propertyId, bounded);
             default -> userDao.hasPermission(Permission.VIEW_SERVICE_CHARGE)
-                    ? chargeRepo.findPageByPropertyStaff(userId, propertyId, bounded)
+                    ? chargeRepo.findPageByEstateScope(userId, false, userDao.getActiveRole().name(), access.selectedAssignmentId(), propertyId, bounded)
                     : Page.empty(bounded);
         };
     }
 
     private Property requireManagedProperty(long propertyId, long userId) {
-        PMSRole role = userDao.getActiveRole();
-        return (role == PMSRole.SUPER_ADMIN
-                ? propertyRepo.findById(propertyId).filter(Property::isActive)
-                : role == PMSRole.LANDLORD
-                    ? propertyRepo.findByIdAndCreatedByAndActiveTrue(propertyId, userId)
-                    : userDao.hasPermission(Permission.MANAGE_ESTATE)
-                        ? propertyRepo.findByIdAndStaffOrOwner(propertyId, userId)
-                        : java.util.Optional.<Property>empty())
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
+        return access.require(propertyId, Permission.MANAGE_ESTATE);
     }
 }

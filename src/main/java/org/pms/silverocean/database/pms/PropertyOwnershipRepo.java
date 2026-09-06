@@ -10,6 +10,13 @@ import java.util.List;
 import java.util.Optional;
 
 public interface PropertyOwnershipRepo extends JpaRepository<PropertyOwnership, Long> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT o FROM PropertyOwnership o WHERE o.id=:id AND o.active")
+    Optional<PropertyOwnership> findActiveForUpdate(long id);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT o FROM PropertyOwnership o WHERE o.unitId=:unitId AND o.active")
+    Optional<PropertyOwnership> findCurrentForUpdate(long unitId);
     boolean existsByPropertyIdAndHomeownerUserIdAndActiveTrue(long propertyId, long homeownerUserId);
     Optional<PropertyOwnership> findBySourceSaleTransactionId(Long saleId);
     Optional<PropertyOwnership> findFirstByUnitIdAndActiveTrue(Long unitId);
@@ -30,7 +37,13 @@ public interface PropertyOwnershipRepo extends JpaRepository<PropertyOwnership, 
             "FROM PropertyOwnership o JOIN Property p ON p.id=o.propertyId " +
             "LEFT JOIN Unit u ON u.id=o.unitId JOIN Users h ON h.id=o.homeownerUserId ";
     String VIEW_FILTER = " AND (:propertyId IS NULL OR o.propertyId=:propertyId) " +
-            "AND (:active IS NULL OR o.active=:active) ORDER BY o.createdOn DESC";
+            "AND (:active IS NULL OR o.active=:active) ORDER BY o.createdOn DESC,o.id DESC";
+
+    @Query(VIEW_SELECT + "WHERE p.active AND p.managementMode=org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE " +
+            "AND ((:owner=true AND p.createdBy=:userId) OR (:owner=false AND EXISTS (SELECT 1 FROM PropertyManager pm " +
+            "WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:assignmentId AND pm.active)))" + VIEW_FILTER)
+    Page<OwnershipView> findPageByEstateScope(long userId, boolean owner, String roleName, Long assignmentId,
+                                             Long propertyId, Boolean active, Pageable pageable);
 
     @Query(VIEW_SELECT + "WHERE o.homeownerUserId=:userId" + VIEW_FILTER)
     Page<OwnershipView> findPageByHomeowner(long userId, Long propertyId, Boolean active, Pageable pageable);

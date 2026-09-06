@@ -243,6 +243,11 @@ public class AccountService {
     }
 
     private List<AccountPropertyDTO> buildPropertyDTOs(PaymentAccount account) {
+        // The platform's own Paystack subscription account uses the protected
+        // host integration key. It is not a merchant split-payment subaccount.
+        if (account.getChannel() == PaymentChannel.PAYSTACK && account.getCategory() == AccountCategory.SLICKHOOD) {
+            return List.of();
+        }
         List<PaymentAccountProperty> storedProps = accountDao.getPropertiesForAccount(account.getId());
 
         return account.getChannel().getAccountProperties().stream().map(def -> {

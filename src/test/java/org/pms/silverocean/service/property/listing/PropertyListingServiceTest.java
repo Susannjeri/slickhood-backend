@@ -109,10 +109,29 @@ class PropertyListingServiceTest {
         verify(limiter).check(startsWith("property-inquiry-client:"),eq(25));
     }
 
+    @Test void estateHomeCannotBePublishedAsARental() {
+        Unit unit=eligibleUnit(); unit.setLeaseMode("SERVICE_CHARGE");
+        unit.getProperty().setManagementMode(PMSPropertyManagementMode.SERVICE_CHARGE);
+        when(units.findAdvertisableByUser(7L,42L)).thenReturn(Optional.of(unit));
+        assertThatThrownBy(() -> service.publish(7L,new PropertyListingModels.PublishRequest(true,null,null)))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("estate homes");
+        verify(units,never()).save(any());
+    }
+
+    @Test void reservedOrCompletedSaleCannotBeRepublished() {
+        Unit unit=eligibleUnit(); unit.setLeaseMode("SALE"); unit.getProperty().setManagementMode(PMSPropertyManagementMode.SALE);
+        when(units.findAdvertisableByUser(7L,42L)).thenReturn(Optional.of(unit));
+        when(listings.hasReservedOrCompletedSale(7L)).thenReturn(true);
+        assertThatThrownBy(() -> service.publish(7L,new PropertyListingModels.PublishRequest(true,null,null)))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("reserved or completed");
+        verify(units,never()).save(any());
+    }
+
     private Unit eligibleUnit() {
         Property property=new Property(); property.setId(3L); property.setName("Atlas Court"); property.setAddress("Kilimani, Nairobi, Kenya");
         property.setManagementMode(PMSPropertyManagementMode.RENTAL); property.setActive(true);
         Unit unit=new Unit(); unit.setId(7L); unit.setPropertyId(3L); unit.setProperty(property); unit.setUnitType("TWO_BEDROOM");
+        unit.setLeaseMode("RENT");
         unit.setPrice(85000); unit.setCurrency("KES"); unit.setActive(true); unit.setImagePath("properties/3/units/7"); unit.setThumbnail("cover.jpg");
         return unit;
     }

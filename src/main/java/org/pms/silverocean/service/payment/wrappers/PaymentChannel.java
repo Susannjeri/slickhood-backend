@@ -31,7 +31,7 @@ public enum PaymentChannel {
             new AccountPropertyDefinition(PaymentPropertyKeys.BANK_ACCOUNT, "pesalink.bank.account", "pesalink.bank.account.description", false, true),
             new AccountPropertyDefinition(PaymentPropertyKeys.BANK_CODE,    "pesalink.bank.code",    "pesalink.bank.code.description",    false, true)
     )),
-    PAYSTACK("Paystack", "Card and mobile money payments routed to a landlord subaccount", List.of(
+    PAYSTACK("Paystack", "Card and mobile money payments: SlickHood subscriptions or a verified recipient subaccount", List.of(
             new AccountPropertyDefinition(PaymentPropertyKeys.SUBACCOUNT_CODE, "paystack.subaccount.code", "paystack.subaccount.code.description", true, true)
     ));
 
@@ -46,8 +46,12 @@ public enum PaymentChannel {
     }
 
     public static PaymentChannel fromName(String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("Payment channel is required");
+        }
         return Arrays.stream(values())
-                .filter(cfg -> cfg.getName().equalsIgnoreCase(value))
+                .filter(cfg -> cfg.name().equalsIgnoreCase(value)
+                        || cfg.getName().equalsIgnoreCase(value))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Invalid param name: " + value));
     }

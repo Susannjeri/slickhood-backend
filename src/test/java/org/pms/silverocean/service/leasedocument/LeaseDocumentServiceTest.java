@@ -43,13 +43,16 @@ class LeaseDocumentServiceTest {
     @Mock SalesService salesService;
     @Mock DocumentBrandingService brandingService;
     @Mock PropertyOwnershipRepo ownershipRepo;
+    @Mock org.pms.silverocean.service.estate.EstateAccessService estateAccess;
+    @Mock org.pms.silverocean.service.sales.SalesAccessService salesAccess;
     LeaseDocumentService service;
     Lease lease;
 
     @BeforeEach void setup() {
         service = new LeaseDocumentService(documents, templates, leases, properties, units, users, renderer, email,
-                leaseService, sales, salesService, brandingService, ownershipRepo);
+                leaseService, sales, salesService, brandingService, ownershipRepo, estateAccess, salesAccess);
         lease = new Lease(); lease.setId(11L); lease.setTenantId(12L); lease.setLeaseMode("RENT");
+        lenient().when(leases.getLeaseForUpdate(11L)).thenReturn(Optional.of(lease));
         lease.setPrice(45_000); lease.setCurrency("KES"); lease.setMoveInDate(LocalDate.of(2026, 10, 1)); lease.setActive(true);
         UnitTenant tenancy = new UnitTenant(); tenancy.setId(12L); tenancy.setUnitId(13L); tenancy.setUserId(14L); tenancy.setActive(true);
         Unit unit = new Unit(); unit.setId(13L); unit.setPropertyId(15L); unit.setRef("A-1"); unit.setActive(true);
@@ -98,7 +101,7 @@ class LeaseDocumentServiceTest {
         SaleTransaction sale = new SaleTransaction(); sale.setId(91L); sale.setPropertyId(15L); sale.setUnitId(13L);
         sale.setBuyerUserId(14L); sale.setStatus(SaleStatus.OFFERED); sale.setOfferAmount(new BigDecimal("14500000"));
         sale.setCurrency("KES"); sale.setActive(true);
-        when(sales.findByIdAndPropertyAccess(91L, 16L)).thenReturn(Optional.of(sale));
+        when(sales.findByIdForUpdate(91L)).thenReturn(Optional.of(sale));
         when(documents.existsOpenForSale(91L, LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER)).thenReturn(false);
         when(templates.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER)).thenReturn(Optional.of(template));
         when(renderer.renderInline(any(), any())).thenReturn("<p>Property Sale Letter of Offer</p>");
@@ -118,9 +121,10 @@ class LeaseDocumentServiceTest {
         LeaseDocument agreement = new LeaseDocument(); agreement.setId(41L); agreement.setLeaseId(11L);
         agreement.setDocumentType(LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT);
         agreement.setStatus(LeaseDocumentStatus.PARTIALLY_SIGNED); agreement.setIssuerUserId(16L);
+        agreement.setAmount(new BigDecimal("45000")); agreement.setCurrency("KES"); agreement.setEffectiveDate(lease.getMoveInDate());
         agreement.setRecipientUserId(14L); agreement.setIssuerSignedAt(LocalDateTime.now().minusMinutes(1)); agreement.setActive(true);
         when(users.getUserId()).thenReturn(14L);
-        when(documents.findAccessible(41L, 14L)).thenReturn(Optional.of(agreement));
+        when(documents.findAccessibleForUpdate(41L, 14L)).thenReturn(Optional.of(agreement));
         when(documents.save(agreement)).thenReturn(agreement);
 
         LeaseDocumentDTO result = service.sign(41L);
@@ -136,8 +140,11 @@ class LeaseDocumentServiceTest {
         offer.setStatus(LeaseDocumentStatus.PARTIALLY_SIGNED); offer.setIssuerUserId(16L);
         offer.setRecipientUserId(14L); offer.setIssuerSignedAt(LocalDateTime.now().minusMinutes(1));
         offer.setAmount(new BigDecimal("14500000")); offer.setActive(true);
+        offer.setCurrency("KES"); offer.setUnitId(13L); offer.setResponseDueDate(LocalDate.now().plusDays(7));
+        SaleTransaction sale = new SaleTransaction(); sale.setId(91L); sale.setUnitId(13L); sale.setBuyerUserId(14L); sale.setStatus(SaleStatus.OFFERED); sale.setOfferAmount(offer.getAmount()); sale.setCurrency("KES");
+        when(sales.findByIdForUpdate(91L)).thenReturn(Optional.of(sale));
         when(users.getUserId()).thenReturn(14L);
-        when(documents.findAccessible(42L, 14L)).thenReturn(Optional.of(offer));
+        when(documents.findAccessibleForUpdate(42L, 14L)).thenReturn(Optional.of(offer));
         when(documents.save(offer)).thenReturn(offer);
 
         LeaseDocumentDTO result = service.sign(42L);
@@ -149,12 +156,130 @@ class LeaseDocumentServiceTest {
     @Test void legallyUnreviewedStarterTemplateCannotBeIssued() {
         LeaseDocument draft = new LeaseDocument(); draft.setId(51L); draft.setStatus(LeaseDocumentStatus.DRAFT);
         draft.setIssuerUserId(16L); draft.setRecipientUserId(14L); draft.setLegalReviewRequired(true); draft.setActive(true);
-        when(documents.findAccessible(51L, 16L)).thenReturn(Optional.of(draft));
+        when(documents.findAccessibleForUpdate(51L, 16L)).thenReturn(Optional.of(draft));
 
         assertThrows(PMSCustomException.class, () -> service.issue(51L));
 
         verifyNoInteractions(email);
         verify(documents, never()).save(draft);
+    }
+
+    @Test void landlordCannotSignBeforeTenant() {
+        LeaseDocument d = rentalDraft(LeaseDocumentStatus.ISSUED);
+        assertThrows(PMSCustomException.class, () -> service.sign(d.getId()));
+        verify(documents, never()).save(any());
+    }
+
+    @Test void repeatedSignatureRetainsOriginalTimestamp() {
+        LeaseDocument d = rentalDraft(LeaseDocumentStatus.PARTIALLY_SIGNED);
+        d.setRecipientSignedAt(LocalDateTime.now().minusDays(1));
+        LocalDateTime first = d.getRecipientSignedAt();
+        when(users.getUserId()).thenReturn(14L);
+        when(documents.findAccessibleForUpdate(66L, 14L)).thenReturn(Optional.of(d));
+        assertEquals(first, service.sign(66L).recipientSignedAt());
+        verify(documents, never()).save(any());
+    }
+
+    @Test void issuerCanCancelUnissuedDraftWithoutDeletingSnapshot() {
+        LeaseDocument d = rentalDraft(LeaseDocumentStatus.DRAFT);
+        d.setRenderedHtml("original terms");
+        when(documents.save(d)).thenReturn(d);
+        assertEquals(LeaseDocumentStatus.CANCELLED, service.cancelDraft(66L).status());
+        assertEquals("original terms", d.getRenderedHtml());
+        verify(documents, never()).delete(any());
+    }
+
+    @Test void issuedAgreementCannotBeCancelledAsDraft() {
+        rentalDraft(LeaseDocumentStatus.ISSUED);
+        assertThrows(PMSCustomException.class, () -> service.cancelDraft(66L));
+    }
+
+    @Test void expiredOfferCannotBeSigned() {
+        LeaseDocument d = rentalDraft(LeaseDocumentStatus.ISSUED);
+        d.setDocumentType(LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER); d.setSaleId(91L); d.setUnitId(13L);
+        d.setResponseDueDate(LocalDate.now().minusDays(1));
+        SaleTransaction sale = new SaleTransaction(); sale.setBuyerUserId(14L); sale.setUnitId(13L); sale.setStatus(SaleStatus.OFFERED);
+        when(sales.findByIdForUpdate(91L)).thenReturn(Optional.of(sale));
+        assertThrows(PMSCustomException.class, () -> service.sign(66L));
+        verifyNoInteractions(salesService);
+    }
+
+    @Test void changedLeaseTermsCannotBeSignedFromStaleSnapshot() {
+        LeaseDocument d = rentalDraft(LeaseDocumentStatus.PARTIALLY_SIGNED); d.setRecipientSignedAt(LocalDateTime.now());
+        lease.setPrice(99_000);
+        assertThrows(PMSCustomException.class, () -> service.sign(66L));
+    }
+
+    @Test void wrongPartyCannotReadDocument() throws Exception {
+        when(documents.findAccessible(999L, 16L)).thenReturn(Optional.empty());
+        assertThrows(PMSCustomException.class, () -> service.renderPdf(999L, new java.io.ByteArrayOutputStream()));
+        verifyNoInteractions(renderer);
+    }
+
+    @Test void estateManagerCanCreateAgreementForExactCurrentOwnership() {
+        lenient().when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        Property property = properties.findById(15L).orElseThrow();
+        when(estateAccess.require(eq(15L), anyString())).thenReturn(property);
+        PropertyOwnership ownership = new PropertyOwnership(); ownership.setId(80L); ownership.setPropertyId(15L);
+        ownership.setHomeownerUserId(14L); ownership.setUnitId(13L); ownership.setOwnershipStart(LocalDate.now().minusDays(10)); ownership.setActive(true);
+        when(ownershipRepo.findAllByPropertyIdAndActiveTrue(15L)).thenReturn(List.of(ownership));
+        when(ownershipRepo.findActiveForUpdate(80L)).thenReturn(Optional.of(ownership));
+        units.findById(13L).orElseThrow().setLeaseMode("SERVICE_CHARGE");
+        LeaseDocumentTemplate template = new LeaseDocumentTemplate(); template.setId(22L); template.setVersion(1);
+        template.setBodyHtml("<p>Estate</p>"); template.setContentSha256(DocumentTemplateIntegrity.sha256(template.getBodyHtml())); template.setLegalReviewRequired(true);
+        when(templates.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT)).thenReturn(Optional.of(template));
+        when(documents.save(any())).thenAnswer(i -> i.getArgument(0));
+        LeaseDocumentDTO d = service.generate(new GenerateLeaseDocumentRequest(null,null,15L,14L,
+                LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT,LocalDate.now(),null,null,"KES",null,80L));
+        assertEquals(13L,d.unitId());
+        verifyNoInteractions(salesService);
+    }
+
+    @Test void endedHomeownerCannotSignOldAgreement() {
+        LeaseDocument d = rentalDraft(LeaseDocumentStatus.ISSUED); d.setDocumentType(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT);
+        d.setPropertyId(15L); d.setUnitId(13L);
+        when(ownershipRepo.findAllByPropertyIdAndActiveTrue(15L)).thenReturn(List.of());
+        assertThrows(PMSCustomException.class, () -> service.sign(66L));
+    }
+
+    @Test void reacquiringAUnitDoesNotReviveItsPreviousUnsignedAgreement() {
+        LeaseDocument d = rentalDraft(LeaseDocumentStatus.ISSUED);
+        d.setDocumentType(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT);
+        // Even an old agreement with a future effective date belongs to the old ownership record.
+        d.setEffectiveDate(LocalDate.now().plusDays(10));
+        d.setCreatedOn(java.time.ZonedDateTime.now().minusYears(1));
+        PropertyOwnership current = new PropertyOwnership(); current.setId(81L); current.setPropertyId(15L);
+        current.setUnitId(13L); current.setHomeownerUserId(14L); current.setActive(true);
+        current.setOwnershipStart(LocalDate.now().minusDays(1));
+        current.setCreatedOn(java.time.ZonedDateTime.now().minusDays(1));
+        when(ownershipRepo.findAllByPropertyIdAndActiveTrue(15L)).thenReturn(List.of(current));
+        when(ownershipRepo.findActiveForUpdate(81L)).thenReturn(Optional.of(current));
+        assertThrows(PMSCustomException.class, () -> service.sign(66L));
+        verify(documents, never()).save(any());
+    }
+
+    @Test void currentHomeownerAgreementCanBeSignedWithoutCreatingATenancy() {
+        LeaseDocument d = rentalDraft(LeaseDocumentStatus.ISSUED);
+        d.setDocumentType(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT);
+        d.setEffectiveDate(LocalDate.now()); d.setCreatedOn(java.time.ZonedDateTime.now().minusDays(1));
+        PropertyOwnership current = new PropertyOwnership(); current.setId(81L); current.setPropertyId(15L);
+        current.setUnitId(13L); current.setHomeownerUserId(14L); current.setActive(true);
+        current.setOwnershipStart(LocalDate.now().minusDays(2)); current.setCreatedOn(java.time.ZonedDateTime.now().minusDays(2));
+        when(ownershipRepo.findAllByPropertyIdAndActiveTrue(15L)).thenReturn(List.of(current));
+        when(ownershipRepo.findActiveForUpdate(81L)).thenReturn(Optional.of(current));
+        when(documents.save(d)).thenReturn(d);
+        assertEquals(LeaseDocumentStatus.PARTIALLY_SIGNED, service.sign(66L).status());
+        assertNotNull(d.getIssuerSignedAt());
+        verifyNoInteractions(leaseService, salesService);
+    }
+
+    private LeaseDocument rentalDraft(LeaseDocumentStatus status) {
+        LeaseDocument d = new LeaseDocument(); d.setId(66L); d.setLeaseId(11L); d.setPropertyId(15L); d.setUnitId(13L);
+        d.setDocumentType(LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT); d.setStatus(status);
+        d.setIssuerUserId(16L); d.setRecipientUserId(14L); d.setAmount(new BigDecimal("45000")); d.setCurrency("KES");
+        d.setEffectiveDate(lease.getMoveInDate()); d.setActive(true);
+        lenient().when(documents.findAccessibleForUpdate(66L,16L)).thenReturn(Optional.of(d));
+        return d;
     }
 
     @Test void recordsManualApprovalAgainstTheExactTemplateContent() {

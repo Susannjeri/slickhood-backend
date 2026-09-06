@@ -90,7 +90,7 @@ public class LeaseController extends OutputStreamErrorHandler {
     @GetMapping("/sign")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SIGN_LEASE)")
     public ResponseEntity<ResponseDTO> acceptLeaseLegacy(@RequestParam long leaseId) {
-        return acceptLease(leaseId);
+        return ResponseEntity.status(405).header(HttpHeaders.ALLOW, "POST").build();
     }
 
     @PostMapping("/message")

@@ -11,6 +11,11 @@ import java.util.Optional;
 public interface PropertyAccountRepo extends JpaRepository<PropertyAccount, Long> {
     long countByPropertyIdAndActiveTrue(long propertyId);
 
+    @Query("SELECT COUNT(pa) FROM PropertyAccount pa JOIN PaymentAccount a ON a.id=pa.accountId " +
+            "JOIN Property p ON p.id=pa.propertyId WHERE pa.propertyId=:propertyId AND pa.active " +
+            "AND a.active AND a.verified AND a.category=:category AND a.createdBy=p.createdBy")
+    long countVerifiedOperatingAccounts(long propertyId, AccountCategory category);
+
     @Query("SELECT pa FROM PropertyAccount pa WHERE pa.accountId=:accountId and pa.propertyId=:propertyId and pa.active")
     Optional<PropertyAccount> findPropertyAccountByIdAndProperty(long accountId, long propertyId);
 

@@ -16,6 +16,8 @@ import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.config.ConfigService;
+import org.pms.silverocean.service.config.ConfigDTO;
+import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
 import org.pms.silverocean.service.property.wrappers.DuplicateUnitJobDTO;
@@ -34,6 +36,7 @@ import java.io.ByteArrayOutputStream;
 import java.lang.reflect.Method;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.LongSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -54,6 +57,10 @@ class UnitCreationHardeningTest {
     private UserDao users;
     private GarageService storage;
     private UnitTypeDao unitTypes;
+    private ConfigService configs;
+    private PropertyRoutines routines;
+    private org.pms.silverocean.service.subscription.SubscriptionEntitlementService entitlements;
+    private UnitReportDao unitReports;
     private PropertyService service;
 
     @BeforeEach
@@ -64,16 +71,16 @@ class UnitCreationHardeningTest {
         storage = mock(GarageService.class);
         unitTypes = mock(UnitTypeDao.class);
         I18NService i18n = mock(I18NService.class);
-        var entitlements = mock(org.pms.silverocean.service.subscription.SubscriptionEntitlementService.class);
+        entitlements = mock(org.pms.silverocean.service.subscription.SubscriptionEntitlementService.class);
         when(entitlements.sessionBusinessProduct()).thenReturn(
                 org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD);
         when(entitlements.subscriptionOwnerUserId()).thenReturn(77L);
         when(i18n.getLocalizedMessage(any(ResponseCode.class))).thenAnswer(call -> call.getArgument(0).toString());
         service = new PropertyService(properties, units, unitTypes, users, i18n,
-                mock(ParamDao.class), mock(AuditLogService.class), mock(ConfigService.class),
-                mock(PMSMeasurementUnitsConverter.class), mock(PropertyRoutines.class), storage,
+                mock(ParamDao.class), mock(AuditLogService.class), configs = mock(ConfigService.class),
+                mock(PMSMeasurementUnitsConverter.class), routines = mock(PropertyRoutines.class), storage,
                 mock(ThreadPoolBeans.class), mock(PaymentPlatformFactory.class), mock(AccountDao.class),
-                entitlements, mock(UnitReportDao.class),
+                entitlements, unitReports = mock(UnitReportDao.class),
                 mock(org.pms.silverocean.service.teamaccess.WorkspaceSelectionService.class));
         ReflectionTestUtils.setField(service, "imageWidth", 300);
         ReflectionTestUtils.setField(service, "imageHeight", 200);
@@ -166,6 +173,38 @@ class UnitCreationHardeningTest {
         assertThat(response.isSuccess()).isFalse();
         assertThat(response.getCode()).isEqualTo(ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT.getCode());
         verify(units, never()).findByIdAndStaffOrOwner(31L, 77L);
+    }
+
+    @Test
+    void validBulkCopyCreatesAQueuedJobWithAnAuditableReservation() {
+        when(configs.getConfigByName(PMSConfigs.MAX_UNIT_DUPLICATE_COUNT))
+                .thenReturn(() -> new ConfigDTO(1L, PMSConfigs.MAX_UNIT_DUPLICATE_COUNT.getName(), null, 49, false));
+        Unit source = new Unit();
+        source.setId(31L);
+        source.setPropertyId(9L);
+        source.setRef("A-01");
+        source.setLeaseMode(PMSLeaseMode.RENT.name());
+        when(units.findByIdAndStaffOrOwner(31L, 77L)).thenReturn(Optional.of(source));
+        when(properties.findByIdAndStaffOrOwner(9L, 77L)).thenReturn(Optional.of(property(PMSPropertyManagementMode.RENTAL)));
+        when(unitReports.countUnitsByOwner(77L)).thenReturn(1);
+        when(units.countPendingUnitCopiesByPropertyOwner(77L)).thenReturn(2L);
+        doAnswer(call -> {
+            ((LongSupplier) call.getArgument(2)).getAsLong();
+            return null;
+        }).when(entitlements).requireAvailableQuota(any(), eq("UNITS"), any(), eq(12L));
+        doAnswer(call -> {
+            BulkUnitJob job = call.getArgument(0);
+            job.setId(901L);
+            return null;
+        }).when(units).createBulkUnitJob(any(BulkUnitJob.class));
+
+        var response = service.createDuplicateJob(31L, 12);
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(response.getData()).hasSize(1);
+        assertThat(response.getData().get(0).toString()).contains("jobId=901", "count=12", "status=QUEUED");
+        verify(units).countPendingUnitCopiesByPropertyOwner(77L);
+        verify(routines).scheduleDuplicateUnitJob(eq(901L), any());
     }
 
     @Test

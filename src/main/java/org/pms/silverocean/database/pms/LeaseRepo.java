@@ -21,6 +21,18 @@ import java.util.List;
 import java.time.LocalDate;
 
 public interface LeaseRepo extends JpaRepository<Lease, Long> {
+    @Query("SELECT new org.pms.silverocean.service.lease.wrappers.LeaseDTO(l, tenant.fullName, signer.fullName) FROM Lease l " +
+            "JOIN UnitTenant ut ON ut.id=l.tenantId JOIN Unit u ON u.id=ut.unitId JOIN Property p ON p.id=u.propertyId " +
+            "JOIN Users tenant ON tenant.id=ut.userId LEFT JOIN Users signer ON signer.id=l.signedByManagerId " +
+            "WHERE l.active AND ut.active AND u.active AND p.active AND l.leaseMode='RENT' " +
+            "AND p.managementMode=org.pms.silverocean.service.property.PMSPropertyManagementMode.RENTAL " +
+            "AND (:roleName='SUPER_ADMIN' OR (:roleName='TENANT' AND ut.userId=:userId) OR (:roleName='LANDLORD' AND p.createdBy=:userId) " +
+            "OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active " +
+            "AND pm.roleName=:roleName AND pm.inviteId=:assignmentId)) ORDER BY l.createdOn DESC,l.id DESC")
+    Page<LeaseDTO> findScopedLeases(long userId, String roleName, Long assignmentId, Pageable pageable);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT l FROM Lease l WHERE l.id=:id AND l.active")
+    Optional<Lease> findActiveForUpdate(long id);
     @Query("SELECT l.id AS leaseId,u.propertyId AS propertyId,u.id AS unitId,u.ref AS unitRef,ut.userId AS tenantUserId," +
             "l.moveInDate AS moveInDate,l.moveOutDate AS moveOutDate,l.signed AS signed,l.selfRenew AS selfRenew," +
             "l.noticePeriodInMonths AS noticePeriodInMonths,l.currency AS currency,l.price AS price " +

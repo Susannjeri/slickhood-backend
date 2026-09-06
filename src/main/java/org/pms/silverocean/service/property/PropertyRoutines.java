@@ -105,26 +105,29 @@ public class PropertyRoutines {
     }
 
     public void scheduleDuplicateUnitJob(long bulkJobId, Supplier<DuplicateUnitJobDTO> bulkJob) {
-        if (!scheduledFutures.containsKey(bulkJobId)) {
+        if (createUnitDuplicatePool == null) {
+            // This should only be possible during an incomplete application
+            // startup. Leave the durable job pending so the service recovery
+            // hook can safely retry it after the executor is ready.
+            log.warn("Duplicate-unit executor is not ready; leaving job {} pending", bulkJobId);
+            return;
+        }
+        scheduledFutures.computeIfAbsent(bulkJobId, id -> {
             Runnable createUnitJob = () -> {
                 try {
                     DuplicateUnitJobDTO duplicateUnitJobDTO = bulkJob.get();
                     String localizedMessage = String.format(i18NService.getLocalizedMessage(NotificationType.CREATE_SIMILAR_UNITS_JOB_COMPLETION_EMAIL.getSubject()), bulkJobId, duplicateUnitJobDTO.success() ? "successfully" : "with failures");
                     NotificationDTO notification =
-                            new NotificationDTO(localizedMessage, duplicateUnitJobDTO.email(), NotificationType.EMAIL_OTP);
+                            new NotificationDTO(localizedMessage, duplicateUnitJobDTO.email(), NotificationType.CREATE_SIMILAR_UNITS_JOB_COMPLETION_EMAIL);
                     notificationService.sendNotification(notification);
                 } catch (Exception e) {
-                    log.error("Exception running creat unit bulk job", e);
+                    log.error("Exception running create unit bulk job {}", bulkJobId, e);
                 } finally {
                     scheduledFutures.remove(bulkJobId);
                 }
             };
-
-
-            ScheduledFuture<?> schedule = createUnitDuplicatePool.schedule(createUnitJob, 5, TimeUnit.SECONDS);
-
-            scheduledFutures.put(bulkJobId, schedule);
-        }
+            return createUnitDuplicatePool.schedule(createUnitJob, 5, TimeUnit.SECONDS);
+        });
     }
 
 

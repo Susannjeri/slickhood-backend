@@ -48,6 +48,15 @@ class EstateServiceTest {
     @Mock InvoiceService invoices;
     @Mock NotificationService notifications;
     @Mock I18NService i18n;
+    @Mock org.pms.silverocean.service.teamaccess.WorkspaceSelectionService workspaces;
+    private Property estate() {
+        Property p = new Property(); p.setId(11L); p.setActive(true);
+        p.setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE); return p;
+    }
+    private void member() {
+        var m = new org.pms.silverocean.database.pms.entities.WorkspaceMembership(); m.setId(5L);
+        when(workspaces.selectedMembership(999L)).thenReturn(Optional.of(m));
+    }
 
     private EstateService service;
     private Unit unit;
@@ -55,11 +64,12 @@ class EstateServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new EstateService(ownerships, properties, units, users, charges, invoices, notifications, i18n);
+        service = new EstateService(ownerships, properties, units, users, charges, invoices, notifications, i18n, new EstateAccessService(properties, users, workspaces));
         unit = new Unit();
         unit.setId(77L);
         unit.setPropertyId(11L);
         unit.setActive(true);
+        unit.setLeaseMode("SERVICE_CHARGE");
         homeowner = new Users();
         homeowner.setId(200L);
         homeowner.setActive(true);
@@ -67,13 +77,13 @@ class EstateServiceTest {
 
     @Test
     void homeownerInviteCreatesOwnershipHistoryInsteadOfStaffAccess() {
-        Property property = new Property();
+        Property property = estate();
         property.setId(11L);
         property.setActive(true);
         when(users.findById(homeowner.getId())).thenReturn(Optional.of(homeowner));
         when(units.findAndLockById(unit.getId())).thenReturn(Optional.of(unit));
-        when(properties.findByIdAndStaffOrOwner(unit.getPropertyId(), 999L)).thenReturn(Optional.of(property));
-        when(ownerships.findFirstByUnitIdAndActiveTrue(unit.getId())).thenReturn(Optional.empty());
+        when(properties.findByIdAndHomeownerInviter(unit.getPropertyId(), 999L)).thenReturn(Optional.of(property));
+        when(ownerships.findCurrentForUpdate(unit.getId())).thenReturn(Optional.empty());
 
         service.createOwnershipFromInvite(unit.getId(), homeowner.getId(), 999L);
 
@@ -93,8 +103,8 @@ class EstateServiceTest {
         current.setActive(true);
         when(users.findById(homeowner.getId())).thenReturn(Optional.of(homeowner));
         when(units.findAndLockById(unit.getId())).thenReturn(Optional.of(unit));
-        when(properties.findByIdAndStaffOrOwner(unit.getPropertyId(), 999L)).thenReturn(Optional.of(new Property()));
-        when(ownerships.findFirstByUnitIdAndActiveTrue(unit.getId())).thenReturn(Optional.of(current));
+        when(properties.findByIdAndHomeownerInviter(unit.getPropertyId(), 999L)).thenReturn(Optional.of(estate()));
+        when(ownerships.findCurrentForUpdate(unit.getId())).thenReturn(Optional.of(current));
 
         PropertyOwnership result = service.createOwnershipFromInvite(unit.getId(), homeowner.getId(), 999L);
 
@@ -112,10 +122,11 @@ class EstateServiceTest {
         current.setActive(true);
         when(users.getUserId()).thenReturn(999L);
         when(users.findById(homeowner.getId())).thenReturn(Optional.of(homeowner));
-        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 999L)).thenReturn(Optional.of(new Property()));
-        when(users.getActiveRole()).thenReturn(org.pms.silverocean.service.auth.roles.enums.PMSRole.LANDLORD);
+        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 999L)).thenReturn(Optional.of(estate()));
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        when(users.hasPermission(Permission.MANAGE_ESTATE)).thenReturn(true);
         when(units.findAndLockById(unit.getId())).thenReturn(Optional.of(unit));
-        when(ownerships.findFirstByUnitIdAndActiveTrue(unit.getId())).thenReturn(Optional.of(current));
+        when(ownerships.findCurrentForUpdate(unit.getId())).thenReturn(Optional.of(current));
 
         PMSCustomException error = assertThrows(PMSCustomException.class,
                 () -> service.create(new OwnershipRequest(11L, unit.getId(), homeowner.getId(), existingStart, "TRANSFER")));
@@ -132,10 +143,11 @@ class EstateServiceTest {
         ownership.setHomeownerUserId(homeowner.getId());
         ownership.setActive(true);
         unit.setCurrency("KES");
-        when(ownerships.findById(88L)).thenReturn(Optional.of(ownership));
+        when(ownerships.findActiveForUpdate(88L)).thenReturn(Optional.of(ownership));
         when(users.getUserId()).thenReturn(999L);
-        when(users.getActiveRole()).thenReturn(org.pms.silverocean.service.auth.roles.enums.PMSRole.LANDLORD);
-        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 999L)).thenReturn(Optional.of(new Property()));
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        when(users.hasPermission(Permission.CREATE_SERVICE_CHARGE)).thenReturn(true);
+        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 999L)).thenReturn(Optional.of(estate()));
         when(units.findById(unit.getId())).thenReturn(Optional.of(unit));
 
         PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.createServiceCharge(
@@ -152,10 +164,11 @@ class EstateServiceTest {
         PropertyOwnership ownership = new PropertyOwnership();
         ownership.setId(88L); ownership.setPropertyId(11L); ownership.setHomeownerUserId(200L);
         ownership.setOwnershipStart(LocalDate.now().minusYears(1)); ownership.setActive(true);
-        when(ownerships.findById(88L)).thenReturn(Optional.of(ownership));
+        when(ownerships.findActiveForUpdate(88L)).thenReturn(Optional.of(ownership));
         when(users.getUserId()).thenReturn(999L);
-        when(users.getActiveRole()).thenReturn(org.pms.silverocean.service.auth.roles.enums.PMSRole.LANDLORD);
-        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 999L)).thenReturn(Optional.of(new Property()));
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        when(users.hasPermission(Permission.MANAGE_ESTATE)).thenReturn(true);
+        when(properties.findByIdAndCreatedByAndActiveTrue(11L, 999L)).thenReturn(Optional.of(estate()));
 
         PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.end(88L,
                 new OwnershipTerminationRequest(LocalDate.now().plusDays(1), "Sale completed")));
@@ -169,14 +182,15 @@ class EstateServiceTest {
         when(users.getUserId()).thenReturn(999L);
         when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_OPERATIONS_MANAGER);
         when(users.hasPermission(Permission.MANAGE_ESTATE)).thenReturn(true);
-        when(properties.findByIdAndStaffOrOwner(11L, 999L)).thenReturn(Optional.of(new Property()));
+        member();
+        when(properties.findByIdAndManagerRoleAndInviteId(11L, 999L, "ESTATE_OPERATIONS_MANAGER", -5L)).thenReturn(Optional.of(estate()));
         when(users.findById(homeowner.getId())).thenReturn(Optional.of(homeowner));
         when(units.findAndLockById(unit.getId())).thenReturn(Optional.of(unit));
-        when(ownerships.findFirstByUnitIdAndActiveTrue(unit.getId())).thenReturn(Optional.empty());
+        when(ownerships.findCurrentForUpdate(unit.getId())).thenReturn(Optional.empty());
 
         service.create(new OwnershipRequest(11L, unit.getId(), homeowner.getId(), LocalDate.now(), "ONBOARDING"));
 
-        verify(properties).findByIdAndStaffOrOwner(11L, 999L);
+        verify(properties).findByIdAndManagerRoleAndInviteId(11L, 999L, "ESTATE_OPERATIONS_MANAGER", -5L);
         verify(ownerships).save(any(PropertyOwnership.class));
     }
 
@@ -186,12 +200,13 @@ class EstateServiceTest {
         when(users.getUserId()).thenReturn(999L);
         when(users.getActiveRole()).thenReturn(PMSRole.WORKSPACE_VIEWER);
         when(users.hasPermission(Permission.VIEW_ESTATE)).thenReturn(true);
-        when(ownerships.findPageByPropertyStaff(999L, 11L, true, request))
+        member();
+        when(ownerships.findPageByEstateScope(999L, false, "WORKSPACE_VIEWER", -5L, 11L, true, request))
                 .thenReturn(new PageImpl<>(java.util.List.of(), request, 0));
 
         service.list(request, 11L, true);
 
-        verify(ownerships).findPageByPropertyStaff(999L, 11L, true, request);
+        verify(ownerships).findPageByEstateScope(999L, false, "WORKSPACE_VIEWER", -5L, 11L, true, request);
     }
 
     @Test
@@ -199,7 +214,7 @@ class EstateServiceTest {
         when(users.getUserId()).thenReturn(555L);
         when(users.findById(homeowner.getId())).thenReturn(Optional.of(homeowner));
         when(units.findAndLockById(unit.getId())).thenReturn(Optional.of(unit));
-        when(ownerships.findFirstByUnitIdAndActiveTrue(unit.getId())).thenReturn(Optional.empty());
+        when(ownerships.findCurrentForUpdate(unit.getId())).thenReturn(Optional.empty());
         when(ownerships.save(any(PropertyOwnership.class))).thenAnswer(call -> call.getArgument(0));
 
         PropertyOwnership ownership = service.transferFromSale(11L, unit.getId(), homeowner.getId(), 91L);
@@ -224,16 +239,16 @@ class EstateServiceTest {
         verify(ownerships, never()).save(any());
     }
     @Test
-    void landlordServiceChargesRemainPropertyScopedAndPaged() {
+    void estateOwnerServiceChargesRemainPropertyScopedAndPaged() {
         PageRequest request = PageRequest.of(0, 25);
         when(users.getUserId()).thenReturn(999L);
-        when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
-        when(charges.findPageByPropertyOwner(999L, 11L, request))
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        when(charges.findPageByEstateScope(999L, true, "ESTATE_MANAGER", null, 11L, request))
                 .thenReturn(new PageImpl<>(java.util.List.of(), request, 0));
 
         service.listServiceCharges(request, 11L);
 
-        verify(charges).findPageByPropertyOwner(999L, 11L, request);
+        verify(charges).findPageByEstateScope(999L, true, "ESTATE_MANAGER", null, 11L, request);
     }
 
     @Test
@@ -242,11 +257,75 @@ class EstateServiceTest {
         when(users.getUserId()).thenReturn(999L);
         when(users.getActiveRole()).thenReturn(PMSRole.PROPERTY_ACCOUNTANT);
         when(users.hasPermission(Permission.VIEW_SERVICE_CHARGE)).thenReturn(true);
-        when(charges.findPageByPropertyStaff(999L, 11L, request))
+        member();
+        when(charges.findPageByEstateScope(999L, false, "PROPERTY_ACCOUNTANT", -5L, 11L, request))
                 .thenReturn(new PageImpl<>(java.util.List.of(), request, 0));
 
         service.listServiceCharges(request, 11L);
 
-        verify(charges).findPageByPropertyStaff(999L, 11L, request);
+        verify(charges).findPageByEstateScope(999L, false, "PROPERTY_ACCOUNTANT", -5L, 11L, request);
+    }
+
+    @Test
+    void estateOwnerSeesOwnRegistryWithoutAnEmployeeRow() {
+        var page = PageRequest.of(0, 25);
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        service.list(page, 11L, true);
+        verify(ownerships).findPageByEstateScope(999L, true, "ESTATE_MANAGER", null, 11L, true, page);
+    }
+
+    @Test
+    void futureOwnershipCannotRevokeTheCurrentHomeownerEarly() {
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        when(users.hasPermission(Permission.MANAGE_ESTATE)).thenReturn(true);
+        when(properties.findByIdAndCreatedByAndActiveTrue(11L,999L)).thenReturn(Optional.of(estate()));
+        assertThrows(PMSCustomException.class, () -> service.create(new OwnershipRequest(11L,77L,200L,
+                LocalDate.now(org.pms.silverocean.common.PMSUtils.getZoneId()).plusDays(1),"TRANSFER")));
+        verify(ownerships,never()).save(any());
+        verifyNoInvoice();
+    }
+
+    @Test
+    void serviceChargeCannotBillAUnitFromAnotherPropertyOrARental() {
+        PropertyOwnership o = new PropertyOwnership(); o.setId(88L); o.setPropertyId(11L);
+        o.setUnitId(77L); o.setHomeownerUserId(200L); o.setActive(true);
+        when(ownerships.findActiveForUpdate(88L)).thenReturn(Optional.of(o));
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        when(users.hasPermission(Permission.CREATE_SERVICE_CHARGE)).thenReturn(true);
+        when(properties.findByIdAndCreatedByAndActiveTrue(11L,999L)).thenReturn(Optional.of(estate()));
+        when(units.findById(77L)).thenReturn(Optional.of(unit));
+        var request = new ServiceChargeRequest(88L,new BigDecimal("1000.00"),"KES",LocalDate.now(),"Security");
+        unit.setPropertyId(12L);
+        assertThrows(PMSCustomException.class, () -> service.createServiceCharge(request));
+        unit.setPropertyId(11L); unit.setLeaseMode("RENT");
+        assertThrows(PMSCustomException.class, () -> service.createServiceCharge(request));
+        verifyNoInvoice();
+    }
+
+    @Test
+    void estateAccountantCreatesInvoiceForCurrentHomeowner() {
+        PropertyOwnership o = new PropertyOwnership(); o.setId(88L); o.setPropertyId(11L);
+        o.setUnitId(77L); o.setHomeownerUserId(200L); o.setActive(true);
+        when(ownerships.findActiveForUpdate(88L)).thenReturn(Optional.of(o));
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.PROPERTY_ACCOUNTANT);
+        when(users.hasPermission(Permission.CREATE_SERVICE_CHARGE)).thenReturn(true);
+        member();
+        when(properties.findByIdAndManagerRoleAndInviteId(11L,999L,"PROPERTY_ACCOUNTANT",-5L)).thenReturn(Optional.of(estate()));
+        unit.setCurrency("KES"); when(units.findById(77L)).thenReturn(Optional.of(unit));
+        PMSInvoice invoice = new PMSInvoice(); invoice.setId(91L);
+        when(invoices.createPropertyInvoice(77L,200L,java.util.Map.of("Security",1000.0),"SERVICE_CHARGE",LocalDate.now())).thenReturn(invoice);
+        when(charges.save(any())).thenAnswer(call -> call.getArgument(0));
+        var result = service.createServiceCharge(new ServiceChargeRequest(88L,new BigDecimal("1000.00"),"KES",LocalDate.now(),"Security"));
+        assertEquals(91L,result.getInvoiceId()); assertEquals(200L,result.getHomeownerUserId());
+        assertEquals(11L,result.getPropertyId());
+        verify(users,never()).hasPermission(Permission.MANAGE_ESTATE);
+    }
+
+    private void verifyNoInvoice() {
+        org.mockito.Mockito.verifyNoInteractions(invoices);
     }
 }

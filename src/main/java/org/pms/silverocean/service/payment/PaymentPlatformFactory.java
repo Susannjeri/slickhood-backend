@@ -21,7 +21,14 @@ public class PaymentPlatformFactory {
     }
 
     public PaymentPlatform getPlatform(PaymentChannel channel) {
-        PaymentPlatform platform = platforms.get(channel.getName());
+        // Spring bean names are legacy display labels and are not a stable
+        // identifier (for example the M-Pesa bean is named "M-Pesa" while
+        // the channel display label is "M-Pesa Direct Paybill"). Resolve by
+        // the platform's canonical enum instead of the human-facing label.
+        PaymentPlatform platform = platforms.values().stream()
+                .filter(candidate -> candidate.channelType() == channel)
+                .findFirst()
+                .orElse(null);
         if (platform == null || !platform.isActive()) {
             throw new IllegalArgumentException("Unsupported payment type: " + channel.getName());
         }

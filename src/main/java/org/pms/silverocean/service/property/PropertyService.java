@@ -74,6 +74,7 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -267,6 +268,11 @@ public class PropertyService {
             case PROPERTY_SALES -> "PROPERTY_SALES";
             default -> throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
         });
+        // The active business subscription is authoritative; never trust a
+        // client-supplied managementMode to cross into another business area.
+        if (!managementModeAllowed(product, propertyDTO.managementMode())) {
+            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
+        }
         Users user = userDao.getUserObject();
         if (!user.isCompletedProfile()) {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
@@ -372,31 +378,65 @@ public class PropertyService {
 
     @Transactional
     public ResponseDTO createDuplicateJob(long unitId, int count) {
-        if (count < 1 || count > configService.getConfigByName(PMSConfigs.MAX_UNIT_DUPLICATE_COUNT).get().intValue()) {
+        if (count < 1) {
+            return new ResponseDTO(false, ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT));
+        }
+        int maxCount = configService.getConfigByName(PMSConfigs.MAX_UNIT_DUPLICATE_COUNT).get().intValue();
+        if (count > maxCount) {
             return new ResponseDTO(false, ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT));
         }
         var product = subscriptionEntitlements.sessionBusinessProduct();
+        subscriptionEntitlements.requireSessionFeatureIfApplicable(
+                "PROPERTY_RENTALS", "ESTATE_MANAGEMENT", "PROPERTY_SALES");
+        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
+        if (unitFromDb.isEmpty()) {
+            return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
+        }
+        Optional<Property> sourceProperty = propertyDao.findByIdAndStaffOrOwner(
+                unitFromDb.get().getPropertyId(), userDao.getUserId());
+        boolean workflowMatches = false;
+        if (sourceProperty.isPresent()
+                && managementModeAllowed(product, sourceProperty.get().getManagementMode())
+                && StringUtils.isNotBlank(unitFromDb.get().getLeaseMode())) {
+            try {
+                workflowMatches = isLeaseModeCompatible(sourceProperty.get(),
+                        PMSLeaseMode.valueOf(unitFromDb.get().getLeaseMode()));
+            } catch (IllegalArgumentException ignored) {
+                // Legacy/corrupt rows must fail validation cleanly, never take
+                // down the request with a 500 response.
+            }
+        }
+        if (!workflowMatches) {
+            return new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA));
+        }
         long subscriptionOwner = subscriptionEntitlements.subscriptionOwnerUserId();
         subscriptionEntitlements.requireAvailableQuota(product, "UNITS",
-                () -> unitReportDao.countUnitsByOwner(subscriptionOwner), count);
-        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
-        return unitFromDb.map(unit -> {
-            BulkUnitJob bulkUnitJob = new BulkUnitJob();
-            bulkUnitJob.setUnitId(unit.getId());
-            bulkUnitJob.setCount(count);
-            bulkUnitJob.setEmail(userDao.getEmail());
-            bulkUnitJob.setDescription(i18NService.getLocalizedMessage(ResponseCode.CREATE_SIMILAR_UNIT_JOB.getDescription()));
-            bulkUnitJob.setCompleted(false);
-            bulkUnitJob.setCreatedBy(userDao.getUserId());
+                () -> unitReportDao.countUnitsByOwner(subscriptionOwner)
+                        + unitDao.countPendingUnitCopiesByPropertyOwner(subscriptionOwner), count);
 
-            unitDao.createBulkUnitJob(bulkUnitJob);
+        BulkUnitJob bulkUnitJob = new BulkUnitJob();
+        bulkUnitJob.setUnitId(unitFromDb.get().getId());
+        bulkUnitJob.setCount(count);
+        bulkUnitJob.setEmail(userDao.getEmail());
+        bulkUnitJob.setDescription(i18NService.getLocalizedMessage(ResponseCode.CREATE_SIMILAR_UNIT_JOB.getDescription()));
+        bulkUnitJob.setCompleted(false);
+        bulkUnitJob.setCreatedBy(userDao.getUserId());
 
-            propertyRoutines.scheduleDuplicateUnitJob(bulkUnitJob.getId(), () -> runDuplicateJob(bulkUnitJob.getId()));
-            return new ResponseDTO(true, ResponseCode.CREATE_SIMILAR_UNIT_JOB.getCode(),
-                    i18NService.getLocalizedMessage(ResponseCode.CREATE_SIMILAR_UNIT_JOB));
-        }).orElseGet(() -> new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
-                i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND)));
+        unitDao.createBulkUnitJob(bulkUnitJob);
+        if (bulkUnitJob.getId() == null) {
+            log.error("Create similar units did not receive a persisted job id for source unit {}", unitId);
+            throw new PMSCustomException(ResponseCode.GENERAL_FAILURE);
+        }
+
+        propertyRoutines.scheduleDuplicateUnitJob(bulkUnitJob.getId(), () -> runDuplicateJob(bulkUnitJob.getId()));
+        return new ResponseDTO(true, ResponseCode.CREATE_SIMILAR_UNIT_JOB.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.CREATE_SIMILAR_UNIT_JOB),
+                Map.of("jobId", bulkUnitJob.getId(), "sourceUnitId", unitId, "count", count,
+                        "status", "QUEUED"));
 
     }
 
@@ -412,6 +452,25 @@ public class PropertyService {
     public ResponseDTO getPendingUnitCreationJobs() {
         int count = unitDao.countPendingBulkUnitJob(userDao.getUserId());
         return new ResponseDTO(true, ResponseCode.CREATE_SIMILAR_UNITS_JOB_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.CREATE_SIMILAR_UNITS_JOB_LIST), count);
+    }
+
+    public ResponseDTO getUnitCreationJobStatus(long jobId) {
+        Optional<BulkUnitJob> job = unitDao.findUnitCreationJob(jobId, userDao.getUserId());
+        if (job.isEmpty()) {
+            return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
+        }
+        BulkUnitJob value = job.get();
+        boolean failed = value.isCompleted()
+                && Objects.equals(value.getDescription(),
+                i18NService.getLocalizedMessage(ResponseCode.DUPLICATE_UNIT_JOB_FAILED.getDescription()));
+        String status = !value.isCompleted() ? "QUEUED" : failed ? "FAILED" : "COMPLETED";
+        return new ResponseDTO(true, ResponseCode.CREATE_SIMILAR_UNITS_JOB_LIST.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.CREATE_SIMILAR_UNITS_JOB_LIST),
+                Map.of("jobId", value.getId(), "sourceUnitId", value.getUnitId(),
+                        "count", value.getCount(), "completed", value.isCompleted(),
+                        "failed", failed, "status", status,
+                        "description", Objects.toString(value.getDescription(), "")));
     }
 
     @Transactional
@@ -596,6 +655,16 @@ public class PropertyService {
 
         try {
             Property property = propertyFromDb.get();
+            var product = subscriptionEntitlements.sessionBusinessProduct();
+            subscriptionEntitlements.requireFeature(product, switch (product) {
+                case LANDLORD -> "PROPERTY_RENTALS";
+                case ESTATE_MANAGEMENT -> "ESTATE_MANAGEMENT";
+                case PROPERTY_SALES -> "PROPERTY_SALES";
+                default -> throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
+            });
+            if (propertyDTO.managementMode() != null && !managementModeAllowed(product, propertyDTO.managementMode())) {
+                throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
+            }
             property.updateFromDto(propertyDTO);
             if (image != null && image.getSize() > 0) {
                 Optional<ResponseDTO> imageValidationError = validateImage(image);
@@ -610,6 +679,17 @@ public class PropertyService {
         } catch (IOException e) {
             throw new PMSCustomException(ResponseCode.INVALID_IMAGE, e);
         }
+    }
+
+    private boolean managementModeAllowed(org.pms.silverocean.service.subscription.enums.SubscriptionProduct product,
+                                          PMSPropertyManagementMode mode) {
+        if (mode == null) return product == org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD;
+        return switch (product) {
+            case LANDLORD -> mode == PMSPropertyManagementMode.RENTAL;
+            case ESTATE_MANAGEMENT -> mode == PMSPropertyManagementMode.SERVICE_CHARGE;
+            case PROPERTY_SALES -> mode == PMSPropertyManagementMode.SALE;
+            default -> false;
+        };
     }
 
     private Pair<ResponseDTO, Property> validateUnitAndImage(UnitDTO unitDTO, MultipartFile image) {
@@ -633,6 +713,9 @@ public class PropertyService {
     }
 
     private boolean isLeaseModeCompatible(Property property, PMSLeaseMode leaseMode) {
+        if (property == null || property.getManagementMode() == null || leaseMode == null) {
+            return false;
+        }
         return switch (property.getManagementMode()) {
             case RENTAL -> leaseMode == PMSLeaseMode.RENT;
             case SALE -> leaseMode == PMSLeaseMode.SALE;

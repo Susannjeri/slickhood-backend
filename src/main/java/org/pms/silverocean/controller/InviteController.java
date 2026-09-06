@@ -52,8 +52,10 @@ public class InviteController {
     }
 
     @PostMapping("/email")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_INVITE) " +
-            "and hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SHARE_INVITE)")
+    @PreAuthorize("(hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_INVITE) " +
+            "and hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SHARE_INVITE)) " +
+            "or (#request.inviteType() == T(org.pms.silverocean.service.invites.InviteType).HOMEOWNER " +
+            "and hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_ESTATE))")
     public ResponseEntity<ResponseDTO> createAndEmailOccupantInvite(
             @Valid @RequestBody EmailOccupantInviteDTO request) {
         inviteService.createAndSendEmailInvite(request.inviteType(), request.entityId(), request.email());

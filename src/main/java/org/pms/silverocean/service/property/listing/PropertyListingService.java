@@ -259,6 +259,12 @@ public class PropertyListingService {
     private void validateForPublication(Unit unit) {
         Property property = unit.getProperty();
         if (!unit.isActive() || property == null || !property.isActive()) badRequest("Only active properties and units can be published");
+        String mode = String.valueOf(property.getManagementMode());
+        if (!("RENTAL".equals(mode) && "RENT".equals(unit.getLeaseMode()))
+                && !("SALE".equals(mode) && "SALE".equals(unit.getLeaseMode())))
+            badRequest("Only matching rental or sale properties and units can be listed; estate homes are not rental listings");
+        if ("SALE".equals(mode) && listings.hasReservedOrCompletedSale(unit.getId()))
+            badRequest("A reserved or completed sale cannot be advertised as available");
         if (unit.isOccupied()) badRequest("An occupied unit cannot be published");
         if (unit.getPrice() <= 0 || StringUtils.isBlank(unit.getCurrency())) badRequest("Add a valid price and currency before publishing");
         if (StringUtils.isBlank(unit.getUnitType())) badRequest("Select a unit type before publishing");

@@ -55,17 +55,19 @@ public class SalesService {
     private final LeaseDocumentRepo documents;
     private final PMSInvoiceRepo invoices;
     private final InvoiceService invoiceService;
+    private final SalesAccessService access;
 
     public SalesService(SaleTransactionRepo sales, PropertyRepo properties, UnitRepo units, UserDao users,
                         EstateService estates, SaleMilestoneRepo milestones, InviteService invites,
                         NotificationService notifications, I18NService i18n, LeaseDocumentRepo documents,
-                        PMSInvoiceRepo invoices, InvoiceService invoiceService) {
+                        PMSInvoiceRepo invoices, InvoiceService invoiceService, SalesAccessService access) {
         this.sales = sales; this.properties = properties; this.units = units; this.users = users;
         this.estates = estates; this.milestones = milestones; this.invites = invites;
         this.notifications = notifications; this.i18n = i18n;
         this.documents = documents;
         this.invoices = invoices;
         this.invoiceService = invoiceService;
+        this.access = access;
     }
 
     @Transactional
@@ -76,7 +78,7 @@ public class SalesService {
         Users buyer = resolveBuyer(request);
         String buyerEmail = buyer != null ? buyer.getEmail().trim().toLowerCase(Locale.ROOT)
                 : request.buyerEmail().trim().toLowerCase(Locale.ROOT);
-        if (buyer != null && buyer.getId() == actorId) throw invalid();
+        if (buyer != null && (buyer.getId() == actorId || buyer.getId() == property.getCreatedBy())) throw invalid();
         Unit unit = units.findAndLockById(request.unitId())
                 .filter(candidate -> candidate.isActive() && candidate.getPropertyId() == property.getId()
                         && PMSLeaseMode.SALE.name().equals(candidate.getLeaseMode()))
@@ -102,7 +104,9 @@ public class SalesService {
             case BUYER -> sales.findViewPageByBuyer(userId, bounded).map(SaleView::redactInternalNotes);
             case SUPER_ADMIN -> sales.findAllActiveViews(bounded);
             default -> users.hasPermission(Permission.VIEW_SALE_PIPELINE)
-                    ? sales.findViewPageByPropertyAccess(userId, bounded) : Page.empty(bounded);
+                    ? sales.findViewPageBySalesScope(userId, users.getActiveRole() == PMSRole.SALES_AGENT,
+                        users.getActiveRole().name(), users.getActiveRole() == PMSRole.SALES_AGENT ? null : access.selectedAssignmentId(), bounded)
+                    : Page.empty(bounded);
         };
     }
 
@@ -115,6 +119,11 @@ public class SalesService {
             sale.setOfferAmount(request.offerAmount());
         } else if (request.offerAmount() != null) throw invalid();
         if (request.status() == SaleStatus.CANCELLED && StringUtils.isBlank(request.notes())) throw invalid();
+        if (request.status() == SaleStatus.CANCELLED && sale.getEscrowInvoiceId() != null
+                && invoices.findById(sale.getEscrowInvoiceId()).filter(PMSInvoice::isActive).isPresent()) {
+            // Do not abandon a collectible or paid invoice. Finance must void/refund it first.
+            throw invalidTransition();
+        }
         requireMilestones(sale, request.status()); transition(sale, request.status());
         if (request.notes() != null) sale.setNotes(StringUtils.trimToNull(request.notes()));
         if (request.status() == SaleStatus.COMPLETED) {
@@ -147,7 +156,7 @@ public class SalesService {
         }
 
         PMSInvoice invoice = invoiceService.createSaleInvoice(sale.getUnitId(), sale.getBuyerUserId(),
-                sale.getSalesAgentUserId(), request.paymentAccountId(),
+                requireSaleProperty(sale.getPropertyId(), users.getUserId()).getCreatedBy(), request.paymentAccountId(),
                 Map.of("Contractual property sale escrow", request.amount().doubleValue()),
                 LocalDate.now().plusDays(7));
         sale.setEscrowRequiredAmount(request.amount());
@@ -169,18 +178,7 @@ public class SalesService {
             if (request.amount() != null || StringUtils.isNotBlank(request.externalReference())
                     || request.evidenceDocumentId() != null || sale.getEscrowInvoiceId() == null
                     || sale.getEscrowRequiredAmount() == null || sale.getBuyerUserId() == null) throw invalid();
-            verifiedEscrowInvoice = invoices.findByIdForUpdate(sale.getEscrowInvoiceId())
-                    .filter(PMSInvoice::isActive).orElseThrow(this::invalid);
-            BigDecimal invoiceAmount = BigDecimal.valueOf(verifiedEscrowInvoice.getAmount());
-            boolean matchesSale = "SALE".equals(verifiedEscrowInvoice.getBillingType())
-                    && verifiedEscrowInvoice.getPropertyId() == sale.getPropertyId()
-                    && verifiedEscrowInvoice.getUnitId() == sale.getUnitId()
-                    && verifiedEscrowInvoice.getBilledUserId() == sale.getBuyerUserId()
-                    && sale.getCurrency().equalsIgnoreCase(verifiedEscrowInvoice.getCurrency())
-                    && sale.getEscrowRequiredAmount().compareTo(invoiceAmount) == 0;
-            if (!matchesSale || !verifiedEscrowInvoice.isPaid() || verifiedEscrowInvoice.getPendingAmount() > 0) {
-                throw invalidTransition();
-            }
+            verifiedEscrowInvoice = requireFundedEscrow(sale);
         }
         if (request.status() == SaleMilestoneModels.Status.COMPLETED
                 && request.type() != SaleMilestoneModels.Type.ESCROW_FUNDED && request.evidenceDocumentId() == null) throw invalid();
@@ -188,9 +186,13 @@ public class SalesService {
             LeaseDocument evidence = documents.findByIdAndPropertyIdAndUnitIdAndActiveTrue(
                             request.evidenceDocumentId(), sale.getPropertyId(), sale.getUnitId())
                     .orElseThrow(this::invalid);
-            boolean involvedParty = evidence.getIssuerUserId() == sale.getSalesAgentUserId()
-                    || (sale.getBuyerUserId() != null && evidence.getRecipientUserId() == sale.getBuyerUserId());
-            if (!involvedParty || !Objects.equals(evidence.getSaleId(), sale.getId())) throw invalid();
+            if (!Objects.equals(sale.getBuyerUserId(), evidence.getRecipientUserId())
+                    || !Objects.equals(evidence.getSaleId(), sale.getId())
+                    || evidence.getStatus() != LeaseDocumentStatus.SIGNED) throw invalid();
+            if (request.type() == SaleMilestoneModels.Type.AGREEMENT_SIGNED
+                    && evidence.getDocumentType() != LeaseDocumentType.PROPERTY_SALE_AGREEMENT) throw invalid();
+            if (request.type() != SaleMilestoneModels.Type.AGREEMENT_SIGNED
+                    && (StringUtils.isBlank(request.externalReference()) || StringUtils.isBlank(request.notes()))) throw invalid();
         }
         BigDecimal milestoneAmount = verifiedEscrowInvoice == null ? request.amount()
                 : BigDecimal.valueOf(verifiedEscrowInvoice.getAmount());
@@ -212,14 +214,15 @@ public class SalesService {
         long userId = users.getUserId();
         SaleTransaction sale = sales.findById(saleId).filter(SaleTransaction::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
-        boolean visible = users.getActiveRole() == PMSRole.SUPER_ADMIN || Objects.equals(sale.getBuyerUserId(), userId)
-                || sales.findByIdAndPropertyAccess(saleId, userId).isPresent();
-        if (!visible) throw new PMSCustomException(ResponseCode.SALE_NOT_FOUND);
+        if (users.getActiveRole() == PMSRole.BUYER) {
+            if (!Objects.equals(sale.getBuyerUserId(), userId)) throw new PMSCustomException(ResponseCode.SALE_NOT_FOUND);
+        } else access.require(sale.getPropertyId(), Permission.VIEW_SALE_PIPELINE);
         return milestones.findAllBySaleIdOrderByOccurredAtAsc(saleId, bounded(pageable));
     }
 
     @Transactional
     public SaleTransaction acceptOffer(long id) {
+        if (users.getActiveRole() != PMSRole.BUYER) throw new PMSCustomException(ResponseCode.INVALID_ROLE);
         SaleTransaction sale = sales.findByIdForUpdate(id)
                 .filter(candidate -> Objects.equals(candidate.getBuyerUserId(), users.getUserId()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
@@ -227,7 +230,8 @@ public class SalesService {
                 LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER, LeaseDocumentStatus.SIGNED)) {
             throw invalidTransition();
         }
-        return reserve(sale);
+        // Signing already reserves the offer; retrying acceptance must not report a false failure.
+        return sale.getStatus() == SaleStatus.RESERVED ? sale : reserve(sale);
     }
 
     @Transactional
@@ -264,6 +268,22 @@ public class SalesService {
         if (next == SaleStatus.AGREEMENT) require(sale, SaleMilestoneModels.Type.DUE_DILIGENCE_CHECK);
         if (next == SaleStatus.COMPLETION) { require(sale, SaleMilestoneModels.Type.AGREEMENT_SIGNED); require(sale, SaleMilestoneModels.Type.ESCROW_FUNDED); }
         if (next == SaleStatus.COMPLETED) { require(sale, SaleMilestoneModels.Type.TRANSFER_REGISTERED); require(sale, SaleMilestoneModels.Type.HANDOVER_COMPLETED); }
+        // A historical milestone is not proof that its invoice is still settled today.
+        if (next == SaleStatus.COMPLETION || next == SaleStatus.COMPLETED) requireFundedEscrow(sale);
+    }
+
+    private PMSInvoice requireFundedEscrow(SaleTransaction sale) {
+        if (sale.getEscrowInvoiceId() == null || sale.getEscrowRequiredAmount() == null || sale.getBuyerUserId() == null)
+            throw invalidTransition();
+        PMSInvoice invoice = invoices.findByIdForUpdate(sale.getEscrowInvoiceId())
+                .filter(PMSInvoice::isActive).orElseThrow(this::invalidTransition);
+        boolean matches = "SALE".equals(invoice.getBillingType())
+                && invoice.getPropertyId() == sale.getPropertyId() && invoice.getUnitId() == sale.getUnitId()
+                && invoice.getBilledUserId() == sale.getBuyerUserId()
+                && StringUtils.equalsIgnoreCase(sale.getCurrency(), invoice.getCurrency())
+                && sale.getEscrowRequiredAmount().compareTo(BigDecimal.valueOf(invoice.getAmount())) == 0;
+        if (!matches || !invoice.isPaid() || invoice.getPendingAmount() > 0) throw invalidTransition();
+        return invoice;
     }
 
     private void require(SaleTransaction sale, SaleMilestoneModels.Type type) {
@@ -277,13 +297,7 @@ public class SalesService {
     }
 
     private Property requireSaleProperty(long propertyId, long userId) {
-        PMSRole role = users.getActiveRole();
-        return (role == PMSRole.SUPER_ADMIN
-                ? properties.findById(propertyId).filter(Property::isActive)
-                : role == PMSRole.LANDLORD || role == PMSRole.SALES_AGENT
-                ? properties.findByIdAndCreatedByAndActiveTrue(propertyId, userId)
-                : properties.findByIdAndManagerRole(propertyId, userId, role.name()))
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
+        return access.require(propertyId, Permission.MANAGE_SALE_PIPELINE);
     }
 
     private Users resolveBuyer(CreateSaleRequest request) {

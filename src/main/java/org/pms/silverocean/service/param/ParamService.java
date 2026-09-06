@@ -8,6 +8,7 @@ import org.pms.silverocean.database.pms.entities.PaymentAccountProperty;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
+import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.config.ConfigService;
@@ -116,7 +117,21 @@ public class ParamService {
     }
 
     public String getParamByAccountIdAndType(long accountId, AccountPropertyDefinition prop, long propertyId) {
-        Optional<PaymentAccountProperty> paramFromDbOptional = propertyDao.getParamByAccountIdAndTypeAndPropertyId(accountId, prop.key(), propertyId);
+        Optional<PaymentAccountProperty> paramFromDbOptional;
+        if (propertyId == 0) {
+            // Subscription and marketplace invoices have no property. The
+            // invoice service has already checked its payee and account category;
+            // still require a verified non-property collection account here.
+            var account = accountDao.getAccountById(accountId);
+            if (!account.isActive() || !account.isVerified() || account.getCategory() == null || account.getChannel() == null
+                    || !Set.of(AccountCategory.SLICKHOOD, AccountCategory.MERCHANT, AccountCategory.INSURANCE).contains(account.getCategory())
+                    || !account.getChannel().getAccountProperties().contains(prop)) {
+                throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+            }
+            paramFromDbOptional = accountDao.getProperty(accountId, prop.key());
+        } else {
+            paramFromDbOptional = propertyDao.getParamByAccountIdAndTypeAndPropertyId(accountId, prop.key(), propertyId);
+        }
         if (paramFromDbOptional.isPresent()) {
             return paramFromDbOptional.map(paramFromDb -> prop.encrypted()
                     ? getParamAndUpdateIfEncryptedWithOldKey(paramFromDb)

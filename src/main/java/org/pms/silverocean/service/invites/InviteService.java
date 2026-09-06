@@ -60,9 +60,10 @@ public class InviteService {
     private final I18NService i18NService;
     private final RoleService roleService;
     private final TeamAccessService teamAccessService;
+    private final org.pms.silverocean.service.estate.EstateAccessService estateAccess;
 
 
-    public InviteService(InviteDao inviteDao, PropertyService propertyService, UserDao userDao, ConfigService configService, RoleRepo roleRepo, NotificationService notificationService, I18NService i18NService, RoleService roleService, TeamAccessService teamAccessService) {
+    public InviteService(InviteDao inviteDao, PropertyService propertyService, UserDao userDao, ConfigService configService, RoleRepo roleRepo, NotificationService notificationService, I18NService i18NService, RoleService roleService, TeamAccessService teamAccessService, org.pms.silverocean.service.estate.EstateAccessService estateAccess) {
         this.inviteDao = inviteDao;
         this.propertyService = propertyService;
         this.userDao = userDao;
@@ -72,6 +73,7 @@ public class InviteService {
         this.i18NService = i18NService;
         this.roleService = roleService;
         this.teamAccessService = teamAccessService;
+        this.estateAccess = estateAccess;
     }
 
     public String createInviteLink(InviteType inviteType, Long entityId) {
@@ -122,15 +124,19 @@ public class InviteService {
                 if (entityId == null) {
                     throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
                 }
-                if (inviteType == InviteType.HOMEOWNER && !Set.of(PMSRole.LANDLORD, PMSRole.ESTATE_MANAGER, PMSRole.SUPER_ADMIN)
-                        .contains(userDao.getActiveRole())) {
-                    throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);
-                }
-                ResponseDTO responseDTO = propertyService.getUnitByIDAndLoggedInUser(entityId);
-                if (!responseDTO.isSuccess()) {
+                ResponseDTO responseDTO = inviteType == InviteType.HOMEOWNER
+                        ? propertyService.listUnits(org.springframework.data.domain.PageRequest.of(0,1), Optional.empty(), Optional.empty(), Optional.of(entityId), Optional.empty())
+                        : propertyService.getUnitByIDAndLoggedInUser(entityId);
+                if (!responseDTO.isSuccess() || responseDTO.getData() == null || responseDTO.getData().isEmpty()) {
                     throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
                 }
                 if (responseDTO.getData().get(0) instanceof UnitDTO unitDTO) {
+                    if (inviteType == InviteType.HOMEOWNER) {
+                        estateAccess.require(unitDTO.propertyId(), org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_ESTATE);
+                        if (unitDTO.leaseMode() != org.pms.silverocean.service.lease.wrappers.PMSLeaseMode.SERVICE_CHARGE) {
+                            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+                        }
+                    }
                     if (inviteType == InviteType.TENANT && unitDTO.templateId() == null) {
                         throw new PMSCustomException(ResponseCode.MISSING_LEASE_TEMPLATE);
                     }

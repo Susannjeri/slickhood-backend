@@ -146,6 +146,13 @@ public class UnitController extends BasePropertyController {
         return responseDTO.isSuccess() ? ResponseEntity.ok(responseDTO) : ResponseEntity.status(HttpStatus.CONFLICT).body(responseDTO);
     }
 
+    @GetMapping("/create/similar/status")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_UNIT)")
+    public ResponseEntity<ResponseDTO> getUnitCreationJobStatus(@RequestParam long jobId) {
+        ResponseDTO responseDTO = propertyService.getUnitCreationJobStatus(jobId);
+        return responseDTO.isSuccess() ? ResponseEntity.ok(responseDTO) : ResponseEntity.status(HttpStatus.NOT_FOUND).body(responseDTO);
+    }
+
     @DeleteMapping("/delete")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).DELETE_UNIT)")
     public ResponseEntity<ResponseDTO> deleteUnit(@RequestParam long unitId) {

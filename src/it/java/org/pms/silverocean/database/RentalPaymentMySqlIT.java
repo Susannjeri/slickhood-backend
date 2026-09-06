@@ -100,8 +100,15 @@ class RentalPaymentMySqlIT {
     }
 
     @AfterAll
-    static void stopContainer() {
+    static void stopContainer(org.springframework.context.ApplicationContext context) {
         if (mysql != null) {
+            // Hibernate's create-drop cleanup needs the disposable database alive.
+            // Stopping it first leaves Spring shutdown waiting on dead connections.
+            // Keep the test context active for Spring's after-class listeners.
+            context.getBean(jakarta.persistence.EntityManagerFactory.class).close();
+            if (context.getBean(javax.sql.DataSource.class) instanceof com.zaxxer.hikari.HikariDataSource pool) {
+                pool.close();
+            }
             mysql.stop();
         }
     }
@@ -115,6 +122,133 @@ class RentalPaymentMySqlIT {
     @Autowired PMSPaymentRepo payments;
     @Autowired FinancialJournalRepo journals;
     @Autowired FinancialLedgerLineRepo ledgerLines;
+    @Autowired PropertyOwnershipRepo ownerships;
+    @Autowired EstateServiceChargeRepo estateCharges;
+    @Autowired PropertyManagerRepo propertyManagers;
+    @Autowired PropertyAccountRepo propertyAccounts;
+    @Autowired PaymentAccountRepo paymentAccounts;
+    @Autowired CustomerWorkspaceRepo workspaces;
+    @Autowired WorkspaceMembershipRepo memberships;
+    @Autowired SaleTransactionRepo sales;
+    @Autowired LeaseDocumentRepo documents;
+    @Autowired PropertyListingRepo propertyListings;
+
+    @Test
+    void saleWorkspaceAndDocumentPartyQueriesPreserveIsolationAndExpiry() {
+        Users owner=user("Sale owner","sale-owner@mysql.test","+254700003011");
+        Users buyer=user("Buyer","buyer@mysql.test","+254700003022");
+        Users staff=user("Sales staff","sales-staff@mysql.test","+254700003033");
+        Property property=new Property();property.setName("Sale Court");property.setRef("SALE-IT-1");
+        property.setType("APARTMENT");property.setAddress("Test lane");property.setCurrency("KES");property.setCreatedBy(owner.getId());property.setActive(true);
+        property.setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.SALE);properties.saveAndFlush(property);
+        Unit unit=new Unit();unit.setPropertyId(property.getId());unit.setRef("SALE-01");unit.setUnitType("HOUSE");unit.setLeaseMode("SALE");unit.setCurrency("KES");unit.setActive(true);units.saveAndFlush(unit);
+        SaleTransaction sale=new SaleTransaction();sale.setPropertyId(property.getId());sale.setUnitId(unit.getId());sale.setBuyerUserId(buyer.getId());sale.setSalesAgentUserId(owner.getId());
+        sale.setStatus(org.pms.silverocean.service.sales.SaleStatus.OFFERED);sale.setAskingPrice(java.math.BigDecimal.TEN);sale.setOfferAmount(java.math.BigDecimal.TEN);sale.setCurrency("KES");sale.setActive(true);sales.saveAndFlush(sale);
+        PropertyManager assignment=new PropertyManager();assignment.setPropertyId(property.getId());assignment.setUserId(staff.getId());assignment.setRoleName("SALES_COORDINATOR");assignment.setInviteId(-9L);assignment.setActive(true);propertyManagers.saveAndFlush(assignment);
+        var page=PageRequest.of(0,25);
+        assertEquals(1,sales.findViewPageBySalesScope(owner.getId(),true,"SALES_AGENT",null,page).getTotalElements());
+        assertEquals(1,sales.findViewPageBySalesScope(staff.getId(),false,"SALES_COORDINATOR",-9L,page).getTotalElements());
+        assertEquals(0,sales.findViewPageBySalesScope(staff.getId(),false,"SALES_COORDINATOR",-10L,page).getTotalElements());
+        assertEquals(0,sales.findViewPageBySalesScope(staff.getId(),false,"LISTING_AGENT",-9L,page).getTotalElements());
+        LeaseDocument d=new LeaseDocument();d.setSaleId(sale.getId());d.setPropertyId(property.getId());d.setUnitId(unit.getId());
+        d.setIssuerUserId(owner.getId());d.setRecipientUserId(buyer.getId());d.setTemplateId(1);d.setTemplateVersion(1);d.setName("Test offer");d.setRenderedHtml("<p>Test only</p>");
+        d.setDocumentType(org.pms.silverocean.service.leasedocument.LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER);
+        d.setStatus(org.pms.silverocean.service.leasedocument.LeaseDocumentStatus.ISSUED);d.setResponseDueDate(LocalDate.now().minusDays(1));d.setActive(true);documents.saveAndFlush(d);
+        assertEquals(1,documents.findAccessiblePage(buyer.getId(),null,sale.getId(),null,page).getTotalElements());
+        assertEquals(0,documents.findAccessiblePage(staff.getId(),null,sale.getId(),null,page).getTotalElements());
+        assertTrue(documents.findAccessibleForUpdate(d.getId(),buyer.getId()).isPresent());
+        assertEquals(1,documents.expireSaleOffers(sale.getId(),LocalDate.now()));
+        assertFalse(documents.existsOpenForSale(sale.getId(),d.getDocumentType()));
+        unit.setAdvertise(true); units.saveAndFlush(unit);
+        var listing=new org.pms.silverocean.database.pms.entities.PropertyListing();
+        listing.setUnitId(unit.getId());listing.setPublicSlug("sale-integration-listing");listing.setListingType("SALE");
+        listing.setHeadline("Test sale only");listing.setDescription("Fixture");listing.setStatus("PUBLISHED");
+        listing.setPublisherUserId(owner.getId());listing.setActive(true);listing.setPublishedAt(ZonedDateTime.now());
+        propertyListings.saveAndFlush(listing);
+        assertTrue(propertyListings.findPublicBySlug(listing.getPublicSlug(),ZonedDateTime.now()).isPresent());
+        for (var state : List.of(org.pms.silverocean.service.sales.SaleStatus.RESERVED, org.pms.silverocean.service.sales.SaleStatus.COMPLETED)) {
+            sale.setStatus(state);sales.saveAndFlush(sale);
+            assertTrue(propertyListings.hasReservedOrCompletedSale(unit.getId()));
+            assertTrue(propertyListings.findPublicBySlug(listing.getPublicSlug(),ZonedDateTime.now()).isEmpty());
+            assertEquals(0,propertyListings.searchPublic("SALE",null,null,null,null,ZonedDateTime.now(),page).getTotalElements());
+            assertTrue(propertyListings.findPublicUnitTypes("SALE",ZonedDateTime.now()).isEmpty());
+        }
+        sale.setStatus(org.pms.silverocean.service.sales.SaleStatus.CANCELLED);sales.saveAndFlush(sale);
+        assertTrue(propertyListings.findPublicBySlug(listing.getPublicSlug(),ZonedDateTime.now()).isPresent());
+        property.setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE);properties.saveAndFlush(property);
+        assertTrue(propertyListings.findPublicBySlug(listing.getPublicSlug(),ZonedDateTime.now()).isEmpty());
+    }
+
+    @Test
+    void estateRegistryBillingAndWorkspaceBoundariesUseRealMysqlQueries() {
+        Users owner = user("Estate Owner", "estate-owner@mysql.test", "+254700002011");
+        Users resident = user("Estate Resident", "resident@mysql.test", "+254700002022");
+        Users employee = user("Estate Accountant", "accountant@mysql.test", "+254700002033");
+        Property estate = new Property(); estate.setName("Cedar Court"); estate.setRef("ESTATE-IT-1");
+        estate.setCurrency("KES"); estate.setType("GATED_ESTATE"); estate.setAddress("Test street");
+        estate.setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE);
+        estate.setCreatedBy(owner.getId()); estate.setActive(true); properties.saveAndFlush(estate);
+        Unit home = new Unit(); home.setPropertyId(estate.getId()); home.setRef("H-01");
+        home.setUnitType("HOUSE"); home.setLeaseMode("SERVICE_CHARGE"); home.setCurrency("KES");
+        home.setCreatedBy(owner.getId()); home.setActive(true); units.saveAndFlush(home);
+        PropertyOwnership ownership = new PropertyOwnership(); ownership.setPropertyId(estate.getId());
+        ownership.setUnitId(home.getId()); ownership.setHomeownerUserId(resident.getId());
+        ownership.setOwnershipStart(LocalDate.now().minusMonths(1)); ownership.setActive(true);
+        ownership.setCreatedBy(owner.getId()); ownerships.saveAndFlush(ownership);
+        PMSInvoice invoice = new PMSInvoice(); invoice.setRef("ESTATE-IT-INVOICE");
+        invoice.setPropertyId(estate.getId()); invoice.setUnitId(home.getId());
+        invoice.setBilledUserId(resident.getId()); invoice.setPayToUserId(owner.getId());
+        invoice.setAmount(1500); invoice.setPendingAmount(500); invoice.setCurrency("KES");
+        invoice.setBillingType("SERVICE_CHARGE"); invoice.setDueDate(LocalDate.now().minusDays(1));
+        invoice.setActive(true); invoices.saveAndFlush(invoice);
+        EstateServiceCharge charge = new EstateServiceCharge(); charge.setPropertyId(estate.getId());
+        charge.setUnitId(home.getId()); charge.setHomeownerUserId(resident.getId()); charge.setInvoiceId(invoice.getId());
+        charge.setAmount(new java.math.BigDecimal("1500.00")); charge.setCurrency("KES");
+        charge.setDescription("Security"); charge.setDueDate(invoice.getDueDate()); charge.setActive(true);
+        charge.setCreatedBy(owner.getId()); estateCharges.saveAndFlush(charge);
+        var page = PageRequest.of(0,25);
+        assertEquals(1,ownerships.findPageByEstateScope(owner.getId(),true,"ESTATE_MANAGER",null,estate.getId(),true,page).getTotalElements());
+        assertEquals(1,estateCharges.findPageByEstateScope(owner.getId(),true,"ESTATE_MANAGER",null,estate.getId(),page).getTotalElements());
+        assertEquals(0,ownerships.findPageByEstateScope(employee.getId(),true,"ESTATE_MANAGER",null,null,true,page).getTotalElements());
+        PropertyManager assignment = new PropertyManager(); assignment.setUserId(employee.getId());
+        assignment.setPropertyId(estate.getId()); assignment.setInviteId(-7L);
+        assignment.setRoleName("PROPERTY_ACCOUNTANT"); assignment.setActive(true); propertyManagers.saveAndFlush(assignment);
+        assertEquals(1,ownerships.findPageByEstateScope(employee.getId(),false,"PROPERTY_ACCOUNTANT",-7L,null,true,page).getTotalElements());
+        assertEquals(0,ownerships.findPageByEstateScope(employee.getId(),false,"PROPERTY_ACCOUNTANT",-8L,null,true,page).getTotalElements());
+        assertEquals(0,estateCharges.findPageByEstateScope(employee.getId(),false,"WORKSPACE_VIEWER",-7L,null,page).getTotalElements());
+        assertEquals(0,estateCharges.findPageByEstateScope(employee.getId(),false,"PROPERTY_ACCOUNTANT",-8L,null,page).getTotalElements());
+        assertEquals(500.0,estateCharges.findPageByHomeowner(resident.getId(),null,page).getContent().getFirst().pendingAmount());
+        assertEquals("OVERDUE",estateCharges.findPageByHomeowner(resident.getId(),null,page).getContent().getFirst().status());
+        ownership.setActive(false); ownerships.saveAndFlush(ownership);
+        assertEquals(0,ownerships.findPageByHomeowner(resident.getId(),null,true,page).getTotalElements());
+        assertEquals(1,ownerships.findPageByHomeowner(resident.getId(),null,null,page).getTotalElements());
+        assertEquals(1,estateCharges.findPageByHomeowner(resident.getId(),null,page).getTotalElements(),"Ending ownership preserves access to historical bills");
+
+        PaymentAccount account = new PaymentAccount(); account.setName("Cedar Collections");
+        account.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT);
+        account.setChannel(PaymentChannel.PAYSTACK); account.setCreatedBy(owner.getId()); account.setActive(true);
+        paymentAccounts.saveAndFlush(account);
+        PropertyAccount link = new PropertyAccount(); link.setPropertyId(estate.getId()); link.setAccountId(account.getId()); link.setActive(true); propertyAccounts.saveAndFlush(link);
+        assertEquals(0,propertyAccounts.countVerifiedOperatingAccounts(estate.getId(),account.getCategory()));
+        assertTrue(properties.findByIdAndHomeownerInviter(estate.getId(),owner.getId()).isPresent());
+        assertTrue(properties.findByIdAndHomeownerInviter(estate.getId(),employee.getId()).isEmpty(),"Finance assignment is not homeowner invitation authority");
+        CustomerWorkspace workspace = new CustomerWorkspace(); workspace.setName("Cedar workspace");
+        workspace.setOwnerUserId(owner.getId()); workspace.setBusinessArea(org.pms.silverocean.service.teamaccess.TeamBusinessArea.ESTATE_MANAGEMENT);
+        workspace.setActive(true); workspaces.saveAndFlush(workspace);
+        WorkspaceMembership member = new WorkspaceMembership(); member.setWorkspaceId(workspace.getId());
+        member.setUserId(employee.getId()); member.setMemberEmail(employee.getEmail()); member.setActive(true);
+        member.setMembershipRole(org.pms.silverocean.service.teamaccess.TeamMembershipRole.ESTATE_OPERATIONS_MANAGER);
+        member.setScopeType(org.pms.silverocean.service.teamaccess.TeamScopeType.ENTIRE_WORKSPACE);
+        member.setStatus(org.pms.silverocean.service.teamaccess.TeamMembershipStatus.ACTIVE); memberships.saveAndFlush(member);
+        assignment.setRoleName("ESTATE_OPERATIONS_MANAGER"); assignment.setInviteId(-member.getId()); propertyManagers.saveAndFlush(assignment);
+        assertTrue(properties.findByIdAndHomeownerInviter(estate.getId(),employee.getId()).isPresent());
+        member.setStatus(org.pms.silverocean.service.teamaccess.TeamMembershipStatus.SUSPENDED); memberships.saveAndFlush(member);
+        assertTrue(properties.findByIdAndHomeownerInviter(estate.getId(),employee.getId()).isEmpty(),"Suspended inviter cannot attach a homeowner even if a stale property assignment exists");
+        account.setVerified(true); paymentAccounts.saveAndFlush(account);
+        assertEquals(1,propertyAccounts.countVerifiedOperatingAccounts(estate.getId(),account.getCategory()));
+        account.setActive(false); paymentAccounts.saveAndFlush(account);
+        assertEquals(0,propertyAccounts.countVerifiedOperatingAccounts(estate.getId(),account.getCategory()));
+    }
 
     @Test
     void realMysqlRepositoriesPersistAndReconcileTheRentalPaymentExactlyOnce() {
@@ -177,6 +311,9 @@ class RentalPaymentMySqlIT {
         assertEquals(property.getId(), unit.getPropertyId());
         assertEquals(unit.getId(), tenancy.getUnitId());
         assertEquals(tenancy.getId(), lease.getTenantId());
+        assertEquals(1,leases.findScopedLeases(tenant.getId(),"TENANT",null,PageRequest.of(0,25)).getTotalElements());
+        assertEquals(1,leases.findScopedLeases(landlord.getId(),"LANDLORD",null,PageRequest.of(0,25)).getTotalElements());
+        assertEquals(0,leases.findScopedLeases(landlord.getId(),"TENANT",null,PageRequest.of(0,25)).getTotalElements());
 
         FinancialLedgerService ledger = new FinancialLedgerService(journals, ledgerLines);
         InvoiceDao invoiceDao = new InvoiceDao(invoices, ledger);

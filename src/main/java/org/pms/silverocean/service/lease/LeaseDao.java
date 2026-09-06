@@ -109,6 +109,7 @@ public class LeaseDao {
     }
 
     public Optional<Lease> getLeaseById(long leaseId) { return leaseRepo.findById(leaseId); }
+    public Optional<Lease> getLeaseForUpdate(long leaseId) { return leaseRepo.findActiveForUpdate(leaseId); }
 
     public Optional<LeaseContextDTO> getContextToPrepLeaseMessage(long leaseId, long userId) {
         return leaseRepo.getLeaseProcessingContext(leaseId, userId);
@@ -156,6 +157,9 @@ public class LeaseDao {
 
     public Page<LeaseDTO> getLeaseList(long userId, boolean privileged, Pageable pageable) {
         return leaseRepo.findAccessibleLeases(userId, privileged, pageable);
+    }
+    public Page<LeaseDTO> getScopedLeaseList(long userId, String roleName, Long assignmentId, Pageable pageable) {
+        return leaseRepo.findScopedLeases(userId, roleName, assignmentId, pageable);
     }
 
     public List<Lease> getTerminationCandidates(LocalDate today, Pageable pageable) {

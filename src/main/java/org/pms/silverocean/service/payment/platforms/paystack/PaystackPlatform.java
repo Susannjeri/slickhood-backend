@@ -2,6 +2,7 @@ package org.pms.silverocean.service.payment.platforms.paystack;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -14,6 +15,8 @@ import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.RestRequestException;
 import org.pms.silverocean.service.RestTemplateService;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.account.dao.AccountDao;
+import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.eventlogger.EventService;
 import org.pms.silverocean.service.param.ParamService;
 import org.pms.silverocean.service.payment.PaymentCallBackRequest;
@@ -49,6 +52,7 @@ public class PaystackPlatform extends PaymentPlatform {
     private final RestTemplateService restTemplateService;
     private final EventService eventService;
     private final ObjectMapper objectMapper;
+    private final AccountDao accountDao;
 
     @Value("${payment.paystack.enabled:false}")
     private boolean enabled;
@@ -69,7 +73,7 @@ public class PaystackPlatform extends PaymentPlatform {
 
     public PaystackPlatform(UpdatePaymentService updatePaymentService, UserDao userDao, PaymentDao paymentDao,
                             ParamService paramService, RestTemplateService restTemplateService,
-                            EventService eventService, ObjectMapper objectMapper) {
+                            EventService eventService, ObjectMapper objectMapper, AccountDao accountDao) {
         super(updatePaymentService);
         this.userDao = userDao;
         this.paymentDao = paymentDao;
@@ -77,13 +81,26 @@ public class PaystackPlatform extends PaymentPlatform {
         this.restTemplateService = restTemplateService;
         this.eventService = eventService;
         this.objectMapper = objectMapper;
+        this.accountDao = accountDao;
     }
 
     @Override
     protected PaymentResponse initPayment(PMSInvoice invoice, long accountId) throws PaymentRequestException {
         Users customer = userDao.findById(userDao.getUserId()).orElseThrow();
-        String subaccountCode = paramService.getParamByAccountIdAndType(accountId,
+        var account = accountDao.getAccountById(accountId);
+        boolean subscription = StringUtils.isNotBlank(invoice.getSubscriptionPlanCode());
+        if (!account.isActive() || !account.isVerified() || account.getChannel() != PaymentChannel.PAYSTACK
+                || !java.util.Objects.equals(account.getCreatedBy(), invoice.getPayToUserId())
+                || subscription != (account.getCategory() == AccountCategory.SLICKHOOD)) {
+            throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+        }
+        // Only platform subscriptions may settle to SlickHood's main integration.
+        // A missing merchant destination must never fall back to that integration.
+        String subaccountCode = subscription ? null : paramService.getParamByAccountIdAndType(accountId,
                 PaymentChannel.PAYSTACK.findProperty(PaymentPropertyKeys.SUBACCOUNT_CODE), invoice.getPropertyId());
+        if (!subscription && (subaccountCode == null || !subaccountCode.matches("ACCT_[A-Za-z0-9_]+"))) {
+            throw new PaymentRequestException(ResponseCode.ACCOUNT_INCOMPLETE_PROPERTIES);
+        }
         PMSPayment payment = new PMSPayment(invoice, customer.getFullName(), accountId);
         payment.setChannel(PaymentChannel.PAYSTACK.getName());
         paymentDao.savePMSPayment(payment);
@@ -92,7 +109,7 @@ public class PaystackPlatform extends PaymentPlatform {
             PaystackInitializeRequest request = new PaystackInitializeRequest(
                     customer.getEmail(), toSubunit(invoice.getPendingAmount()),
                     StringUtils.defaultIfBlank(invoice.getCurrency(), defaultCurrency),
-                    String.valueOf(payment.getId()), callbackUrl, channels(), subaccountCode, feeBearer);
+                    String.valueOf(payment.getId()), callbackUrl, channels(), subaccountCode, subscription ? null : feeBearer);
             PaystackInitializeResponse response = restTemplateService.sendPostRequest(
                     apiUrl + INITIALIZE_PATH, request, authHeaders(), PaystackInitializeResponse.class);
             eventService.saveEvent(response, payment.getId());
@@ -145,6 +162,7 @@ public class PaystackPlatform extends PaymentPlatform {
             long paymentId = Long.parseLong(event.data().reference());
             paymentDao.findPaymentByID(paymentId)
                     .filter(PMSPayment::isInProgress)
+                    .filter(payment -> PaymentChannel.PAYSTACK.getName().equals(payment.getChannel()))
                     .ifPresent(payment -> verifyAndSettle(payment, callback.sourceIp()));
             return new PaystackCallbackResponse("Callback received");
         } catch (Exception e) {
@@ -161,6 +179,7 @@ public class PaystackPlatform extends PaymentPlatform {
         boolean valid = response != null && response.status() && data != null
                 && SUCCESS.equals(data.status())
                 && String.valueOf(payment.getId()).equals(data.reference())
+                && StringUtils.equals(secretKey.startsWith("sk_test_") ? "test" : "live", data.domain())
                 && toSubunit(payment.getAmount()) == data.amount();
 
         PMSInvoice invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference()).orElse(null);
@@ -202,6 +221,7 @@ public class PaystackPlatform extends PaymentPlatform {
         return BigDecimal.valueOf(amount, 2).doubleValue();
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record PaystackInitializeRequest(String email, long amount, String currency, String reference,
                                      @JsonProperty("callback_url") String callbackUrl,
                                      List<String> channels, String subaccount, String bearer) {
@@ -226,6 +246,6 @@ public class PaystackPlatform extends PaymentPlatform {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record PaystackTransaction(long id, String status, String reference, long amount, String currency,
-                               @JsonProperty("gateway_response") String gatewayResponse) {
+                               @JsonProperty("gateway_response") String gatewayResponse, String domain) {
     }
 }

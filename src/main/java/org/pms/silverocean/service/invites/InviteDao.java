@@ -37,6 +37,7 @@ public class InviteDao {
     public Optional<Invite> getInviteByToken(String token, boolean active) {
         return inviteRepo.findByTokenAndActive(token, active);
     }
+    public Optional<Invite> getActiveTokenForUpdate(String token) { return inviteRepo.findActiveTokenForUpdate(token); }
 
     public Optional<Invite> getLatestActiveRoleInviteForRecipient(String recipient) {
         return inviteRepo.findFirstByRecipientIgnoreCaseAndActiveTrueAndExpiryDateAfterAndRoleIdIsNotNullOrderByCreatedOnDesc(
