@@ -21,9 +21,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  */
 @EnabledIf("externalMysqlAvailable")
 class ProductionBaselineMigrationMySqlIT {
-    private static final String URL = setting("SLICKHOOD_TEST_MYSQL_URL");
-    private static final String USERNAME = setting("SLICKHOOD_TEST_MYSQL_USERNAME");
-    private static final String PASSWORD = setting("SLICKHOOD_TEST_MYSQL_PASSWORD");
+    // Separate namespace prevents Hibernate repository tests from resetting the
+    // imported schema/history during the same clean verify invocation.
+    private static final String URL = setting("SLICKHOOD_MIGRATION_MYSQL_URL");
+    private static final String USERNAME = setting("SLICKHOOD_MIGRATION_MYSQL_USERNAME");
+    private static final String PASSWORD = setting("SLICKHOOD_MIGRATION_MYSQL_PASSWORD");
     private static final String BASELINE_VERSION = settingOrDefault(
             "SLICKHOOD_TEST_MYSQL_BASELINE_VERSION", "67");
     private static final String EXPECTED_VERSION = settingOrDefault(
@@ -32,7 +34,7 @@ class ProductionBaselineMigrationMySqlIT {
     static boolean externalMysqlAvailable() {
         return URL != null
                 && !URL.isBlank()
-                && Boolean.parseBoolean(setting("SLICKHOOD_TEST_MYSQL_ALLOW_RESET"));
+                && Boolean.parseBoolean(setting("SLICKHOOD_MIGRATION_MYSQL_ALLOW_RESET"));
     }
 
     private static String setting(String name) {

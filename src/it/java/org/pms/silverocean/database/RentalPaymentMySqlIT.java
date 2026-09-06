@@ -64,6 +64,11 @@ class RentalPaymentMySqlIT {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
+        if (EXTERNAL_URL != null && !EXTERNAL_URL.isBlank()
+                && (!Boolean.parseBoolean(setting("SLICKHOOD_TEST_MYSQL_ALLOW_RESET"))
+                || !EXTERNAL_URL.matches("jdbc:(?:mysql|mariadb)://(?:127\\.0\\.0\\.1|localhost):[0-9]+/slickhood_(?:rehearsal|integration|test)_[a-zA-Z0-9_]+"))) {
+            throw new IllegalArgumentException("Repository DDL tests require an explicitly resettable, loopback disposable database");
+        }
         if (EXTERNAL_URL == null || EXTERNAL_URL.isBlank()) {
             mysql = new MySQLContainer<>("mysql:8.4")
                     .withDatabaseName("slickhood_integration")
@@ -141,7 +146,7 @@ class RentalPaymentMySqlIT {
         Property property=new Property();property.setName("Sale Court");property.setRef("SALE-IT-1");
         property.setType("APARTMENT");property.setAddress("Test lane");property.setCurrency("KES");property.setCreatedBy(owner.getId());property.setActive(true);
         property.setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.SALE);properties.saveAndFlush(property);
-        Unit unit=new Unit();unit.setPropertyId(property.getId());unit.setRef("SALE-01");unit.setUnitType("HOUSE");unit.setLeaseMode("SALE");unit.setCurrency("KES");unit.setActive(true);units.saveAndFlush(unit);
+        Unit unit=new Unit();unit.setPropertyId(property.getId());unit.setRef("SALE-01");unit.setUnitType("HOUSE");unit.setLeaseMode("SALE");unit.setCurrency("KES");unit.setCreatedBy(owner.getId());unit.setActive(true);units.saveAndFlush(unit);
         SaleTransaction sale=new SaleTransaction();sale.setPropertyId(property.getId());sale.setUnitId(unit.getId());sale.setBuyerUserId(buyer.getId());sale.setSalesAgentUserId(owner.getId());
         sale.setStatus(org.pms.silverocean.service.sales.SaleStatus.OFFERED);sale.setAskingPrice(java.math.BigDecimal.TEN);sale.setOfferAmount(java.math.BigDecimal.TEN);sale.setCurrency("KES");sale.setActive(true);sales.saveAndFlush(sale);
         PropertyManager assignment=new PropertyManager();assignment.setPropertyId(property.getId());assignment.setUserId(staff.getId());assignment.setRoleName("SALES_COORDINATOR");assignment.setInviteId(-9L);assignment.setActive(true);propertyManagers.saveAndFlush(assignment);
