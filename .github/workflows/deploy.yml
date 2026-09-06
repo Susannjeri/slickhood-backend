@@ -45,7 +45,10 @@ jobs:
           test -z "$duplicates" || { echo "Duplicate Flyway versions: $duplicates" >&2; exit 1; }
 
       - name: Create release checksum
-        run: cd target && sha256sum -- *.jar > release.sha256
+        run: |
+          install -m 0755 scripts/production-preflight.py target/production-preflight.py
+          cd target
+          sha256sum -- *.jar production-preflight.py > release.sha256
 
       - name: Copy JAR to EC2
         uses: appleboy/scp-action@v0.1.7
@@ -53,7 +56,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "target/*.jar,target/release.sha256"
+          source: "target/*.jar,target/release.sha256,target/production-preflight.py"
           target: /tmp/slickhood-backend-release
           strip_components: 1
 
@@ -71,7 +74,12 @@ jobs:
             candidate=/tmp/slickhood-backend-release/silverocean-0.0.1-SNAPSHOT.jar
             rollback="/home/silverocean/backups/backend-$stamp.jar"
             health_url='${{ secrets.BACKEND_HEALTHCHECK_URL }}'
+            preflight=/tmp/slickhood-backend-release/production-preflight.py
+            public_origin=https://app.slickhood.com
+            expected_bucket=slickhood-production-documents-603455138904-ca-central-1-an
+            expected_region=ca-central-1
             test -n "$health_url"
+            test -f "$preflight"
             case "$health_url" in
               */actuator/health/production-readiness) ;;
               *) echo "BACKEND_HEALTHCHECK_URL must target /actuator/health/production-readiness" >&2; exit 1 ;;
@@ -106,16 +114,26 @@ jobs:
               fi
               exit "$status"
             }
+            run_preflight() {
+              sudo python3 "$preflight" \
+                --readiness-url "$health_url" \
+                --public-origin "$public_origin" \
+                --expected-flyway-version 71 \
+                --expected-bucket "$expected_bucket" \
+                --expected-region "$expected_region"
+            }
             trap cleanup EXIT
             cd /tmp/slickhood-backend-release
             sha256sum -c release.sha256
             test -f "$candidate"
+            run_preflight
             sudo mkdir -p /home/silverocean/backups
             sudo cp "$live" "$rollback"
             sudo install -o silverocean -g silverocean -m 0644 "$candidate" "$live"
             installed=true
             sudo systemctl restart pms.service
             if wait_for_health; then
+              run_preflight
               installed=false
               exit 0
             fi

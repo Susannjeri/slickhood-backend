@@ -30,6 +30,7 @@ public class ProductionModuleGuardrails {
         boundedDuration("wealth.market.minimum-refresh", "PT15M", Duration.ofMinutes(1), Duration.ofDays(1));
         boundedInt("wealth.vault.antivirus.port", 3310, 1, 65_535);
         boundedInt("wealth.vault.antivirus.timeout-ms", 5_000, 250, 60_000);
+        boundedInt("garage.presigner.duration-seconds", 120, 30, 900);
         boundedInt("app.insurance.imap.port", 993, 1, 65_535);
         boundedInt("app.insurance.imap.max-per-poll", 50, 1, 200);
         boundedInt("app.insurance.imap.poll-delay-ms", 60_000, 10_000, 3_600_000);
@@ -54,18 +55,23 @@ public class ProductionModuleGuardrails {
     public Assessment assess() {
         List<String> failures = new ArrayList<>();
 
-        require(failures, "garage.s3.access.key");
-        require(failures, "garage.s3.secret.key");
+        requireAwsCredentials(failures);
         require(failures, "garage.s3.bucket");
         require(failures, "garage.s3.region");
+        requireTrue(failures, "garage.s3.require-https");
+        requireFalse(failures, "garage.bootstrap.enabled");
         rejectUnsafeEndpointIfConfigured(failures, "garage.presigner.url");
         rejectUnsafeEndpointIfConfigured(failures, "garage.s3.url");
+
+        requireValue(failures, "kyc.ocr.provider", "aws-textract");
+        require(failures, "kyc.ocr.aws.region");
 
         require(failures, "spring.mail.host");
         require(failures, "spring.mail.username");
         require(failures, "spring.mail.password");
         requireHttps(failures, "app.public-url");
         requireHttpsOrigins(failures, "app.cors.allowed-origins");
+        requireOrigin(failures, "app.cors.allowed-origins", "https://app.slickhood.com");
 
         requireTrue(failures, "wealth.market.enabled");
         require(failures, "wealth.market.alpha-vantage.api-key");
@@ -75,6 +81,7 @@ public class ProductionModuleGuardrails {
         require(failures, "wealth.vault.antivirus.host");
 
         requireTrueEither(failures, "app.insurance.imap.enabled", "INSURANCE_IMAP_ENABLED");
+        requireTrueEither(failures, "app.insurance.imap.ssl", "INSURANCE_IMAP_SSL");
         requireEither(failures, "app.insurance.imap.host", "INSURANCE_IMAP_HOST");
         requireEither(failures, "app.insurance.imap.username", "INSURANCE_IMAP_USERNAME");
         requireEither(failures, "app.insurance.imap.password", "INSURANCE_IMAP_PASSWORD");
@@ -90,14 +97,15 @@ public class ProductionModuleGuardrails {
         requireExplicit(failures, "affiliate.commission-rate");
         requireExplicit(failures, "affiliate.minimum-payout");
         requireExplicit(failures, "affiliate.commission-hold-days");
+        requireExplicit(failures, "affiliate.eligible-payment-count");
 
         if (!hasText("payment.paystack.secret-key")
-                && !hasText("payment.flutterwave.webhook-secret")
                 && !hasText("payment.mpesa.callback-token")) {
-            failures.add("one verified payment callback secret");
+            failures.add("one verified Paystack or M-Pesa callback secret");
         }
         if (Boolean.parseBoolean(value("payment.paystack.enabled", "false"))) {
             require(failures, "payment.paystack.secret-key");
+            requireHttps(failures, "payment.paystack.api-url");
             requireHttps(failures, "payment.paystack.callback-url");
         }
 
@@ -114,6 +122,25 @@ public class ProductionModuleGuardrails {
 
     private void requireTrue(List<String> failures, String key) {
         if (!Boolean.parseBoolean(value(key, "false"))) failures.add(key + "=true");
+    }
+
+    private void requireFalse(List<String> failures, String key) {
+        if (Boolean.parseBoolean(value(key, "true"))) failures.add(key + "=false");
+    }
+
+    private void requireValue(List<String> failures, String key, String expected) {
+        if (!expected.equalsIgnoreCase(value(key, "").trim())) failures.add(key + "=" + expected);
+    }
+
+    private void requireAwsCredentials(List<String> failures) {
+        boolean accessKey = hasText("garage.s3.access.key");
+        boolean secretKey = hasText("garage.s3.secret.key");
+        boolean defaultChain = Boolean.parseBoolean(value("garage.s3.use-default-credentials", "false"));
+        if (accessKey != secretKey) {
+            failures.add("garage.s3 access and secret keys must be configured together");
+        } else if (defaultChain == accessKey) {
+            failures.add("exactly one S3 credential source: static key pair or garage.s3.use-default-credentials=true");
+        }
     }
 
     private void requireHttps(List<String> failures, String key) {
@@ -157,6 +184,15 @@ public class ProductionModuleGuardrails {
                 return;
             }
         }
+    }
+
+    private void requireOrigin(List<String> failures, String key, String requiredOrigin) {
+        String configured = environment.getProperty(key, "");
+        boolean present = java.util.Arrays.stream(configured.split(","))
+                .map(String::trim)
+                .map(origin -> origin.endsWith("/") ? origin.substring(0, origin.length() - 1) : origin)
+                .anyMatch(requiredOrigin::equalsIgnoreCase);
+        if (!present) failures.add(key + " must include " + requiredOrigin);
     }
 
     private boolean isHttps(String configured) {
