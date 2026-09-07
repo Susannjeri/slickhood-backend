@@ -104,6 +104,16 @@ public class AccountController {
                 i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS)));
     }
 
+    @PostMapping("/{id}/readiness")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_ACCOUNT)")
+    public ResponseEntity<ResponseDTO> checkAccountReadiness(@PathVariable Long id) {
+        accountService.requestVerification(id);
+        return ResponseEntity.ok(new ResponseDTO(
+                true,
+                ResponseCode.GENERAL_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS)));
+    }
+
     @PutMapping("/{id}/property")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_ACCOUNT)")
     public ResponseEntity<ResponseDTO> updateAccountProperty(@PathVariable Long id,

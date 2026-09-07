@@ -16,6 +16,7 @@ import org.pms.silverocean.service.config.ConfigDTO;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.eventlogger.EventService;
+import org.pms.silverocean.service.param.ParamService;
 import org.pms.silverocean.service.payment.PaymentCallBackRequest;
 import org.pms.silverocean.service.payment.PaymentCallBackResponse;
 import org.pms.silverocean.service.payment.PaymentDao;
@@ -31,6 +32,7 @@ import org.pms.silverocean.service.payment.platforms.pesalink.wrappers.PesalinkS
 import org.pms.silverocean.service.payment.platforms.pesalink.wrappers.PesalinkValidatePaymentRequestDTO;
 import org.pms.silverocean.service.payment.platforms.pesalink.wrappers.PesalinkValidatePaymentResponseDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
+import org.pms.silverocean.service.payment.wrappers.PaymentPropertyKeys;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -45,6 +47,7 @@ public class PesaLinkService extends PaymentPlatform {
     private final I18NService i18NService;
     private final EventService eventService;
     private final PaymentDao paymentDao;
+    private final ParamService paramService;
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
@@ -53,12 +56,14 @@ public class PesaLinkService extends PaymentPlatform {
     private Supplier<ConfigDTO> ipnPassword;
 
     protected PesaLinkService(UpdatePaymentService updatePaymentService, ConfigService configService,
-                              I18NService i18NService, EventService eventService, PaymentDao paymentDao) {
+                              I18NService i18NService, EventService eventService, PaymentDao paymentDao,
+                              ParamService paramService) {
         super(updatePaymentService);
         this.configService = configService;
         this.i18NService = i18NService;
         this.eventService = eventService;
         this.paymentDao = paymentDao;
+        this.paramService = paramService;
     }
 
     @PostConstruct
@@ -68,10 +73,15 @@ public class PesaLinkService extends PaymentPlatform {
 
     @Override
     protected PaymentResponse initPayment(PMSInvoice pmsInvoice, long accountId) throws PaymentRequestException {
+        String bankAccount = paramService.getParamByAccountIdAndType(accountId,
+                PaymentChannel.PESA_LINK.findProperty(PaymentPropertyKeys.BANK_ACCOUNT), pmsInvoice.getPropertyId());
+        String bankCode = paramService.getParamByAccountIdAndType(accountId,
+                PaymentChannel.PESA_LINK.findProperty(PaymentPropertyKeys.BANK_CODE), pmsInvoice.getPropertyId());
         pmsInvoice.setTransactionInProgress(false);
         updatePaymentService.updateInvoice(pmsInvoice);
         return new PaymentResponse(true, ResponseCode.PESALINK_INIT_PAYMENT,
-                String.format(i18NService.getLocalizedMessage(ResponseCode.PESALINK_INIT_PAYMENT), pmsInvoice.getRef()));
+                String.format(i18NService.getLocalizedMessage(ResponseCode.PESALINK_INIT_PAYMENT),
+                        bankCode, bankAccount, pmsInvoice.getRef()));
     }
 
     @Override

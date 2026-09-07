@@ -22,6 +22,7 @@ import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.beans.factory.annotation.Value;
 import org.pms.silverocean.service.payment.wrappers.AccountPropertyDefinition;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.security.DecryptDTO;
@@ -49,6 +50,14 @@ public class AccountService {
     private final NotificationService notificationService;
     private final CommunityFundRepo communityFundRepo;
     private final ApplicationEventPublisher eventPublisher;
+
+    /**
+     * Temporary non-production bridge for recipient onboarding. It never
+     * confirms that a provider owns or endorses an account; it only allows a
+     * structurally complete destination to participate in test payments.
+     */
+    @Value("${payment.accounts.testing-auto-approve:${PAYMENT_ACCOUNT_TEST_AUTO_APPROVAL:false}}")
+    private boolean testingAutoApprove;
 
 
     public AccountDTO createAccount(CreateAccountRequestDTO dto) {
@@ -104,37 +113,43 @@ public class AccountService {
             throw new PMSCustomException(ResponseCode.ACCOUNT_INSUFFICIENT_PERMISSIONS);
         }
         PaymentAccount account = accountDao.getAccountForUpdate(accountId);
+        // SlickHood staff must not represent a gateway or bank verification.
+        // This endpoint remains available only to revoke a destination for a
+        // security, fraud or configuration concern.
         if (verify) {
-            validateStoredProperties(account);
+            throw new PMSCustomException(ResponseCode.ACCOUNT_PROVIDER_VERIFICATION_REQUIRED);
         }
         NotificationDTO notification;
         String email = userDao.findById(account.getCreatedBy()).map(Users::getEmail)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_EMAIL));
-        if (verify) {
-            accountDao.updateVerification(account, true);
-            String message = String.format(i18NService.getLocalizedMessage(NotificationType.ACCOUNT_VERIFICATION_SUCCESS_EMAIL.getBody()),
-                    account.getName());
-            notification = new NotificationDTO(message, email, NotificationType.ACCOUNT_VERIFICATION_SUCCESS_EMAIL);
-        } else {
-            if (StringUtils.isBlank(comments)) {
-                throw new PMSCustomException(ResponseCode.ACCOUNT_VERIFICATION_INVALID_COMMENTS);
-            }
-            accountDao.updateVerification(account, false);
-            String message = String.format(i18NService.getLocalizedMessage(NotificationType.ACCOUNT_VERIFICATION_FAILED_EMAIL.getBody()),
-                    account.getName(), comments);
-            notification = new NotificationDTO(message, email, NotificationType.ACCOUNT_VERIFICATION_FAILED_EMAIL);
+        if (StringUtils.isBlank(comments)) {
+            throw new PMSCustomException(ResponseCode.ACCOUNT_VERIFICATION_INVALID_COMMENTS);
         }
+        accountDao.updateVerification(account, false);
+        String message = String.format(i18NService.getLocalizedMessage(NotificationType.ACCOUNT_VERIFICATION_FAILED_EMAIL.getBody()),
+                account.getName(), comments);
+        notification = new NotificationDTO(message, email, NotificationType.ACCOUNT_VERIFICATION_FAILED_EMAIL);
         notificationService.sendNotification(notification);
     }
 
+    @Transactional("pmsDBTransactionManager")
     public void requestVerification(long accountId) {
-        PaymentAccount account = accountDao.getAccountByIdAndCreatedBy(accountId, userDao.getUserId());
+        PaymentAccount account = accountDao.getAccountForUpdate(accountId);
+        assertOwner(account);
         if (account.isVerified()) {
             throw new PMSCustomException(ResponseCode.PARAM_VERIFIED);
         }
-        String message = String.format(i18NService.getLocalizedMessage(NotificationType.ACCOUNT_VERIFICATION_REQUEST_EMAIL.getBody()),
-                userDao.getEmail(), account.getName(), account.getChannel().getName(), accountId);
-        notificationService.sendEmailToSuperAdmin(NotificationType.ACCOUNT_VERIFICATION_REQUEST_EMAIL, message);
+        validateStoredProperties(account);
+
+        if (!isManualInstructionChannel(account.getChannel()) && !testingAutoApprove) {
+            throw new PMSCustomException(ResponseCode.ACCOUNT_PROVIDER_VERIFICATION_REQUIRED);
+        }
+
+        // `verified` is retained as the legacy routing-eligibility flag. The
+        // client labels it "Ready for payments", never "provider verified".
+        // Manual channels are self-configured; direct channels can enter this
+        // state only while explicitly enabled for testing.
+        accountDao.updateVerification(account, true);
     }
 
     public AccountDTO getAccount(Long accountId) {
@@ -182,8 +197,8 @@ public class AccountService {
             throw new PMSCustomException(ResponseCode.ACCOUNT_INCOMPLETE_PROPERTIES);
         }
 
-        // A destination is verified as a complete set. Changing any constituent
-        // value invalidates that decision until an administrator reviews it again.
+        // A destination is enabled as a complete set. Changing any constituent
+        // value invalidates readiness until the owner checks the setup again.
         if (account.isVerified()) {
             accountDao.updateVerification(account, false);
         }
@@ -309,6 +324,10 @@ public class AccountService {
         return StringUtils.isBlank(value) || value.trim().matches("[\\*•]+") || value.length() > 4096;
     }
 
+    private boolean isManualInstructionChannel(PaymentChannel channel) {
+        return channel == PaymentChannel.MPESA_BANK || channel == PaymentChannel.PESA_LINK;
+    }
+
     private String resolveDisplayValue(AccountPropertyDefinition def, PaymentAccountProperty prop) {
         if (!def.encrypted()) {
             return new String(prop.getValue(), StandardCharsets.UTF_8);
@@ -325,6 +344,12 @@ public class AccountService {
         boolean isOwner = account.getCreatedBy() != null && account.getCreatedBy().equals(currentUserId);
         boolean isSuperAdmin = userDao.hasPermission(org.pms.silverocean.service.auth.roles.enums.Permission.VIEW_ALL_ACCOUNTS);
         if (!isOwner && !isSuperAdmin) {
+            throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+        }
+    }
+
+    private void assertOwner(PaymentAccount account) {
+        if (account.getCreatedBy() == null || !account.getCreatedBy().equals(userDao.getUserId())) {
             throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);
         }
     }

@@ -1,15 +1,41 @@
 package org.pms.silverocean.service.payment.platforms.pesalink;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.pms.silverocean.common.ResponseCode;
+import org.pms.silverocean.database.pms.entities.PMSInvoice;
+import org.pms.silverocean.service.I18NService;
+import org.pms.silverocean.service.config.ConfigService;
+import org.pms.silverocean.service.eventlogger.EventService;
+import org.pms.silverocean.service.param.ParamService;
+import org.pms.silverocean.service.payment.PaymentDao;
+import org.pms.silverocean.service.payment.UpdatePaymentService;
 import org.pms.silverocean.service.payment.platforms.pesalink.wrappers.IPNCallbackDTO;
+import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
+import org.pms.silverocean.service.payment.wrappers.PaymentPropertyKeys;
+import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class PesaLinkServiceTest {
+
+    @Mock private UpdatePaymentService updatePaymentService;
+    @Mock private ConfigService configService;
+    @Mock private I18NService i18NService;
+    @Mock private EventService eventService;
+    @Mock private PaymentDao paymentDao;
+    @Mock private ParamService paramService;
 
     // %02x produces lowercase hex, so the expected signature must be lowercase
     private static final String VALID_SIGNATURE = "c59fefc6faf51f9e0a1d434c56a7f60ace844c94";
@@ -35,6 +61,31 @@ class PesaLinkServiceTest {
                 "INV-D74",
                 "0075"
         );
+    }
+
+    @Test
+    void paymentInstructionsContainDestinationAndInvoiceReferenceWithoutMarkingPaid() {
+        PesaLinkService service = new PesaLinkService(updatePaymentService, configService,
+                i18NService, eventService, paymentDao, paramService);
+        PMSInvoice invoice = new PMSInvoice();
+        invoice.setRef("INV-PESA-1");
+        invoice.setPropertyId(22L);
+        when(paramService.getParamByAccountIdAndType(8L,
+                PaymentChannel.PESA_LINK.findProperty(PaymentPropertyKeys.BANK_ACCOUNT), 22L))
+                .thenReturn("001500100816801");
+        when(paramService.getParamByAccountIdAndType(8L,
+                PaymentChannel.PESA_LINK.findProperty(PaymentPropertyKeys.BANK_CODE), 22L))
+                .thenReturn("0075");
+        when(i18NService.getLocalizedMessage(ResponseCode.PESALINK_INIT_PAYMENT))
+                .thenReturn("Bank %s account %s reference %s");
+
+        PaymentResponse response = service.processPayment(invoice, null, 8L);
+
+        assertTrue(response.success());
+        assertEquals("Bank 0075 account 001500100816801 reference INV-PESA-1", response.body());
+        assertFalse(invoice.isPaid());
+        assertFalse(invoice.isTransactionInProgress());
+        verify(updatePaymentService, times(2)).updateInvoice(invoice);
     }
 
     @Test

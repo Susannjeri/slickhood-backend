@@ -24,6 +24,7 @@ import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.payment.wrappers.PaymentPropertyKeys;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -188,6 +189,67 @@ class AccountServiceSecurityTest {
     }
 
     @Test
+    void slickhoodAdministratorCannotApproveARecipientAccount() {
+        when(userDao.hasPermission("verify_account")).thenReturn(true);
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(
+                account(42L, 7L, AccountCategory.LANDLORD, PaymentChannel.MPESA, false));
+
+        assertThatThrownBy(() -> service.verifyAccount(42L, true, ""))
+                .isInstanceOf(PMSCustomException.class);
+        verify(accountDao, never()).updateVerification(any(), org.mockito.ArgumentMatchers.anyBoolean());
+        verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    void completeManualPaymentRouteBecomesReadyWithoutAdministratorReview() {
+        PaymentAccount account = account(42L, 7L, AccountCategory.LANDLORD, PaymentChannel.PESA_LINK, false);
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(accountDao.getPropertiesForAccount(42L)).thenReturn(List.of(
+                property(42L, PaymentPropertyKeys.BANK_ACCOUNT, "123456789"),
+                property(42L, PaymentPropertyKeys.BANK_CODE, "01")
+        ));
+
+        service.requestVerification(42L);
+
+        verify(accountDao).updateVerification(account, true);
+        verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    void nonOwnerCannotEnableARecipientPaymentRoute() {
+        PaymentAccount account = account(42L, 99L, AccountCategory.LANDLORD, PaymentChannel.PESA_LINK, false);
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account);
+        when(userDao.getUserId()).thenReturn(7L);
+
+        assertThatThrownBy(() -> service.requestVerification(42L))
+                .isInstanceOf(PMSCustomException.class);
+
+        verify(accountDao, never()).getPropertiesForAccount(any());
+        verify(accountDao, never()).updateVerification(any(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    @Test
+    void directProviderRouteCanBeEnabledOnlyWhenTestModeIsExplicitlyOn() {
+        PaymentAccount account = account(42L, 7L, AccountCategory.LANDLORD, PaymentChannel.PAYSTACK, false);
+        PaymentAccountProperty subaccount = property(42L, PaymentPropertyKeys.SUBACCOUNT_CODE, "ciphertext");
+        subaccount.setEncrypted(true);
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(accountDao.getPropertiesForAccount(42L)).thenReturn(List.of(subaccount));
+        when(encryptionService.decrypt(subaccount.getValue()))
+                .thenReturn(new org.pms.silverocean.service.security.DecryptDTO(false, "ACCT_test123"));
+
+        assertThatThrownBy(() -> service.requestVerification(42L))
+                .isInstanceOf(PMSCustomException.class);
+        verify(accountDao, never()).updateVerification(any(), org.mockito.ArgumentMatchers.anyBoolean());
+
+        ReflectionTestUtils.setField(service, "testingAutoApprove", true);
+        service.requestVerification(42L);
+        verify(accountDao).updateVerification(account, true);
+    }
+
+    @Test
     void slickhoodPaystackAccountDoesNotAskForAMerchantSubaccount() {
         PaymentAccount account = account(42L, 7L, AccountCategory.SLICKHOOD, PaymentChannel.PAYSTACK, false);
         when(accountDao.getAccountById(42L)).thenReturn(account);
@@ -243,17 +305,18 @@ class AccountServiceSecurityTest {
     }
 
     @Test
-    void encryptedBlankCannotBeApprovedBecauseItsDisplayMaskLooksComplete() {
+    void encryptedBlankCannotBeEnabledBecauseItsDisplayMaskLooksComplete() {
         PaymentAccount account = account(42L, 7L, AccountCategory.MERCHANT, PaymentChannel.PAYSTACK, false);
         PaymentAccountProperty property = new PaymentAccountProperty();
         property.setPropertyKey(PaymentPropertyKeys.SUBACCOUNT_CODE);
         property.setValue(new byte[]{1, 2, 3});
         property.setEncrypted(true);
-        when(userDao.hasPermission("verify_account")).thenReturn(true);
         when(accountDao.getAccountForUpdate(42L)).thenReturn(account);
+        when(userDao.getUserId()).thenReturn(7L);
         when(accountDao.getPropertiesForAccount(42L)).thenReturn(List.of(property));
         when(encryptionService.decrypt(property.getValue())).thenReturn(new org.pms.silverocean.service.security.DecryptDTO(false, " "));
-        assertThatThrownBy(() -> service.verifyAccount(42L, true, ""))
+        ReflectionTestUtils.setField(service, "testingAutoApprove", true);
+        assertThatThrownBy(() -> service.requestVerification(42L))
                 .isInstanceOf(PMSCustomException.class);
         verify(accountDao, never()).updateVerification(any(), org.mockito.ArgumentMatchers.anyBoolean());
         verifyNoInteractions(notificationService);
@@ -285,5 +348,14 @@ class AccountServiceSecurityTest {
         account.setActive(true);
         account.setVerified(verified);
         return account;
+    }
+
+    private static PaymentAccountProperty property(long accountId, String key, String value) {
+        PaymentAccountProperty property = new PaymentAccountProperty();
+        property.setAccountId(accountId);
+        property.setPropertyKey(key);
+        property.setValue(value.getBytes(StandardCharsets.UTF_8));
+        property.setEncrypted(false);
+        return property;
     }
 }
