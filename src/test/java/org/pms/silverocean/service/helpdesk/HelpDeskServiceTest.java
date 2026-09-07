@@ -126,7 +126,7 @@ class HelpDeskServiceTest {
     @Test void humanCaseResponseDoesNotInvokeAiAndKeepsDeadline() {
         HelpConversation c = ownedCase("WAITING_FOR_SUPPORT");
         c.setPriority("HIGH"); c.setWaitingSince(java.time.LocalDateTime.now().minusHours(2));
-        c.setSlaDueAt(java.time.LocalDateTime.now().minusHours(1));
+        c.setSlaDueAt(c.getWaitingSince().plusHours(1));
         var due = c.getSlaDueAt();
         when(ai.moderate(anyString())).thenReturn(new OpenAiHelpDeskClient.ModerationResult(true, false));
         assertEquals("ESCALATED", service.send(5L, new HelpDeskModels.SendMessage("Here are more details")).status());
