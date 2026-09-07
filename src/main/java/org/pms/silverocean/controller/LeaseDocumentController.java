@@ -43,8 +43,9 @@ public class LeaseDocumentController extends OutputStreamErrorHandler {
     @GetMapping
     @PreAuthorize("hasAuthority(" + PERMISSION + ".VIEW_LEASE_DOCUMENT)")
     public ResponseEntity<ResponseDTO> list(@PageableDefault(size = 25, sort = "createdOn", direction = org.springframework.data.domain.Sort.Direction.DESC) Pageable pageable,
-            @RequestParam(required=false) Long leaseId, @RequestParam(required=false) Long saleId, @RequestParam(required=false) Long propertyId) {
-        return page(service.list(pageable, leaseId, saleId, propertyId));
+            @RequestParam(required=false) Long leaseId, @RequestParam(required=false) Long saleId, @RequestParam(required=false) Long propertyId,
+            @RequestParam(required=false) Long unitId) {
+        return page(service.list(pageable, leaseId, saleId, propertyId, unitId));
     }
 
     @GetMapping("/{id}/pdf")

@@ -110,7 +110,7 @@ public class LeaseDocumentService {
         model.put("legalReviewRequired", template.isLegalReviewRequired());
         model.put("templateVersion", template.getVersion());
         model.put("saleDocument", type.isSaleDocument());
-        model.put("generatedDate", LocalDate.now().toString());
+        model.put("generatedDate", LocalDate.now(PMSUtils.getZoneId()).toString());
         model.put("issuerEmail", StringUtils.defaultString(context.issuer().getEmail(), "Not recorded"));
         model.put("issuerPhone", StringUtils.defaultString(context.issuer().getPhoneNumber(), "Not recorded"));
         model.put("issuerIdentification", StringUtils.defaultString(context.issuer().getIdentificationNumber(), "Not recorded"));
@@ -136,7 +136,15 @@ public class LeaseDocumentService {
         document.setDocumentType(type);
         document.setStatus(LeaseDocumentStatus.DRAFT);
         document.setName(template.getDisplayName());
-        document.setRenderedHtml(renderService.renderInline(template.getBodyHtml(), model));
+        String body = template.getBodyHtml();
+        if (type.isTenancyAgreement()) {
+            // Factual lease schedule is snapshotted with the approved clauses, never read live at download time.
+            String schedule = "<section><h2>Recorded lease schedule</h2><p>Pet policy: {{petsPolicy}}</p>"
+                    + "<h3>Additional charges</h3>{{#leaseCharges}}<p>{{name}}: {{currency}} {{amount}} ({{period}})</p>{{/leaseCharges}}"
+                    + "{{^leaseCharges}}<p>No additional charges recorded.</p>{{/leaseCharges}}</section>";
+            body = body.contains("</body>") ? body.replace("</body>", schedule + "</body>") : body + schedule;
+        }
+        document.setRenderedHtml(renderService.renderInline(body, model));
         document.setIssuerUserId(context.issuer().getId());
         document.setRecipientUserId(context.recipient().getId());
         document.setEffectiveDate(request.effectiveDate());
@@ -155,19 +163,17 @@ public class LeaseDocumentService {
     }
 
     public Page<LeaseDocumentDTO> list(Pageable pageable, Long leaseId, Long saleId, Long propertyId) {
+        return list(pageable, leaseId, saleId, propertyId, null);
+    }
+
+    public Page<LeaseDocumentDTO> list(Pageable pageable, Long leaseId, Long saleId, Long propertyId, Long unitId) {
         Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize())), pageable.getSort());
-        return documentRepo.findAccessiblePage(userDao.getUserId(), leaseId, saleId, propertyId, bounded).map(d -> new LeaseDocumentDTO(d, userDao.getUserId()));
+        return documentRepo.findAccessiblePage(userDao.getUserId(), leaseId, saleId, propertyId, unitId, bounded).map(d -> new LeaseDocumentDTO(d, userDao.getUserId()));
     }
 
     public void renderPdf(long id, ByteArrayOutputStream output) throws IOException {
         LeaseDocument document = accessible(id);
-        // Keep the immutable agreement snapshot; append the recorded execution status to its PDF.
-        String audit = "<section><h2>Electronic execution record</h2><p>Document #" + document.getId()
-                + " — " + document.getStatus() + "</p><p>Issuer #" + document.getIssuerUserId() + ": "
-                + value(document.getIssuerSignedAt()) + "</p><p>Recipient #" + document.getRecipientUserId() + ": "
-                + value(document.getRecipientSignedAt()) + "</p></section>";
-        String html = document.getRenderedHtml();
-        renderService.toPdf(html.contains("</body>") ? html.replace("</body>", audit + "</body>") : html + audit, output);
+        renderService.toPdf(LeaseDocumentPdf.html(document), output);
     }
 
     @Transactional
@@ -301,6 +307,14 @@ public class LeaseDocumentService {
                     || document.getCreatedOn() == null || current.getCreatedOn() == null
                     || document.getCreatedOn().isBefore(current.getCreatedOn()))
                 throw new PMSCustomException(ResponseCode.OWNERSHIP_NOT_FOUND);
+            // Ownership alone must not authorize an agreement for retired or reclassified inventory.
+            propertyRepo.findById(document.getPropertyId()).filter(p -> p.isActive()
+                    && p.getManagementMode() == org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE)
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
+            if (document.getUnitId() != null) unitRepo.findById(document.getUnitId())
+                    .filter(u -> u.isActive() && u.getPropertyId() == document.getPropertyId()
+                            && "SERVICE_CHARGE".equals(u.getLeaseMode()))
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
             if (userDao.getUserId() == document.getIssuerUserId()) estateAccess.require(document.getPropertyId(), Permission.CREATE_LEASE_DOCUMENT);
         }
     }
@@ -478,6 +492,11 @@ public class LeaseDocumentService {
         model.put("repairThreshold", value(lease.getRepairThreshold()));
         model.put("entryNoticeDays", value(lease.getEntryNoticeDays()));
         model.put("selfRenewing", lease.isSelfRenew());
+        model.put("petsPolicy", lease.getPetsPolicy() == null ? "Not recorded" : new String(lease.getPetsPolicy(), java.nio.charset.StandardCharsets.UTF_8));
+        model.put("leaseCharges", leaseDao.getLeaseChargeByLeaseId(lease.getId()).stream().map(charge -> Map.of(
+                "name", StringUtils.defaultIfBlank(charge.getChargeName(), "Charge " + charge.getChargeId()),
+                "amount", java.math.BigDecimal.valueOf(charge.getAmount()).toPlainString(),
+                "period", StringUtils.defaultIfBlank(charge.getPeriodId(), "Not recorded"))).toList());
     }
 
     private void addSaleModel(Map<String, Object> model, SaleTransaction sale) {

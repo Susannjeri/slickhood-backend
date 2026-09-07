@@ -137,8 +137,12 @@ public class InviteService {
                             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
                         }
                     }
-                    if (inviteType == InviteType.TENANT && unitDTO.templateId() == null) {
-                        throw new PMSCustomException(ResponseCode.MISSING_LEASE_TEMPLATE);
+                    if (inviteType == InviteType.TENANT) {
+                        if (unitDTO.leaseMode() != org.pms.silverocean.service.lease.wrappers.PMSLeaseMode.RENT
+                                || Boolean.TRUE.equals(unitDTO.occupied())) {
+                            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+                        }
+                        if (unitDTO.templateId() == null) throw new PMSCustomException(ResponseCode.MISSING_LEASE_TEMPLATE);
                     }
                 } else {
                     throw new PMSCustomException(ResponseCode.GENERAL_FAILURE);

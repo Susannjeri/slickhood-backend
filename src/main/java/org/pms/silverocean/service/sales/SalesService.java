@@ -158,7 +158,7 @@ public class SalesService {
         PMSInvoice invoice = invoiceService.createSaleInvoice(sale.getUnitId(), sale.getBuyerUserId(),
                 requireSaleProperty(sale.getPropertyId(), users.getUserId()).getCreatedBy(), request.paymentAccountId(),
                 Map.of("Contractual property sale escrow", request.amount().doubleValue()),
-                LocalDate.now().plusDays(7));
+                LocalDate.now(PMSUtils.getZoneId()).plusDays(7));
         sale.setEscrowRequiredAmount(request.amount());
         sale.setEscrowInvoiceId(invoice.getId());
         sales.save(sale);
@@ -277,9 +277,12 @@ public class SalesService {
             throw invalidTransition();
         PMSInvoice invoice = invoices.findByIdForUpdate(sale.getEscrowInvoiceId())
                 .filter(PMSInvoice::isActive).orElseThrow(this::invalidTransition);
+        Property property = properties.findById(sale.getPropertyId()).filter(Property::isActive)
+                .orElseThrow(this::invalidTransition);
         boolean matches = "SALE".equals(invoice.getBillingType())
                 && invoice.getPropertyId() == sale.getPropertyId() && invoice.getUnitId() == sale.getUnitId()
                 && invoice.getBilledUserId() == sale.getBuyerUserId()
+                && invoice.getPayToUserId() == property.getCreatedBy()
                 && StringUtils.equalsIgnoreCase(sale.getCurrency(), invoice.getCurrency())
                 && sale.getEscrowRequiredAmount().compareTo(BigDecimal.valueOf(invoice.getAmount())) == 0;
         if (!matches || !invoice.isPaid() || invoice.getPendingAmount() > 0) throw invalidTransition();

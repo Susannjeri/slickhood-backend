@@ -61,6 +61,8 @@ public class LeaseController extends OutputStreamErrorHandler {
     @GetMapping(value = "/view")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_ACTIVE_LEASE)")
     public void viewLease(@RequestParam long leaseId, HttpServletResponse response) {
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store, private");
+        response.setHeader("X-Content-Type-Options", "nosniff");
         try (ByteArrayOutputStream buffer = new ByteArrayOutputStream()) {
             leaseService.viewLease(leaseId, buffer);
             response.setContentType(MediaType.APPLICATION_PDF_VALUE);
@@ -193,6 +195,8 @@ public class LeaseController extends OutputStreamErrorHandler {
     @GetMapping(value = "/view/template")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_LEASE_TEMPLATE)")
     public void viewLeaseTemplate(@RequestParam Optional<Long> templateId, @RequestParam Optional<Long> unitId, @RequestParam Optional<String> token, HttpServletResponse response) {
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store, private");
+        response.setHeader("X-Content-Type-Options", "nosniff");
         try (ByteArrayOutputStream buffer = new ByteArrayOutputStream()) {
             if (templateId.isPresent()) {
                 leaseService.renderLeaseTemplateToPdfByTemplate(templateId.get(), buffer);

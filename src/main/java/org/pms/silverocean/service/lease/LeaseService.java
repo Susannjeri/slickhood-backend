@@ -396,6 +396,8 @@ public class LeaseService {
 
     private void activateWhenFullySigned(Lease lease, UnitTenant tenancy, Unit unit) {
         if (lease.getTenantSignedDate() == null || lease.getManagerSignedDate() == null) return;
+        if (lease.getMoveOutDate() == null || !lease.getMoveOutDate().isAfter(LocalDate.now(PMSUtils.getZoneId())))
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         if (unit.isOccupied()) throw new PMSCustomException(ResponseCode.LEASE_ALREADY_EXISTS);
         lease.setSigned(true);
         lease.setLifecycleStatus("ACTIVE");
@@ -518,8 +520,19 @@ public class LeaseService {
 
     @Transactional
     public void viewLease(long leaseId, OutputStream outputStream) {
+        // Original parties retain their immutable agreement after tenancy termination.
+        var agreement = documents.findAccessibleAgreement(leaseId, userDao.getUserId(), PageRequest.of(0, 1));
+        if (!agreement.isEmpty()) {
+            try {
+                renderService.toPdf(org.pms.silverocean.service.leasedocument.LeaseDocumentPdf.html(agreement.getFirst()), outputStream);
+                return;
+            } catch (IOException exception) {
+                throw new PMSCustomException(ResponseCode.GENERAL_FAILURE, exception);
+            }
+        }
         Lease lease = leaseDao.getLeaseByIdAndStaffOwnerOrTenantId(leaseId, userDao.getUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
         access.check(lease);
+        if (lease.isGovernedDocumentRequired()) throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_NOT_FOUND);
 
         UnitTenant unitTenant = leaseDao.getUnitTenantByTenantId(lease.getTenantId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
 

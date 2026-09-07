@@ -15,7 +15,7 @@ public record LeaseDocumentDTO(Long id, Long leaseId, Long saleId, Long property
         this(d, 0);
     }
     public LeaseDocumentDTO(LeaseDocument d, long viewerId) {
-        this(d.getId(), d.getLeaseId(), d.getSaleId(), d.getPropertyId(), d.getUnitId(), d.getDocumentType(), d.getStatus(),
+        this(d.getId(), d.getLeaseId(), d.getSaleId(), d.getPropertyId(), d.getUnitId(), d.getDocumentType(), LeaseDocumentStatus.displayed(d),
                 d.getName(), d.getTemplateVersion(), d.getIssuerUserId(), d.getRecipientUserId(), d.getEffectiveDate(),
                 d.getResponseDueDate(), d.getAmount(), d.getCurrency(), d.getReason(), d.getDeliveryChannel(),
                 d.isLegalReviewRequired(), d.getIssuedAt(), d.getAcknowledgedAt(), d.getIssuerSignedAt(), d.getRecipientSignedAt(),

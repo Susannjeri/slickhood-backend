@@ -159,8 +159,10 @@ class RentalPaymentMySqlIT {
         d.setIssuerUserId(owner.getId());d.setRecipientUserId(buyer.getId());d.setTemplateId(1);d.setTemplateVersion(1);d.setName("Test offer");d.setRenderedHtml("<p>Test only</p>");
         d.setDocumentType(org.pms.silverocean.service.leasedocument.LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER);
         d.setStatus(org.pms.silverocean.service.leasedocument.LeaseDocumentStatus.ISSUED);d.setResponseDueDate(LocalDate.now().minusDays(1));d.setActive(true);documents.saveAndFlush(d);
-        assertEquals(1,documents.findAccessiblePage(buyer.getId(),null,sale.getId(),null,page).getTotalElements());
-        assertEquals(0,documents.findAccessiblePage(staff.getId(),null,sale.getId(),null,page).getTotalElements());
+        assertEquals(1,documents.findAccessiblePage(buyer.getId(),null,sale.getId(),null,null,page).getTotalElements());
+        assertEquals(0,documents.findAccessiblePage(staff.getId(),null,sale.getId(),null,null,page).getTotalElements());
+        assertEquals(1,documents.findAccessiblePage(buyer.getId(),null,null,null,unit.getId(),page).getTotalElements());
+        assertEquals(0,documents.findAccessiblePage(buyer.getId(),null,null,null,-1L,page).getTotalElements());
         assertTrue(documents.findAccessibleForUpdate(d.getId(),buyer.getId()).isPresent());
         assertEquals(1,documents.expireSaleOffers(sale.getId(),LocalDate.now()));
         assertFalse(documents.existsOpenForSale(sale.getId(),d.getDocumentType()));

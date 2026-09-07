@@ -23,7 +23,7 @@ public class SalesController {
     @PutMapping("/{id}") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SALE_PIPELINE)")
     public ResponseEntity<ResponseDTO> update(@PathVariable long id,@Valid @RequestBody UpdateSaleRequest request){return ok(ResponseCode.SALE_UPDATED,service.update(id,request));}
     @PostMapping("/{id}/accept-offer") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).ACCEPT_SALE_OFFER)")
-    public ResponseEntity<ResponseDTO> accept(@PathVariable long id){return ok(ResponseCode.SALE_ACCEPTED,service.acceptOffer(id));}
+    public ResponseEntity<ResponseDTO> accept(@PathVariable long id){return ok(ResponseCode.SALE_ACCEPTED,new SaleAcceptanceView(service.acceptOffer(id)));}
     @PostMapping("/{id}/escrow-invoice") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SALE_PIPELINE)")
     public ResponseEntity<ResponseDTO> escrowInvoice(@PathVariable long id,@Valid @RequestBody EscrowInvoiceModels.Create request){return ok(ResponseCode.SALE_UPDATED,service.createEscrowInvoice(id,request));}
     @PostMapping("/{id}/milestones") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SALE_PIPELINE)") public ResponseEntity<ResponseDTO> milestone(@PathVariable long id,@Valid @RequestBody SaleMilestoneModels.Create request){return ok(ResponseCode.SALE_UPDATED,service.addMilestone(id,request));}

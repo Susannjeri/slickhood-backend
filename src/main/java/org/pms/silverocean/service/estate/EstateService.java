@@ -179,7 +179,7 @@ public class EstateService {
         ownershipRepo.findFirstByUnitIdAndActiveTrue(unitId)
                 .filter(existing -> existing.getHomeownerUserId() == buyerId)
                 .ifPresent(existing -> { throw new PMSCustomException(ResponseCode.DATA_INTEGRITY_VIOLATION); });
-        PropertyOwnership ownership = createUnitOwnership(unit, buyer.getId(), LocalDate.now(),
+        PropertyOwnership ownership = createUnitOwnership(unit, buyer.getId(), LocalDate.now(PMSUtils.getZoneId()),
                 "SALE_COMPLETION", userDao.getUserId());
         ownership.setSourceSaleTransactionId(saleId);
         return ownershipRepo.save(ownership);

@@ -11,6 +11,19 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SalesControllerSecurityTest {
+    @Test void buyerAcceptanceResponseNeverLeaksInternalNotes() throws Exception {
+        var service = org.mockito.Mockito.mock(org.pms.silverocean.service.sales.SalesService.class);
+        var i18n = org.mockito.Mockito.mock(org.pms.silverocean.service.I18NService.class);
+        var sale = new org.pms.silverocean.database.pms.entities.SaleTransaction();
+        sale.setId(1L); sale.setStatus(org.pms.silverocean.service.sales.SaleStatus.RESERVED);
+        sale.setNotes("PRIVATE SELLER NEGOTIATION"); sale.setCurrency("KES");
+        org.mockito.Mockito.when(service.acceptOffer(1L)).thenReturn(sale);
+        var response = new SalesController(service,i18n).accept(1L);
+        String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(response.getBody());
+        assertThat(json).contains("RESERVED").doesNotContain("PRIVATE SELLER NEGOTIATION").doesNotContain("notes");
+        assertThat(sale.getNotes()).isEqualTo("PRIVATE SELLER NEGOTIATION");
+    }
+
     @Test
     void managerMutationsRequirePipelineManagementPermission() throws NoSuchMethodException {
         assertPermission("create", "MANAGE_SALE_PIPELINE", CreateSaleRequest.class);

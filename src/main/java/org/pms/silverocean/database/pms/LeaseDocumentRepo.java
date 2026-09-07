@@ -35,8 +35,14 @@ public interface LeaseDocumentRepo extends JpaRepository<LeaseDocument, Long> {
     Page<LeaseDocument> findAllAccessible(long userId, Pageable pageable);
     @Query("SELECT d FROM LeaseDocument d WHERE d.active AND (d.issuerUserId=:userId OR d.recipientUserId=:userId) " +
             "AND (:leaseId IS NULL OR d.leaseId=:leaseId) AND (:saleId IS NULL OR d.saleId=:saleId) " +
-            "AND (:propertyId IS NULL OR d.propertyId=:propertyId) ORDER BY d.createdOn DESC,d.id DESC")
-    Page<LeaseDocument> findAccessiblePage(long userId, Long leaseId, Long saleId, Long propertyId, Pageable pageable);
+            "AND (:propertyId IS NULL OR d.propertyId=:propertyId) AND (:unitId IS NULL OR d.unitId=:unitId) ORDER BY d.createdOn DESC,d.id DESC")
+    Page<LeaseDocument> findAccessiblePage(long userId, Long leaseId, Long saleId, Long propertyId, Long unitId, Pageable pageable);
+
+    @Query("SELECT d FROM LeaseDocument d WHERE d.leaseId=:leaseId AND d.active " +
+            "AND (d.issuerUserId=:userId OR d.recipientUserId=:userId) " +
+            "AND d.documentType IN ('RESIDENTIAL_LEASE_AGREEMENT','COMMERCIAL_LEASE_AGREEMENT') " +
+            "AND d.status NOT IN ('CANCELLED','EXPIRED') ORDER BY d.createdOn DESC,d.id DESC")
+    java.util.List<LeaseDocument> findAccessibleAgreement(long leaseId, long userId, Pageable pageable);
     long countByRecipientUserIdAndStatusAndActiveTrue(long userId, LeaseDocumentStatus status);
     Optional<LeaseDocument> findByIdAndPropertyIdAndUnitIdAndActiveTrue(long id, long propertyId, Long unitId);
     boolean existsByLeaseIdAndDocumentTypeAndStatusAndActiveTrue(long leaseId, LeaseDocumentType type, LeaseDocumentStatus status);

@@ -1,0 +1,73 @@
+package org.pms.silverocean.service.invites;
+
+import org.junit.jupiter.api.Test;
+import org.pms.silverocean.controller.wrappers.ResponseDTO;
+import org.pms.silverocean.database.pms.RoleRepo;
+import org.pms.silverocean.database.pms.entities.Invite;
+import org.pms.silverocean.database.pms.entities.Role;
+import org.pms.silverocean.service.I18NService;
+import org.pms.silverocean.service.PMSCustomException;
+import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.config.ConfigDTO;
+import org.pms.silverocean.service.config.ConfigService;
+import org.pms.silverocean.service.config.enums.PMSConfigs;
+import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
+import org.pms.silverocean.service.notification.NotificationDTO;
+import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.property.PropertyService;
+import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class TenantInvitationTest {
+    final InviteDao invites = mock(InviteDao.class);
+    final PropertyService properties = mock(PropertyService.class);
+    final UserDao users = mock(UserDao.class);
+    final ConfigService config = mock(ConfigService.class);
+    final RoleRepo roles = mock(RoleRepo.class);
+    final NotificationService notifications = mock(NotificationService.class);
+    final I18NService i18n = mock(I18NService.class);
+    final UnitDTO unit = mock(UnitDTO.class);
+    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,null,null,null);
+
+    void unit(PMSLeaseMode mode, boolean occupied) {
+        when(users.getUserId()).thenReturn(9L);
+        when(config.getConfigByName(PMSConfigs.INVITE_LINK_EXPIRY_DAYS)).thenReturn(() -> new ConfigDTO(1,"expiry",null,7,false));
+        when(properties.getUnitByIDAndLoggedInUser(77L)).thenReturn(new ResponseDTO(true,"ok","ok",unit));
+        when(unit.leaseMode()).thenReturn(mode); when(unit.occupied()).thenReturn(occupied);
+        when(unit.templateId()).thenReturn(1L);
+    }
+
+    @Test void landlordInvitationBindsEmailAndQueuesDelivery() {
+        unit(PMSLeaseMode.RENT,false);
+        when(config.getConfigByName(PMSConfigs.INVITE_LINK_URL)).thenReturn(() -> new ConfigDTO(2,"url","https://app.slickhood.test/invite",0,false));
+        when(i18n.getLocalizedMessage(anyString())).thenReturn("Open your unit invitation: %s");
+        Role tenant = new Role(); tenant.setId(6L); when(roles.findByName("Tenant")).thenReturn(Optional.of(tenant));
+        AtomicReference<Invite> saved = new AtomicReference<>();
+        doAnswer(call -> { Invite invite = call.getArgument(0); invite.setId(88L); saved.set(invite); return null; }).when(invites).createInvite(any());
+        when(invites.getInviteByInviteIdAndCreatedBy(88L,9L)).thenAnswer(call -> Optional.of(saved.get()));
+        service.createAndSendEmailInvite(InviteType.TENANT,77L," Tenant@Example.test ");
+        assertEquals("tenant@example.test",saved.get().getRecipient());
+        assertEquals("TENANT",saved.get().getType());
+        assertEquals(77L,saved.get().getEntityId());
+        var notification = org.mockito.ArgumentCaptor.forClass(NotificationDTO.class);
+        verify(notifications).queueNotification(notification.capture());
+        assertEquals("tenant@example.test",notification.getValue().recipient());
+    }
+
+    @Test void saleAndEstateUnitsCannotSendRentalInvitations() {
+        for (var mode : java.util.List.of(PMSLeaseMode.SALE,PMSLeaseMode.SERVICE_CHARGE)) {
+            unit(mode,false);
+            assertThrows(PMSCustomException.class,()->service.createAndSendEmailInvite(InviteType.TENANT,77L,"tenant@example.test"));
+        }
+        verifyNoInteractions(invites,notifications);
+    }
+
+    @Test void occupiedRentalCannotInviteANewTenant() {
+        unit(PMSLeaseMode.RENT,true);
+        assertThrows(PMSCustomException.class,()->service.createAndSendEmailInvite(InviteType.TENANT,77L,"tenant@example.test"));
+        verifyNoInteractions(invites,notifications);
+    }
+}

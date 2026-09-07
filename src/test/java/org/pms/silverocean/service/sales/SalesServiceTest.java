@@ -56,6 +56,7 @@ class SalesServiceTest {
         property.setManagementMode(PMSPropertyManagementMode.SALE);
         unit = new Unit(); unit.setId(77L); unit.setPropertyId(11L); unit.setActive(true); unit.setLeaseMode("SALE"); unit.setCurrency("KES");
         buyer = new Users(); buyer.setId(200L); buyer.setActive(true); buyer.setEmail("buyer@example.com");
+        lenient().when(properties.findById(11L)).thenReturn(Optional.of(property));
     }
 
     @Test
@@ -241,7 +242,7 @@ class SalesServiceTest {
         PMSInvoice invoice = new PMSInvoice(); invoice.setId(501L); invoice.setRef("INV-1F5");
         invoice.setAmount(1400000); invoice.setPendingAmount(0); invoice.setCurrency("KES");
         invoice.setPropertyId(11L); invoice.setUnitId(77L); invoice.setBilledUserId(200L);
-        invoice.setBillingType("SALE"); invoice.setPaid(true); invoice.setActive(true);
+        invoice.setBillingType("SALE"); invoice.setPaid(true); invoice.setActive(true); invoice.setPayToUserId(100L);
         when(users.getUserId()).thenReturn(300L);
         lenient().when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
         when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
@@ -341,11 +342,22 @@ class SalesServiceTest {
         verify(sales, never()).save(any());
     }
 
+    @Test void paidInvoiceForAnotherPayeeCannotCompleteTheSale() {
+        SaleTransaction sale = sale(SaleStatus.COMPLETION);
+        PMSInvoice invoice = stubSettledEscrow(sale); invoice.setPayToUserId(999L);
+        when(users.getUserId()).thenReturn(100L);
+        when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        when(milestones.existsBySaleIdAndMilestoneTypeAndStatus(eq(1L),anyString(),eq("COMPLETED"))).thenReturn(true);
+        assertThrows(PMSCustomException.class, () -> service.update(1L,new UpdateSaleRequest(SaleStatus.COMPLETED,null,null)));
+        verifyNoInteractions(estates); verify(sales,never()).save(any());
+    }
+
     private PMSInvoice stubSettledEscrow(SaleTransaction sale) {
         sale.setEscrowInvoiceId(501L); sale.setEscrowRequiredAmount(new BigDecimal("1400000"));
         PMSInvoice invoice = new PMSInvoice(); invoice.setId(501L); invoice.setActive(true); invoice.setPaid(true);
         invoice.setBillingType("SALE"); invoice.setPropertyId(11L); invoice.setUnitId(77L); invoice.setBilledUserId(200L);
-        invoice.setCurrency("KES"); invoice.setAmount(1400000); invoice.setPendingAmount(0);
+        invoice.setCurrency("KES"); invoice.setAmount(1400000); invoice.setPendingAmount(0); invoice.setPayToUserId(100L);
         when(invoices.findByIdForUpdate(501L)).thenReturn(Optional.of(invoice));
         return invoice;
     }

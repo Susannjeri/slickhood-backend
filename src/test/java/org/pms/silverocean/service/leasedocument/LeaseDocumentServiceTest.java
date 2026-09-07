@@ -91,6 +91,17 @@ class LeaseDocumentServiceTest {
         assertEquals("2026-10-01", modelCaptor.getValue().get("moveInDate"));
         assertEquals(false, modelCaptor.getValue().get("hasAdditionalTerms"));
         assertEquals("Owner", modelCaptor.getValue().get("documentOwnerName"));
+        assertEquals("Not recorded", modelCaptor.getValue().get("petsPolicy"));
+        assertEquals(List.of(), modelCaptor.getValue().get("leaseCharges"));
+        verify(renderer).renderInline(contains("Recorded lease schedule"), any());
+    }
+
+    @Test void unitDocumentFilterIsAppliedBeforePagingAndKeepsPartyScope() {
+        when(documents.findAccessiblePage(eq(16L),isNull(),isNull(),isNull(),eq(13L),any()))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+        service.list(org.springframework.data.domain.PageRequest.of(1,500),null,null,null,13L);
+        verify(documents).findAccessiblePage(eq(16L),isNull(),isNull(),isNull(),eq(13L),
+                argThat(page -> page.getPageNumber() == 1 && page.getPageSize() == 100));
     }
 
     @Test void validPropertySaleLetterOfOfferCreatesSaleLinkedSnapshot() {
@@ -259,6 +270,8 @@ class LeaseDocumentServiceTest {
     }
 
     @Test void currentHomeownerAgreementCanBeSignedWithoutCreatingATenancy() {
+        properties.findById(15L).orElseThrow().setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE);
+        units.findById(13L).orElseThrow().setLeaseMode("SERVICE_CHARGE");
         LeaseDocument d = rentalDraft(LeaseDocumentStatus.ISSUED);
         d.setDocumentType(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT);
         d.setEffectiveDate(LocalDate.now()); d.setCreatedOn(java.time.ZonedDateTime.now().minusDays(1));
@@ -280,6 +293,52 @@ class LeaseDocumentServiceTest {
         d.setEffectiveDate(lease.getMoveInDate()); d.setActive(true);
         lenient().when(documents.findAccessibleForUpdate(66L,16L)).thenReturn(Optional.of(d));
         return d;
+    }
+
+    private LeaseDocument currentEstateDraft() {
+        LeaseDocument d = rentalDraft(LeaseDocumentStatus.ISSUED);
+        d.setLeaseId(null); d.setDocumentType(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT);
+        d.setEffectiveDate(LocalDate.now()); d.setCreatedOn(java.time.ZonedDateTime.now().minusDays(1));
+        PropertyOwnership current = new PropertyOwnership(); current.setId(81L); current.setPropertyId(15L);
+        current.setUnitId(13L); current.setHomeownerUserId(14L); current.setActive(true);
+        current.setOwnershipStart(LocalDate.now().minusDays(2)); current.setCreatedOn(java.time.ZonedDateTime.now().minusDays(2));
+        when(ownershipRepo.findAllByPropertyIdAndActiveTrue(15L)).thenReturn(List.of(current));
+        when(ownershipRepo.findActiveForUpdate(81L)).thenReturn(Optional.of(current));
+        properties.findById(15L).orElseThrow().setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE);
+        units.findById(13L).orElseThrow().setLeaseMode("SERVICE_CHARGE");
+        return d;
+    }
+
+    @Test void homeownerCannotSignReclassifiedEstateInventory() {
+        currentEstateDraft();
+        properties.findById(15L).orElseThrow().setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.RENTAL);
+        assertThrows(PMSCustomException.class, () -> service.sign(66L));
+        verify(documents, never()).save(any());
+    }
+
+    @Test void estateAgreementCannotBeIssuedForRetiredHome() {
+        LeaseDocument d = currentEstateDraft(); d.setStatus(LeaseDocumentStatus.DRAFT);
+        units.findById(13L).orElseThrow().setActive(false);
+        assertThrows(PMSCustomException.class, () -> service.issue(66L));
+        verifyNoInteractions(email); verify(documents, never()).save(any());
+    }
+
+    @Test void bothEstatePartiesSignAndHistoricalPdfStillUsesFrozenAgreement() throws Exception {
+        LeaseDocument d = currentEstateDraft();
+        d.setRenderedHtml("<html><body><h1>Estate agreement</h1><p>Acacia home A-1</p></body></html>");
+        when(documents.save(d)).thenReturn(d);
+        service.sign(66L); // Estate manager may sign first; this is not a rental lease.
+        when(users.getUserId()).thenReturn(14L);
+        when(documents.findAccessibleForUpdate(66L,14L)).thenReturn(Optional.of(d));
+        assertEquals(LeaseDocumentStatus.SIGNED, service.sign(66L).status());
+        assertNotNull(d.getRecipientSignedAt());
+        when(documents.findAccessible(66L,14L)).thenReturn(Optional.of(d));
+        // Viewing historical evidence does not require a currently active ownership.
+        clearInvocations(ownershipRepo);
+        service.renderPdf(66L,new java.io.ByteArrayOutputStream());
+        verify(renderer).toPdf(contains("Acacia home A-1"),any());
+        verify(renderer).toPdf(contains("SIGNED"),any());
+        verifyNoInteractions(leaseService,salesService,ownershipRepo);
     }
 
     @Test void recordsManualApprovalAgainstTheExactTemplateContent() {
