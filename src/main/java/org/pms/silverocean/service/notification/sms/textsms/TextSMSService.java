@@ -58,7 +58,7 @@ public class TextSMSService implements SmsProvider {
                 request, null, TextSMSResponse.class);
         int statusCode = 0;
         for (SmsResponseItem responseItem : textSMSResponse.responses()) {
-            log.debug("SMS Sent to recipients: {}", responseItem);
+            log.debug("SMS provider receipt status {}", responseItem.responseCode());
             sms.setStatus(String.valueOf(responseItem.responseCode()));
             sms.setDescription(responseItem.responseDescription());
             sms.setThirdPartyId(responseItem.thirdPartyMessageId());
@@ -104,7 +104,7 @@ public class TextSMSService implements SmsProvider {
                 .whenComplete((response, throwable) -> {
                     if (throwable != null) {
                         Throwable actualError = throwable.getCause() != null ? throwable.getCause() : throwable;
-                        log.error("Error fetching DLR for ID {}: {}",  request.messageId(), actualError.getMessage());
+                        log.error("Error fetching DLR for ID {} ({})", request.messageId(), actualError.getClass().getSimpleName());
                         scheduleDeliveryReportCallback(new TextSMSDlrRequest(getPartnerId(), getApiKey(), request.messageId(), request.retryCount() + 1));
                         return;
                     }

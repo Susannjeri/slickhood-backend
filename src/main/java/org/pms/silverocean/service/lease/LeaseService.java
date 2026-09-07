@@ -416,7 +416,8 @@ public class LeaseService {
         Lease lease = leaseDao.getLeaseByIdAndStaffOwnerOrTenantId(leaseId, userId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
         access.check(lease);
-        if (!lease.isSigned() || "TERMINATED".equals(lease.getLifecycleStatus())) {
+        if (!lease.isSigned() || "TERMINATED".equals(lease.getLifecycleStatus())
+                || "NOTICE_GIVEN".equals(lease.getLifecycleStatus())) {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA_CONSTRAINT);
         }
         int noticeMonths = Optional.ofNullable(lease.getNoticePeriodInMonths()).orElse(0);
@@ -509,7 +510,7 @@ public class LeaseService {
         Unit unit = leaseDao.getUnitByTenantId(lease.getTenantId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
         String body = String.format(i18NService.getLocalizedMessage(NotificationType.LEASE_TERMINATION_EMAIL.getBody()),
-                lease.getId(), request.effectiveDate(), request.reason().trim());
+                lease.getId(), request.effectiveDate(), org.springframework.web.util.HtmlUtils.htmlEscape(request.reason().trim()));
         long ownerId = unitDao.findPropertyOwnerId(unit.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
         new HashSet<>(List.of(tenancy.getUserId(), ownerId)).forEach(id -> userDao.findById(id)

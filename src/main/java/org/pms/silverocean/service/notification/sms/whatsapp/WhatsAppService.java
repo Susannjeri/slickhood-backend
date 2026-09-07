@@ -29,6 +29,10 @@ public class WhatsAppService implements SmsProvider {
     private final RestTemplateService restTemplateService;
     private final ConfigService configService;
     private final SMSDao smsDao;
+    @org.springframework.beans.factory.annotation.Value("${whatsapp.utility-template:general_message}")
+    private String utilityTemplate = "general_message";
+    @org.springframework.beans.factory.annotation.Value("${whatsapp.template-language:en}")
+    private String templateLanguage = "en";
 
     public WhatsAppService(RestTemplateService restTemplateService, ConfigService configService, SMSDao smsDao) {
         this.restTemplateService = restTemplateService;
@@ -48,6 +52,19 @@ public class WhatsAppService implements SmsProvider {
         String accessToken = configService.getConfigByName(PMSConfigs.WHATSAPP_ACCESS_TOKEN).get().stringValue();
 
         String url = String.format(apiUrl, phoneNumberId);
+        java.net.URI endpoint = java.net.URI.create(url);
+        if (!"https".equals(endpoint.getScheme()) || !"graph.facebook.com".equals(endpoint.getHost())
+                || endpoint.getUserInfo() != null || endpoint.getQuery() != null || endpoint.getFragment() != null
+                || (endpoint.getPort() != -1 && endpoint.getPort() != 443)
+                || !phoneNumberId.matches("[0-9]+")
+                || !endpoint.getPath().matches("/v[0-9]+\\.[0-9]+/" + phoneNumberId + "/messages")) {
+            throw new IllegalStateException("WhatsApp requires the HTTPS Meta messages endpoint and a numeric phone ID");
+        }
+        if (StringUtils.isBlank(accessToken) || "placeholder".equalsIgnoreCase(accessToken)) {
+            throw new IllegalStateException("WhatsApp access token is not configured");
+        }
+        String recipient = StringUtils.defaultString(recipientPhone).replaceFirst("^\\+", "");
+        if (!recipient.matches("[1-9][0-9]{7,14}")) throw new IllegalArgumentException("WhatsApp requires an international phone number");
 
 
         var params = List.of(
@@ -56,8 +73,8 @@ public class WhatsAppService implements SmsProvider {
         );
 
         var components = List.of(new Component("body", params));
-        var template = new Template("general_message", new Language("en"), components);
-        var request = new WhatsAppRequest("whatsapp", recipientPhone, "template", template);
+        var template = new Template(utilityTemplate, new Language(templateLanguage), components);
+        var request = new WhatsAppRequest("whatsapp", recipient, "template", template);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -65,16 +82,22 @@ public class WhatsAppService implements SmsProvider {
 
         log.info("Sending WhatsApp Message");
         WhatsAppResponse response = restTemplateService.sendPostRequest(url, request, headers, WhatsAppResponse.class);
-        for (WAMessage waMessage : response.messages()) {
-            sms.setStatus(String.valueOf(waMessage.messageStatus()));
-            sms.setThirdPartyId(waMessage.id());
-            sms.setDescription("Sent To Meta Servers");
+        if (response == null || response.messages() == null || response.messages().size() != 1
+                || response.messages().getFirst() == null || StringUtils.isBlank(response.messages().getFirst().id())) {
+            throw new IllegalStateException("WhatsApp did not return a message receipt");
         }
+        WAMessage receipt = response.messages().getFirst();
+        sms.setStatus("accepted");
+        sms.setThirdPartyId(receipt.id());
+        sms.setDescription("Accepted by Meta; delivery not yet confirmed");
         smsDao.saveSMS(sms);
     }
 
     @Override
     public int executeSend(NotificationDTO dto, long notificationId) throws Exception {
+        if (dto.notificationType() == org.pms.silverocean.service.notification.common.NotificationType.OTP_SMS) {
+            throw new IllegalStateException("OTP delivery requires its own approved authentication template; keep the SMS provider enabled");
+        }
         sendUtilityMessage(dto.recipient(), "SlickHood User", dto.formattedMessage(), notificationId);
         return 0;
     }

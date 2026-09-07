@@ -65,7 +65,7 @@ class SubscriptionManagementServiceTest {
         SubscriptionPlan listingPlan = new SubscriptionPlan();
         listingPlan.setCode("LISTING_ADDON");
         listingPlan.setActive(true);
-        when(plans.findByCodeAndActiveTrue("LISTING_ADDON")).thenReturn(Optional.of(listingPlan));
+        when(plans.findByCode("LISTING_ADDON")).thenReturn(Optional.of(listingPlan));
         PlanFeature enabled = feature("listing_management", true);
         PlanFeature disabled = feature("unpaid_feature", false);
         when(features.findBySubscriptionPlanAndActiveTrue(listingPlan)).thenReturn(List.of(enabled, disabled));
@@ -97,8 +97,8 @@ class SubscriptionManagementServiceTest {
                 .thenReturn(List.of(addOn));
         SubscriptionPlan plan = new SubscriptionPlan();
         plan.setCode("PORTFOLIO_ADDON");
-        plan.setActive(true);
-        when(plans.findByCodeAndActiveTrue("PORTFOLIO_ADDON")).thenReturn(Optional.of(plan));
+        plan.setActive(false); // Retired from new sales, but the purchased term still grants access.
+        when(plans.findByCode("PORTFOLIO_ADDON")).thenReturn(Optional.of(plan));
         when(features.findBySubscriptionPlanAndActiveTrue(plan))
                 .thenReturn(List.of(feature("portfolio_management", true)));
 

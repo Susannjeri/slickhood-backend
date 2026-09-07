@@ -39,7 +39,7 @@ class CallBackControllerWebhookTest {
         ReflectionTestUtils.setField(controller, "flutterwaveWebhookSecret", "fw-secret");
         ReflectionTestUtils.setField(controller, "mpesaCallbackToken", "mpesa-token");
         ReflectionTestUtils.setField(controller, "whatsAppAppSecret", "meta-secret");
-        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        org.mockito.Mockito.lenient().when(request.getRemoteAddr()).thenReturn("127.0.0.1");
     }
 
     @Test void rejectsInvalidPaystackSignatureBeforeDispatch() {
@@ -76,5 +76,39 @@ class CallBackControllerWebhookTest {
         StringBuilder signature = new StringBuilder();
         for (byte value : mac.doFinal(body.getBytes(StandardCharsets.UTF_8))) signature.append(String.format("%02x", value));
         return signature.toString();
+    }
+
+    @Test void verifiesOnlySubscribeWithANonEmptyMatchingToken() {
+        ReflectionTestUtils.setField(controller, "whatsAppVerifyToken", "verify-test");
+        assertEquals("challenge", controller.verifyWebhook("subscribe", "verify-test", "challenge").getBody());
+        assertEquals(HttpStatus.FORBIDDEN, controller.verifyWebhook("unsubscribe", "verify-test", "challenge").getStatusCode());
+        assertEquals(HttpStatus.FORBIDDEN, controller.verifyWebhook("subscribe", "wrong", "challenge").getStatusCode());
+        ReflectionTestUtils.setField(controller, "whatsAppVerifyToken", "");
+        assertEquals(HttpStatus.FORBIDDEN, controller.verifyWebhook("subscribe", "", "challenge").getStatusCode());
+    }
+
+    @Test void authenticatedMalformedJsonReturnsBadRequest() throws Exception {
+        String body = "{invalid";
+        assertEquals(HttpStatus.BAD_REQUEST, controller.handleIncomingEvents(request, metaSignature(body), body).getStatusCode());
+        verify(sms, never()).receiveWhatsAppCallback(any(), any());
+    }
+
+    @Test void authenticatedCallbackParsesSnakeCaseFieldsAndIgnoresUnrelatedFields() throws Exception {
+        String body = """
+          {"object":"whatsapp_business_account","entry":[{"id":"a","changes":[{"field":"messages","value":{
+          "messaging_product":"whatsapp","metadata":{"phone_number_id":"123"},
+          "statuses":[{"id":"b","status":"read","recipient_id":"254700000000"}],"messages":[]}}]}]}
+          """;
+        assertEquals(HttpStatus.OK, controller.handleIncomingEvents(request, metaSignature(body), body).getStatusCode());
+        var captured = org.mockito.ArgumentCaptor.forClass(org.pms.silverocean.service.notification.sms.whatsapp.wrappers.callback.WAWebHook.class);
+        verify(sms).receiveWhatsAppCallback(captured.capture(), any());
+        var value = captured.getValue().entry().getFirst().changes().getFirst().value();
+        assertEquals("123", value.metadata().phoneNumberId());
+        assertEquals("254700000000", value.statuses().getFirst().recipientId());
+    }
+    private String metaSignature(String body) throws Exception {
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec("meta-secret".getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        return "sha256=" + java.util.HexFormat.of().formatHex(mac.doFinal(body.getBytes(StandardCharsets.UTF_8)));
     }
 }

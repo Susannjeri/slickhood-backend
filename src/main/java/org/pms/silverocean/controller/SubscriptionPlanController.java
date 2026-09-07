@@ -53,8 +53,10 @@ public class SubscriptionPlanController {
 
     @GetMapping
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SUBSCRIPTION_PLAN)")
-    public ResponseEntity<ResponseDTO> listPlans(Pageable pageable, @RequestParam(required = false) PlanCategory category) {
-        Page<SubscriptionPlanResponseDTO> plans = subscriptionPlanService.listPlans(pageable, category);
+    public ResponseEntity<ResponseDTO> listPlans(Pageable pageable, @RequestParam(required = false) PlanCategory category,
+                                                @RequestParam(required = false) Boolean active,
+                                                @RequestParam(required = false) String search) {
+        Page<SubscriptionPlanResponseDTO> plans = subscriptionPlanService.listPlans(pageable, category, active, search);
         ResponseDTO responseDTO = new ResponseDTO(true, ResponseCode.SUBSCRIPTION_PLAN_LIST.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SUBSCRIPTION_PLAN_LIST), plans.getContent());
         responseDTO.setSize(plans.getSize());

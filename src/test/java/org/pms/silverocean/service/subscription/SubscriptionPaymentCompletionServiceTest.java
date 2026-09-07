@@ -61,7 +61,7 @@ class SubscriptionPaymentCompletionServiceTest {
         PaidInvoiceView invoice = new PaidInvoiceView(13L,"INV-MISSING","MISSING",true,0,7L);
         when(paidInvoiceReader.findByIdForUpdate(13L)).thenReturn(Optional.of(invoice));
         when(completionRepo.existsByInvoiceId(13L)).thenReturn(false);
-        when(subscriptionPlanRepo.findByCodeAndActiveTrue("MISSING")).thenReturn(Optional.empty());
+        when(subscriptionPlanRepo.findByCode("MISSING")).thenReturn(Optional.empty());
         assertThrows(IllegalStateException.class,()->service.completePaidSubscriptionAfterPayment(13L,"PAY-RETRY"));
         verify(completionRepo,never()).save(any());
     }
@@ -80,7 +80,7 @@ class SubscriptionPaymentCompletionServiceTest {
     }
 
     @Test
-    void completePaidSubscriptionAfterPayment_activatesWhenNotYetApplied() {
+    void settledInvoiceStillActivatesItsPurchasedTermAfterPlanRetirement() {
         PaidInvoiceView invoice = new PaidInvoiceView(11L,"INV-TEST2","PRO",true,0,7L);
 
         SubscriptionPlan plan = SubscriptionPlan.builder()
@@ -93,7 +93,7 @@ class SubscriptionPaymentCompletionServiceTest {
                 .currency("KES")
                 .productKey(org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD)
                 .build();
-        plan.setActive(true);
+        plan.setActive(false);
 
         Role dbRole = Role.builder()
                 .name(PMSRole.LANDLORD.getName())
@@ -105,7 +105,7 @@ class SubscriptionPaymentCompletionServiceTest {
 
         when(paidInvoiceReader.findByIdForUpdate(11L)).thenReturn(Optional.of(invoice));
         when(completionRepo.existsByInvoiceId(11L)).thenReturn(false);
-        when(subscriptionPlanRepo.findByCodeAndActiveTrue("PRO")).thenReturn(Optional.of(plan));
+        when(subscriptionPlanRepo.findByCode("PRO")).thenReturn(Optional.of(plan));
         when(roleRepo.findByName(PMSRole.LANDLORD.getName())).thenReturn(Optional.of(dbRole));
         when(userRoleRepo.findByUserIdAndRoleId(7L, 2L)).thenReturn(1);
         when(userSubscriptionRepo.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
@@ -149,7 +149,7 @@ class SubscriptionPaymentCompletionServiceTest {
 
         when(paidInvoiceReader.findByIdForUpdate(12L)).thenReturn(Optional.of(invoice));
         when(completionRepo.existsByInvoiceId(12L)).thenReturn(false);
-        when(subscriptionPlanRepo.findByCodeAndActiveTrue("PRO")).thenReturn(Optional.of(plan));
+        when(subscriptionPlanRepo.findByCode("PRO")).thenReturn(Optional.of(plan));
         when(roleRepo.findByName(PMSRole.LANDLORD.getName())).thenReturn(Optional.of(role));
         when(userRoleRepo.findByUserIdAndRoleId(7L, 2L)).thenReturn(1);
         when(userSubscriptionRepo.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(

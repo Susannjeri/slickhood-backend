@@ -143,5 +143,36 @@ class TaxAssistServiceTest {
         if (lower != null) r.setLowerThreshold(bd(lower)); if (upper != null) r.setUpperThreshold(bd(upper));
         r.setSourceUrl("https://example.test/law"); r.setSourceNote("Verified rule"); r.setActive(true); return r;
     }
+
+    @Test
+    void doesNotReportCreditWhenMriDoesNotApply() {
+        when(rules.effectiveCandidates(eq("KENYA_MRI"), any(), any(Pageable.class))).thenReturn(List.of(mri));
+        var result = service.estimateMri(new MriEstimateRequest(YearMonth.of(2026, 8), false, true, false,
+                bd("1200000"), bd("100000"), bd("1000")));
+        assertThat(result.creditAmount()).isZero();
+    }
+
+    @Test
+    void cgtDoesNotInventFollowingMonthDeadline() {
+        when(rules.effectiveCandidates(eq("KENYA_CGT_PROPERTY"), any(), any(Pageable.class))).thenReturn(List.of(cgt));
+        var result = service.estimateCgt(new CgtEstimateRequest(LocalDate.of(2026, 8, 12), bd("10000000"), bd("0"),
+                bd("5000000"), bd("0"), bd("0"), false, false, null));
+        assertThat(result.dueDate()).isNull();
+        assertThat(result.explanation()).contains("do not assume the 20th");
+    }
+
+    @Test
+    void historyReadsSavedRuleNotLaterAdminEdits() {
+        when(rules.effectiveCandidates(eq("KENYA_MRI"), any(), any(Pageable.class))).thenReturn(List.of(mri));
+        service.estimateMri(new MriEstimateRequest(YearMonth.of(2026, 8), true, true, false,
+                bd("1200000"), bd("100000"), bd("0")));
+        var captured = org.mockito.ArgumentCaptor.forClass(TaxCalculation.class);
+        verify(calculations).save(captured.capture());
+        mri.setRate(bd("0.99"));
+        when(calculations.findByOwnerUserIdOrderByCreatedOnDesc(eq(42L), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(captured.getValue())));
+        assertThat(service.history(org.springframework.data.domain.PageRequest.of(0, 20)).getContent().getFirst().rule().rate())
+                .isEqualByComparingTo("0.075");
+    }
     private static BigDecimal bd(String value) { return new BigDecimal(value); }
 }

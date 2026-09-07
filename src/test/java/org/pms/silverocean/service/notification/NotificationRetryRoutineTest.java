@@ -69,4 +69,17 @@ class NotificationRetryRoutineTest {
         notification.setActive(true);
         return notification;
     }
+
+    @Test void temporarySenderFailureDoesNotPermanentlyDisableRecovery() {
+        Notification stored = stored(NotificationType.SERVICE_CHARGE_OVERDUE_EMAIL);
+        when(email.retryDelaySeconds()).thenReturn(300);
+        when(email.maxRetries()).thenReturn(10);
+        when(notifications.findRetryCandidates(eq("EMAIL"), any(LocalDateTime.class), eq(10), eq(100))).thenReturn(List.of(42L));
+        when(notifications.findById(42L)).thenReturn(Optional.of(stored));
+        when(encryption.decrypt(stored.getMessage())).thenReturn(new DecryptDTO(false, "Outstanding balance"));
+        org.mockito.Mockito.doThrow(new java.util.concurrent.RejectedExecutionException("sensitive provider detail"))
+                .when(email).retry(any(), eq(42L));
+        new NotificationRetryRoutine(notifications, encryption, Map.of("EMAIL", email)).recoverRetries();
+        verify(notifications, never()).stopRetry(42L);
+    }
 }

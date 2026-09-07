@@ -10,6 +10,9 @@ import org.springframework.data.jpa.repository.Query;
 import java.util.Optional;
 
 public interface PaymentAccountRepo extends JpaRepository<PaymentAccount, Long>, JpaSpecificationExecutor<PaymentAccount> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT pa FROM PaymentAccount pa WHERE pa.id=:id AND pa.active")
+    Optional<PaymentAccount> findActiveForUpdate(Long id);
     Page<PaymentAccount> findAllByActiveTrue(Pageable pageable);
     Page<PaymentAccount> findByCreatedByAndActiveTrue(Long createdBy, Pageable pageable);
     Optional<PaymentAccount> findByIdAndActiveTrue(Long id);

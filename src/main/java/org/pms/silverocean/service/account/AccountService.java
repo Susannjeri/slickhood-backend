@@ -30,6 +30,7 @@ import org.pms.silverocean.database.pms.CommunityFundRepo;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -97,12 +98,14 @@ public class AccountService {
         return Page.empty();
     }
 
+    @Transactional("pmsDBTransactionManager")
     public void verifyAccount(long accountId, boolean verify, String comments) {
-        PaymentAccount account = accountDao.getAccountById(accountId);
-        for (AccountPropertyDTO accountProperty : buildPropertyDTOs(account)) {
-            if (StringUtils.isBlank(accountProperty.value()) && verify) {
-                throw new PMSCustomException(ResponseCode.ACCOUNT_INCOMPLETE_PROPERTIES);
-            }
+        if (!userDao.hasPermission(org.pms.silverocean.service.auth.roles.enums.Permission.VERIFY_ACCOUNT)) {
+            throw new PMSCustomException(ResponseCode.ACCOUNT_INSUFFICIENT_PERMISSIONS);
+        }
+        PaymentAccount account = accountDao.getAccountForUpdate(accountId);
+        if (verify) {
+            validateStoredProperties(account);
         }
         NotificationDTO notification;
         String email = userDao.findById(account.getCreatedBy()).map(Users::getEmail)
@@ -169,11 +172,15 @@ public class AccountService {
         return new AccountDTO(account, safeProperties, paymentPlatformFactory.getChannelImage(account.getChannel()));
     }
 
+    @Transactional("pmsDBTransactionManager")
     public void updateAccountProperty(Long accountId, UpdateAccountPropertyRequestDTO dto) {
-        PaymentAccount account = accountDao.getAccountById(accountId);
+        PaymentAccount account = accountDao.getAccountForUpdate(accountId);
         assertOwnerOrAdmin(account);
 
         AccountPropertyDefinition definition = account.getChannel().findProperty(dto.key());
+        if (invalidConfigurationValue(dto.value())) {
+            throw new PMSCustomException(ResponseCode.ACCOUNT_INCOMPLETE_PROPERTIES);
+        }
 
         // A destination is verified as a complete set. Changing any constituent
         // value invalidates that decision until an administrator reviews it again.
@@ -181,11 +188,11 @@ public class AccountService {
             accountDao.updateVerification(account, false);
         }
 
-        PaymentAccountProperty prop = accountDao.getProperty(accountId, dto.key())
+        PaymentAccountProperty prop = accountDao.getProperty(accountId, definition.key())
                 .orElseGet(() -> {
                     PaymentAccountProperty p = new PaymentAccountProperty();
                     p.setAccountId(accountId);
-                    p.setPropertyKey(dto.key());
+                    p.setPropertyKey(definition.key());
                     return p;
                 });
 
@@ -213,16 +220,14 @@ public class AccountService {
         }
 
         DecryptDTO result = encryptionService.decrypt(prop.getValue());
-        if (result.usedOldKey()) {
-            prop.setValue(encryptionService.encrypt(result.decryptedValue()));
-            prop.setLastModifiedDate(LocalDateTime.now());
-            accountDao.upsertProperty(prop);
-        }
+        // Reads must not overwrite a newer replacement with an old-key value.
+        // Re-encryption belongs in an explicitly locked maintenance operation.
         return result.decryptedValue();
     }
 
+    @Transactional("pmsDBTransactionManager")
     public void deleteAccount(Long accountId) {
-        PaymentAccount account = accountDao.getAccountById(accountId);
+        PaymentAccount account = accountDao.getAccountForUpdate(accountId);
         assertOwnerOrAdmin(account);
         if (communityFundRepo.existsByPaymentAccountIdAndActiveTrueAndStatusIn(accountId,List.of("DRAFT","OPEN","FROZEN"))) {
             throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);
@@ -278,17 +283,38 @@ public class AccountService {
         }).toList();
     }
 
+    private void validateStoredProperties(PaymentAccount account) {
+        if (account.getChannel() == PaymentChannel.PAYSTACK && account.getCategory() == AccountCategory.SLICKHOOD) {
+            return; // This destination uses the protected platform integration configuration.
+        }
+        List<PaymentAccountProperty> properties = accountDao.getPropertiesForAccount(account.getId());
+        for (AccountPropertyDefinition definition : account.getChannel().getAccountProperties()) {
+            PaymentAccountProperty property = properties.stream()
+                    .filter(p -> definition.key().equalsIgnoreCase(p.getPropertyKey()))
+                    .findFirst().orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_INCOMPLETE_PROPERTIES));
+            if (property.getValue() == null || property.isEncrypted() != definition.encrypted()) {
+                throw new PMSCustomException(ResponseCode.ACCOUNT_INCOMPLETE_PROPERTIES);
+            }
+            // Never validate the masked display DTO, and never log decrypted credentials.
+            String value = definition.encrypted()
+                    ? encryptionService.decrypt(property.getValue()).decryptedValue()
+                    : new String(property.getValue(), StandardCharsets.UTF_8);
+            if (invalidConfigurationValue(value)) {
+                throw new PMSCustomException(ResponseCode.ACCOUNT_INCOMPLETE_PROPERTIES);
+            }
+        }
+    }
+
+    private boolean invalidConfigurationValue(String value) {
+        return StringUtils.isBlank(value) || value.trim().matches("[\\*•]+") || value.length() > 4096;
+    }
+
     private String resolveDisplayValue(AccountPropertyDefinition def, PaymentAccountProperty prop) {
         if (!def.encrypted()) {
             return new String(prop.getValue(), StandardCharsets.UTF_8);
         }
         if (def.displayField()) {
             DecryptDTO result = encryptionService.decrypt(prop.getValue());
-            if (result.usedOldKey()) {
-                prop.setValue(encryptionService.encrypt(result.decryptedValue()));
-                prop.setLastModifiedDate(LocalDateTime.now());
-                accountDao.upsertProperty(prop);
-            }
             return result.decryptedValue();
         }
         return "*****";

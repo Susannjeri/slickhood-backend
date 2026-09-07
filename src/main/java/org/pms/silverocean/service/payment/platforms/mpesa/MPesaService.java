@@ -321,7 +321,7 @@ public class MPesaService extends PaymentPlatform {
         return mPesaPaymentResponseDTO;
     }
 
-    @EventListener
+    @org.springframework.transaction.event.TransactionalEventListener(fallbackExecution = true)
     public void invalidateCredentials(PaymentAccountCredentialsChangedEvent event) {
         if (event.channel() == PaymentChannel.MPESA) {
             tokenCache.asMap().keySet().removeIf(key -> key.accountId() == event.accountId());

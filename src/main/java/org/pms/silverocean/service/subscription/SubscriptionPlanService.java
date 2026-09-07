@@ -44,6 +44,7 @@ public class SubscriptionPlanService {
 
     @Transactional
     public SubscriptionPlanResponseDTO createPlan(SubscriptionPlanRequestDTO request) {
+        validateIdentity(request);
         String normalizedCode = normalizeCode(request.code());
         if (subscriptionPlanRepo.existsByCode(normalizedCode)) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_ALREADY_EXISTS);
@@ -72,7 +73,21 @@ public class SubscriptionPlanService {
     @Transactional
     public SubscriptionPlanResponseDTO updatePlan(String planCode, SubscriptionPlanRequestDTO request) {
         SubscriptionPlan existingPlan = getByCodeOrThrow(planCode);
+        validateIdentity(request);
         String normalizedCode = normalizeCode(request.code());
+        // Subscription and invoice history reference this identity. Publish a new plan for a new product/term.
+        if (!existingPlan.getCode().equals(normalizedCode)
+                || existingPlan.getPlanCategory() != request.planCategory()
+                || existingPlan.getRoleFamily() != request.roleFamily()
+                || existingPlan.getBillingCycle() != request.billingCycle()
+                || !existingPlan.getCurrency().equalsIgnoreCase(request.currency().trim())) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
+        SubscriptionPurchaseMode originalMode = modeOrDefault(existingPlan);
+        if (originalMode != SubscriptionPurchaseMode.SALES_MANAGED
+                && originalMode != modeFor(normalizedCode, request.price())) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
         if (subscriptionPlanRepo.existsByCodeAndIdNot(normalizedCode, existingPlan.getId())) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_ALREADY_EXISTS);
         }
@@ -86,8 +101,11 @@ public class SubscriptionPlanService {
         existingPlan.setBillingCycle(request.billingCycle());
         existingPlan.setPrice(request.price());
         existingPlan.setCurrency(request.currency().trim().toUpperCase(Locale.ROOT));
-        existingPlan.setProductKey(productFor(request.planCategory()));
-        existingPlan.setPurchaseMode(modeFor(normalizedCode, request.price()));
+        // Soko and add-ons share categories with other products; never infer their identity again on edit.
+        if (existingPlan.getProductKey() == null) existingPlan.setProductKey(productFor(request.planCategory()));
+        if (modeOrDefault(existingPlan) != SubscriptionPurchaseMode.SALES_MANAGED) {
+            existingPlan.setPurchaseMode(modeFor(normalizedCode, request.price()));
+        }
         existingPlan.setTierRank(rankFor(request.displayName()));
         SubscriptionPlan savedPlan = subscriptionPlanRepo.save(existingPlan);
         replaceFeatures(savedPlan, request.features());
@@ -102,16 +120,34 @@ public class SubscriptionPlanService {
 
     @Transactional(readOnly = true)
     public Page<SubscriptionPlanResponseDTO> listPlans(Pageable pageable, PlanCategory category) {
+        return listPlans(pageable, category, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<SubscriptionPlanResponseDTO> listPlans(Pageable pageable, PlanCategory category, Boolean active, String search) {
         Specification<SubscriptionPlan> specification = Specification.where(null);
         if (category != null) {
             specification = specification.and((root, query, cb) -> cb.equal(root.get("planCategory"), category));
         }
-        return subscriptionPlanRepo.findAll(specification, pageable).map(this::toResponse);
+        if (active != null) specification = specification.and((root, query, cb) -> cb.equal(root.get("active"), active));
+        if (search != null && !search.isBlank()) {
+            String pattern = "%" + search.trim().toUpperCase(Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+            specification = specification.and((root, query, cb) -> cb.or(
+                    cb.like(cb.upper(root.get("code")), pattern, '\\'),
+                    cb.like(cb.upper(root.get("displayName")), pattern, '\\')));
+        }
+        Pageable bounded = org.springframework.data.domain.PageRequest.of(pageable.getPageNumber(),
+                Math.min(100, Math.max(1, pageable.getPageSize())), pageable.getSort());
+        return subscriptionPlanRepo.findAll(specification, bounded).map(this::toResponse);
     }
 
     @Transactional
     public void updatePlanStatus(String planCode, boolean active) {
         SubscriptionPlan subscriptionPlan = getByCodeOrThrow(planCode);
+        if (active && java.util.Set.of("STARTER", "STANDARD", "STANDARD_AFFILIATE")
+                .contains(subscriptionPlan.getCode())) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
         if (active && !subscriptionPlan.isActive()) {
             ensureUniqueActivePackage(subscriptionPlan.getRoleFamily(), subscriptionPlan.getBillingCycle(),
                     subscriptionPlan.getDisplayName(), subscriptionPlan.getId());
@@ -267,6 +303,18 @@ public class SubscriptionPlanService {
 
     private String normalizeCode(String code) {
         return code.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private void validateIdentity(SubscriptionPlanRequestDTO request) {
+        var expectedRole = switch (request.planCategory()) {
+            case LANDLORD -> org.pms.silverocean.service.auth.roles.enums.PMSRole.LANDLORD;
+            case ESTATE_MANAGEMENT -> org.pms.silverocean.service.auth.roles.enums.PMSRole.ESTATE_MANAGER;
+            case PROPERTY_SALES -> org.pms.silverocean.service.auth.roles.enums.PMSRole.SALES_AGENT;
+            case SERVICE_PROVIDER -> org.pms.silverocean.service.auth.roles.enums.PMSRole.SERVICE_PROVIDER;
+            case AFFILIATE -> org.pms.silverocean.service.auth.roles.enums.PMSRole.AFFILIATE;
+            case ASSET_PORTFOLIO_MANAGER -> org.pms.silverocean.service.auth.roles.enums.PMSRole.ASSET_PORTFOLIO_MANAGER;
+        };
+        if (request.roleFamily() != expectedRole) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
     }
 
     private SubscriptionProduct productFor(PlanCategory category) {

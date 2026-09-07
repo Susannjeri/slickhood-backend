@@ -32,7 +32,14 @@ public class NotificationRetryRoutine {
         try {
             var notification = notifications.findById(id).orElse(null);
             if (notification == null || notification.isDelivered() || !notification.isRetry()) return;
-            NotificationType type = NotificationType.valueOf(notification.getType());
+            NotificationType type;
+            try {
+                type = NotificationType.valueOf(notification.getType());
+            } catch (IllegalArgumentException | NullPointerException invalidType) {
+                notifications.stopRetry(id);
+                log.error("Notification {} has an unsupported stored type", id);
+                return;
+            }
             var decrypted = encryption.decrypt(notification.getMessage());
             if (decrypted == null) {
                 notifications.stopRetry(id);
@@ -41,8 +48,9 @@ public class NotificationRetryRoutine {
             }
             sender.retry(new NotificationDTO(decrypted.decryptedValue(), notification.getRecipient(), type), id);
         } catch (Exception failure) {
-            notifications.stopRetry(id);
-            log.error("Notification {} recovery was disabled because its persisted payload is invalid", id, failure);
+            // A database outage, executor rejection or key-service outage is not corrupt payload.
+            // Keep the persisted retry eligible; never log provider bodies or decrypted content.
+            log.warn("Notification {} recovery deferred ({})", id, failure.getClass().getSimpleName());
         }
     }
 }

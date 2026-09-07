@@ -194,13 +194,16 @@ public class CallBackController {
     }
 
     @GetMapping("/whatsapp")
-    public String verifyWebhook(@RequestParam("hub.verify_token") String token,
+    public ResponseEntity<String> verifyWebhook(@RequestParam("hub.mode") String mode,
+                                @RequestParam("hub.verify_token") String token,
                                 @RequestParam("hub.challenge") String challenge) {
-        // Match this token with the one you set in the Meta Dashboard
-        if (whatsAppVerifyToken.equals(token)) {
-            return challenge;
+        if ("subscribe".equals(mode) && whatsAppVerifyToken != null && !whatsAppVerifyToken.isBlank()
+                && token != null && java.security.MessageDigest.isEqual(
+                whatsAppVerifyToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                token.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+            return ResponseEntity.ok(challenge);
         }
-        return "Verification Failed";
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
     }
 
     @PostMapping("/whatsapp")
@@ -212,7 +215,17 @@ public class CallBackController {
             log.warn("Rejected unauthenticated WhatsApp callback from {}", PMSUtils.getIPAddress(request));
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        WAWebHook whatsAppCallback = gson.fromJson(rawBody, WAWebHook.class);
+        WAWebHook whatsAppCallback;
+        try {
+            whatsAppCallback = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+                    .readValue(rawBody, WAWebHook.class);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException invalidJson) {
+            return ResponseEntity.badRequest().build();
+        }
+        if (whatsAppCallback == null || !"whatsapp_business_account".equals(whatsAppCallback.object())) {
+            return ResponseEntity.badRequest().build();
+        }
         smsService.receiveWhatsAppCallback(whatsAppCallback, PMSUtils.getIPAddress(request));
         return ResponseEntity.ok().build();
     }

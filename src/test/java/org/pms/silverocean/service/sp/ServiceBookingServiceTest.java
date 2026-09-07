@@ -81,6 +81,7 @@ class ServiceBookingServiceTest {
         s.setId(id);
         s.setProfileId(profileId);
         s.setStatus(status);
+        s.setActive(true);
         s.setCategoryName(categoryName);
         return s;
     }
@@ -102,6 +103,8 @@ class ServiceBookingServiceTest {
         p.setId(id);
         p.setBusinessName(businessName);
         p.setUserId(99L);
+        p.setActive(true);
+        p.setStatus("ACTIVE");
         return p;
     }
 
@@ -351,6 +354,8 @@ class ServiceBookingServiceTest {
     void financeCannotSettleMoreThanCompletedBookingNetAmount() {
         when(userDao.hasRole(PMSRole.FINANCE)).thenReturn(true);
         ServiceBooking booking = makeBooking(42L, 10L, BookingStatus.COMPLETED.name());
+        booking.setPaymentStatus("PAID");
+        booking.setRefundStatus("CONFIRMED");
         booking.setRefundedAmount(new BigDecimal("100.00"));
         when(bookingDao.findByIdForUpdate(42L)).thenReturn(Optional.of(booking));
         var request = new MarketplaceFinanceRequest(MarketplaceFinanceRequest.FinanceType.SETTLEMENT,
@@ -358,6 +363,39 @@ class ServiceBookingServiceTest {
 
         PMSCustomException ex = assertThrows(PMSCustomException.class, () -> service.updateFinance(42L, request));
 
-        assertEquals(ResponseCode.SP_BOOKING_INVALID_STATUS, ex.getResponseCode());
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, ex.getResponseCode());
+    }
+
+    @Test void bookingRejectsBlacklistedProviderEvenIfServiceRemainsListed(){
+        when(userDao.getUserId()).thenReturn(1L);
+        when(serviceDao.findById(10L)).thenReturn(Optional.of(makeProviderService(10L,5L,"LISTED","Cleaning")));
+        ProviderProfile profile=makeProfile(5L,"CleanCo");profile.setStatus("BLACKLISTED");
+        when(profileDao.findById(5L)).thenReturn(Optional.of(profile));
+        assertThrows(PMSCustomException.class,()->service.createBooking(new CreateBookingRequest(10L,LocalDateTime.now().plusDays(1),null,null,null)));
+        org.mockito.Mockito.verifyNoInteractions(bookingDao);
+    }
+    @Test void bookingRejectsPastNairobiTimeAtServiceBoundary(){
+        when(userDao.getUserId()).thenReturn(1L);
+        when(serviceDao.findById(10L)).thenReturn(Optional.of(makeProviderService(10L,5L,"LISTED","Cleaning")));
+        when(profileDao.findById(5L)).thenReturn(Optional.of(makeProfile(5L,"CleanCo")));
+        assertThrows(PMSCustomException.class,()->service.createBooking(new CreateBookingRequest(10L,LocalDateTime.now(ZoneId.of("Africa/Nairobi")).minusMinutes(1),null,null,null)));
+        org.mockito.Mockito.verifyNoInteractions(bookingDao);
+    }
+    @Test void inactivePaymentAccountCannotIssueInvoice(){
+        when(userDao.getUserId()).thenReturn(99L);
+        ServiceBooking booking=makeBooking(20L,10L,"PENDING");
+        when(bookingDao.findByIdAndServiceCreatedByForUpdate(20L,99L)).thenReturn(Optional.of(booking));
+        when(serviceDao.findById(10L)).thenReturn(Optional.of(makeProviderService(10L,5L,"LISTED","Cleaning")));
+        ProviderProfile profile=makeProfile(5L,"CleanCo");profile.setPaymentAccountId(30L);
+        when(profileDao.findById(5L)).thenReturn(Optional.of(profile));
+        PaymentAccount account=new PaymentAccount();account.setActive(false);account.setVerified(true);account.setCategory(AccountCategory.MERCHANT);
+        when(accountDao.getAccountByIdAndCreatedBy(30L,99L)).thenReturn(account);
+        assertThrows(PMSCustomException.class,()->service.confirmBooking(20L));
+        org.mockito.Mockito.verifyNoInteractions(invoiceDao);
+    }
+    @Test void bookingPerspectiveIsPerTransactionNotGlobalProviderRole(){
+        ServiceBooking booking=makeBooking(20L,10L,"AWAITING_PAYMENT");
+        org.junit.jupiter.api.Assertions.assertTrue(new ServiceBookingDTO(booking,"Cleaning","CleanCo","Customer",1L).customerBooking());
+        org.junit.jupiter.api.Assertions.assertFalse(new ServiceBookingDTO(booking,"Cleaning","CleanCo","Customer",99L).customerBooking());
     }
 }

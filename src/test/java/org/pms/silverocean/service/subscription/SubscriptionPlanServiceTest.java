@@ -73,6 +73,63 @@ class SubscriptionPlanServiceTest {
                 BillingCycle.MONTHLY, new BigDecimal("1000"), "KES", List.of(), List.of());
     }
 
+    @Test
+    void editingSokoDoesNotChangeItsProductToServices() {
+        SubscriptionPlan soko = plan("SOKO_FREE", "Soko", true);
+        soko.setId(7L); soko.setPlanCategory(PlanCategory.SERVICE_PROVIDER); soko.setRoleFamily(PMSRole.SERVICE_PROVIDER);
+        soko.setPrice(BigDecimal.ZERO); soko.setProductKey(org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SOKO);
+        soko.setPurchaseMode(org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode.FREE);
+        when(planRepo.findByCode("SOKO_FREE")).thenReturn(Optional.of(soko));
+        when(planRepo.save(soko)).thenReturn(soko);
+        var result = service.updatePlan("SOKO_FREE", new SubscriptionPlanRequestDTO("SOKO_FREE", "Soko",
+                PlanCategory.SERVICE_PROVIDER, PMSRole.SERVICE_PROVIDER, BillingCycle.MONTHLY, BigDecimal.ZERO, "KES", List.of(), List.of()));
+        assertEquals(org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SOKO, result.productKey());
+    }
+
+    @Test
+    void editingZeroPricedAddonDoesNotMakeItFree() {
+        SubscriptionPlan addon = plan("ADDON_GATE_MANAGEMENT", "Gate Management add-on", true);
+        addon.setId(8L); addon.setPrice(BigDecimal.ZERO);
+        addon.setProductKey(org.pms.silverocean.service.subscription.enums.SubscriptionProduct.GATE_MANAGEMENT_ADDON);
+        addon.setPurchaseMode(org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode.SALES_MANAGED);
+        when(planRepo.findByCode(addon.getCode())).thenReturn(Optional.of(addon));
+        when(planRepo.save(addon)).thenReturn(addon);
+        var result = service.updatePlan(addon.getCode(), new SubscriptionPlanRequestDTO(addon.getCode(), addon.getDisplayName(),
+                PlanCategory.LANDLORD, PMSRole.LANDLORD, BillingCycle.MONTHLY, BigDecimal.ZERO, "KES", List.of(), List.of()));
+        assertEquals(org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode.SALES_MANAGED, result.purchaseMode());
+        assertEquals(org.pms.silverocean.service.subscription.enums.SubscriptionProduct.GATE_MANAGEMENT_ADDON, result.productKey());
+    }
+
+    @Test
+    void refusesRenameOfPlanReferencedBySubscriptionHistory() {
+        when(planRepo.findByCode("LANDLORD_BRONZE")).thenReturn(Optional.of(plan("LANDLORD_BRONZE", "Bronze", true)));
+        assertThrows(PMSCustomException.class, () -> service.updatePlan("LANDLORD_BRONZE", request("RENAMED", "Bronze")));
+        verify(planRepo, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void retiredLegacyAliasCannotBeReactivated() {
+        when(planRepo.findByCode("STANDARD")).thenReturn(Optional.of(plan("STANDARD", "Standard", false)));
+        assertThrows(PMSCustomException.class, () -> service.updatePlanStatus("STANDARD", true));
+        verify(planRepo, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void rejectsMismatchedRoleAndCategory() {
+        assertThrows(PMSCustomException.class, () -> service.createPlan(new SubscriptionPlanRequestDTO("BAD", "Bad",
+                PlanCategory.ESTATE_MANAGEMENT, PMSRole.LANDLORD, BillingCycle.MONTHLY, BigDecimal.TEN, "KES", List.of(), List.of())));
+        verify(planRepo, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void unlimitedQuotaIsValidButLowerNegativeValuesAreNot() {
+        try (var factory = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
+            var validator = factory.getValidator();
+            assertEquals(0, validator.validate(new PlanQuotaDTO("UNITS", -1L)).size());
+            assertEquals(1, validator.validate(new PlanQuotaDTO("UNITS", -2L)).size());
+        }
+    }
+
     private SubscriptionPlan plan(String code, String name, boolean active) {
         SubscriptionPlan plan = SubscriptionPlan.builder().code(code).displayName(name)
                 .planCategory(PlanCategory.LANDLORD).roleFamily(PMSRole.LANDLORD)

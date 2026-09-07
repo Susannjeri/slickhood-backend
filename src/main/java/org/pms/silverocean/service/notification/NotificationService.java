@@ -25,11 +25,12 @@ public class NotificationService {
     private final UserDao userDao;
     private final Map<String, NotificationSender> senders;
     private final ApplicationEventPublisher events;
-    @Async
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public void sendNotification(NotificationDTO notificationDTO) {
         queueNotification(notificationDTO);
     }
 
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public long queueNotification(NotificationDTO notificationDTO) {
         long notificationId = createNotification(notificationDTO.recipient(), notificationDTO.formattedMessage(), notificationDTO.notificationType());
         events.publishEvent(new NotificationQueued(notificationId, notificationDTO));

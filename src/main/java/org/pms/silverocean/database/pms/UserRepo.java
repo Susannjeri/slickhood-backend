@@ -64,7 +64,7 @@ public interface UserRepo extends JpaRepository<Users, Long>, JpaSpecificationEx
     long countActiveInsuranceStaff(@Param("userId") long userId, @Param("roleNames") Set<String> roleNames);
 
     @Query("""
-        SELECT (SUM(CASE WHEN u.active THEN 1.0 ELSE 0.0 END) * 100.0) / COUNT(u)
+        SELECT COALESCE((SUM(CASE WHEN u.active THEN 1.0 ELSE 0.0 END) * 100.0) / NULLIF(COUNT(u), 0), 0.0)
         FROM Users u
     """)
     double getActiveUserPercentage();

@@ -79,6 +79,8 @@ public class TaxAssistService {
             if (credit.compareTo(tax) > 0) credit = tax;
             explanation = "Estimated MRI is based on gross residential rent received. Expenses and capital deductions are not deducted. Review any KRA withholding certificates before filing.";
         }
+        // Never report a credit against tax that was not assessed by this regime.
+        credit = credit.min(tax);
         return save("MRI", input.period().toString(), input.grossRentReceived(), taxable, tax, credit,
                 tax.subtract(credit).max(zero()), outcome, explanation, due, input, rule);
     }
@@ -113,7 +115,9 @@ public class TaxAssistService {
             tax = taxable.multiply(rule.getRate()).setScale(2, RoundingMode.HALF_UP);
             explanation = "Estimated CGT is based on the transfer value less allowable transfer, acquisition and enhancement costs. Confirm evidence, exemptions and the legal transfer date before filing.";
         }
-        LocalDate due = YearMonth.from(input.transferDate()).plusMonths(1).atDay(20);
+        // A transfer date alone cannot determine the CGT deadline (full payment may precede registration).
+        LocalDate due = null;
+        explanation += " CGT payment timing must be confirmed before transfer; do not assume the 20th of the following month. Check receipt of the full purchase price and transfer registration/lodgement with your tax adviser.";
         return save("CGT", input.transferDate().toString(), gross, taxable, tax, zero(), tax,
                 outcome, explanation, due, input, rule);
     }
@@ -221,7 +225,16 @@ public class TaxAssistService {
         return rules.effectiveCandidates(code, date, PageRequest.of(0, 1)).stream().findFirst().orElseThrow(() -> new IllegalStateException("No approved tax rule is configured for " + code + " on " + date));
     }
     private CalculationView view(TaxCalculation c) {
-        return new CalculationView(c.getId(), c.getCalculationType(), c.getTaxPeriod(), c.getCurrency(), c.getGrossAmount(), c.getTaxableAmount(), c.getEstimatedTax(), c.getCreditAmount(), c.getEstimatedPayable(), c.getOutcome(), c.getExplanation(), c.getDueDate(), ruleView(rules.findById(c.getRuleVersionId()).orElseThrow(() -> new IllegalStateException("Calculation rule snapshot is unavailable"))), c.getCreatedOn());
+        return new CalculationView(c.getId(), c.getCalculationType(), c.getTaxPeriod(), c.getCurrency(), c.getGrossAmount(), c.getTaxableAmount(), c.getEstimatedTax(), c.getCreditAmount(), c.getEstimatedPayable(), c.getOutcome(), c.getExplanation(), c.getDueDate(), calculationRule(c), c.getCreatedOn());
+    }
+    private RuleView calculationRule(TaxCalculation calculation) {
+        String snapshot = calculation.getRuleSnapshot();
+        if (snapshot != null && !snapshot.isBlank()) {
+            try { return json.readValue(snapshot, RuleView.class); }
+            catch (JsonProcessingException e) { throw new IllegalStateException("Calculation rule snapshot is unavailable", e); }
+        }
+        // Legacy calculations may predate snapshots; never silently replace a corrupt snapshot.
+        return ruleView(rules.findById(calculation.getRuleVersionId()).orElseThrow(() -> new IllegalStateException("Calculation rule snapshot is unavailable")));
     }
     private RuleView ruleView(TaxRuleVersion r) { return new RuleView(r.getId(), r.getRuleCode(), r.getVersion(), r.getEffectiveFrom(), r.getEffectiveTo(), r.getRate(), r.getLowerThreshold(), r.getUpperThreshold(), r.getCurrency(), r.getSourceUrl(), r.getSourceNote(), r.isActive()); }
     private ConnectionView connectionView(TaxConnectionRequest c) { return new ConnectionView(c.getId(), c.getProvider(), c.getTaxpayerPinMasked(), Set.copyOf(Arrays.asList(c.getRequestedScopes().split(","))), c.getConsentVersion(), c.getConsentedAt(), c.getStatus(), c.getEnvironment(), c.getReviewNote(), c.getCreatedOn()); }

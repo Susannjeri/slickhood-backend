@@ -79,7 +79,6 @@ class HelpDeskServiceTest {
         when(messages.findByConversationIdAndActiveTrueOrderByCreatedOnDesc(eq(5L), any())).thenReturn(List.of());
         when(articles.findByPublishedTrueAndActiveTrueOrderByCategoryAscTitleAsc()).thenReturn(List.of());
         when(ai.moderate(anyString())).thenReturn(new OpenAiHelpDeskClient.ModerationResult(true, false));
-        when(ai.answer(anyString(), anyString(), anyString())).thenThrow(new IllegalStateException("provider unavailable"));
 
         var result = service.send(5L, new HelpDeskModels.SendMessage("My payment is missing"));
         assertEquals("ESCALATED", result.status());
@@ -87,6 +86,7 @@ class HelpDeskServiceTest {
         verify(messages, times(2)).save(saved.capture());
         assertEquals(List.of("USER", "SYSTEM"), saved.getAllValues().stream().map(HelpMessage::getSenderType).toList());
         assertFalse(saved.getAllValues().get(1).getContent().toLowerCase().contains("api key"));
+        verify(ai, never()).answer(anyString(), anyString(), anyString());
     }
 
     @Test void guestTokenIsReturnedOnlyInPlaintextAndStoredAsHash() {
@@ -121,5 +121,98 @@ class HelpDeskServiceTest {
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
                 () -> service.getGuest("SH-TEST", validLengthToken));
         assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
+    }
+
+    @Test void humanCaseResponseDoesNotInvokeAiAndKeepsDeadline() {
+        HelpConversation c = ownedCase("WAITING_FOR_SUPPORT");
+        c.setPriority("HIGH"); c.setWaitingSince(java.time.LocalDateTime.now().minusHours(2));
+        c.setSlaDueAt(java.time.LocalDateTime.now().minusHours(1));
+        var due = c.getSlaDueAt();
+        when(ai.moderate(anyString())).thenReturn(new OpenAiHelpDeskClient.ModerationResult(true, false));
+        assertEquals("ESCALATED", service.send(5L, new HelpDeskModels.SendMessage("Here are more details")).status());
+        assertEquals(due, c.getSlaDueAt()); assertEquals("HIGH", c.getPriority());
+        verify(ai, never()).answer(anyString(), anyString(), anyString());
+        verifyNoInteractions(articles);
+    }
+
+    @Test void repeatedEscalationCannotExtendDeadlineOrDowngradePriority() {
+        HelpConversation c = ownedCase("ESCALATED"); c.setPriority("URGENT");
+        c.setWaitingSince(java.time.LocalDateTime.now().minusHours(1));
+        c.setSlaDueAt(c.getWaitingSince().plusMinutes(15)); var due = c.getSlaDueAt();
+        service.escalate(5L, new HelpDeskModels.Escalate(null, "LOW"));
+        assertEquals(due, c.getSlaDueAt()); assertEquals("URGENT", c.getPriority());
+        verifyNoInteractions(notifications);
+    }
+
+    @Test void secretInSubjectIsRejectedBeforeStorageAndUrlQueryIsRemoved() {
+        assertThrows(ResponseStatusException.class, () -> service.startGuest(new HelpDeskModels.GuestStart("OTP is 123456", "GENERAL", "/register")));
+        verify(conversations, never()).save(any());
+        when(conversations.save(any())).thenAnswer(i -> { HelpConversation c=i.getArgument(0); c.setId(7L); return c; });
+        var guest = service.startGuest(new HelpDeskModels.GuestStart("Help", "GENERAL", "/register?invite=private#secret"));
+        assertEquals("/register", guest.conversation().pageContext());
+    }
+
+    @Test void internalNotesDoNotReachCustomerOrAiTranscript() {
+        HelpConversation c = new HelpConversation(); c.setId(5L);
+        HelpMessage note = new HelpMessage(); note.setId(2L); note.setInternalNote(true); note.setContent("private investigation");
+        HelpMessage publicMessage = new HelpMessage(); publicMessage.setId(3L); publicMessage.setContent("public reply");
+        assertEquals(1, new HelpDeskModels.ConversationView(c, List.of(note, publicMessage), false).messages().size());
+        assertEquals(2, new HelpDeskModels.ConversationView(c, List.of(note, publicMessage), true).messages().size());
+    }
+
+    @Test void manualImportCreatesOnlyDraftsAndRetainsExistingSlugs() throws Exception {
+        when(users.getUserId()).thenReturn(17L);
+        when(articles.existsBySlugAndIdNot(anyString(), eq(-1L))).thenAnswer(i -> "manual-start".equals(i.getArgument(0)));
+        when(articles.save(any())).thenAnswer(i -> { var a=(org.pms.silverocean.database.pms.entities.HelpArticle)i.getArgument(0); a.setId(9L); return a; });
+        var result = service.importManualDrafts();
+        assertEquals(29, result.get("created")); assertEquals(1, result.get("retained"));
+        var captor = ArgumentCaptor.forClass(org.pms.silverocean.database.pms.entities.HelpArticle.class);
+        verify(articles, times(29)).save(captor.capture());
+        assertTrue(captor.getAllValues().stream().noneMatch(org.pms.silverocean.database.pms.entities.HelpArticle::isPublished));
+        assertTrue(captor.getAllValues().stream().filter(a -> a.getSlug().equals("manual-admin")).allMatch(a -> "Superadmin".equals(a.getAudienceRoles())));
+        assertTrue(org.pms.silverocean.controller.HelpDeskController.class.getMethod("importManual")
+                .getAnnotation(org.springframework.security.access.prepost.PreAuthorize.class).value().contains("manage_helpdesk_articles"));
+    }
+
+    @Test void manualImportIsRepeatSafe() {
+        when(users.getUserId()).thenReturn(17L);
+        when(articles.existsBySlugAndIdNot(anyString(), eq(-1L))).thenReturn(true);
+        assertEquals(0, service.importManualDrafts().get("created"));
+        verify(articles, never()).save(any());
+    }
+
+    @Test void guestKnowledgeCannotIncludeRestrictedStaffArticles() {
+        var publicArticle = new org.pms.silverocean.database.pms.entities.HelpArticle(); publicArticle.setId(1L);
+        var internal = new org.pms.silverocean.database.pms.entities.HelpArticle(); internal.setId(2L); internal.setAudienceRoles("Superadmin,Support");
+        when(articles.findByPublishedTrueAndActiveTrueOrderByCategoryAscTitleAsc()).thenReturn(List.of(publicArticle, internal));
+        assertEquals(List.of(1L), service.guestArticles().stream().map(HelpDeskModels.ArticleView::id).toList());
+    }
+
+    private HelpConversation ownedCase(String status) {
+        when(users.getUserId()).thenReturn(17L);
+        HelpConversation c = new HelpConversation(); c.setId(5L); c.setStatus(status); c.setPriority("NORMAL"); c.setActiveRole("Tenant");
+        when(conversations.findByIdAndUserIdAndActiveTrue(5L, 17L)).thenReturn(Optional.of(c));
+        when(conversations.save(any())).thenAnswer(i -> i.getArgument(0));
+        return c;
+    }
+
+    @Test void detachedConversationCarriesForwardMergeVersionAcrossAiResponse() {
+        HelpConversation c = ownedCase("OPEN");
+        var version = new java.util.concurrent.atomic.AtomicLong();
+        when(conversations.save(any())).thenAnswer(i -> {
+            HelpConversation incoming = i.getArgument(0);
+            assertEquals(version.get(), incoming.getVersion(), "A stale detached version would fail the next JPA save");
+            HelpConversation merged = new HelpConversation();
+            org.springframework.beans.BeanUtils.copyProperties(incoming, merged);
+            merged.setVersion(version.incrementAndGet());
+            return merged;
+        });
+        var article = new org.pms.silverocean.database.pms.entities.HelpArticle(); article.setId(6L);
+        article.setTitle("Workspace guidance"); article.setBody("Open Business Areas to select a workspace.");
+        when(articles.findByPublishedTrueAndActiveTrueOrderByCategoryAscTitleAsc()).thenReturn(List.of(article));
+        when(ai.moderate(anyString())).thenReturn(new OpenAiHelpDeskClient.ModerationResult(true, false));
+        when(ai.answer(anyString(), anyString(), anyString())).thenReturn(new HelpDeskModels.AiAnswer("Open Business Areas. [Article 6]", "test-response", "test-model", false));
+        assertEquals("OPEN", service.send(5L, new HelpDeskModels.SendMessage("Which workspace should I select?")).status());
+        assertTrue(version.get() >= 2); assertEquals(version.get(), c.getVersion());
     }
 }

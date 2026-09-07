@@ -159,7 +159,7 @@ class AccountServiceSecurityTest {
     @Test
     void changingAFieldRevokesVerificationAndPublishesCacheInvalidationEvent() {
         PaymentAccount account = account(42L, 7L, AccountCategory.LANDLORD, PaymentChannel.MPESA, true);
-        when(accountDao.getAccountById(42L)).thenReturn(account);
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account);
         when(userDao.getUserId()).thenReturn(7L);
         when(accountDao.getProperty(42L, PaymentPropertyKeys.CONSUMER_SECRET)).thenReturn(Optional.empty());
         when(encryptionService.encrypt("new-secret")).thenReturn("ciphertext".getBytes(StandardCharsets.UTF_8));
@@ -177,8 +177,8 @@ class AccountServiceSecurityTest {
         PaymentAccount account = account(42L, 7L, AccountCategory.LANDLORD, PaymentChannel.MPESA, true);
         Users owner = org.mockito.Mockito.mock(Users.class);
         when(owner.getEmail()).thenReturn("owner@example.test");
-        when(accountDao.getAccountById(42L)).thenReturn(account);
-        when(accountDao.getPropertiesForAccount(42L)).thenReturn(List.of());
+        when(userDao.hasPermission("verify_account")).thenReturn(true);
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account);
         when(userDao.findById(7L)).thenReturn(Optional.of(owner));
         when(i18NService.getLocalizedMessage(any(String.class))).thenReturn("Account %s: %s");
 
@@ -194,6 +194,84 @@ class AccountServiceSecurityTest {
         when(userDao.getUserId()).thenReturn(7L);
         assertThat(service.getAccount(42L).properties()).isEmpty();
         verify(accountDao, never()).getPropertiesForAccount(42L);
+    }
+
+    @Test
+    void verificationPermissionIsRequiredEvenWhenCalledOutsideController() {
+        assertThatThrownBy(() -> service.verifyAccount(42L, true, ""))
+                .isInstanceOf(PMSCustomException.class);
+        verifyNoInteractions(accountDao, encryptionService, notificationService);
+    }
+
+    @Test
+    void readingAnOldKeyDisplayValueCannotOverwriteConcurrentCredentialReplacement() {
+        when(accountDao.getAccountById(42L)).thenReturn(account(42L, 7L, AccountCategory.MERCHANT, PaymentChannel.PAYSTACK, true));
+        when(userDao.getUserId()).thenReturn(7L);
+        PaymentAccountProperty property = new PaymentAccountProperty();
+        property.setPropertyKey(PaymentPropertyKeys.SUBACCOUNT_CODE);
+        property.setValue(new byte[]{1});
+        property.setEncrypted(true);
+        when(accountDao.getPropertiesForAccount(42L)).thenReturn(List.of(property));
+        when(encryptionService.decrypt(property.getValue())).thenReturn(new org.pms.silverocean.service.security.DecryptDTO(true, "ACCT_test"));
+        assertThat(service.getAccount(42L).properties()).singleElement().extracting("value").isEqualTo("ACCT_test");
+        verify(accountDao, never()).upsertProperty(any());
+        verify(encryptionService, never()).encrypt(any());
+    }
+
+    @Test
+    void nonOwnerCannotReplaceCredentials() {
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account(42L, 99L, AccountCategory.LANDLORD, PaymentChannel.MPESA, true));
+        when(userDao.getUserId()).thenReturn(7L);
+        assertThatThrownBy(() -> service.updateAccountProperty(42L,
+                new UpdateAccountPropertyRequestDTO(PaymentPropertyKeys.CONSUMER_SECRET, "replacement")))
+                .isInstanceOf(PMSCustomException.class);
+        verify(accountDao, never()).upsertProperty(any());
+        verifyNoInteractions(encryptionService, eventPublisher);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"", "   ", "*****", " ••• "})
+    void blankOrMaskedReplacementCannotOverwriteRealCredentials(String value) {
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account(42L, 7L, AccountCategory.LANDLORD, PaymentChannel.MPESA, true));
+        when(userDao.getUserId()).thenReturn(7L);
+        assertThatThrownBy(() -> service.updateAccountProperty(42L,
+                new UpdateAccountPropertyRequestDTO(PaymentPropertyKeys.CONSUMER_SECRET, value)))
+                .isInstanceOf(PMSCustomException.class);
+        verify(accountDao, never()).updateVerification(any(), org.mockito.ArgumentMatchers.anyBoolean());
+        verify(accountDao, never()).upsertProperty(any());
+        verifyNoInteractions(encryptionService, eventPublisher);
+    }
+
+    @Test
+    void encryptedBlankCannotBeApprovedBecauseItsDisplayMaskLooksComplete() {
+        PaymentAccount account = account(42L, 7L, AccountCategory.MERCHANT, PaymentChannel.PAYSTACK, false);
+        PaymentAccountProperty property = new PaymentAccountProperty();
+        property.setPropertyKey(PaymentPropertyKeys.SUBACCOUNT_CODE);
+        property.setValue(new byte[]{1, 2, 3});
+        property.setEncrypted(true);
+        when(userDao.hasPermission("verify_account")).thenReturn(true);
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account);
+        when(accountDao.getPropertiesForAccount(42L)).thenReturn(List.of(property));
+        when(encryptionService.decrypt(property.getValue())).thenReturn(new org.pms.silverocean.service.security.DecryptDTO(false, " "));
+        assertThatThrownBy(() -> service.verifyAccount(42L, true, ""))
+                .isInstanceOf(PMSCustomException.class);
+        verify(accountDao, never()).updateVerification(any(), org.mockito.ArgumentMatchers.anyBoolean());
+        verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    void maintenanceMutationsShareOneTransactionAndLockedAccountRead() throws Exception {
+        for (var method : List.of(
+                AccountService.class.getMethod("verifyAccount", long.class, boolean.class, String.class),
+                AccountService.class.getMethod("updateAccountProperty", Long.class, UpdateAccountPropertyRequestDTO.class),
+                AccountService.class.getMethod("deleteAccount", Long.class))) {
+            assertThat(method.getAnnotation(org.springframework.transaction.annotation.Transactional.class).value())
+                    .isEqualTo("pmsDBTransactionManager");
+        }
+        assertThat(org.pms.silverocean.database.pms.PaymentAccountRepo.class
+                .getMethod("findActiveForUpdate", Long.class)
+                .getAnnotation(org.springframework.data.jpa.repository.Lock.class).value())
+                .isEqualTo(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
     }
 
     private static PaymentAccount account(long id, long ownerId, AccountCategory category,

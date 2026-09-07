@@ -118,7 +118,7 @@ public class SubscriptionManagementService {
         return userSubscriptionRepo.findAllByCreatedByAndStatusAndActiveTrue(userId, SubscriptionStatus.ACTIVE).stream()
                 .filter(subscription -> isAddOn(subscription.getProductKey()))
                 .filter(subscription -> subscription.getEndAt() == null || subscription.getEndAt().isAfter(now))
-                .map(subscription -> subscriptionPlanRepo.findByCodeAndActiveTrue(subscription.getPlanCode())
+                .map(subscription -> subscriptionPlanRepo.findByCode(subscription.getPlanCode())
                         .map(plan -> new SubscriptionEffectiveAddOnDTO(
                                 subscription.getProductKey().name(),
                                 subscription.getPlanCode(),

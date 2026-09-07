@@ -39,13 +39,15 @@ public class CreateInvoiceService {
     @Transactional
     public void processPendingInvoices() {
         log.info("Running Invoice Creation Service");
-        Slice<ProcessLeaseInvoiceDTO> leaseSlice = leaseDao.getLeasePaymentsDueToday(PageRequest.of(0, configService.getConfigByName(PMSConfigs.LEASE_PAYMENT_RECORDS_PAGE_SIZE).get().intValue()));
+        var page = PageRequest.of(0, Math.min(1000, Math.max(1, configService.getConfigByName(PMSConfigs.LEASE_PAYMENT_RECORDS_PAGE_SIZE).get().intValue())));
+        Slice<ProcessLeaseInvoiceDTO> leaseSlice = leaseDao.getLeasePaymentsDueAfter(0, page);
         while (leaseSlice.hasContent()) {
             log.info("Processing Invoices for {} leases.", leaseSlice.getNumber());
             // Process the current batch
             processPendingInvoices(leaseSlice.getContent());
             if (leaseSlice.hasNext()) {
-                leaseSlice = leaseDao.getLeasePaymentsDueToday(leaseSlice.nextPageable());
+                // Processing advances due dates and shrinks this result set; offsets skip leases.
+                leaseSlice = leaseDao.getLeasePaymentsDueAfter(leaseSlice.getContent().getLast().id(), page);
             } else {
                 log.info("Done processing lease invoices");
                 break;
@@ -75,7 +77,8 @@ public class CreateInvoiceService {
             }
 
             if (!invoiceAmounts.isEmpty()) {
-                invoiceService.createInvoice(lease.unitId(), lease.tenantUserId(), invoiceAmounts);
+                invoiceService.createPropertyInvoice(lease.unitId(), lease.tenantUserId(), invoiceAmounts,
+                        PMSLeaseMode.SALE.name().equals(leaseMode) ? "SALE" : "RENTAL", lease.nextPaymentDate());
             }
         }
         if (!idsToIncrement.isEmpty()) {

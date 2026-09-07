@@ -45,8 +45,9 @@ public class OpenAiHelpDeskClient {
                     .header("Authorization", "Bearer " + apiKey)
                     .body(Map.of("model", "omni-moderation-latest", "input", input))
                     .retrieve().body(JsonNode.class);
-            return new ModerationResult(true,
-                    result != null && result.path("results").path(0).path("flagged").asBoolean(false));
+            JsonNode flagged = result == null ? null : result.path("results").path(0).path("flagged");
+            if (flagged == null || !flagged.isBoolean()) return new ModerationResult(false, false);
+            return new ModerationResult(true, flagged.booleanValue());
         } catch (Exception e) {
             log.warn("Help-desk moderation unavailable: {}", e.getClass().getSimpleName());
             return new ModerationResult(false, false);

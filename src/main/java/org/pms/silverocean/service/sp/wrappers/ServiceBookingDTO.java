@@ -17,9 +17,9 @@ public record ServiceBookingDTO(
     String invoiceRef, String paymentStatus, String providerReference,
     String refundStatus, String refundReference, BigDecimal refundedAmount,
     String settlementStatus, String settlementReference, BigDecimal settledAmount,
-    String completionEvidenceReference, ZonedDateTime startedAt
+    String completionEvidenceReference, ZonedDateTime startedAt, boolean customerBooking
 ) {
-    public ServiceBookingDTO(ServiceBooking b, String serviceName, String serviceProviderName, String bookedByUserName) {
+    public ServiceBookingDTO(ServiceBooking b, String serviceName, String serviceProviderName, String bookedByUserName, long viewerUserId) {
         this(b.getId(), b.getServiceId(), b.getCreatedBy(), b.getScheduledAt(),
              b.getCompletedAt(), b.getStatus(), b.getNotes(), b.getCancellationReason(), b.getCreatedOn(),
              serviceName, serviceProviderName, bookedByUserName,
@@ -28,6 +28,6 @@ public record ServiceBookingDTO(
              b.getInvoiceRef(), b.getPaymentStatus(), b.getProviderReference(),
              b.getRefundStatus(), b.getRefundReference(), b.getRefundedAmount(),
              b.getSettlementStatus(), b.getSettlementReference(), b.getSettledAmount(),
-             b.getCompletionEvidenceReference(), b.getStartedAt());
+             b.getCompletionEvidenceReference(), b.getStartedAt(), java.util.Objects.equals(b.getCreatedBy(), viewerUserId));
     }
 }

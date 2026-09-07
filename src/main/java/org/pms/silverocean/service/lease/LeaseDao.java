@@ -173,4 +173,8 @@ public class LeaseDao {
     public Slice<ProcessLeaseInvoiceDTO> getLeasePaymentsDueToday(Pageable pageable) {
         return leaseRepo.findLeasePaymentsDueToday(pageable);
     }
+
+    public Slice<ProcessLeaseInvoiceDTO> getLeasePaymentsDueAfter(long afterId, Pageable pageable) {
+        return leaseRepo.findLeasePaymentsDueAfter(afterId, pageable);
+    }
 }

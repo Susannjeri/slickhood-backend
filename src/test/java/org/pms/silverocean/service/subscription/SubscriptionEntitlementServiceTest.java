@@ -61,7 +61,7 @@ class SubscriptionEntitlementServiceTest {
                 7L, SubscriptionProduct.LANDLORD, SubscriptionStatus.ACTIVE)).thenReturn(Optional.of(primary));
         when(subscriptions.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
                 7L, SubscriptionProduct.LISTING_ADDON, SubscriptionStatus.ACTIVE)).thenReturn(Optional.of(addOn));
-        when(plans.findByCodeAndActiveTrue("LANDLORD_BRONZE")).thenReturn(Optional.of(primaryPlan));
+        when(plans.findByCode("LANDLORD_BRONZE")).thenReturn(Optional.of(primaryPlan));
         when(features.findTopBySubscriptionPlanAndFeatureKeyOrderByIdDesc(primaryPlan, "PROPERTY_LISTINGS"))
                 .thenReturn(Optional.empty());
 
@@ -77,7 +77,7 @@ class SubscriptionEntitlementServiceTest {
                 7L, SubscriptionProduct.LANDLORD, SubscriptionStatus.ACTIVE)).thenReturn(Optional.of(primary));
         when(subscriptions.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
                 7L, SubscriptionProduct.LISTING_ADDON, SubscriptionStatus.ACTIVE)).thenReturn(Optional.empty());
-        when(plans.findByCodeAndActiveTrue("LANDLORD_BRONZE")).thenReturn(Optional.of(primaryPlan));
+        when(plans.findByCode("LANDLORD_BRONZE")).thenReturn(Optional.of(primaryPlan));
 
         PMSCustomException error = assertThrows(PMSCustomException.class,
                 () -> service.requireFeatureOrAddOn(SubscriptionProduct.LANDLORD, "PROPERTY_LISTINGS",
@@ -115,7 +115,7 @@ class SubscriptionEntitlementServiceTest {
         feature.setEnabled(true);
         when(subscriptions.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
                 7L, SubscriptionProduct.LANDLORD, SubscriptionStatus.ACTIVE)).thenReturn(Optional.of(subscription));
-        when(plans.findByCodeAndActiveTrue("LANDLORD_BRONZE")).thenReturn(Optional.of(plan));
+        when(plans.findByCode("LANDLORD_BRONZE")).thenReturn(Optional.of(plan));
         when(features.findTopBySubscriptionPlanAndFeatureKeyOrderByIdDesc(plan, "PROPERTY_AND_UNIT_MANAGEMENT"))
                 .thenReturn(Optional.of(feature));
 

@@ -50,7 +50,10 @@ public class PaymentPlatformFactory {
     }
 
     public String getChannelImage(PaymentChannel channel) {
-       return signImage(getPlatform(channel).channelIcon());
+       // Turning off checkout must not make existing account settings unreadable.
+       return platforms.values().stream()
+               .filter(platform -> platform.channelType() == channel)
+               .findFirst().map(platform -> signImage(platform.channelIcon())).orElse(null);
     }
 
     private String signImage(String imageLocation) {

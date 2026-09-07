@@ -120,6 +120,15 @@ class LeaseJourneyTest {
         verifyNoInteractions(documents);
     }
 
+    @Test void existingTerminationCannotBeOverwrittenOrNotifiedAgain() {
+        Lease lease=lease();lease.setSigned(true);lease.setLifecycleStatus("NOTICE_GIVEN");
+        when(users.getUserId()).thenReturn(4L);
+        when(leases.getLeaseByIdAndStaffOwnerOrTenantId(1L,4L)).thenReturn(Optional.of(lease));
+        assertThrows(PMSCustomException.class,()->service.requestTermination(1,
+                new org.pms.silverocean.service.lease.wrappers.LeaseTerminationRequest(LocalDate.now().plusMonths(2),"Duplicate request")));
+        verify(leases,never()).saveLease(any(),any());
+    }
+
     @Test void terminationCannotBypassTheAgreedNoticePeriod() {
         Lease lease = lease(); lease.setSigned(true); lease.setNoticePeriodInMonths(1);
         when(users.getUserId()).thenReturn(4L);

@@ -77,10 +77,11 @@ public class SubscriptionPaymentCompletionService {
         }
 
         String normalizedPlanCode = planCode.trim().toUpperCase(Locale.ROOT);
-        Optional<SubscriptionPlan> planOpt = subscriptionPlanRepo.findByCodeAndActiveTrue(normalizedPlanCode);
+        // A settled invoice issued before retirement is still owed its purchased term.
+        Optional<SubscriptionPlan> planOpt = subscriptionPlanRepo.findByCode(normalizedPlanCode);
         if (planOpt.isEmpty()) {
-            log.error("Paid subscription invoice {} references unknown or inactive plan {}", invoice.getRef(), normalizedPlanCode);
-            throw new IllegalStateException("Paid subscription plan is unknown or inactive: "+normalizedPlanCode);
+            log.error("Paid subscription invoice {} references unknown plan {}", invoice.getRef(), normalizedPlanCode);
+            throw new IllegalStateException("Paid subscription plan is unknown: "+normalizedPlanCode);
         }
         SubscriptionPlan plan = planOpt.get();
         if (plan.getPurchaseMode() != null && plan.getPurchaseMode() != SubscriptionPurchaseMode.SELF_SERVICE) {

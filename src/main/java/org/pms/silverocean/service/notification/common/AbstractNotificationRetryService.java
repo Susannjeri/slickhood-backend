@@ -56,7 +56,7 @@ public abstract class AbstractNotificationRetryService  implements NotificationS
                     if (throwable != null) {
                         // Use getCause() because the original Exception is wrapped in a RuntimeException/CompletionException
                         Throwable actualError = throwable.getCause() != null ? throwable.getCause() : throwable;
-                        log.error("Provider API failed for notification {}: {}", notificationId, actualError.getMessage());
+                        log.error("Provider API failed for notification {} ({})", notificationId, actualError.getClass().getSimpleName());
 
                         triggerRetryIfAllowed(notificationDTO, notificationId);
                     } else if (isRetryableStatusCode(statusCode)) {

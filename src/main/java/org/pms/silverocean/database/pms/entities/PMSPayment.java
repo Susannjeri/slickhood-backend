@@ -94,6 +94,7 @@ public class PMSPayment extends BaseIDEntity {
         this.channel = manualPaymentDTO.channel();
         this.thirdPartyTransId = manualPaymentDTO.transId();
         this.status = "success";
+        this.inProgress = false;
     }
 
     public PMSPayment(PesalinkValidatePaymentRequestDTO pesalinkValidatePaymentRequestDTO, TransactionCategory transactionCategory) {

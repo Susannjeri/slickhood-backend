@@ -90,7 +90,13 @@ public class ConfigService {
 
             configByName.setStringValue(value);
         } else {
-            configByName.setIntValue(Integer.parseInt(configDTO.value()));
+            try {
+                int value = Integer.parseInt(configDTO.value());
+                if (value < 0) throw new NumberFormatException("Negative setting");
+                configByName.setIntValue(value);
+            } catch (NumberFormatException exception) {
+                throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+            }
         }
         saveConfig(configByName);
         auditLogService.createAuditLog(configByName, Permission.EDIT_CONFIG);
@@ -126,7 +132,7 @@ public class ConfigService {
                             throw new PMSCustomException(ResponseCode.FAILED_TO_DECRYPT_CONFIG);
                         }
                     } else {
-                        configDTO = new ConfigDTO(config.getId(), config.getName(), new String(config.getStringValue()), config.getIntValue(), false);
+                        configDTO = new ConfigDTO(config.getId(), config.getName(), config.getStringValue() == null ? "" : new String(config.getStringValue(), java.nio.charset.StandardCharsets.UTF_8), config.getIntValue(), false);
                     }
                     return configDTO;
                 });

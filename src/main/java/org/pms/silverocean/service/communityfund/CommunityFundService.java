@@ -73,12 +73,13 @@ public class CommunityFundService {
 
     @Transactional
     public CommunityFundContribution pledge(long contributionId,PledgeRequest request){
-        CommunityFundContribution contribution=contributions.findById(contributionId).filter(CommunityFundContribution::isActive)
+        CommunityFundContribution contribution=contributions.findForUpdate(contributionId).filter(CommunityFundContribution::isActive)
                 .filter(c->c.getContributorUserId().equals(users.getUserId())).orElseThrow(this::notFound);
-        CommunityFund fund=funds.findById(contribution.getFundId()).filter(f->f.isActive()&&"OPEN".equals(f.getStatus())).orElseThrow(this::notFound);
+        CommunityFund fund=funds.findForUpdate(contribution.getFundId()).filter(f->f.isActive()&&"OPEN".equals(f.getStatus())).orElseThrow(this::notFound);
+        requireFundAccount(fund.getPaymentAccountId(),fund.getCustodianUserId(),true);
         if(contribution.getInvoiceId()!=null)invalid();BigDecimal amount=money(request.amount());
         PMSInvoice invoice=invoices.createFundInvoice(contribution.getUnitId(),contribution.getContributorUserId(),fund.getCustodianUserId(),fund.getPaymentAccountId(),
-                Map.of(fund.getName()+" contribution",amount.doubleValue()),fund.getDueDate());
+                Map.of(fund.getName()+" contribution",amount.doubleValue()),fund.getDueDate(),fund.getCurrency());
         contribution.setAssessedAmount(amount);contribution.setInvoiceId(invoice.getId());contribution.setStatus("ASSESSED");
         return contributions.save(contribution);
     }
@@ -96,7 +97,8 @@ public class CommunityFundService {
         PaymentAccount account=accounts.getAccountById(fund.getPaymentAccountId());
         return new FundDashboard(fund,new PaymentAccountView(account.getId(),account.getName(),account.getChannel().name(),account.isActive(),account.isVerified()),
                 assessed,collected,committed,spent,collected.subtract(spent).subtract(committed),all.size(),(int)all.stream().filter(c->"PAID".equals(c.getStatus())).count(),
-                mine,manager?all:List.of(),expenseList,transactions.findByFundIdAndActiveTrueOrderByOccurredAtDesc(fundId),manager);
+                mine,manager?all:List.of(),expenseList,transactions.findByFundIdAndActiveTrueOrderByOccurredAtDesc(fundId)
+                        .stream().map(t -> FundTransactionView.forViewer(t,userId,manager)).toList(),manager);
     }
 
     @Transactional
@@ -139,7 +141,9 @@ public class CommunityFundService {
     public void completePaidInvoice(long invoiceId,String providerReference,BigDecimal amount,String currency,LocalDateTime paidAt){
         contributions.findByInvoiceIdAndActiveTrue(invoiceId).ifPresent(contribution->{
             String key="COMMUNITY_FUND_CONTRIBUTION:"+invoiceId;if(transactions.existsByEventKey(key))return;
-            CommunityFund fund=funds.findById(contribution.getFundId()).orElseThrow(this::notFound);
+            CommunityFund fund=funds.findForUpdate(contribution.getFundId()).orElseThrow(this::notFound);
+            if (amount == null || amount.signum() <= 0 || amount.compareTo(contribution.getAssessedAmount()) != 0
+                    || currency == null || !fund.getCurrency().equalsIgnoreCase(currency.trim())) invalid();
             contribution.setPaidAmount(money(amount));contribution.setPaidAt(paidAt==null?LocalDateTime.now():paidAt);
             contribution.setPaymentReference(providerReference);contribution.setStatus("PAID");contributions.save(contribution);
             CommunityFundTransaction transaction=new CommunityFundTransaction();transaction.setFundId(fund.getId());transaction.setEventKey(key);
@@ -156,7 +160,7 @@ public class CommunityFundService {
         contribution.setUnitId(member.unitId());contribution.setAssessedAmount(fund.getDefaultContribution());contribution.setPaidAmount(BigDecimal.ZERO.setScale(2));
         contribution.setStatus(fund.getDefaultContribution().signum()>0?"ASSESSED":"INVITED");contribution.setCreatedBy(users.getUserId());contribution.setActive(true);
         if(fund.getDefaultContribution().signum()>0){PMSInvoice invoice=invoices.createFundInvoice(member.unitId(),member.userId(),fund.getCustodianUserId(),fund.getPaymentAccountId(),
-                Map.of(fund.getName()+" contribution",fund.getDefaultContribution().doubleValue()),fund.getDueDate());contribution.setInvoiceId(invoice.getId());}
+                Map.of(fund.getName()+" contribution",fund.getDefaultContribution().doubleValue()),fund.getDueDate(),fund.getCurrency());contribution.setInvoiceId(invoice.getId());}
         contributions.save(contribution);
     }
 
@@ -165,8 +169,8 @@ public class CommunityFundService {
         transaction.setAmount(expense.getAmount());transaction.setCurrency(fund.getCurrency());transaction.setDescription(expense.getPurpose());transaction.setSourceType("EXPENDITURE");transaction.setSourceId(expense.getId());
         transaction.setBeneficiaryUserId(expense.getBeneficiaryUserId());transaction.setBeneficiaryName(expense.getBeneficiaryName());transaction.setExternalReference(expense.getPaymentReference());
         transaction.setOccurredAt(expense.getPaidAt());transaction.setCreatedBy(users.getUserId());transaction.setActive(true);transactions.save(transaction);}
-    private CommunityFund requireManagedFund(long id){CommunityFund fund=funds.findById(id).filter(CommunityFund::isActive).orElseThrow(this::notFound);if(!isManaged(fund))throw notFound();return fund;}
-    private CommunityFundExpenditure requireManagedExpense(long id){CommunityFundExpenditure e=expenditures.findById(id).filter(CommunityFundExpenditure::isActive).orElseThrow(this::notFound);requireManagedFund(e.getFundId());return e;}
+    private CommunityFund requireManagedFund(long id){CommunityFund fund=funds.findForUpdate(id).filter(CommunityFund::isActive).orElseThrow(this::notFound);if(!isManaged(fund))throw notFound();return fund;}
+    private CommunityFundExpenditure requireManagedExpense(long id){CommunityFundExpenditure e=expenditures.findForUpdate(id).filter(CommunityFundExpenditure::isActive).orElseThrow(this::notFound);requireManagedFund(e.getFundId());return e;}
     private boolean isManaged(CommunityFund fund){try{requireManagedProperty(fund.getPropertyId(),users.getUserId());return true;}catch(PMSCustomException e){return false;}}
     private Property requireManagedProperty(long propertyId,long userId){PMSRole role=users.getActiveRole();return(role==PMSRole.LANDLORD?properties.findByIdAndCreatedByAndActiveTrue(propertyId,userId):properties.findByIdAndManagerRole(propertyId,userId,role.name())).orElseThrow(this::notFound);}
     private PaymentAccount requireFundAccount(long accountId,long custodian,boolean verified){PaymentAccount account=accounts.getAccountById(accountId);if(!account.isActive()||account.getCategory()!=AccountCategory.COMMUNITY_FUND||!Objects.equals(account.getCreatedBy(),custodian)||verified&&!account.isVerified())throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);return account;}

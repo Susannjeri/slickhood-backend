@@ -50,7 +50,7 @@ public class AfricasTalkingService implements SmsProvider {
         sms.setChannel(ATSMS);
         String recipient = notificationDTO.recipient().startsWith("+") ? notificationDTO.recipient() : "+" + notificationDTO.recipient();
         List<Recipient> sendResponse = smsService.send(notificationDTO.formattedMessage(), new String[]{recipient}, true);
-        log.debug("SMS Sent to recipients: {}", sendResponse);
+        log.debug("SMS provider returned {} receipts", sendResponse.size());
         int statusCode = 0;
         for (Recipient r : sendResponse) {
             sms.setStatus(String.valueOf(r.statusCode));

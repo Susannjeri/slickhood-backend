@@ -62,7 +62,7 @@ public class SubscriptionEntitlementService {
     public void requireFeature(SubscriptionProduct product, String featureKey) {
         UserSubscription subscription = requireProduct(product);
         if (subscription == null) return;
-        SubscriptionPlan plan = plans.findByCodeAndActiveTrue(subscription.getPlanCode())
+        SubscriptionPlan plan = plans.findByCode(subscription.getPlanCode())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_ACCESS_REQUIRED));
         boolean included = features.findTopBySubscriptionPlanAndFeatureKeyOrderByIdDesc(plan, featureKey)
                 .filter(f -> f.isActive() && f.isEnabled()).isPresent();
@@ -81,7 +81,7 @@ public class SubscriptionEntitlementService {
         long payerId = subscriptionOwner(users.getUserId());
         var primary = activeSubscription(payerId, primaryProduct);
         if (primary.isPresent()) {
-            SubscriptionPlan plan = plans.findByCodeAndActiveTrue(primary.get().getPlanCode())
+            SubscriptionPlan plan = plans.findByCode(primary.get().getPlanCode())
                     .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_ACCESS_REQUIRED));
             boolean bundled = features.findTopBySubscriptionPlanAndFeatureKeyOrderByIdDesc(plan, featureKey)
                     .filter(f -> f.isActive() && f.isEnabled()).isPresent();
@@ -102,7 +102,7 @@ public class SubscriptionEntitlementService {
                 .filter(s -> s.getEndAt() == null || s.getEndAt().isAfter(ZonedDateTime.now()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_ACCESS_REQUIRED));
         if (subscription == null) return;
-        SubscriptionPlan plan = plans.findByCodeAndActiveTrue(subscription.getPlanCode())
+        SubscriptionPlan plan = plans.findByCode(subscription.getPlanCode())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_ACCESS_REQUIRED));
         long limit = quotas.findTopBySubscriptionPlanAndMetricKeyOrderByIdDesc(plan, metricKey)
                 .filter(q -> q.isActive()).map(q -> q.getLimitValue()).orElse(0L);

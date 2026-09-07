@@ -19,6 +19,10 @@ import java.util.Set;
 import java.util.List;
 
 public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpecificationExecutor<PMSInvoice> {
+    @Query("SELECT i FROM PMSInvoice i WHERE i.active=true AND i.paid=false AND i.pendingAmount>0 " +
+            "AND i.billingType='RENTAL' AND i.dueDate<:today AND i.id>:afterId ORDER BY i.id")
+    List<PMSInvoice> findRentalReminderCandidates(@Param("today") java.time.LocalDate today,
+            @Param("afterId") long afterId, Pageable pageable);
     List<PMSInvoice> findAllByPropertyIdInAndActiveTrueAndPaidFalse(List<Long> propertyIds);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT i FROM PMSInvoice i WHERE i.id = :id")
@@ -46,8 +50,8 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
     @Query("UPDATE PMSInvoice i SET i.ref=:ref WHERE i.id=:id")
     void updateInvoiceRef(long id, String ref);
 
-    @Query("SELECT i.amount as amount, i.currency as currency FROM PMSInvoice i WHERE i.paid AND i.createdOn >= :start AND i.createdOn < :end AND i.payToUserId = 0 " +
-            "AND (i.billingType=:type OR (:type='SUBSCRIPTION' AND i.subscriptionPlanCode IS NOT NULL))")
+    @Query("SELECT SUM(i.amount) as amount, i.currency as currency FROM PMSInvoice i WHERE i.active AND i.paid AND i.createdOn >= :start AND i.createdOn < :end AND i.payToUserId = 0 " +
+            "AND (i.billingType=:type OR (:type='SUBSCRIPTION' AND i.subscriptionPlanCode IS NOT NULL)) GROUP BY i.currency")
     Set<AmountCurrencyProjection> getSumOfPaidInvoicesUsingTypeAndDateRange(ZonedDateTime start, ZonedDateTime end, String type);
 
     @Query("SELECT COALESCE(COUNT(i), 0) FROM PMSInvoice i WHERE i.paid=:paid AND i.billedUserId=:userId")

@@ -26,7 +26,7 @@ public final class HelpDeskModels {
     }
     public record InternalNote(@NotBlank @Size(max=4000) String message) {}
     public record ArticleUpsert(@NotBlank @Size(max=160) String slug, @NotBlank @Size(max=200) String title,
-                                @NotBlank @Size(max=80) String category, @NotBlank String body,
+                                @NotBlank @Size(max=80) String category, @NotBlank @Size(max=16000) String body,
                                 @Size(max=500) String keywords, @Size(max=500) String audienceRoles, boolean published) {}
     public record MessageView(long id, String senderType, String content, ZonedDateTime createdOn,
                               String model, String sourceArticleIds, boolean internalNote) {

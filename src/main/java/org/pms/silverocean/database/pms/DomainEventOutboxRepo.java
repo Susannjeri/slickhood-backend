@@ -10,6 +10,9 @@ import java.util.List;
 import java.util.Collection;
 
 public interface DomainEventOutboxRepo extends JpaRepository<DomainEventOutbox,Long>{
+    @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT e FROM DomainEventOutbox e WHERE e.id=:id")
+    java.util.Optional<DomainEventOutbox> lockForNotification(@Param("id") long id);
     boolean existsByDedupeKey(String dedupeKey);
     long countByStatusInAndActiveTrue(Collection<String> statuses);
     long countByStatusAndActiveTrue(String status);

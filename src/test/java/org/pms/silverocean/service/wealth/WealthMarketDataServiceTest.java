@@ -23,6 +23,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class WealthMarketDataServiceTest {
+    @Test void cachedQuoteInAnotherCurrencyCannotChangeAssetValue(){var cached=new WealthMarketQuote();cached.setCurrency("KES");cached.setPrice(BigDecimal.TEN);cached.setQuoteAsOf(java.time.ZonedDateTime.now());cached.setLastModifiedDate(LocalDateTime.now());ReflectionTestUtils.setField(service,"minimumRefresh",Duration.ofMinutes(15));when(quotes.findByExchangeCodeAndInstrumentSymbolAndActiveTrue("NASDAQ","AAPL")).thenReturn(Optional.of(cached));org.assertj.core.api.Assertions.assertThatThrownBy(()->service.refresh(7)).isInstanceOf(org.pms.silverocean.service.PMSCustomException.class);assertThat(asset.getCurrentValue()).isEqualByComparingTo("1000");verify(assets,never()).save(any());}
     @Mock WealthAssetRepo assets; @Mock WealthMarketQuoteRepo quotes; @Mock WealthValuationRepo valuations;
     @Mock UserDao users; @Mock MarketQuoteProvider provider;
     WealthMarketDataService service; WealthAsset asset;

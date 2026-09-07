@@ -119,6 +119,37 @@ class RentalPaymentMySqlIT {
     }
 
     @Autowired UserRepo users;
+    @Autowired HelpConversationRepo helpConversations;
+    @Autowired HelpMessageRepo helpMessages;
+    @Autowired HelpArticleRepo helpArticles;
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void helpConversationPersistsBothMessagesAcrossDetachedRepositoryTransactions() {
+        var ai = mock(org.pms.silverocean.service.helpdesk.OpenAiHelpDeskClient.class);
+        when(ai.moderate(anyString())).thenReturn(new org.pms.silverocean.service.helpdesk.OpenAiHelpDeskClient.ModerationResult(true, false));
+        when(ai.answer(anyString(), anyString(), anyString())).thenReturn(
+                new org.pms.silverocean.service.helpdesk.HelpDeskModels.AiAnswer("Choose Business Areas.", "synthetic", "synthetic", false));
+        var service = new org.pms.silverocean.service.helpdesk.HelpDeskService(helpConversations, helpMessages, helpArticles,
+                mock(org.pms.silverocean.service.auth.dao.UserDao.class), ai,
+                mock(org.pms.silverocean.service.helpdesk.HelpDeskRateLimiter.class), mock(NotificationService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "maxInputChars", 4000);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "maxContextMessages", 12);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "guestSessionHours", 24L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "normalSla", java.time.Duration.ofHours(4));
+        var article = new HelpArticle(); article.setSlug("integration-help-" + java.util.UUID.randomUUID());
+        article.setTitle("Workspace selection"); article.setBody("Select your workspace in Business Areas.");
+        article.setCategory("General"); article.setPublished(true); article.setActive(true); helpArticles.save(article);
+        var guest = service.startGuest(new org.pms.silverocean.service.helpdesk.HelpDeskModels.GuestStart("Workspace help", "GENERAL", "/register"));
+        var answer = service.sendGuest(guest.conversation().ticketNumber(), guest.accessToken(),
+                new org.pms.silverocean.service.helpdesk.HelpDeskModels.SendMessage("How do I choose a workspace?", "synthetic-message"));
+        assertEquals("OPEN", answer.status());
+        assertEquals(List.of("USER", "AI"), answer.messages().stream().map(org.pms.silverocean.service.helpdesk.HelpDeskModels.MessageView::senderType).toList());
+        assertTrue(helpConversations.findById(answer.id()).orElseThrow().getVersion() >= 2);
+        var repeated = service.sendGuest(guest.conversation().ticketNumber(), guest.accessToken(),
+                new org.pms.silverocean.service.helpdesk.HelpDeskModels.SendMessage("How do I choose a workspace?", "synthetic-message"));
+        assertEquals(2, repeated.messages().size());
+    }
     @Autowired PropertyRepo properties;
     @Autowired UnitRepo units;
     @Autowired UnitTenantRepo tenancies;
@@ -136,7 +167,82 @@ class RentalPaymentMySqlIT {
     @Autowired WorkspaceMembershipRepo memberships;
     @Autowired SaleTransactionRepo sales;
     @Autowired LeaseDocumentRepo documents;
+    @Autowired SMSRepo smsMessages;
+    @Autowired DomainEventOutboxRepo notificationOutbox;
     @Autowired PropertyListingRepo propertyListings;
+    @Autowired CommunityFundRepo communityFunds;
+    @Test void adminMetricsKeepRepeatedInvoiceAmountsAndHandleEmptyUsers() {
+        assertEquals(0.0, users.getActiveUserPercentage());
+        var active = user("Active", "admin-metrics-active@example.test", "+254700000010");
+        var inactive = user("Inactive", "admin-metrics-inactive@example.test", "+254700000011");
+        inactive.setActive(false); users.saveAndFlush(inactive);
+        assertEquals(50.0, users.getActiveUserPercentage());
+        for (int index = 0; index < 4; index++) {
+            PMSInvoice invoice = new PMSInvoice(); invoice.setRef("ADMIN-METRIC-" + index);
+            invoice.setActive(index != 3); invoice.setPaid(true); invoice.setPayToUserId(0);
+            invoice.setBilledUserId(active.getId()); invoice.setAmount(100); invoice.setPendingAmount(0);
+            invoice.setCurrency(index == 2 ? "USD" : "KES"); invoice.setBillingType("SUBSCRIPTION");
+            invoices.saveAndFlush(invoice);
+        }
+        var totals = invoices.getSumOfPaidInvoicesUsingTypeAndDateRange(ZonedDateTime.now().minusDays(1), ZonedDateTime.now().plusDays(1), "SUBSCRIPTION");
+        assertEquals(2, totals.size());
+        assertEquals(200.0, totals.stream().filter(value -> value.getCurrency().equals("KES")).findFirst().orElseThrow().getAmount().doubleValue());
+        assertEquals(100.0, totals.stream().filter(value -> value.getCurrency().equals("USD")).findFirst().orElseThrow().getAmount().doubleValue());
+    }
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+    @Test
+    @Transactional(Transactional.TxType.NOT_SUPPORTED)
+    void communityFundBalanceLockSerializesCompetingTransactions() throws Exception {
+        var tx = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        Long fundId = tx.execute(status -> {
+            CommunityFund f = new CommunityFund(); f.setPropertyId(777L); f.setCreatedBy(777L); f.setActive(true);
+            f.setName("Disposable lock test"); f.setFundType("PROJECT"); f.setContributorScope("ALL_OCCUPANTS");
+            f.setDescription("Integration fixture only"); f.setCurrency("KES");
+            f.setTargetAmount(new java.math.BigDecimal("100")); f.setDefaultContribution(java.math.BigDecimal.ZERO);
+            f.setOpensOn(LocalDate.now()); f.setDueDate(LocalDate.now().plusDays(1)); f.setStatus("OPEN");
+            f.setPaymentAccountId(777L); f.setCustodianUserId(777L);
+            return communityFunds.saveAndFlush(f).getId();
+        });
+        var locked = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> tx.execute(status -> {
+                var fund = communityFunds.findForUpdate(fundId).orElseThrow();
+                fund.setTargetAmount(new java.math.BigDecimal("50"));
+                communityFunds.saveAndFlush(fund); locked.countDown();
+                try { if (!release.await(10, java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("Lock release timed out"); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+                return true;
+            }));
+            assertTrue(locked.await(10, java.util.concurrent.TimeUnit.SECONDS));
+            var second = executor.submit(() -> tx.execute(status -> communityFunds.findForUpdate(fundId).orElseThrow().getTargetAmount()));
+            assertThrows(java.util.concurrent.TimeoutException.class, () -> second.get(250, java.util.concurrent.TimeUnit.MILLISECONDS));
+            release.countDown();
+            assertTrue(first.get(10, java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(0, second.get(10, java.util.concurrent.TimeUnit.SECONDS).compareTo(new java.math.BigDecimal("50")));
+        } finally {
+            release.countDown(); executor.shutdown();
+            assertTrue(executor.awaitTermination(15, java.util.concurrent.TimeUnit.SECONDS));
+            tx.executeWithoutResult(status -> communityFunds.deleteById(fundId));
+        }
+    }
+
+    @Test
+    void receivingAccountMaintenanceLocksOnlyActiveAccounts() {
+        PaymentAccount account = new PaymentAccount();
+        account.setName("Test receiving destination");
+        account.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.LANDLORD);
+        account.setChannel(PaymentChannel.MPESA);
+        account.setCreatedBy(123L);
+        account.setActive(true);
+        account = paymentAccounts.saveAndFlush(account);
+        assertEquals(account.getId(), paymentAccounts.findActiveForUpdate(account.getId()).orElseThrow().getId());
+        account.setActive(false);
+        paymentAccounts.saveAndFlush(account);
+        assertTrue(paymentAccounts.findActiveForUpdate(account.getId()).isEmpty());
+    }
 
     @Test
     void saleWorkspaceAndDocumentPartyQueriesPreserveIsolationAndExpiry() {
@@ -337,10 +443,13 @@ class RentalPaymentMySqlIT {
         invoice.setHtmlDescription("Monthly rent".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         invoice.setCustomerEmail(tenant.getEmail());
         invoice.setCustomerPhoneNumber(tenant.getPhoneNumber());
-        invoice.setDueDate(LocalDate.now().plusDays(5));
+        invoice.setDueDate(LocalDate.now().minusDays(2));
         invoice.setActive(true);
         invoiceDao.createInvoice(invoice);
         invoices.flush();
+
+        assertEquals(List.of(invoice.getId()), invoices.findRentalReminderCandidates(LocalDate.now(), 0, PageRequest.of(0,100)).stream().map(PMSInvoice::getId).toList());
+        assertTrue(invoices.findRentalReminderCandidates(LocalDate.now(), invoice.getId(), PageRequest.of(0,100)).isEmpty());
 
         PMSPayment payment = new PMSPayment(invoice, tenant.getFullName(), 71L);
         payment.setChannel(PaymentChannel.PAYSTACK.getName());
@@ -362,6 +471,7 @@ class RentalPaymentMySqlIT {
         PMSInvoice paid = invoices.findByRef(invoice.getRef()).orElseThrow();
         assertTrue(paid.isPaid());
         assertEquals(0.0, paid.getPendingAmount());
+        assertTrue(invoices.findRentalReminderCandidates(LocalDate.now(), 0, PageRequest.of(0,100)).isEmpty(), "Paid rent must disappear from reminder candidates");
         assertTrue(payment.isCompletedSuccessfully());
         assertTrue(payments.findByIdForAuthorizedUser(payment.getId(), landlord.getId()).isPresent());
         assertTrue(payments.findByIdForAuthorizedUser(payment.getId(), tenant.getId()).isPresent());
@@ -378,6 +488,15 @@ class RentalPaymentMySqlIT {
         updater.setInvoiceToPaid(paid, payment.getThirdPartyTransId(), payment.getAmount());
         assertEquals(2, journals.count(), "callback replay must not create a duplicate journal");
         assertEquals(4, ledgerLines.count(), "callback replay must not create duplicate ledger lines");
+    }
+
+    @Test void whatsappCallbackLocksExcludeOtherProvidersAndOutboxAcknowledgementIsPersistent() {
+        SMS whatsapp=new SMS();whatsapp.setActive(true);whatsapp.setChannel("WHATS_APP");whatsapp.setThirdPartyId("notification-mysql-receipt");whatsapp.setNotificationId(55);smsMessages.saveAndFlush(whatsapp);
+        SMS other=new SMS();other.setActive(true);other.setChannel("TEXT_SMS");other.setThirdPartyId("notification-mysql-receipt");other.setNotificationId(66);smsMessages.saveAndFlush(other);
+        assertEquals(java.util.Set.of(whatsapp.getId()),smsMessages.lockWhatsAppMessage("notification-mysql-receipt").stream().map(SMS::getId).collect(java.util.stream.Collectors.toSet()));
+        DomainEventOutbox event=new DomainEventOutbox();event.setEventId(java.util.UUID.randomUUID().toString());event.setDedupeKey("notification-mysql");event.setEventType("RENTAL_OVERDUE_REMINDER");event.setAggregateType("INVOICE");event.setAggregateId("1");event.setPayload("{}");event.setStatus("PROCESSING");event.setNextAttemptAt(java.time.LocalDateTime.now());event.setActive(true);notificationOutbox.saveAndFlush(event);
+        var locked=notificationOutbox.lockForNotification(event.getId()).orElseThrow();locked.setStatus("PROCESSED");notificationOutbox.saveAndFlush(locked);
+        assertEquals("PROCESSED",notificationOutbox.lockForNotification(event.getId()).orElseThrow().getStatus());
     }
 
     private Users user(String name, String email, String phone) {

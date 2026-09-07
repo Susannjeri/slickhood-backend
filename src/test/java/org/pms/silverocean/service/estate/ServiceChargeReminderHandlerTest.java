@@ -70,6 +70,22 @@ class ServiceChargeReminderHandlerTest {
         verify(notifications, never()).queueNotification(org.mockito.ArgumentMatchers.any());
     }
 
+    @Test void deferredDueDateSuppressesOldOverdueNotice() throws Exception {
+        var charge=charge();charge.setDueDate(LocalDate.now().plusDays(2));
+        when(charges.findById(5L)).thenReturn(Optional.of(charge));
+        when(invoices.getInvoiceById(9L)).thenReturn(Optional.of(invoice(false)));
+        handler().handle(event(ServiceChargeReminderEvent.Phase.OVERDUE));
+        verify(notifications,never()).queueNotification(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test void zeroBalanceSuppressesReminderEvenWhenLegacyPaidFlagIsFalse() throws Exception {
+        var invoice=invoice(false);invoice.setPendingAmount(0);
+        when(charges.findById(5L)).thenReturn(Optional.of(charge()));
+        when(invoices.getInvoiceById(9L)).thenReturn(Optional.of(invoice));
+        handler().handle(event(ServiceChargeReminderEvent.Phase.OVERDUE));
+        verify(notifications,never()).queueNotification(org.mockito.ArgumentMatchers.any());
+    }
+
     private ServiceChargeReminderHandler handler() {
         return new ServiceChargeReminderHandler(mapper, charges, invoices, units, users, i18n, notifications);
     }

@@ -51,28 +51,40 @@ public class SMSService {
         notificationDao.findById(notificationId)
                 .ifPresent(notification -> {
                     notification.setUpdatedOn(LocalDateTime.now());
-                    notification.setDelivered(delivered);
+                    notification.setDelivered(notification.isDelivered() || delivered);
                     notificationDao.save(notification);
                 });
     }
 
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public void receiveWhatsAppCallback(WAWebHook waWebHook, String ip) {
-        log.info("Processing whatsApp callback {} ", waWebHook);
-        waWebHook.entry().stream()
-                .flatMap(e -> e.changes().stream())
-                .map(WAChange::value)
-                .flatMap(v -> v.statuses().stream())
-                .findFirst().ifPresent(waStatus -> smsDao.findByThirdPartyId(waStatus.id())
-                        .ifPresent(smsEntity -> {
-                            smsEntity.setCallBackIP(ip);
-                            smsEntity.setStatus(waStatus.status());
-                            smsEntity.setDescription(String.format("Billable: %s Category %s", waStatus.pricing().billable(), waStatus.pricing().category()));
-                            smsEntity.setUpdatedOn(LocalDateTime.now());
-                            smsDao.saveSMS(smsEntity);
-                            if (WhatsAppStatus.DELIVERED.getName().equals(waStatus.status())) {
-                                updateNotification(smsEntity.getNotificationId(), true);
-                            }
-                        }));
+        if (waWebHook == null || !"whatsapp_business_account".equals(waWebHook.object())) return;
+        stream(waWebHook.entry()).flatMap(e -> stream(e.changes()))
+                .filter(change -> "messages".equals(change.field()))
+                .map(WAChange::value).filter(java.util.Objects::nonNull)
+                .flatMap(value -> stream(value.statuses()))
+                .filter(status -> status.id() != null && !status.id().isBlank() && rank(status.status()) > 0)
+                .forEach(status -> smsDao.lockWhatsAppMessage(status.id()).ifPresent(sms -> {
+                    // Serialize concurrent callbacks and never regress read/delivered to sent/failed.
+                    if (rank(status.status()) <= rank(sms.getStatus())) return;
+                    sms.setCallBackIP(ip);
+                    sms.setStatus(status.status());
+                    sms.setDescription("WhatsApp delivery status: " + status.status());
+                    sms.setUpdatedOn(LocalDateTime.now());
+                    smsDao.saveSMS(sms);
+                    if ("delivered".equals(status.status()) || "read".equals(status.status())) {
+                        updateNotification(sms.getNotificationId(), true);
+                    }
+                }));
+    }
+
+    private static <T> java.util.stream.Stream<T> stream(java.util.List<T> items) {
+        return items == null ? java.util.stream.Stream.empty() : items.stream().filter(java.util.Objects::nonNull);
+    }
+
+    private static int rank(String status) {
+        if (status == null) return 0;
+        return switch (status) { case "sent" -> 1; case "failed" -> 2; case "delivered" -> 3; case "read" -> 4; default -> 0; };
     }
 
 }

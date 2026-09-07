@@ -59,9 +59,10 @@ public class HelpDeskService {
     @Transactional
     public HelpDeskModels.ConversationView start(HelpDeskModels.StartConversation request) {
         long userId = requireUser();
+        rateLimiter.check(hash("start-user:" + userId), guestStartLimitPerMinute);
         HelpConversation c = newConversation(request.subject(), request.category(), request.pageContext());
         c.setUserId(userId); c.setCreatedBy(userId); c.setActiveRole(users.getActiveRole().getName());
-        return detail(conversations.save(c), false);
+        return detail(persistConversation(c), false);
     }
 
     @Transactional
@@ -75,7 +76,7 @@ public class HelpDeskService {
         String token = newGuestToken();
         HelpConversation c = newConversation(request.subject(), request.category(), request.pageContext());
         c.setActiveRole("Registration guest"); c.setGuestTokenHash(hash(token));
-        c.setGuestExpiresAt(LocalDateTime.now().plusHours(guestSessionHours)); c = conversations.save(c);
+        c.setGuestExpiresAt(LocalDateTime.now().plusHours(guestSessionHours)); c = persistConversation(c);
         return new HelpDeskModels.GuestConversation(detail(c, false), token, c.getGuestExpiresAt());
     }
 
@@ -87,7 +88,7 @@ public class HelpDeskService {
     @Transactional
     public HelpDeskModels.ConversationView get(long id) {
         HelpConversation c = owned(id); c.setCustomerUnreadCount(0);
-        return detail(conversations.save(c), false);
+        return detail(persistConversation(c), false);
     }
 
     public HelpDeskModels.ConversationView getGuest(String ticketNumber, String token) {
@@ -99,7 +100,7 @@ public class HelpDeskService {
         HelpConversation c = conversations.findByGuestTokenHashAndActiveTrue(hash(requireToken(token))).orElseThrow();
         ensureGuestActive(c); long userId = requireUser(); c.setUserId(userId); c.setCreatedBy(userId);
         c.setActiveRole(users.getActiveRole().getName()); c.setGuestTokenHash(null); c.setGuestExpiresAt(null);
-        return detail(conversations.save(c), false);
+        return detail(persistConversation(c), false);
     }
 
     public HelpDeskModels.ConversationView send(long id, HelpDeskModels.SendMessage request) {
@@ -153,7 +154,7 @@ public class HelpDeskService {
 
     @Transactional
     public HelpDeskModels.ConversationView adminGet(long id) {
-        HelpConversation c = active(id); c.setAgentUnreadCount(0); return detail(conversations.save(c), true);
+        HelpConversation c = active(id); c.setAgentUnreadCount(0); return detail(persistConversation(c), true);
     }
 
     @Transactional
@@ -162,7 +163,7 @@ public class HelpDeskService {
         if (c.getAssignedToUserId() != null && !c.getAssignedToUserId().equals(agent) && !users.hasRole(PMSRole.SUPER_ADMIN))
             throw new IllegalArgumentException("This case is already assigned to another support agent.");
         c.setAssignedToUserId(agent); c.setStatus("ASSIGNED"); c.setAgentUnreadCount(0);
-        return detail(conversations.save(c), true);
+        return detail(persistConversation(c), true);
     }
 
     @Transactional
@@ -174,7 +175,7 @@ public class HelpDeskService {
         saveMessage(c, "AGENT", input, null, null, null, agent, false, request.idempotencyKey());
         c.setStatus("WAITING_FOR_CUSTOMER"); c.setWaitingSince(null); c.setSlaDueAt(null);
         if (c.getFirstResponseAt() == null) c.setFirstResponseAt(LocalDateTime.now());
-        c.setCustomerUnreadCount(c.getCustomerUnreadCount() + 1); conversations.save(c); notifyCustomer(c);
+        c.setCustomerUnreadCount(c.getCustomerUnreadCount() + 1); persistConversation(c); notifyCustomer(c);
         return detail(c, true);
     }
 
@@ -189,7 +190,7 @@ public class HelpDeskService {
     @Transactional
     public HelpDeskModels.ConversationView resolve(long id) {
         HelpConversation c = active(id); ensureAgentOwns(c, requireUser()); c.setStatus("RESOLVED");
-        c.setResolvedAt(LocalDateTime.now()); c.setWaitingSince(null); c.setSlaDueAt(null); return detail(conversations.save(c), true);
+        c.setResolvedAt(LocalDateTime.now()); c.setWaitingSince(null); c.setSlaDueAt(null); return detail(persistConversation(c), true);
     }
 
     @Transactional
@@ -197,17 +198,46 @@ public class HelpDeskService {
         HelpConversation c = owned(id);
         if (!"RESOLVED".equals(c.getStatus())) return detail(c, false);
         c.setStatus("WAITING_FOR_SUPPORT"); c.setResolvedAt(null); c.setWaitingSince(LocalDateTime.now()); c.setSlaDueAt(LocalDateTime.now().plus(normalSla));
-        c.setAgentUnreadCount(c.getAgentUnreadCount() + 1); conversations.save(c); notifyEscalation(c); return detail(c, false);
+        c.setSlaBreachedAt(null);
+        c.setAgentUnreadCount(c.getAgentUnreadCount() + 1); persistConversation(c); notifyEscalation(c); return detail(c, false);
     }
 
     public List<HelpDeskModels.ArticleView> adminArticles() {
         return articles.findByActiveTrueOrderByCategoryAscTitleAsc().stream().map(HelpDeskModels.ArticleView::new).toList();
     }
 
+    /** Import only missing, release-reviewed manual chapters. Never overwrite or auto-publish articles. */
+    @Transactional
+    public Map<String, Object> importManualDrafts() {
+        requireUser();
+        try (var stream = new org.springframework.core.io.ClassPathResource("helpdesk/user-manual.json").getInputStream()) {
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            var bundle = mapper.readTree(stream);
+            int created = 0, retained = 0;
+            for (var chapter : bundle.path("chapters")) {
+                HelpDeskModels.ArticleUpsert article = mapper.treeToValue(chapter.path("article"), HelpDeskModels.ArticleUpsert.class);
+                if (article.published()) throw new IllegalStateException("Manual imports must be drafts");
+                if (articles.existsBySlugAndIdNot(article.slug(), -1)) { retained++; continue; }
+                saveArticle(null, article); created++;
+            }
+            return Map.of("version", bundle.path("version").asText(), "created", created, "retained", retained);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("The packaged user manual could not be loaded", e);
+        }
+    }
+
     @Transactional
     public HelpDeskModels.ArticleView saveArticle(Long id, HelpDeskModels.ArticleUpsert r) {
         HelpArticle a = id == null ? new HelpArticle() : articles.findByIdAndActiveTrue(id).orElseThrow();
         String slug = r.slug().trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9-]", "-").replaceAll("-+", "-");
+        if (slug.isBlank() || slug.matches("-+")) throw new IllegalArgumentException("Use a meaningful article slug.");
+        if (containsSensitiveData(r.title() + " " + r.body())) throw new IllegalArgumentException("Remove credentials from the article.");
+        if (r.audienceRoles() != null && !r.audienceRoles().isBlank()) {
+            Set<String> allowed = Arrays.stream(PMSRole.values()).map(PMSRole::getName).collect(Collectors.toSet());
+            allowed.add("Registration guest");
+            if (Arrays.stream(r.audienceRoles().split(",", -1)).map(String::trim).anyMatch(role -> !allowed.contains(role)))
+                throw new IllegalArgumentException("Choose exact supported role names, or leave the audience blank for everyone.");
+        }
         if (articles.existsBySlugAndIdNot(slug, id == null ? -1 : id)) throw new IllegalArgumentException("Article slug already exists.");
         a.setSlug(slug); a.setTitle(r.title().trim()); a.setCategory(r.category().trim()); a.setBody(r.body().trim());
         a.setKeywords(r.keywords()); a.setAudienceRoles(r.audienceRoles()); a.setPublished(r.published()); a.setActive(true);
@@ -223,7 +253,7 @@ public class HelpDeskService {
                 .findTop100ByStatusInAndActiveTrueAndSlaDueAtBeforeAndSlaBreachedAtIsNullOrderBySlaDueAtAsc(
                         List.of("ESCALATED", "ASSIGNED", "WAITING_FOR_SUPPORT"), now);
         for (HelpConversation c : breached) {
-            c.setSlaBreachedAt(now); conversations.save(c);
+            c.setSlaBreachedAt(now); persistConversation(c);
             notifications.sendEmailToSuperAdmin(NotificationType.HELPDESK_SLA_BREACH_EMAIL,
                     "Help case " + c.getTicketNumber() + " has exceeded its first-response target. Priority: " + c.getPriority() + ".");
         }
@@ -243,11 +273,19 @@ public class HelpDeskService {
             markEscalated(c, inputModeration.flagged() ? "HIGH" : "NORMAL"); return detail(c, false);
         }
         saveMessage(c, "USER", input, null, null, null, creator, false, request.idempotencyKey());
+        // Once a human owns the conversation, the bot must not resume or compete with support.
+        // A role change also prevents previously privileged transcript content being reused as AI context.
+        if (!"OPEN".equals(c.getStatus()) || (creator != null && users.getActiveRole() != null
+                && !users.getActiveRole().getName().equals(c.getActiveRole()))) {
+            markEscalated(c, c.getPriority());
+            return detail(c, false);
+        }
         c.setAgentUnreadCount(c.getAgentUnreadCount() + 1); List<HelpArticle> sources = relevant(input, c.getActiveRole());
         try {
+            if (sources.isEmpty()) throw new IllegalStateException("No approved guidance for this question");
             HelpDeskModels.AiAnswer answer = ai.answer(instructions(), prompt(c, input, sources), hash(rateSubject));
             OpenAiHelpDeskClient.ModerationResult outputModeration = ai.moderate(answer.text());
-            if (!outputModeration.available() || outputModeration.flagged()) throw new IllegalStateException("Unsafe AI output");
+            if (!outputModeration.available() || outputModeration.flagged() || containsSensitiveData(answer.text())) throw new IllegalStateException("Unsafe AI output");
             if (answer.escalated()) markEscalated(c, "NORMAL");
             saveMessage(c, "AI", answer.text(), answer.model(), answer.responseId(), ids(sources), creator, false, null);
         } catch (Exception e) {
@@ -260,6 +298,8 @@ public class HelpDeskService {
     }
 
     private HelpConversation newConversation(String subject, String category, String pageContext) {
+        if (containsSensitiveData(subject)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "Remove credentials from the conversation subject before starting.");
         HelpConversation c = new HelpConversation(); c.setTicketNumber(ticketNumber()); c.setSubject(subject.trim());
         c.setCategory(normalizeCategory(category)); c.setPageContext(safeContext(pageContext)); c.setStatus("OPEN");
         c.setPriority("NORMAL"); c.setPriorityRank(2); c.setActive(true); c.setLastMessageAt(LocalDateTime.now()); return c;
@@ -280,6 +320,13 @@ public class HelpDeskService {
         else if (!c.getAssignedToUserId().equals(agent) && !users.hasRole(PMSRole.SUPER_ADMIN)) throw new IllegalArgumentException("This case is assigned to another support agent.");
     }
     private long requireUser() { return Objects.requireNonNull(users.getUserId(), "Authenticated user required"); }
+    // Remote AI calls must not hold a database transaction. JPA merge returns a different
+    // instance; carry its optimistic version into the next save of this detached conversation.
+    private HelpConversation persistConversation(HelpConversation c) {
+        HelpConversation saved = conversations.save(c);
+        c.setVersion(saved.getVersion());
+        return saved;
+    }
     private HelpDeskModels.ConversationView summary(HelpConversation c, boolean admin) { return new HelpDeskModels.ConversationView(c, List.of(), admin); }
     private HelpDeskModels.ConversationView detail(HelpConversation c, boolean admin) {
         List<HelpMessage> history = new ArrayList<>(messages.findByConversationIdAndActiveTrueOrderByCreatedOnDesc(c.getId(), PageRequest.of(0, MESSAGE_PAGE_SIZE)));
@@ -289,10 +336,16 @@ public class HelpDeskService {
 
     private void markEscalated(HelpConversation c, String priority) {
         boolean newlyWaiting = !Set.of("ESCALATED", "ASSIGNED", "WAITING_FOR_SUPPORT").contains(c.getStatus());
+        priority = normalizePriority(priority);
+        if (!newlyWaiting && priorityRank(c.getPriority()) > priorityRank(priority)) priority = c.getPriority();
         c.setStatus(c.getAssignedToUserId() == null ? "ESCALATED" : "WAITING_FOR_SUPPORT"); c.setPriority(priority);
         c.setPriorityRank(priorityRank(priority)); if (c.getEscalatedAt() == null) c.setEscalatedAt(LocalDateTime.now());
-        c.setWaitingSince(LocalDateTime.now()); c.setSlaDueAt(LocalDateTime.now().plus(slaFor(priority)));
-        c.setAgentUnreadCount(c.getAgentUnreadCount() + 1); conversations.save(c);
+        if (newlyWaiting || c.getWaitingSince() == null) c.setWaitingSince(LocalDateTime.now());
+        LocalDateTime due = c.getWaitingSince().plus(slaFor(priority));
+        if (newlyWaiting || c.getSlaDueAt() == null || due.isBefore(c.getSlaDueAt())) c.setSlaDueAt(due);
+        if (newlyWaiting) c.setSlaBreachedAt(null);
+        c.setResolvedAt(null);
+        c.setAgentUnreadCount(c.getAgentUnreadCount() + 1); persistConversation(c);
         if (newlyWaiting) notifyEscalation(c);
     }
     private void notifyEscalation(HelpConversation c) {
@@ -309,7 +362,7 @@ public class HelpDeskService {
         HelpMessage m = new HelpMessage(); m.setConversationId(c.getId()); m.setSenderType(sender); m.setContent(content);
         m.setModel(model); m.setProviderResponseId(responseId); m.setSourceArticleIds(sourceIds); m.setCreatedBy(creator);
         m.setInternalNote(internalNote); m.setIdempotencyKey(blankToNull(idempotencyKey)); m.setActive(true); messages.save(m);
-        c.setLastMessageAt(LocalDateTime.now()); conversations.save(c);
+        c.setLastMessageAt(LocalDateTime.now()); persistConversation(c);
     }
     private boolean idempotent(HelpConversation c, String key) { return key != null && !key.isBlank() && messages.existsByConversationIdAndIdempotencyKey(c.getId(), key); }
 
@@ -340,7 +393,7 @@ public class HelpDeskService {
     private int priorityRank(String p) { return switch(p){case "URGENT"->4;case "HIGH"->3;case "LOW"->1;default->2;}; }
     private Duration slaFor(String p) { return switch(p){case "URGENT"->urgentSla;case "HIGH"->highSla;case "LOW"->lowSla;default->normalSla;}; }
     private String normalizeCategory(String c) { String v=Objects.toString(c,"GENERAL").trim().toUpperCase(Locale.ROOT).replace(' ','_'); return CATEGORIES.contains(v)?v:"GENERAL"; }
-    private String safeContext(String c) { if(c==null||c.isBlank())return null; String v=c.trim().replaceAll("[\\r\\n\\t]"," "); return v.length()>255?v.substring(0,255):v; }
+    private String safeContext(String c) { if(c==null||c.isBlank())return null; String v=c.trim().split("[?#]",2)[0]; if(!v.matches("/[a-zA-Z0-9/_-]*"))return null; return v.length()>255?v.substring(0,255):v; }
     private String cleanInput(String input) { String v=Objects.toString(input,"").trim(); if(v.isBlank())throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Message is required."); if(v.length()>maxInputChars)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Message is too long."); return v; }
     private boolean containsSensitiveData(String input) { return SECRET_PATTERN.matcher(input).find(); }
     private String newGuestToken() { byte[] b=new byte[32]; secureRandom.nextBytes(b); return Base64.getUrlEncoder().withoutPadding().encodeToString(b); }

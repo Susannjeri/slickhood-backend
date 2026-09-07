@@ -93,6 +93,7 @@ public class VisitorAccessService {
     public RegisteredVisitDTO registerExpected(RegisterVisitRequest request) {
         Users host = requireUser();
         DbUnitDTO unit = unitRepo.findByIdAndStaffOrOwnerOrTenant(request.unitId(), host.getId())
+                .or(() -> unitRepo.findDTOByIdAndHomeowner(request.unitId(), host.getId()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
         return createVisit(request, host.getId(), host.getId(), unit, false);
     }
@@ -119,6 +120,10 @@ public class VisitorAccessService {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.VISITOR_NOT_FOUND));
         if (VisitorStatus.valueOf(visitor.getStatus()) != VisitorStatus.PENDING_APPROVAL) {
             throw new PMSCustomException(ResponseCode.VISITOR_ALREADY_PROCESSED);
+        }
+        if (request.decision() == VisitorDecisionRequest.Decision.APPROVE
+                && (visitor.getValidUntil() == null || !visitor.getValidUntil().isAfter(ZonedDateTime.now(UTC)))) {
+            throw new PMSCustomException(ResponseCode.VISITOR_INVALID_STATUS);
         }
         visitor.setApprovedBy(hostId);
         visitor.setApprovedAt(ZonedDateTime.now(UTC));
@@ -189,7 +194,9 @@ public class VisitorAccessService {
     public Page<org.pms.silverocean.service.visitor.wrappers.AccessEventDTO> listEvents(long propertyId, Pageable pageable) {
         propertyRepo.findByIdAndStaffOrOwner(propertyId, userDao.getUserId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
-        return eventRepo.findAllByPropertyIdOrderByOccurredAtDesc(propertyId, pageable)
+        Pageable bounded = org.springframework.data.domain.PageRequest.of(pageable.getPageNumber(),
+                Math.min(100, Math.max(1, pageable.getPageSize())), pageable.getSort());
+        return eventRepo.findAllByPropertyIdOrderByOccurredAtDesc(propertyId, bounded)
                 .map(org.pms.silverocean.service.visitor.wrappers.AccessEventDTO::new);
     }
 
@@ -211,11 +218,21 @@ public class VisitorAccessService {
         validateRequest(request);
         return eventRepo.findByCorrelationId(request.correlationId())
                 .map(event -> {
-                    if (event.getDeviceId() == null || event.getDeviceId() != device.getId() || event.getPropertyId() != device.getPropertyId()) {
+                    if (!java.util.Objects.equals(event.getDeviceId(), device.getId()) || event.getPropertyId() != device.getPropertyId()
+                            || !request.direction().name().equals(event.getDirection())
+                            || !normalizePlate(request.vehiclePlate()).equals(normalizePlate(event.getVehiclePlate()))) {
                         throw new IllegalArgumentException("CORRELATION_CONFLICT");
                     }
+                    if (AccessOutcome.GRANTED.name().equals(event.getOutcome())) {
+                        Visitor original = visitorRepo.findByCredentialHashForUpdate(sha256(request.accessCode())).orElse(null);
+                        if (original == null || !java.util.Objects.equals(original.getId(), event.getVisitorId())
+                                || event.getOccurredAt() == null || event.getOccurredAt().plus(SIGNATURE_WINDOW).isBefore(now)) {
+                            throw new IllegalArgumentException("CORRELATION_CONFLICT");
+                        }
+                    }
                     return new AccessDecisionDTO(AccessOutcome.GRANTED.name().equals(event.getOutcome()), event.getReasonCode(),
-                            event.getCorrelationId(), event.getVisitorId(), null, null, null, event.getOccurredAt());
+                            event.getCorrelationId(), AccessOutcome.GRANTED.name().equals(event.getOutcome()) ? event.getVisitorId() : null,
+                            null, null, null, event.getOccurredAt());
                 })
                 .orElseGet(() -> evaluate(device, request, now));
     }
@@ -230,7 +247,8 @@ public class VisitorAccessService {
         ZonedDateTime validFrom = expected.minusHours(2);
         ZonedDateTime validUntil = request.validUntil() == null ? expected.plusHours(8)
                 : request.validUntil().atZone(ZoneId.of("Africa/Nairobi")).withZoneSameInstant(UTC);
-        if (!validUntil.isAfter(validFrom) || validUntil.isAfter(expected.plusDays(30))) {
+        if (!validUntil.isAfter(expected) || !validUntil.isAfter(ZonedDateTime.now(UTC))
+                || validUntil.isAfter(expected.plusDays(30))) {
             throw new IllegalArgumentException("Invalid access validity window");
         }
         if (request.visitType() == VisitType.DRIVE_IN && StringUtils.isBlank(request.vehiclePlate())) {
@@ -289,18 +307,19 @@ public class VisitorAccessService {
             notifyHost(visitor, request.direction(), now);
         }
         VisitorAccessEvent event = new VisitorAccessEvent();
-        event.setVisitorId(visitor == null ? null : visitor.getId()); event.setPropertyId(device.getPropertyId());
+        boolean sameProperty = visitor != null && visitor.getPropertyId() == device.getPropertyId();
+        event.setVisitorId(sameProperty ? visitor.getId() : null); event.setPropertyId(device.getPropertyId());
         event.setDeviceId(device.getId()); event.setSource("SMART_GATE"); event.setDirection(request.direction().name());
         event.setOutcome(granted ? AccessOutcome.GRANTED.name() : AccessOutcome.DENIED.name()); event.setReasonCode(reason);
         event.setCorrelationId(request.correlationId()); event.setVehiclePlate(normalizePlate(request.vehiclePlate()));
         event.setOccurredAt(now); event.setActive(true); eventRepo.save(event);
-        return new AccessDecisionDTO(granted, reason, request.correlationId(), visitor == null ? null : visitor.getId(),
-                visitor == null ? null : visitor.getVisitorName(), visitor == null ? null : visitor.getUnitRef(),
-                visitor == null ? null : visitor.getVisitType(), now);
+        return new AccessDecisionDTO(granted, reason, request.correlationId(), granted ? visitor.getId() : null,
+                granted ? visitor.getVisitorName() : null, granted ? visitor.getUnitRef() : null,
+                granted ? visitor.getVisitType() : null, now);
     }
 
     private String validateAccess(GateDevice device, Visitor visitor, SmartGateDecisionRequest request, ZonedDateTime now) {
-        if (visitor == null) return "INVALID_CREDENTIAL";
+        if (visitor == null || !visitor.isActive()) return "INVALID_CREDENTIAL";
         if (visitor.getPropertyId() != device.getPropertyId()) return "WRONG_PROPERTY";
         if (visitor.getValidFrom() == null || now.isBefore(visitor.getValidFrom())) return "NOT_YET_VALID";
         if (visitor.getValidUntil() == null || now.isAfter(visitor.getValidUntil())) return "CREDENTIAL_EXPIRED";

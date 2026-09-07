@@ -14,7 +14,7 @@ public class UserReportDao {
     private final UserRepo userRepo;
 
     public double getInActiveUserPercentage() {
-        return userRepo.getActiveUserPercentage();
+        return 100.0 - Math.max(0.0, Math.min(100.0, userRepo.getActiveUserPercentage()));
     }
 
     public int getUserLoggedInWithinCurrentMonth() {

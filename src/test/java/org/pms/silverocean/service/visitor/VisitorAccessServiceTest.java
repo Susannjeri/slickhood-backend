@@ -136,6 +136,79 @@ class VisitorAccessServiceTest {
     }
 
     @Test
+    void wrongPropertyCredentialDoesNotDiscloseVisitorIdentity() throws Exception {
+        Visitor visitor = new Visitor(); visitor.setId(999L); visitor.setPropertyId(21L); visitor.setActive(true);
+        visitor.setVisitorName("Private visitor"); visitor.setUnitRef("Private unit");
+        when(visitorRepo.findByCredentialHashForUpdate(anyString())).thenReturn(Optional.of(visitor));
+        var result = signedDecision("ENTRY", "entry-new");
+        assertFalse(result.granted()); assertEquals("WRONG_PROPERTY", result.reasonCode());
+        org.junit.jupiter.api.Assertions.assertNull(result.visitorId());
+        org.junit.jupiter.api.Assertions.assertNull(result.visitorName());
+        ArgumentCaptor<VisitorAccessEvent> event = ArgumentCaptor.forClass(VisitorAccessEvent.class);
+        verify(eventRepo).save(event.capture());
+        org.junit.jupiter.api.Assertions.assertNull(event.getValue().getVisitorId());
+    }
+
+    @Test
+    void replayCorrelationCannotChangeEntryIntoExit() throws Exception {
+        VisitorAccessEvent event = new VisitorAccessEvent(); event.setDeviceId(1000L); event.setPropertyId(20L);
+        event.setDirection("ENTRY"); event.setOutcome("GRANTED");
+        when(eventRepo.findByCorrelationId("old-entry")).thenReturn(Optional.of(event));
+        assertThrows(IllegalArgumentException.class, () -> signedDecision("EXIT", "old-entry"));
+        org.mockito.Mockito.verifyNoInteractions(visitorRepo);
+    }
+
+    @Test
+    void matchingDeviceIdsOutsideBoxedIntegerCacheAcceptDeniedReplayWithoutPersonalData() throws Exception {
+        VisitorAccessEvent event = new VisitorAccessEvent(); event.setDeviceId(Long.valueOf("1000")); event.setPropertyId(20L);
+        event.setDirection("ENTRY"); event.setOutcome("DENIED"); event.setReasonCode("VISIT_NOT_APPROVED"); event.setVisitorId(9L);
+        when(eventRepo.findByCorrelationId("old-denial")).thenReturn(Optional.of(event));
+        var result = signedDecision("ENTRY", "old-denial");
+        assertFalse(result.granted()); assertEquals("VISIT_NOT_APPROVED", result.reasonCode());
+        org.junit.jupiter.api.Assertions.assertNull(result.visitorId());
+    }
+
+    @Test
+    void expiredPendingVisitCannotBeApproved() {
+        Visitor visitor = new Visitor(); visitor.setStatus("PENDING_APPROVAL");
+        visitor.setValidUntil(ZonedDateTime.now().minusMinutes(1));
+        when(userDao.getUserId()).thenReturn(7L);
+        when(visitorRepo.findByIdAndHostUserId(99L, 7L)).thenReturn(Optional.of(visitor));
+        assertThrows(org.pms.silverocean.service.PMSCustomException.class,
+                () -> service.decide(99L, new VisitorDecisionRequest(VisitorDecisionRequest.Decision.APPROVE, null)));
+        org.mockito.Mockito.verifyNoInteractions(visitorDao);
+    }
+
+    @Test
+    void homeownerCanRegisterAnExpectedVisitor() {
+        Users host = new Users(); host.setId(7L);
+        DbUnitDTO unit = new DbUnitDTO(20L, "A-12", PMSUnitTypes.APARTMENT_UNIT, PMSPropertyType.APARTMENT_BLOCK,
+                80d, "SERVICE_CHARGE", 1d, "KES", true, false, null, null, null, 0, 10L, null);
+        Property property = new Property(); property.setId(20L); property.setName("Acacia");
+        when(userDao.getUserObject()).thenReturn(host);
+        when(unitRepo.findDTOByIdAndHomeowner(10L, 7L)).thenReturn(Optional.of(unit));
+        when(propertyRepo.findById(20L)).thenReturn(Optional.of(property));
+        doAnswer(call -> { ((Visitor)call.getArgument(0)).setId(99L); return null; })
+                .when(visitorDao).save(any(Visitor.class), anyString());
+        var result = service.registerExpected(new RegisterVisitRequest("Guest", "0712345678", VisitType.WALK_IN,
+                VisitorCategory.GUEST, 10L, null, LocalDateTime.now(ZoneId.of("Africa/Nairobi")).plusHours(2),
+                null, "Visit", null, null, null, null, 1, false));
+        assertEquals("APPROVED", result.visit().status());
+    }
+
+    private org.pms.silverocean.service.visitor.wrappers.AccessDecisionDTO signedDecision(String direction, String correlation) throws Exception {
+        var keys = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        GateDevice device = new GateDevice(); device.setId(Long.valueOf("1000")); device.setPropertyId(20L);
+        device.setPublicKey(Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()));
+        when(gateDeviceRepo.findByDeviceCodeAndEnabledTrueAndActiveTrue("test-device")).thenReturn(Optional.of(device));
+        String body = "{\"accessCode\":\"" + "A".repeat(43) + "\",\"direction\":\"" + direction + "\",\"correlationId\":\"" + correlation + "\"}";
+        long timestamp = java.time.Instant.now().getEpochSecond(); String nonce = "valid-nonce-123456789";
+        Signature signer = Signature.getInstance("Ed25519"); signer.initSign(keys.getPrivate());
+        signer.update((timestamp + "\n" + nonce + "\n" + body).getBytes(StandardCharsets.UTF_8));
+        return service.decideFromDevice("test-device", timestamp, nonce, Base64.getEncoder().encodeToString(signer.sign()), body);
+    }
+
+    @Test
     void hostDenialRequiresAndPersistsAnAuditReason() {
         Users host = new Users(); host.setId(7L);
         Visitor pending = new Visitor(); pending.setId(99L); pending.setStatus(VisitorStatus.PENDING_APPROVAL.name());

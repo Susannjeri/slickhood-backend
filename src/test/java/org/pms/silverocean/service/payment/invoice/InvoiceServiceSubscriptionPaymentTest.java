@@ -40,13 +40,14 @@ class InvoiceServiceSubscriptionPaymentTest {
     @Mock private I18NService i18NService;
     @Mock private PaymentPlatformFactory paymentPlatformFactory;
     @Mock private PaymentPlatform paymentPlatform;
+    @Mock private org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents;
 
     private InvoiceService service;
 
     @BeforeEach
     void setUp() {
         service = new InvoiceService(invoiceDao, unitDao, userDao, accountDao, renderService,
-                emailService, i18NService, paymentPlatformFactory);
+                emailService, i18NService, paymentPlatformFactory, notificationEvents);
     }
 
     @Test
@@ -63,6 +64,19 @@ class InvoiceServiceSubscriptionPaymentTest {
         PaymentResponse actual = service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 12L);
 
         assertSame(expected, actual);
+    }
+
+    @Test
+    void fundInvoiceUsesFundCurrencyNotRentalUnitCurrencyAndEscapesDescription() {
+        var unit = new org.pms.silverocean.database.pms.entities.Unit();
+        unit.setId(1L); unit.setPropertyId(2L); unit.setCurrency("USD");
+        when(unitDao.findById(1L)).thenReturn(Optional.of(unit));
+        org.mockito.Mockito.doAnswer(call -> { ((PMSInvoice)call.getArgument(0)).setId(10L); return null; })
+                .when(invoiceDao).createInvoice(org.mockito.ArgumentMatchers.any());
+        var invoice = service.createFundInvoice(1L, 7L, 8L, 9L,
+                java.util.Map.of("<script>fund</script>", 100d), java.time.LocalDate.now(), "KES");
+        org.junit.jupiter.api.Assertions.assertEquals("KES", invoice.getCurrency());
+        org.junit.jupiter.api.Assertions.assertTrue(new String(invoice.getHtmlDescription()).contains("&lt;script&gt;"));
     }
 
     @Test

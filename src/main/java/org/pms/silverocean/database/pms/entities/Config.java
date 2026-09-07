@@ -32,12 +32,12 @@ public class Config extends BaseIDEntity implements Auditable {
 
     @Override
     public String toAuditJSON() {
-        return "{" +
-                "\"id\":" + getId() + "," +
-                "\"name\":\"" + name + "\"," +
-                "\"stringValue\":\"" + (encrypted ? "*****" : new String(stringValue)) + "\"," +
-                "\"intValue\":" + intValue + "," +
-                "\"updatedOn\":\"" + updatedOn + "\""+
-                "}";
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode();
+        json.put("id", getId());
+        json.put("name", name);
+        json.put("stringValue", encrypted ? "*****" : stringValue == null ? "" : new String(stringValue, java.nio.charset.StandardCharsets.UTF_8));
+        json.put("intValue", intValue);
+        json.put("updatedOn", String.valueOf(updatedOn));
+        return json.toString();
     }
 }

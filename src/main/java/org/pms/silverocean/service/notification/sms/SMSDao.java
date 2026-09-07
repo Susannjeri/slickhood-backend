@@ -34,6 +34,11 @@ public class SMSDao {
         return byThirdPartyId.stream().findFirst();
     }
 
+    public Optional<SMS> lockWhatsAppMessage(String id) {
+        Set<SMS> matches = smsRepo.lockWhatsAppMessage(id);
+        return matches.size() == 1 ? matches.stream().findFirst() : Optional.empty();
+    }
+
     public Page<SMS> findAll(Pageable pageable) {
         return smsRepo.findAll(pageable);
     }

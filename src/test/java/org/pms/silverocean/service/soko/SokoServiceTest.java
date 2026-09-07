@@ -136,6 +136,11 @@ class SokoServiceTest {
     @Test void checkoutRejectsInsufficientStockWithoutCreatingOrder(){
         SokoStore store=new SokoStore();store.setId(2L);store.setActive(true);store.setStatus("PUBLISHED");store.setPickupEnabled(true);store.setCurrency("KES");
         SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setStatus("PUBLISHED");product.setStockQuantity(1);product.setName("Milk");
+        store.setPaymentAccountId(3L);
+        var account=new org.pms.silverocean.database.pms.entities.PaymentAccount();
+        account.setActive(true);account.setVerified(true);account.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);
+        account.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);
+        when(accounts.getAccountByIdAndCreatedBy(3L,store.getOwnerUserId())).thenReturn(account);
         when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,2)),"PICKUP",null,"0712345678",null,null);
         assertThrows(PMSCustomException.class,()->service.checkout(request));verify(orders,never()).save(any());
@@ -147,5 +152,53 @@ class SokoServiceTest {
         service.completePaidInvoice("INV-9","PS-1");
         assertEquals("PAID",order.getPaymentStatus());assertEquals("PAID",order.getStatus());verify(orders).save(order);
         service.completePaidInvoice("INV-9","PS-1");verify(orders,times(1)).save(order);
+    }
+
+    @Test void deliveryCannotBypassProofByBecomingPickup(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);
+        order.setStatus("PACKED");order.setDeliveryMethod("DELIVERY");
+        when(users.getUserId()).thenReturn(7L);
+        when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));
+        when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+        assertThrows(PMSCustomException.class,()->service.transition(9L,"READY_FOR_PICKUP",null));
+        order.setStatus("READY_FOR_PICKUP");
+        assertThrows(PMSCustomException.class,()->service.transition(9L,"COMPLETED",null));
+        verify(orders,never()).save(any());
+    }
+    @Test void pickupCannotEnterDeliveryDispatch(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);
+        order.setStatus("PACKED");order.setDeliveryMethod("PICKUP");
+        when(users.getUserId()).thenReturn(7L);
+        when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));
+        when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+        assertThrows(PMSCustomException.class,()->service.transition(9L,"DISPATCHED",null));
+        verify(orders,never()).save(any());
+    }
+    @Test void checkoutRechecksInactivePayeeBeforeReservingStock(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);
+        store.setStatus("PUBLISHED");store.setPickupEnabled(true);store.setPaymentAccountId(3L);
+        var account=new org.pms.silverocean.database.pms.entities.PaymentAccount();
+        account.setVerified(true);account.setActive(false);
+        when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+        when(accounts.getAccountByIdAndCreatedBy(3L,7L)).thenReturn(account);
+        var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678",null,null);
+        assertThrows(PMSCustomException.class,()->service.checkout(request));
+        verifyNoInteractions(products,invoices);
+    }
+    @Test void wrongCodeRetainsProofAndLimitsAttempts(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);
+        order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");
+        order.setDeliveryCode("123456");order.setDeliveryProofReference("protected-proof");
+        when(users.getUserId()).thenReturn(7L);
+        when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));
+        when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));
+        for(int i=0;i<5;i++)assertThrows(PMSCustomException.class,()->service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("000000")));
+        assertEquals(5,order.getDeliveryCodeAttempts());
+        assertEquals("protected-proof",order.getDeliveryProofReference());
+        assertThrows(PMSCustomException.class,()->service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("123456")));
+        assertEquals("DISPATCHED",order.getStatus());
     }
 }

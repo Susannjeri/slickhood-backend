@@ -51,7 +51,8 @@ public class RestTemplateService {
 
     private <B, R> R sendRequest(String url, HttpMethod method, B body, HttpHeaders headers, Class<R> responseType)
             throws RestRequestException {
-        log.info("Sending {} request to URL: {}", method, url);
+        // URLs can contain API keys; responses can contain tokens, OTPs and customer details.
+        log.debug("Sending {} upstream request for {}", method, responseType.getSimpleName());
 
         var entity = HttpEntity.EMPTY;
         if (body != null && headers != null) {
@@ -64,11 +65,11 @@ public class RestTemplateService {
 
         try {
             ResponseEntity<R> response = restTemplate.exchange(url, method, entity, responseType);
-            log.debug("Got response {} for expected type {}", response.getBody(), responseType);
+            log.debug("Upstream request completed with status {}", response.getStatusCode().value());
             return response.getBody();
         } catch (HttpClientErrorException | HttpServerErrorException e) {
             int statusCode = e.getStatusCode().value();
-            log.error("Upstream service returned error status: {}, {}", statusCode, e.getResponseBodyAsString(), e);
+            log.warn("Upstream service returned error status: {}", statusCode);
             throw new RestRequestException(resolveErrorMessage(statusCode), statusCode, e.getResponseBodyAsString());
         }
     }

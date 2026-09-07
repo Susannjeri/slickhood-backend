@@ -47,7 +47,7 @@ public final class WealthRequests {
             @Min(0) @Max(365) Integer reminderDays, @Size(max=500) String notes) {}
 
     public record GoalRequest(@NotBlank @Pattern(regexp="NET_WORTH|INCOME|EQUITY|DEBT_REDUCTION") String goalType,
-            @NotBlank @Size(max=160) String name, @NotNull @Positive BigDecimal targetAmount,
+            @NotBlank @Size(max=160) String name, @NotNull @PositiveOrZero BigDecimal targetAmount,
             @NotBlank @Pattern(regexp="[A-Za-z]{3}") String currency,
             @NotNull @FutureOrPresent LocalDate targetDate) {}
 

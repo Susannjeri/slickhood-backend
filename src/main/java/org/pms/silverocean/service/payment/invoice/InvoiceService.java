@@ -52,12 +52,14 @@ public class InvoiceService {
     private final EmailService emailService;
     private final I18NService i18NService;
     private final PaymentPlatformFactory paymentPlatformFactory;
+    private final org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents;
     private static final String INVOICE_TEMPLATE = "invoice";
 
     public InvoiceService(InvoiceDao invoiceDao, UnitDao unitDao, UserDao userDao, AccountDao accountDao,
                           RenderService renderService, @Qualifier("EMAIL") EmailService emailService,
                           I18NService i18NService,
-                          PaymentPlatformFactory paymentPlatformFactory) {
+                          PaymentPlatformFactory paymentPlatformFactory,
+                          org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents) {
         this.invoiceDao = invoiceDao;
         this.unitDao = unitDao;
         this.userDao = userDao;
@@ -66,22 +68,35 @@ public class InvoiceService {
         this.emailService = emailService;
         this.i18NService = i18NService;
         this.paymentPlatformFactory = paymentPlatformFactory;
+        this.notificationEvents = notificationEvents;
     }
 
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public void createInvoice(long unitId, long tenantUserId, Map<String, Double> invoiceAmounts) {
-        createPropertyInvoice(unitId, tenantUserId, invoiceAmounts, "RENTAL", null);
+        createPropertyInvoice(unitId, tenantUserId, invoiceAmounts, "RENTAL", LocalDate.now(PMSUtils.getZoneId()));
     }
 
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public PMSInvoice createPropertyInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
                                             String billingType, LocalDate dueDate) {
         return createScopedInvoice(unitId, billedUserId, invoiceAmounts, billingType, dueDate, null, null);
     }
 
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public PMSInvoice createFundInvoice(long unitId, long billedUserId, long custodianUserId, long paymentAccountId,
                                         Map<String, Double> invoiceAmounts, LocalDate dueDate) {
         return createScopedInvoice(unitId, billedUserId, invoiceAmounts, "COMMUNITY_FUND", dueDate, custodianUserId, paymentAccountId);
     }
 
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
+    public PMSInvoice createFundInvoice(long unitId, long billedUserId, long custodianUserId, long paymentAccountId,
+                                        Map<String, Double> invoiceAmounts, LocalDate dueDate, String fundCurrency) {
+        java.util.Currency.getInstance(fundCurrency);
+        return createScopedInvoice(unitId, billedUserId, invoiceAmounts, "COMMUNITY_FUND", dueDate,
+                custodianUserId, paymentAccountId, fundCurrency);
+    }
+
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public PMSInvoice createSaleInvoice(long unitId, long billedUserId, long salesRecipientUserId,
                                         long paymentAccountId, Map<String, Double> invoiceAmounts,
                                         LocalDate dueDate) {
@@ -97,13 +112,19 @@ public class InvoiceService {
 
     private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
                                            String billingType, LocalDate dueDate, Long payToUserId, Long paymentAccountId) {
+        return createScopedInvoice(unitId, billedUserId, invoiceAmounts, billingType, dueDate, payToUserId, paymentAccountId, null);
+    }
+
+    private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
+                                           String billingType, LocalDate dueDate, Long payToUserId, Long paymentAccountId,
+                                           String currencyOverride) {
         Unit unit = unitDao.findById(unitId).orElseThrow();
 
         double totalAmount = 0.0;
 
         StringBuilder descriptionBuilder = new StringBuilder();
         StringBuilder htmlDescriptionBuilder = new StringBuilder();
-        String currency = unit.getCurrency();
+        String currency = currencyOverride == null ? unit.getCurrency() : currencyOverride;
 
         for (Map.Entry<String, Double> entry : invoiceAmounts.entrySet()) {
             String formattedAmount = String.format("%,.2f", entry.getValue());
@@ -112,7 +133,7 @@ public class InvoiceService {
             totalAmount += entry.getValue();
             htmlDescriptionBuilder.append("<tr>")
                     .append("<td>")
-                    .append("<span>").append(entry.getKey()).append("</span>")
+                    .append("<span>").append(org.springframework.web.util.HtmlUtils.htmlEscape(entry.getKey())).append("</span>")
                     .append("</td>")
                     .append("<td class='amount-col'>")
                     .append(formattedAmount)
@@ -218,7 +239,8 @@ public class InvoiceService {
 
     private void createInvoicePDFAndSendEmail(PMSInvoice invoice, boolean sendEmail, OutputStream outputStream) {
         if (sendEmail) {
-            populatePDFAndSendEmail(compilePDFData(invoice));
+            notificationEvents.publish(InvoiceEmailHandler.TYPE, "INVOICE", invoice.getId().toString(),
+                    InvoiceEmailHandler.TYPE + ":" + invoice.getId(), new InvoiceEmailHandler.Request(invoice.getId()));
         } else if (outputStream != null) {
             String renderedInvoice = renderService.render(INVOICE_TEMPLATE, compilePDFData(invoice));
             try {
@@ -232,24 +254,23 @@ public class InvoiceService {
 
     }
 
-    private void populatePDFAndSendEmail(Map<String, Object> invoiceData) {
-        renderService.toPdfAsync(renderService.render(INVOICE_TEMPLATE, invoiceData))
-                .thenAccept(pdfBytes -> {
-                    try {
-                        // 2. Once bytes are ready, send the email
-                        String fileName = "Invoice_" + invoiceData.get("invoiceRef") + ".pdf";
-
-                        String formattedMessage = String.format(i18NService.getLocalizedMessage(NotificationType.INVOICE_EMAIL.getBody()), invoiceData.get("customerName").toString(), invoiceData.get("dateIssued"));
-                        emailService.sendAttachment(invoiceData.get("customerEmail").toString(), formattedMessage, i18NService.getLocalizedMessage(NotificationType.INVOICE_EMAIL.getSubject()), pdfBytes, fileName);
-
-                    } catch (MessagingException e) {
-                        log.error("Failed to attach PDF for email to {}", invoiceData.get("customerEmail").toString(), e);
-                    }
-                })
-                .exceptionally(ex -> {
-                    log.error("PDF generation failed for tenant {}: {}", invoiceData.get("customerEmail").toString(), ex.getMessage());
-                    return null;
-                });
+    /** Called by the durable outbox after invoice commit. Failures remain retryable, not swallowed. */
+    public void sendInvoiceEmail(long invoiceId) {
+        PMSInvoice invoice = invoiceDao.getInvoiceById(invoiceId).filter(PMSInvoice::isActive).orElse(null);
+        if (invoice == null) return;
+        try {
+            Map<String, Object> invoiceData = compilePDFData(invoice);
+            var bytes = new java.io.ByteArrayOutputStream();
+            renderService.toPdf(renderService.render(INVOICE_TEMPLATE, invoiceData), bytes);
+            String name = org.springframework.web.util.HtmlUtils.htmlEscape(String.valueOf(invoiceData.get("customerName")));
+            String message = String.format(i18NService.getLocalizedMessage(NotificationType.INVOICE_EMAIL.getBody()), name, invoiceData.get("dateIssued"));
+            emailService.sendAttachment(String.valueOf(invoiceData.get("customerEmail")), message,
+                    i18NService.getLocalizedMessage(NotificationType.INVOICE_EMAIL.getSubject()), bytes.toByteArray(),
+                    "Invoice_" + invoiceId + ".pdf");
+        } catch (Exception failure) {
+            // The provider exception may include personal data. Persist only a safe error classification.
+            throw new IllegalStateException("Invoice email delivery failed (" + failure.getClass().getSimpleName() + ")");
+        }
     }
 
     public Page<InvoiceDTO> getInvoiceList(Pageable pageable, Long tenantId, Long landlordId, Long propertyId, Long unitId) {

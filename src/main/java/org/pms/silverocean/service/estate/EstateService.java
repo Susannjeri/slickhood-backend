@@ -154,7 +154,9 @@ public class EstateService {
                 .ifPresent(homeowner -> {
                     String location = propertyName + (ownership.getUnitId() == null ? "" : " / unit " + ownership.getUnitId());
                     String body = String.format(i18n.getLocalizedMessage(NotificationType.OWNERSHIP_ENDED_EMAIL.getBody()),
-                            homeowner.getFullName(), location, endDate, reason);
+                            org.springframework.web.util.HtmlUtils.htmlEscape(java.util.Objects.toString(homeowner.getFullName(), "")),
+                            org.springframework.web.util.HtmlUtils.htmlEscape(location), endDate,
+                            org.springframework.web.util.HtmlUtils.htmlEscape(java.util.Objects.toString(reason, "")));
                     notificationService.queueNotification(new NotificationDTO(body, homeowner.getEmail(), NotificationType.OWNERSHIP_ENDED_EMAIL));
                 });
     }

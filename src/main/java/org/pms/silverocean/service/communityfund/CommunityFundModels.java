@@ -50,11 +50,22 @@ public final class CommunityFundModels {
 
     public record PaymentAccountView(Long id,String name,String channel,boolean active,boolean verified) {}
 
+    public record FundTransactionView(Long id, String transactionType, BigDecimal amount, String currency,
+                                      String description, String beneficiaryName, String externalReference,
+                                      java.time.LocalDateTime occurredAt) {
+        public static FundTransactionView forViewer(CommunityFundTransaction t, long viewer, boolean manager) {
+            return new FundTransactionView(t.getId(), t.getTransactionType(), t.getAmount(), t.getCurrency(),
+                    t.getDescription(), t.getBeneficiaryName(),
+                    manager || java.util.Objects.equals(t.getContributorUserId(), viewer) ? t.getExternalReference() : null,
+                    t.getOccurredAt());
+        }
+    }
+
     public record FundDashboard(CommunityFund fund,PaymentAccountView paymentAccount,
                                 BigDecimal assessed,BigDecimal collected,BigDecimal committed,
                                 BigDecimal spent,BigDecimal available,int contributorCount,int paidContributorCount,
                                 List<CommunityFundContribution> myContributions,
                                 List<CommunityFundContribution> contributions,
                                 List<CommunityFundExpenditure> expenditures,
-                                List<CommunityFundTransaction> transactions,boolean managerView) {}
+                                List<FundTransactionView> transactions,boolean managerView) {}
 }

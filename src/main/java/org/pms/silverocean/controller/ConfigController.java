@@ -47,15 +47,15 @@ public class ConfigController {
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_CONFIG)")
     public ResponseEntity<ResponseDTO> getConfig(@RequestParam PMSConfigs name) {
         ConfigDTO config = configService.getConfigByNameForFrontEndView(name);
-        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.CONFIG_DETAILS.getCode(), i18NService.getLocalizedMessage(ResponseCode.CONFIG_DETAILS), config));
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore()).body(new ResponseDTO(true, ResponseCode.CONFIG_DETAILS.getCode(), i18NService.getLocalizedMessage(ResponseCode.CONFIG_DETAILS), config));
 
     }
 
     @GetMapping("/value/decrypt")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_CONFIG)")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_CONFIG)")
     public ResponseEntity<ResponseDTO> getConfigDecryptedValue(@RequestParam PMSConfigs name) {
         ConfigDTO param = configService.getConfigByName(name).get();
-        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.DECRYPTED_PARAM_VALUE.getCode(),
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore()).body(new ResponseDTO(true, ResponseCode.DECRYPTED_PARAM_VALUE.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.DECRYPTED_PARAM_VALUE), String.valueOf(param.stringValue())));
     }
 

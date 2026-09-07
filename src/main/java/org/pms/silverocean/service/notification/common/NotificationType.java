@@ -29,6 +29,7 @@ public enum NotificationType {
     LEASE_TERMINATION_EMAIL("email.lease.termination.subject", "email.lease.termination.body", true, NotificationChannel.EMAIL),
     LEASE_RENEWAL_EMAIL("email.lease.renewal.subject", "email.lease.renewal.body", true, NotificationChannel.EMAIL),
     RENT_OVERDUE_EMAIL("email.rent.overdue.subject", "email.rent.overdue.body", true, NotificationChannel.EMAIL),
+    RENT_PAYMENT_REMINDER_EMAIL("email.rent.payment.reminder.subject", "email.rent.payment.reminder.body", true, NotificationChannel.EMAIL),
     INVOICE_EMAIL("email.invoice.subject", "email.invoice.body", false, NotificationChannel.EMAIL),
     SERVICE_CHARGE_REMINDER_EMAIL("email.service.charge.reminder.subject", "email.service.charge.reminder.body", true, NotificationChannel.EMAIL),
     SERVICE_CHARGE_OVERDUE_EMAIL("email.service.charge.overdue.subject", "email.service.charge.overdue.body", true, NotificationChannel.EMAIL),

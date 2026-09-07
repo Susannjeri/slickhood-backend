@@ -105,6 +105,11 @@ public interface LeaseRepo extends JpaRepository<Lease, Long> {
     @Query("SELECT new org.pms.silverocean.service.payment.invoice.wrappers.ProcessLeaseInvoiceDTO(l.id, l.leaseMode, l.leaseDate, l.nextPaymentDate, l.price, l.currency, l.charges, ut.unitId, ut.userId) from Lease l JOIN UnitTenant ut ON ut.id=l.tenantId WHERE l.paymentDue AND l.active AND l.nextPaymentDate <= CURRENT_DATE")
     Slice<ProcessLeaseInvoiceDTO> findLeasePaymentsDueToday(Pageable pageable);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT new org.pms.silverocean.service.payment.invoice.wrappers.ProcessLeaseInvoiceDTO(l.id, l.leaseMode, l.leaseDate, l.nextPaymentDate, l.price, l.currency, l.charges, ut.unitId, ut.userId) " +
+            "FROM Lease l JOIN UnitTenant ut ON ut.id=l.tenantId WHERE l.paymentDue AND l.active AND l.nextPaymentDate<=CURRENT_DATE AND l.id>:afterId ORDER BY l.id")
+    Slice<ProcessLeaseInvoiceDTO> findLeasePaymentsDueAfter(@org.springframework.data.repository.query.Param("afterId") long afterId, Pageable pageable);
+
     @Modifying(clearAutomatically = true)
     @Query("UPDATE Lease l SET l.nextPaymentDate = l.nextPaymentDate + 1 MONTH WHERE l.id IN :ids")
     void incrementNextPaymentDate(Set<Long> ids);

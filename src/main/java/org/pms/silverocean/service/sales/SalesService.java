@@ -332,7 +332,8 @@ public class SalesService {
     private void queueStatus(String recipient, String name, SaleTransaction sale, String detail) {
         String suffix = StringUtils.isBlank(detail) ? "" : " " + StringUtils.abbreviate(detail.trim(), 300);
         String body = String.format(i18n.getLocalizedMessage(NotificationType.SALE_STATUS_EMAIL.getBody()),
-                StringUtils.defaultIfBlank(name, "Customer"), sale.getPropertyId(), sale.getUnitId(), sale.getStatus(), suffix);
+                org.springframework.web.util.HtmlUtils.htmlEscape(StringUtils.defaultIfBlank(name, "Customer")),
+                sale.getPropertyId(), sale.getUnitId(), sale.getStatus(), org.springframework.web.util.HtmlUtils.htmlEscape(suffix));
         notifications.queueNotification(new NotificationDTO(body, recipient, NotificationType.SALE_STATUS_EMAIL));
     }
 

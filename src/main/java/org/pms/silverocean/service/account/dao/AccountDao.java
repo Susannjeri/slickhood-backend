@@ -81,6 +81,12 @@ public class AccountDao {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND));
     }
 
+    /** Caller must hold the account-maintenance transaction until its changes commit. */
+    public PaymentAccount getAccountForUpdate(Long id) {
+        return accountRepo.findActiveForUpdate(id)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND));
+    }
+
     public Page<PaymentAccount> getActiveSlickHoodAccount(Pageable pageable) {
         return accountRepo.listAllActiveSlickHoodAccount(pageable);
     }
