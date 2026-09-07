@@ -134,14 +134,14 @@ jobs:
             cd /tmp/slickhood-backend-release
             sha256sum -c release.sha256
             test -f "$candidate"
-            run_preflight 72
+            run_preflight 73
             sudo mkdir -p /home/silverocean/backups
             sudo cp "$live" "$rollback"
             sudo install -o silverocean -g silverocean -m 0644 "$candidate" "$live"
             installed=true
             sudo systemctl restart pms.service
             if wait_for_health; then
-              run_preflight 72
+              run_preflight 73
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
               installed=false
               exit 0
