@@ -71,7 +71,7 @@ class UserAuthenticationServiceTest {
 
     @Test
     void verifiedRecoveryNormalizesEmailAndAcceptsInvitationForExistingTenant() {
-        Users tenant = Users.builder().id(42L).email("tenant@example.com").build();
+        Users tenant = Users.builder().email("tenant@example.com").build();
         when(userDao.findByEmail("tenant@example.com")).thenReturn(Optional.of(tenant));
 
         service.acceptInvitationForVerifiedUser("  Tenant@Example.COM ", "tenant-invite-token");
