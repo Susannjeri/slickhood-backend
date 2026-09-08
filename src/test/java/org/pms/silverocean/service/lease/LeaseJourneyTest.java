@@ -11,6 +11,8 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.RoleService;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.property.UnitDao;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import java.time.*;
 import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
@@ -26,6 +28,27 @@ class LeaseJourneyTest {
     @Mock LeaseAccessService access;
     @Mock org.pms.silverocean.service.mustache.RenderService renderer;
     @InjectMocks LeaseService service;
+
+    @Test void leaseListIncludesTheCurrentAgreementStateWithoutExposingAnotherLease() {
+        Lease lease = lease();
+        LeaseDocumentRepo.AgreementSummary agreement = mock(LeaseDocumentRepo.AgreementSummary.class);
+        when(agreement.getDocumentId()).thenReturn(9L);
+        when(agreement.getLeaseId()).thenReturn(lease.getId());
+        when(agreement.getStatus()).thenReturn(org.pms.silverocean.service.leasedocument.LeaseDocumentStatus.ISSUED);
+        var dto = new org.pms.silverocean.service.lease.wrappers.LeaseDTO(lease, "Tenant", null);
+        when(users.getUserId()).thenReturn(4L);
+        when(users.getActiveRole()).thenReturn(PMSRole.TENANT);
+        when(leases.getScopedLeaseList(eq(4L), eq(PMSRole.TENANT.name()), isNull(), any()))
+                .thenReturn(new PageImpl<>(java.util.List.of(dto)));
+        when(documents.findCurrentAgreementsForLeases(java.util.Set.of(1L)))
+                .thenReturn(java.util.List.of(agreement));
+
+        var result = service.getLeaseList(PageRequest.of(0, 25));
+
+        assertEquals(9L, result.getContent().getFirst().agreementDocumentId());
+        assertEquals("ISSUED", result.getContent().getFirst().agreementStatus());
+        verify(documents).findCurrentAgreementsForLeases(java.util.Set.of(1L));
+    }
 
     @Test void bothGovernedSignaturesActivateTenancyAndOccupyUnit() {
         Lease lease = lease(); Unit unit = unit(false); UnitTenant tenancy = tenancy();

@@ -226,7 +226,17 @@ public class LeaseService {
     public Page<LeaseDTO> getLeaseList(Pageable pageable) {
         long userId = userDao.getUserId();
         PMSRole role = userDao.getActiveRole();
-        return leaseDao.getScopedLeaseList(userId, role.name(), role.isCustomerEmployeeRole() ? access.selectedAssignmentId() : null, bounded(pageable));
+        Page<LeaseDTO> page = leaseDao.getScopedLeaseList(userId, role.name(),
+                role.isCustomerEmployeeRole() ? access.selectedAssignmentId() : null, bounded(pageable));
+        Set<Long> leaseIds = page.getContent().stream().map(LeaseDTO::id).collect(java.util.stream.Collectors.toSet());
+        if (leaseIds.isEmpty()) return page;
+        Map<Long, org.pms.silverocean.database.pms.LeaseDocumentRepo.AgreementSummary> agreements = new HashMap<>();
+        documents.findCurrentAgreementsForLeases(leaseIds)
+                .forEach(document -> agreements.putIfAbsent(document.getLeaseId(), document));
+        return page.map(lease -> {
+            var agreement = agreements.get(lease.id());
+            return agreement == null ? lease : lease.withAgreement(agreement.getDocumentId(), agreement.getStatus().name());
+        });
     }
 
     @Transactional

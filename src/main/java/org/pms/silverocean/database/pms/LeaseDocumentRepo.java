@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import java.util.Optional;
+import java.util.Set;
 import org.pms.silverocean.service.leasedocument.LeaseDocumentStatus;
 import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
 
@@ -43,6 +44,17 @@ public interface LeaseDocumentRepo extends JpaRepository<LeaseDocument, Long> {
             "AND d.documentType IN ('RESIDENTIAL_LEASE_AGREEMENT','COMMERCIAL_LEASE_AGREEMENT') " +
             "AND d.status NOT IN ('CANCELLED','EXPIRED') ORDER BY d.createdOn DESC,d.id DESC")
     java.util.List<LeaseDocument> findAccessibleAgreement(long leaseId, long userId, Pageable pageable);
+
+    @Query("SELECT d.id AS documentId,d.leaseId AS leaseId,d.status AS status FROM LeaseDocument d WHERE d.leaseId IN :leaseIds AND d.active " +
+            "AND d.documentType IN ('RESIDENTIAL_LEASE_AGREEMENT','COMMERCIAL_LEASE_AGREEMENT') " +
+            "AND d.status NOT IN ('CANCELLED','EXPIRED') ORDER BY d.createdOn DESC,d.id DESC")
+    java.util.List<AgreementSummary> findCurrentAgreementsForLeases(Set<Long> leaseIds);
+
+    interface AgreementSummary {
+        Long getDocumentId();
+        Long getLeaseId();
+        LeaseDocumentStatus getStatus();
+    }
     long countByRecipientUserIdAndStatusAndActiveTrue(long userId, LeaseDocumentStatus status);
     Optional<LeaseDocument> findByIdAndPropertyIdAndUnitIdAndActiveTrue(long id, long propertyId, Long unitId);
     boolean existsByLeaseIdAndDocumentTypeAndStatusAndActiveTrue(long leaseId, LeaseDocumentType type, LeaseDocumentStatus status);
