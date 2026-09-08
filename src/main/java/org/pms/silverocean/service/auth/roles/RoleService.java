@@ -85,6 +85,21 @@ public class RoleService {
                 .map(Invite::getToken);
     }
 
+    /** Add the Tenant workspace to an existing verified account on ordinary sign-in.
+     * The lease itself is not created or accepted here; the email-bound invitation
+     * remains pending in the tenant inbox until the user reviews it. */
+    @Transactional
+    public void assignPendingTenantRoleIfMissing(Users user) {
+        if (user == null || user.getId() == null || !user.isEmailVerified()
+                || user.getEmail() == null || user.getEmail().isBlank()) return;
+        inviteDao.getLatestActiveTenantInviteForRecipient(user.getEmail().trim()).ifPresent(invite -> {
+            if (invite.getRoleId() != null
+                    && userRoleRepo.findByUserIdAndRoleId(user.getId(), invite.getRoleId()) == 0) {
+                assignRoleFromInvite(invite, null, user);
+            }
+        });
+    }
+
     @Transactional
     public ResponseDTO selfAssignRole(long roleId) {
         Users user = userDao.getUserObject();

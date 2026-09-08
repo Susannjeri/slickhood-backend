@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.List;
 
 @Service
 public class InviteDao {
@@ -42,6 +43,15 @@ public class InviteDao {
     public Optional<Invite> getLatestActiveRoleInviteForRecipient(String recipient) {
         return inviteRepo.findFirstByRecipientIgnoreCaseAndActiveTrueAndExpiryDateAfterAndRoleIdIsNotNullOrderByCreatedOnDesc(
                 recipient, LocalDateTime.now());
+    }
+
+    public List<PendingTenantInviteProjection> listPendingTenantInvites(String recipient) {
+        return inviteRepo.findPendingTenantInvites(recipient, LocalDateTime.now());
+    }
+
+    public Optional<Invite> getLatestActiveTenantInviteForRecipient(String recipient) {
+        return inviteRepo.findFirstByRecipientIgnoreCaseAndTypeAndActiveTrueAndExpiryDateAfterOrderByCreatedOnDesc(
+                recipient, InviteType.TENANT.name(), LocalDateTime.now());
     }
 
     public Page<Invite> listUserInvites(Pageable pageable, long createdBy) {

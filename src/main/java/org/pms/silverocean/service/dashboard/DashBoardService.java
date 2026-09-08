@@ -227,13 +227,16 @@ public class DashBoardService {
             return CompletableFuture.failedFuture(new PMSCustomException(ResponseCode.INVALID_ROLE));
         }
         long userId = userDao.getUserId();
+        String tenantEmail = userDao.getUserObject().getEmail();
 
 
         CompletableFuture<List<TenancyProjection>> tenancyFuture = reportExecutorService.submit(() -> unitReportDao.countUnitsOccupiedByTenantWithUserId(userId));
         CompletableFuture<Integer> totalUnpaidInvoicesFuture = reportExecutorService.submit(() -> unitReportDao.countUnPaidInvoicesByTenantWithUserId(userId));
         CompletableFuture<Integer> totalPaidInvoicesFuture = reportExecutorService.submit(() -> unitReportDao.countPaidInvoicesByTenantWithUserId(userId));
+        CompletableFuture<Integer> pendingInvitesFuture = reportExecutorService.submit(() ->
+                unitReportDao.countPendingTenantInvites(tenantEmail));
 
-        return CompletableFuture.allOf(tenancyFuture, totalUnpaidInvoicesFuture, totalPaidInvoicesFuture)
+        return CompletableFuture.allOf(tenancyFuture, totalUnpaidInvoicesFuture, totalPaidInvoicesFuture, pendingInvitesFuture)
                 .thenApply(__ -> {
                     List<TenancyProjection>  tenancyProjections = tenancyFuture.join();
                     int totalOccupiedUnits = 0, totalPendingLeases = 0;
@@ -244,7 +247,8 @@ public class DashBoardService {
                             totalPendingLeases++;
                         }
                     }
-                    return new TenantDto(totalOccupiedUnits, totalPendingLeases, totalUnpaidInvoicesFuture.join(), totalPaidInvoicesFuture.join());
+                    return new TenantDto(totalOccupiedUnits, totalPendingLeases + pendingInvitesFuture.join(),
+                            totalUnpaidInvoicesFuture.join(), totalPaidInvoicesFuture.join());
                 });
     }
 

@@ -7,6 +7,7 @@ import org.pms.silverocean.database.pms.PMSPaymentRepo;
 import org.pms.silverocean.database.pms.PropertyRepo;
 import org.pms.silverocean.database.pms.UnitRepo;
 import org.pms.silverocean.database.pms.UnitTenantRepo;
+import org.pms.silverocean.database.pms.InviteRepo;
 import org.pms.silverocean.service.lease.wrappers.TenancyProjection;
 import org.springframework.stereotype.Service;
 
@@ -23,6 +24,7 @@ public class UnitReportDao {
     private final PropertyRepo propertyRepo;
     private final PMSPaymentRepo pmsPaymentRepo;
     private final PMSInvoiceRepo pmsInvoiceRepo;
+    private final InviteRepo inviteRepo;
 
 
     public int countPropertiesByOwner(long userId) {
@@ -57,6 +59,12 @@ public class UnitReportDao {
 
     public int countPaidInvoicesByTenantWithUserId(long userId) {
         return pmsInvoiceRepo.countInvoicesByTenantWithUserIdAndPaidStatus(userId, true);
+    }
+
+    public int countPendingTenantInvites(String recipient) {
+        if (recipient == null || recipient.isBlank()) return 0;
+        return inviteRepo.countPendingTenantInvites(recipient.trim().toLowerCase(java.util.Locale.ROOT),
+                java.time.LocalDateTime.now());
     }
 
     public int countUnitsOccupiedByPropertyManager(long userId) {

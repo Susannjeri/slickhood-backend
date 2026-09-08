@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.HashSet;
 import java.util.stream.Collectors;
 
 import static org.pms.silverocean.common.PMSUtils.formatInviteLink;
@@ -415,6 +416,25 @@ public class InviteService {
             throw new PMSCustomException(ResponseCode.INVALID_EMAIL);
         }
         return recipient;
+    }
+
+    /**
+     * Lets an authenticated account recover email-bound tenant assignments even
+     * when the email client hid or lost the original link. Only invitations sent
+     * to the account's verified email address are returned.
+     */
+    public List<PendingTenantInviteDTO> getPendingTenantInvitesForCurrentUser() {
+        var user = userDao.getUserObject();
+        if (user == null || !user.isActive() || !user.isEmailVerified()
+                || user.getEmail() == null || user.getEmail().isBlank()) {
+            throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+        }
+        String recipient = normalizeAndValidateEmail(user.getEmail());
+        Set<Long> seenUnits = new HashSet<>();
+        return inviteDao.listPendingTenantInvites(recipient).stream()
+                .filter(invite -> invite.getUnitId() != null && seenUnits.add(invite.getUnitId()))
+                .map(PendingTenantInviteDTO::new)
+                .toList();
     }
 
     private void validateTenantLeaseDates(LocalDate start, LocalDate end) {

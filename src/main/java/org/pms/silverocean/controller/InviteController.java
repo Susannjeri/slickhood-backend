@@ -96,4 +96,12 @@ public class InviteController {
         return ResponseEntity.ok(body);
     }
 
+    @GetMapping("/pending/tenant")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ResponseDTO> listPendingTenantInvitations() {
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.USER_INVITE_LINKS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.USER_INVITE_LINKS),
+                inviteService.getPendingTenantInvitesForCurrentUser()));
+    }
+
 }

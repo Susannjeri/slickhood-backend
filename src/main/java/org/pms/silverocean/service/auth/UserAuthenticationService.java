@@ -206,6 +206,8 @@ public class UserAuthenticationService {
             }
             if (StringUtils.isNotBlank(emailPasswordDTO.getToken())) {
                 roleService.assignRoleFromInvite(emailPasswordDTO.getToken(), users);
+            } else {
+                recoverPendingTenantRole(users);
             }
             String refreshToken = PMSUtils.randomMask();
             users.setLastLogin(ZonedDateTime.now());
@@ -299,6 +301,8 @@ public class UserAuthenticationService {
                     }
                     if (StringUtils.isNotBlank(token)) {
                         roleService.assignRoleFromInvite(token, googleUser);
+                    } else {
+                        recoverPendingTenantRole(googleUser);
                     }
                     userDao.save(googleUser);
                 }
@@ -336,6 +340,16 @@ public class UserAuthenticationService {
         Users user = userDao.findByEmail(normalizedEmail)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LOGIN_FAILURE_INVALID_USER));
         roleService.assignRoleFromInvite(token, user);
+    }
+
+    private void recoverPendingTenantRole(Users user) {
+        try {
+            roleService.assignPendingTenantRoleIfMissing(user);
+        } catch (RuntimeException exception) {
+            // A malformed historical invitation must never lock an otherwise
+            // valid customer out. It remains visible to administrators for audit.
+            log.warn("Could not recover pending tenant role during sign-in for {}", user.getEmail(), exception);
+        }
     }
 
     private void recoverEmailBoundInvitation(RegistrationDTO registrationDTO, String normalizedEmail) {

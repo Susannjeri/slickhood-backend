@@ -296,6 +296,48 @@ class RoleServiceTest {
     }
 
     @Test
+    void ordinarySignInAddsTenantRoleFromLatestEmailBoundInvitation() {
+        Users tenant = new Users();
+        tenant.setId(22L);
+        tenant.setEmail("tenant@example.com");
+        tenant.setEmailVerified(true);
+        Invite invite = new Invite();
+        invite.setId(30L);
+        invite.setRecipient("tenant@example.com");
+        invite.setRoleId(6L);
+        invite.setType(InviteType.TENANT.name());
+        invite.setCreatedBy(1L);
+        invite.setExpiryDate(java.time.LocalDateTime.now().plusDays(2));
+        invite.setActive(true);
+        Role tenantRole = new Role(PMSRole.TENANT.getName(), PMSRole.TENANT.getDescription(), false);
+        tenantRole.setId(6L); tenantRole.setActive(true);
+        when(inviteDao.getLatestActiveTenantInviteForRecipient("tenant@example.com")).thenReturn(Optional.of(invite));
+        when(userRoleRepo.findByUserIdAndRoleId(22L, 6L)).thenReturn(0);
+        when(userDao.findById(1L)).thenReturn(Optional.of(testUser));
+        when(roleRepo.findByIdAndActive(6L)).thenReturn(Optional.of(tenantRole));
+        when(roleRepo.findById(6L)).thenReturn(Optional.of(tenantRole));
+        when(userDao.findByEmail("tenant@example.com")).thenReturn(Optional.of(tenant));
+
+        roleService.assignPendingTenantRoleIfMissing(tenant);
+
+        verify(userRoleRepo).save(any(UserRole.class));
+        verify(inviteDao).updateInvite(invite);
+    }
+
+    @Test
+    void ordinarySignInDoesNotReassignAnExistingTenantRole() {
+        Users tenant = new Users(); tenant.setId(22L); tenant.setEmail("tenant@example.com"); tenant.setEmailVerified(true);
+        Invite invite = new Invite(); invite.setRoleId(6L);
+        when(inviteDao.getLatestActiveTenantInviteForRecipient("tenant@example.com")).thenReturn(Optional.of(invite));
+        when(userRoleRepo.findByUserIdAndRoleId(22L, 6L)).thenReturn(1);
+
+        roleService.assignPendingTenantRoleIfMissing(tenant);
+
+        verify(inviteDao, never()).updateInvite(any());
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+    }
+
+    @Test
     void assignRoleFromInvite_emailBoundInvite_rejectsDifferentUser() {
         Invite invite = new Invite();
         invite.setRecipient("intended@example.com");

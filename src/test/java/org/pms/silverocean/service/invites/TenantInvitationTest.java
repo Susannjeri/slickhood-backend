@@ -7,6 +7,7 @@ import org.pms.silverocean.database.pms.LeaseDocumentTemplateRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.LeaseDocumentTemplate;
 import org.pms.silverocean.database.pms.entities.Role;
+import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -23,6 +24,7 @@ import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -94,5 +96,44 @@ class TenantInvitationTest {
         unit(PMSLeaseMode.RENT,true);
         assertThrows(PMSCustomException.class,()->service.createAndSendEmailInvite(InviteType.TENANT,77L,"tenant@example.test"));
         verifyNoInteractions(invites,notifications);
+    }
+
+    @Test void verifiedExistingTenantCanDiscoverPendingInvitationsWithoutTheEmailLink() {
+        Users tenant = Users.builder().email("tenant@example.test").build();
+        tenant.setActive(true);
+        tenant.setEmailVerified(true);
+        when(users.getUserObject()).thenReturn(tenant);
+
+        PendingTenantInviteProjection newest = mock(PendingTenantInviteProjection.class);
+        when(newest.getInviteId()).thenReturn(92L);
+        when(newest.getToken()).thenReturn("new-token");
+        when(newest.getUnitId()).thenReturn(77L);
+        when(newest.getUnitRef()).thenReturn("A-101");
+        when(newest.getPropertyName()).thenReturn("Acacia Court");
+        when(newest.getLeaseStartDate()).thenReturn(LocalDate.of(2026, 10, 1));
+        when(newest.getLeaseEndDate()).thenReturn(LocalDate.of(2027, 9, 30));
+        when(newest.getExpiryDate()).thenReturn(LocalDateTime.of(2026, 9, 22, 12, 0));
+
+        PendingTenantInviteProjection olderForSameUnit = mock(PendingTenantInviteProjection.class);
+        when(olderForSameUnit.getUnitId()).thenReturn(77L);
+        when(invites.listPendingTenantInvites("tenant@example.test"))
+                .thenReturn(List.of(newest, olderForSameUnit));
+
+        var pending = service.getPendingTenantInvitesForCurrentUser();
+
+        assertEquals(1, pending.size());
+        assertEquals(92L, pending.getFirst().inviteId());
+        assertEquals("new-token", pending.getFirst().token());
+        assertEquals("Acacia Court", pending.getFirst().propertyName());
+    }
+
+    @Test void unverifiedAccountCannotDiscoverEmailBoundInvitations() {
+        Users tenant = Users.builder().email("tenant@example.test").build();
+        tenant.setActive(true);
+        tenant.setEmailVerified(false);
+        when(users.getUserObject()).thenReturn(tenant);
+
+        assertThrows(PMSCustomException.class, service::getPendingTenantInvitesForCurrentUser);
+        verify(invites, never()).listPendingTenantInvites(anyString());
     }
 }

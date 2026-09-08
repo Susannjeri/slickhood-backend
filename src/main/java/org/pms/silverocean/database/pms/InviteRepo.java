@@ -4,6 +4,7 @@ import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.Lease;
 import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.service.lease.LeaseInviteProjection;
+import org.pms.silverocean.service.invites.PendingTenantInviteProjection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,6 +12,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.Optional;
+import java.util.List;
 import java.time.LocalDateTime;
 
 public interface InviteRepo extends JpaRepository<Invite, Long> {
@@ -20,6 +22,18 @@ public interface InviteRepo extends JpaRepository<Invite, Long> {
     Optional<Invite> findActiveTokenForUpdate(String token);
     Optional<Invite> findFirstByRecipientIgnoreCaseAndActiveTrueAndExpiryDateAfterAndRoleIdIsNotNullOrderByCreatedOnDesc(
             String recipient, LocalDateTime now);
+    Optional<Invite> findFirstByRecipientIgnoreCaseAndTypeAndActiveTrueAndExpiryDateAfterOrderByCreatedOnDesc(
+            String recipient, String type, LocalDateTime now);
+    @Query("SELECT i.id as inviteId, i.token as token, i.entityId as unitId, u.ref as unitRef, " +
+            "p.name as propertyName, i.leaseStartDate as leaseStartDate, i.leaseEndDate as leaseEndDate, " +
+            "i.expiryDate as expiryDate FROM Invite i JOIN Unit u ON i.entityId=u.id " +
+            "JOIN Property p ON u.propertyId=p.id WHERE i.recipient=:recipient AND i.type='TENANT' " +
+            "AND i.active AND i.expiryDate>:now AND u.active AND p.active ORDER BY i.createdOn DESC")
+    List<PendingTenantInviteProjection> findPendingTenantInvites(String recipient, LocalDateTime now);
+
+    @Query("SELECT COUNT(DISTINCT i.entityId) FROM Invite i WHERE i.recipient=:recipient " +
+            "AND i.type='TENANT' AND i.active AND i.expiryDate>:now")
+    int countPendingTenantInvites(String recipient, LocalDateTime now);
     Optional<Invite> findByIdAndActiveTrueAndCreatedBy(long inviteId, long createdBy);
     @Query("SELECT li.id as inviteId, li.entityId as entityId, u.ref as unitRef, p.name as propertyName," +
             " li.lastModifiedDate as lastAccessed, li.expiryDate as expiryDate, li.visits as visits, li.token as token" +
