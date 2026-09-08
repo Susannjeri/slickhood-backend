@@ -41,7 +41,7 @@ class PaymentReceiptServiceTest {
     @BeforeEach void setup() {
         service = new PaymentReceiptService(payments, invoices, users, renderer);
         when(users.getUserId()).thenReturn(7L);
-        when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(false);
+        when(users.getActiveRole()).thenReturn(PMSRole.TENANT);
     }
 
     @Test void rendersVerifiedReceiptForAuthorizedInvoiceParticipant() throws Exception {

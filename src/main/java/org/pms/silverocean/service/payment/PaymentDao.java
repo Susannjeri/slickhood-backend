@@ -46,6 +46,10 @@ public class PaymentDao {
         return pmsPaymentRepo.findByIdForAuthorizedUser(paymentId, userId);
     }
 
+    public Optional<PMSPayment> findPlatformPaymentById(long paymentId) {
+        return pmsPaymentRepo.findPlatformPaymentById(paymentId);
+    }
+
     public void savePMSPayment(PMSPayment pmsPayment) {
         if (pmsPayment != null && pmsPayment.getId() != null) {
             pmsPayment.setUpdatedOn(LocalDateTime.now());
@@ -56,6 +60,12 @@ public class PaymentDao {
 
     public Page<PMSPayment> findPMSPayment(Pageable pageable, String filter) {
         return pmsPaymentRepo.findAll(searchPayment(Optional.ofNullable(filter)), pageable);
+    }
+
+    public Page<PMSPayment> findPlatformPayments(Pageable pageable, String filter) {
+        return pmsPaymentRepo.findPlatformPayments(pageable, filter,
+                TransactionCategory.PAYMENT_VALIDATION.name(),
+                TransactionCategory.PAYMENT_VALIDATION.getSuccessString());
     }
 
     public Page<PMSPayment> findPaymentByInvoiceRefAndUser(Pageable pageable, long userId, String invoiceRef) {

@@ -6,7 +6,6 @@ import org.pms.silverocean.database.pms.PMSInvoiceRepo;
 import org.pms.silverocean.database.pms.entities.PMSInvoice;
 import org.pms.silverocean.database.pms.entities.PMSPayment;
 import org.pms.silverocean.service.PMSCustomException;
-import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.payment.ledger.FinancialLedgerService;
 import org.springframework.data.domain.Page;
@@ -17,8 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.pms.silverocean.service.payment.invoice.InvoiceSpecifications.searchInvoiceForOwnerAndTenantView;
-import static org.pms.silverocean.service.payment.invoice.InvoiceSpecifications.searchInvoiceForSuperAdminView;
+import static org.pms.silverocean.service.payment.invoice.InvoiceSpecifications.searchParticipantInvoices;
+import static org.pms.silverocean.service.payment.invoice.InvoiceSpecifications.searchPlatformInvoices;
 
 @Service @Slf4j
 public class InvoiceDao {
@@ -52,7 +51,7 @@ public class InvoiceDao {
     }
 
     public Optional<PMSInvoice> getInvoiceByRefForOwnerOrPropertyManager(String ref, long ownerOrManagerId) {
-        return pmsInvoiceRepo.findByRefAndOwnerOrPropertyManager(ref, ownerOrManagerId, PMSRole.PROPERTY_MANAGER.getName());
+        return pmsInvoiceRepo.findByRefAndPayToUserIdAndActiveTrue(ref, ownerOrManagerId);
 
     }
 
@@ -68,12 +67,12 @@ public class InvoiceDao {
         return pmsInvoiceRepo.findByTransactionInProgressTrue(channel.getName(), status);
     }
 
-    public Page<PMSInvoice> getInvoicesForSuperAdminView(Pageable pageable, Long tenantId, Long propertyId, Long unitId, Long landlordId) {
-        return pmsInvoiceRepo.findAll(searchInvoiceForSuperAdminView(tenantId, propertyId, unitId, landlordId), pageable);
+    public Page<PMSInvoice> getPlatformInvoices(Pageable pageable, Long billedUserId) {
+        return pmsInvoiceRepo.findAll(searchPlatformInvoices(billedUserId), pageable);
     }
 
     public Page<PMSInvoice> getInvoicesForOwnerAndTenantView(Pageable pageable, long userId, Long propertyId, Long unitId) {
-        return pmsInvoiceRepo.findAll(searchInvoiceForOwnerAndTenantView(userId, propertyId, unitId), pageable);
+        return pmsInvoiceRepo.findAll(searchParticipantInvoices(userId, propertyId, unitId), pageable);
     }
 
     public Optional<PMSInvoice> getInvoiceForOwnerOrTenantView(long invoiceId, long userId) {
@@ -82,5 +81,13 @@ public class InvoiceDao {
 
     public Optional<PMSInvoice> getInvoiceForOwnerOrTenantView(String invoiceRef, long userId) {
         return pmsInvoiceRepo.findInvoiceForOwnerOrTenantByRef(invoiceRef, userId);
+    }
+
+    public Optional<PMSInvoice> getPlatformInvoice(long invoiceId) {
+        return pmsInvoiceRepo.findPlatformInvoice(invoiceId);
+    }
+
+    public Optional<PMSInvoice> getPlatformInvoice(String invoiceRef) {
+        return pmsInvoiceRepo.findPlatformInvoiceByRef(invoiceRef);
     }
 }

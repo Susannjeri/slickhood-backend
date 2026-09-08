@@ -172,11 +172,7 @@ public class InvoiceService {
     }
 
     public void viewInvoicePDF(long invoiceId, OutputStream outputStream) {
-        Long userId = userDao.getUserId();
-
-        PMSInvoice pmsInvoice = userDao.hasRole(PMSRole.SUPER_ADMIN) ?
-                invoiceDao.getInvoiceById(invoiceId).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER))
-                : invoiceDao.getInvoiceForOwnerOrTenantView(invoiceId, userId).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
+        PMSInvoice pmsInvoice = accessibleInvoice(invoiceId);
         createInvoicePDFAndSendEmail(pmsInvoice, false, outputStream);
     }
 
@@ -275,8 +271,10 @@ public class InvoiceService {
 
     public Page<InvoiceDTO> getInvoiceList(Pageable pageable, Long tenantId, Long landlordId, Long propertyId, Long unitId) {
         Long userId = userDao.getUserId();
-        if (userDao.hasRole(PMSRole.SUPER_ADMIN)) {
-            return invoiceDao.getInvoicesForSuperAdminView(pageable, tenantId, propertyId, unitId, landlordId).map(this::mapInvoiceEntityToDTO);
+        if (userDao.getActiveRole() == PMSRole.SUPER_ADMIN) {
+            // Platform administrators operate SlickHood subscription billing. They
+            // must not inherit visibility into customer-to-customer invoices.
+            return invoiceDao.getPlatformInvoices(pageable, tenantId).map(this::mapInvoiceEntityToDTO);
         } else {
             return invoiceDao.getInvoicesForOwnerAndTenantView(pageable, userId, propertyId, unitId).map(this::mapInvoiceEntityToDTO);
         }
@@ -303,11 +301,17 @@ public class InvoiceService {
                     invoice.getBillingType().replace('_', ' '), propertyDetails.getName(), unit.getRef()),
                     invoice.getPropertyId(), propertyDetails.getName(), unit.getRef(), billed.getFullName());
         }
-        TenantNameEmailPhoneAndUnitRefProjection tenantAndUnit = unitDao.getTenantAndUnitDetailsByUnitId(invoice.getUnitId(), invoice.getBilledUserId()).orElseThrow();
+        // Invoice presentation must survive a later tenancy change. The immutable
+        // billed user and unit on the invoice are the financial source of truth;
+        // a current UnitTenant join is not required to display an existing bill.
+        Unit unit = unitDao.findById(invoice.getUnitId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
+        Users billed = userDao.findById(invoice.getBilledUserId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
 
         return buildInvoiceDTO(invoice, String.format("Property: %s - Unit: %s",
-                propertyDetails.getName(), tenantAndUnit.getUnitRef()), invoice.getPropertyId(),
-                propertyDetails.getName(), tenantAndUnit.getUnitRef(), tenantAndUnit.getTenantName());
+                propertyDetails.getName(), unit.getRef()), invoice.getPropertyId(),
+                propertyDetails.getName(), unit.getRef(), billed.getFullName());
     }
 
     private InvoiceDTO buildInvoiceDTO(PMSInvoice invoice, String propertyDetails, Long propertyId,
@@ -357,9 +361,7 @@ public class InvoiceService {
     }
 
     public AccountSummaryDTO getInvoicePaymentAccount(long invoiceId){
-        long userId=userDao.getUserId();
-        PMSInvoice invoice=userDao.hasRole(PMSRole.SUPER_ADMIN)?invoiceDao.getInvoiceById(invoiceId).orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER)):
-                invoiceDao.getInvoiceForOwnerOrTenantView(invoiceId,userId).orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
+        PMSInvoice invoice=accessibleInvoice(invoiceId);
         if(invoice.getPaymentAccountId()==null)throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);
         PaymentAccount account=accountDao.getAccountById(invoice.getPaymentAccountId());
         return new AccountSummaryDTO(account,paymentPlatformFactory.getChannelImage(account.getChannel()));
@@ -370,9 +372,7 @@ public class InvoiceService {
             throw new PaymentRequestException(ResponseCode.PAYMENT_INITIALIZATION_FAILED);
         }
         long userId = userDao.getUserId();
-        PMSInvoice invoice = userDao.hasRole(PMSRole.SUPER_ADMIN)
-                ? invoiceDao.getInvoiceByRef(invoiceRef).orElseThrow(() -> new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER))
-                : invoiceDao.getInvoiceForOwnerOrTenantView(invoiceRef, userId)
+        PMSInvoice invoice = invoiceDao.getInvoiceForOwnerOrTenantView(invoiceRef, userId)
                 .orElseThrow(() -> new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER));
         // Viewing an invoice as its issuer, manager or administrator must never
         // imply authority to initiate a charge on behalf of the billed customer.
@@ -389,6 +389,14 @@ public class InvoiceService {
         validateSubscriptionPaymentAccount(invoice, paymentChannel, accountId);
         PaymentPlatform platform = paymentPlatformFactory.getPlatform(paymentChannel);
         return platform.processPayment(invoice, phoneNumber, accountId);
+    }
+
+    private PMSInvoice accessibleInvoice(long invoiceId) {
+        long userId = userDao.getUserId();
+        return (userDao.getActiveRole() == PMSRole.SUPER_ADMIN
+                ? invoiceDao.getPlatformInvoice(invoiceId)
+                : invoiceDao.getInvoiceForOwnerOrTenantView(invoiceId, userId))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
     }
 
     private void validateSubscriptionPaymentAccount(PMSInvoice invoice, PaymentChannel paymentChannel, long accountId) {

@@ -33,18 +33,22 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
     Page<PMSInvoice> findByBilledUserIdAndSubscriptionPlanCodeIsNotNullOrderByCreatedOnDesc(
             long billedUserId, Pageable pageable);
 
-    @Query("SELECT i FROM PMSInvoice i WHERE i.ref=:ref AND (i.payToUserId=:userId OR" +
-            " EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=i.propertyId AND pm.userId=:userId AND pm.roleName=:role AND pm.active))")
-    Optional<PMSInvoice> findByRefAndOwnerOrPropertyManager(String ref, long userId, String role);
+    Optional<PMSInvoice> findByRefAndPayToUserIdAndActiveTrue(String ref, long userId);
 
     @Query("SELECT p FROM PMSInvoice i JOIN PMSPayment p ON i.ref=p.billReference WHERE i.transactionInProgress AND p.channel=:channel AND p.status=:status")
     Set<PMSPayment> findByTransactionInProgressTrue(String channel, String status);
 
-    @Query("SELECT i FROM PMSInvoice i where i.id=:invoiceId AND (i.payToUserId=:userId OR i.billedUserId=:userId OR i.propertyId IN (SELECT p.propertyId FROM PropertyManager p WHERE p.userId=:userId AND p.active))")
+    @Query("SELECT i FROM PMSInvoice i WHERE i.id=:invoiceId AND i.active=true AND (i.payToUserId=:userId OR i.billedUserId=:userId)")
     Optional<PMSInvoice> findInvoiceForOwnerOrTenant(long invoiceId, long userId);
 
-    @Query("SELECT i FROM PMSInvoice i where i.ref=:ref AND (i.payToUserId=:userId OR i.billedUserId=:userId OR i.propertyId IN (SELECT p.propertyId FROM PropertyManager p WHERE p.userId=:userId AND p.active))")
+    @Query("SELECT i FROM PMSInvoice i WHERE i.ref=:ref AND i.active=true AND (i.payToUserId=:userId OR i.billedUserId=:userId)")
     Optional<PMSInvoice> findInvoiceForOwnerOrTenantByRef(String ref, long userId);
+
+    @Query("SELECT i FROM PMSInvoice i WHERE i.id=:invoiceId AND i.active=true AND i.subscriptionPlanCode IS NOT NULL")
+    Optional<PMSInvoice> findPlatformInvoice(long invoiceId);
+
+    @Query("SELECT i FROM PMSInvoice i WHERE i.ref=:ref AND i.active=true AND i.subscriptionPlanCode IS NOT NULL")
+    Optional<PMSInvoice> findPlatformInvoiceByRef(String ref);
 
     @Modifying
     @Query("UPDATE PMSInvoice i SET i.ref=:ref WHERE i.id=:id")
@@ -58,7 +62,7 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
     int countInvoicesByTenantWithUserIdAndPaidStatus(long userId, boolean paid);
 
     @Query("SELECT i FROM PMSInvoice i WHERE i.active AND i.createdOn >= :start AND i.createdOn < :end " +
-            "AND (:privileged = true OR i.billedUserId=:userId OR i.payToUserId=:userId OR i.propertyId IN " +
-            "(SELECT pm.propertyId FROM PropertyManager pm WHERE pm.userId=:userId AND pm.active)) ORDER BY i.createdOn DESC")
+            "AND ((:privileged=true AND i.subscriptionPlanCode IS NOT NULL) OR " +
+            "(:privileged=false AND (i.billedUserId=:userId OR i.payToUserId=:userId))) ORDER BY i.createdOn DESC")
     List<PMSInvoice> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end, Pageable pageable);
 }

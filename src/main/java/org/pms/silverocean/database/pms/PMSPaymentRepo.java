@@ -20,22 +20,33 @@ public interface PMSPaymentRepo extends JpaRepository<PMSPayment, Long>, JpaSpec
             String thirdPartyTransId, String billReference, String category, String status);
 
     @Query("SELECT p FROM PMSPayment p WHERE p.billReference IN" +
-            " (SELECT pi.ref FROM PMSInvoice pi WHERE pi.ref=:invoiceRef AND (pi.billedUserId=:userId OR pi.payToUserId=:userId OR pi.propertyId IN" +
-            " (SELECT pm.propertyId FROM PropertyManager pm WHERE pm.userId=:userId AND pm.active))) AND NOT (p.category =:category AND p.status =:status)")
+            " (SELECT pi.ref FROM PMSInvoice pi WHERE pi.active=true AND pi.ref=:invoiceRef AND (pi.billedUserId=:userId OR pi.payToUserId=:userId))" +
+            " AND NOT (p.category =:category AND p.status =:status)")
     Page<PMSPayment> findByInvoiceRefAndUser(Pageable pageable, String invoiceRef, long userId, String category, String status);
 
     @Query("SELECT p FROM PMSPayment p WHERE  p.billReference IN" +
-            " (SELECT pi.ref FROM PMSInvoice pi WHERE (pi.billedUserId=:userId OR pi.payToUserId=:userId OR pi.propertyId IN" +
-            " (SELECT pm.propertyId FROM PropertyManager pm WHERE pm.userId=:userId AND pm.active))) AND NOT (p.category =:category AND p.status =:status)")
+            " (SELECT pi.ref FROM PMSInvoice pi WHERE pi.active=true AND (pi.billedUserId=:userId OR pi.payToUserId=:userId))" +
+            " AND NOT (p.category =:category AND p.status =:status)")
     Page<PMSPayment> findByUser(Pageable pageable, long userId, String category, String status);
+
+    @Query("SELECT p FROM PMSPayment p WHERE p.billReference IN " +
+            "(SELECT i.ref FROM PMSInvoice i WHERE i.active=true AND i.subscriptionPlanCode IS NOT NULL) " +
+            "AND NOT (p.category=:category AND p.status=:status) AND " +
+            "(:filter IS NULL OR LOWER(COALESCE(p.thirdPartyTransId,'')) LIKE LOWER(CONCAT('%',:filter,'%')) OR " +
+            "LOWER(COALESCE(p.customerAccountNumber,'')) LIKE LOWER(CONCAT('%',:filter,'%')) OR " +
+            "LOWER(COALESCE(p.billReference,'')) LIKE LOWER(CONCAT('%',:filter,'%')))")
+    Page<PMSPayment> findPlatformPayments(Pageable pageable, String filter, String category, String status);
 
     @Query("SELECT p FROM PMSPayment p JOIN PMSInvoice i ON p.billReference=i.ref WHERE p.id=:paymentId AND i.billedUserId=:userId")
     Optional<PMSPayment> findByIdAndUserId(long paymentId, long userId);
 
     @Query("SELECT p FROM PMSPayment p JOIN PMSInvoice i ON p.billReference=i.ref WHERE p.id=:paymentId AND " +
-            "(i.billedUserId=:userId OR i.payToUserId=:userId OR i.propertyId IN " +
-            "(SELECT pm.propertyId FROM PropertyManager pm WHERE pm.userId=:userId AND pm.active))")
+            "i.active=true AND (i.billedUserId=:userId OR i.payToUserId=:userId)")
     Optional<PMSPayment> findByIdForAuthorizedUser(long paymentId, long userId);
+
+    @Query("SELECT p FROM PMSPayment p JOIN PMSInvoice i ON p.billReference=i.ref WHERE p.id=:paymentId " +
+            "AND i.active=true AND i.subscriptionPlanCode IS NOT NULL")
+    Optional<PMSPayment> findPlatformPaymentById(long paymentId);
 
 
     @Query("SELECT COALESCE(SUM(p.amount), 0.0) FROM PMSPayment p WHERE p.payToUserId=:userId AND p.createdOn >= :start AND p.createdOn < :end")
@@ -43,7 +54,7 @@ public interface PMSPaymentRepo extends JpaRepository<PMSPayment, Long>, JpaSpec
 
     @Query("SELECT DISTINCT p FROM PMSPayment p JOIN PMSInvoice i ON p.billReference=i.ref " +
             "WHERE p.createdOn >= :start AND p.createdOn < :end AND " +
-            "(:privileged = true OR i.billedUserId=:userId OR i.payToUserId=:userId OR i.propertyId IN " +
-            "(SELECT pm.propertyId FROM PropertyManager pm WHERE pm.userId=:userId AND pm.active)) ORDER BY p.createdOn DESC")
+            "((:privileged=true AND i.subscriptionPlanCode IS NOT NULL) OR " +
+            "(:privileged=false AND (i.billedUserId=:userId OR i.payToUserId=:userId))) ORDER BY p.createdOn DESC")
     List<PMSPayment> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end, Pageable pageable);
 }

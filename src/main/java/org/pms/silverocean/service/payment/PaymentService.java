@@ -40,8 +40,8 @@ public class PaymentService {
     public Page<PaymentDTO> getPayments(Pageable pageable, String filter) {
         long userId = userDao.getUserId();
         Page<PMSPayment> pmsPayment;
-        if (userDao.hasRole(PMSRole.SUPER_ADMIN)) {
-            pmsPayment = paymentDao.findPMSPayment(pageable, filter);
+        if (userDao.getActiveRole() == PMSRole.SUPER_ADMIN) {
+            pmsPayment = paymentDao.findPlatformPayments(pageable, filter);
         } else {
             pmsPayment = StringUtils.isBlank(filter) ? paymentDao.findPaymentByUser(pageable, userId) : paymentDao.findPaymentByInvoiceRefAndUser(pageable, userId, filter);
         }

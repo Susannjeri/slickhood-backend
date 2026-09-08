@@ -1,77 +1,45 @@
 package org.pms.silverocean.service.payment.invoice;
 
-import jakarta.persistence.criteria.Predicate;
-import jakarta.persistence.criteria.Root;
 import org.pms.silverocean.database.pms.entities.PMSInvoice;
-import org.pms.silverocean.database.pms.entities.PropertyManager;
-import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.springframework.data.jpa.domain.Specification;
-
-import java.util.Optional;
 
 public class InvoiceSpecifications {
 
-    public static Specification<PMSInvoice> searchInvoiceForSuperAdminView(Long tenantId, Long propertyId, Long unitId, Long landlordId) {
-        return Specification.anyOf(billedUserIdEquals(Optional.ofNullable(tenantId)), propertyIdEquals(Optional.ofNullable(propertyId)), unitIdEquals(Optional.ofNullable(unitId)), landlordIdEquals(Optional.ofNullable(landlordId)));
+    private InvoiceSpecifications() {
     }
 
-    public static Specification<PMSInvoice> searchInvoiceForOwnerAndTenantView(Long userId, Long propertyId, Long unitId) {
-        return Specification.anyOf(searchInvoiceForTenantView(userId, propertyId, unitId), searchInvoiceForLandlordView(propertyId, unitId, userId));
+    /**
+     * Platform administrators may inspect SlickHood subscription invoices only.
+     * Customer rental, estate, sales and marketplace invoices remain private to
+     * their payer and recipient even when the caller is a Super Admin.
+     */
+    public static Specification<PMSInvoice> searchPlatformInvoices(Long tenantId) {
+        return active()
+                .and((root, query, cb) -> cb.isNotNull(root.get("subscriptionPlanCode")))
+                .and(equalWhenPresent("billedUserId", tenantId));
     }
 
-    private static Specification<PMSInvoice> searchInvoiceForLandlordView(Long propertyId, Long unitId, Long landlordId) {
-        return Specification.anyOf(propertyIdEquals(Optional.ofNullable(propertyId)), unitIdEquals(Optional.ofNullable(unitId))).and(ownerIdEquals(Optional.ofNullable(landlordId)));
+    /**
+     * An operational invoice is visible only to its billed customer and exact
+     * receiving account owner. Property membership and platform roles must not
+     * silently widen access to another customer's financial records.
+     */
+    public static Specification<PMSInvoice> searchParticipantInvoices(long userId, Long propertyId, Long unitId) {
+        Specification<PMSInvoice> participant = (root, query, cb) -> cb.or(
+                cb.equal(root.get("billedUserId"), userId),
+                cb.equal(root.get("payToUserId"), userId));
+        return active()
+                .and(participant)
+                .and(equalWhenPresent("propertyId", propertyId))
+                .and(equalWhenPresent("unitId", unitId));
     }
 
-    private static Specification<PMSInvoice> searchInvoiceForTenantView(Long tenantId, Long propertyId, Long unitId) {
-        return Specification.anyOf(propertyIdEquals(Optional.ofNullable(propertyId)), unitIdEquals(Optional.ofNullable(unitId))).and(billedUserIdEquals(Optional.ofNullable(tenantId)));
+    private static Specification<PMSInvoice> active() {
+        return (root, query, cb) -> cb.isTrue(root.get("active"));
     }
 
-    private static Specification<PMSInvoice> billedUserIdEquals(Optional<Long> tenantUserId) {
-        return tenantUserId.<Specification<PMSInvoice>>map(s -> (document, query, criteriaBuilder) ->
-                        criteriaBuilder.equal(document.get("billedUserId"), s))
-                .orElse(null);
+    private static Specification<PMSInvoice> equalWhenPresent(String field, Long value) {
+        return value == null ? Specification.unrestricted()
+                : (root, query, cb) -> cb.equal(root.get(field), value);
     }
-
-    private static Specification<PMSInvoice> propertyIdEquals(Optional<Long> propertyId) {
-        return propertyId.<Specification<PMSInvoice>>map(s -> (document, query, criteriaBuilder) ->
-                        criteriaBuilder.equal(document.get("propertyId"), s))
-                .orElse(null);
-    }
-
-    private static Specification<PMSInvoice> unitIdEquals(Optional<Long> unitId) {
-        return unitId.<Specification<PMSInvoice>>map(s -> (document, query, criteriaBuilder) ->
-                        criteriaBuilder.equal(document.get("unitId"), s))
-                .orElse(null);
-    }
-
-    private static Specification<PMSInvoice> landlordIdEquals(Optional<Long> landlordId) {
-        return landlordId.<Specification<PMSInvoice>>map(s -> (document, query, criteriaBuilder) ->
-                        criteriaBuilder.equal(document.get("payToUserId"), s))
-                .orElse(null);
-    }
-
-    private static Specification<PMSInvoice> ownerIdEquals(Optional<Long> landlordId) {
-        return landlordId.<Specification<PMSInvoice>>map(id -> (root, query, cb) -> {
-            // Condition 1: Check if payToUserId matches the landlordId directly
-            Predicate directLandlordPredicate = cb.equal(root.get("payToUserId"), id);
-
-            // Condition 2: Join to PropertyManager table and check their userId
-            // Assuming PMSInvoice has a field 'propertyId' that links to PropertyManager
-            // and PropertyManager is an entity related to PMSInvoice.
-            Root<PropertyManager> properyManagerRoot = query.from(PropertyManager.class);
-            Predicate propertyManagerJoin = cb.equal(root.get("propertyId"), properyManagerRoot.get("propertyId"));
-
-            Predicate isTargetUser = cb.equal(properyManagerRoot.get("userId"), id);
-            Predicate isCorrectRole = cb.equal(properyManagerRoot.get("roleName"), PMSRole.PROPERTY_MANAGER.name());
-
-            Predicate propertyManagerPredicate = cb.and(propertyManagerJoin, isTargetUser, isCorrectRole);
-
-            query.distinct(true);
-
-            // Return records matching EITHER condition (OR logic)
-            return cb.or(directLandlordPredicate, propertyManagerPredicate);
-        }).orElse(null);
-    }
-
 }

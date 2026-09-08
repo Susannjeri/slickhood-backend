@@ -33,8 +33,8 @@ public class PaymentReceiptService {
 
     public void render(long paymentId, OutputStream output) {
         long userId = users.getUserId();
-        PMSPayment payment = users.hasRole(PMSRole.SUPER_ADMIN)
-                ? payments.findPaymentByID(paymentId).orElseThrow(this::invalid)
+        PMSPayment payment = users.getActiveRole() == PMSRole.SUPER_ADMIN
+                ? payments.findPlatformPaymentById(paymentId).orElseThrow(this::invalid)
                 : payments.findPaymentByIdForAuthorizedUser(paymentId, userId).orElseThrow(this::invalid);
         if (!payment.isCompletedSuccessfully() || StringUtils.isBlank(payment.getThirdPartyTransId())) {
             throw invalid();
