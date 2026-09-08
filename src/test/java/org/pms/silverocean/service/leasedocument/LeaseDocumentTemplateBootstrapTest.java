@@ -28,7 +28,7 @@ class LeaseDocumentTemplateBootstrapTest {
         verify(repo, times(9)).save(captor.capture());
         assertEquals(9, captor.getAllValues().size());
         for (LeaseDocumentTemplate template : captor.getAllValues()) {
-            assertTrue(template.getBodyHtml().startsWith("<!doctype html>"));
+            assertTrue(template.getBodyHtml().startsWith("<!DOCTYPE html>"));
             assertTrue(template.getBodyHtml().contains("Powered by SlickHood"));
             assertTrue(template.getBodyHtml().contains("immutable snapshot"));
             assertFalse(template.getBodyHtml().contains("<!--DOCUMENT_BODY-->"));
