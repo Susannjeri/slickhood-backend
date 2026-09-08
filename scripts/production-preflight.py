@@ -213,6 +213,21 @@ def check_provider_http(preflight: Preflight, name: str, url: str, headers: dict
     return None
 
 
+def classify_alpha_payload(payload: object) -> str:
+    """Classify Alpha Vantage without logging its provider response or API key."""
+    if not isinstance(payload, dict):
+        return "invalid"
+    quote = payload.get("Global Quote")
+    if isinstance(quote, dict) and quote:
+        return "quote"
+    message = str(payload.get("Information") or payload.get("Note") or "").lower()
+    if any(marker in message for marker in ("invalid api key", "invalid key", "not activated")):
+        return "invalid_key"
+    if any(marker in message for marker in ("rate limit", "call frequency", "requests per")):
+        return "rate_limit"
+    return "invalid"
+
+
 def check_mail(preflight: Preflight, config: dict[str, str]) -> None:
     host = required(preflight, config, "SMTP host", "spring.mail.host", "MAIL_HOST")
     username = required(preflight, config, "SMTP username", "spring.mail.username", "MAIL_USERNAME")
@@ -287,9 +302,17 @@ def check_external_apis(preflight: Preflight, config: dict[str, str]) -> None:
         result = check_provider_http(preflight, "Alpha Vantage", f"{alpha_base}{separator}{query}", {}, {200})
         if result:
             try:
-                quote = json.loads(result[1]).get("Global Quote")
-                if isinstance(quote, dict) and quote:
+                classification = classify_alpha_payload(json.loads(result[1]))
+                if classification == "quote":
                     preflight.pass_("Alpha Vantage credential validity")
+                elif classification == "rate_limit":
+                    # The free provider quota can be consumed by the required
+                    # before/after deployment checks themselves. Reachability
+                    # already passed, so a recognized throttle is operational
+                    # degradation rather than evidence of a bad credential.
+                    preflight.skip("Alpha Vantage credential validity", "provider rate limit is temporarily exhausted")
+                elif classification == "invalid_key":
+                    preflight.fail("Alpha Vantage credential validity", "provider rejected the configured key")
                 else:
                     preflight.fail("Alpha Vantage credential validity", "provider did not return a live quote")
             except ValueError:
