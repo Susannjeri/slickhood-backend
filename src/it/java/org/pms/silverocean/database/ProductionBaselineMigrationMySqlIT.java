@@ -27,9 +27,9 @@ class ProductionBaselineMigrationMySqlIT {
     private static final String USERNAME = setting("SLICKHOOD_MIGRATION_MYSQL_USERNAME");
     private static final String PASSWORD = setting("SLICKHOOD_MIGRATION_MYSQL_PASSWORD");
     private static final String BASELINE_VERSION = settingOrDefault(
-            "SLICKHOOD_TEST_MYSQL_BASELINE_VERSION", "67");
+            "SLICKHOOD_TEST_MYSQL_BASELINE_VERSION", "73");
     private static final String EXPECTED_VERSION = settingOrDefault(
-            "SLICKHOOD_EXPECTED_FLYWAY_VERSION", "72");
+            "SLICKHOOD_EXPECTED_FLYWAY_VERSION", "74");
 
     static boolean externalMysqlAvailable() {
         return URL != null

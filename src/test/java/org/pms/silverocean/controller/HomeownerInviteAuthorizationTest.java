@@ -46,13 +46,13 @@ class HomeownerInviteAuthorizationTest {
                 "estate-staff", "unused", AuthorityUtils.createAuthorityList(permissions)));
     }
     EmailOccupantInviteDTO request(InviteType type) {
-        return new EmailOccupantInviteDTO(type, 77L, "homeowner@example.test");
+        return new EmailOccupantInviteDTO(type, 77L, "homeowner@example.test", null, null);
     }
 
     @Test void estateManagerCanEmailHomeownerWithoutGenericStaffInvitePowers() {
         authenticate(Permission.MANAGE_ESTATE);
         controller.createAndEmailOccupantInvite(request(InviteType.HOMEOWNER));
-        verify(invitations).createAndSendEmailInvite(InviteType.HOMEOWNER, 77L, "homeowner@example.test");
+        verify(invitations).createAndSendEmailInvite(InviteType.HOMEOWNER, 77L, "homeowner@example.test", null, null);
     }
     @Test void estatePermissionDoesNotPermitTenantInvites() {
         authenticate(Permission.MANAGE_ESTATE);
@@ -74,6 +74,6 @@ class HomeownerInviteAuthorizationTest {
         assertThrows(AccessDeniedException.class, () -> controller.createAndEmailOccupantInvite(request(InviteType.TENANT)));
         authenticate(Permission.CREATE_INVITE, Permission.SHARE_INVITE);
         controller.createAndEmailOccupantInvite(request(InviteType.TENANT));
-        verify(invitations).createAndSendEmailInvite(InviteType.TENANT, 77L, "homeowner@example.test");
+        verify(invitations).createAndSendEmailInvite(InviteType.TENANT, 77L, "homeowner@example.test", null, null);
     }
 }

@@ -10,7 +10,7 @@ public record LeaseDocumentDTO(Long id, Long leaseId, Long saleId, Long property
         long issuerUserId, long recipientUserId, LocalDate effectiveDate, LocalDate responseDueDate,
         BigDecimal amount, String currency, String reason, String deliveryChannel, boolean legalReviewRequired,
         LocalDateTime issuedAt, LocalDateTime acknowledgedAt, LocalDateTime issuerSignedAt, LocalDateTime recipientSignedAt,
-        String viewerParty) {
+        String viewerParty, String recipientRejectionReason) {
     public LeaseDocumentDTO(LeaseDocument d) {
         this(d, 0);
     }
@@ -19,6 +19,7 @@ public record LeaseDocumentDTO(Long id, Long leaseId, Long saleId, Long property
                 d.getName(), d.getTemplateVersion(), d.getIssuerUserId(), d.getRecipientUserId(), d.getEffectiveDate(),
                 d.getResponseDueDate(), d.getAmount(), d.getCurrency(), d.getReason(), d.getDeliveryChannel(),
                 d.isLegalReviewRequired(), d.getIssuedAt(), d.getAcknowledgedAt(), d.getIssuerSignedAt(), d.getRecipientSignedAt(),
-                viewerId == d.getIssuerUserId() ? "ISSUER" : viewerId == d.getRecipientUserId() ? "RECIPIENT" : null);
+                viewerId == d.getIssuerUserId() ? "ISSUER" : viewerId == d.getRecipientUserId() ? "RECIPIENT" : null,
+                d.getRecipientRejectionReason());
     }
 }

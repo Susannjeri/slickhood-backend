@@ -58,7 +58,8 @@ public class InviteController {
             "and hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_ESTATE))")
     public ResponseEntity<ResponseDTO> createAndEmailOccupantInvite(
             @Valid @RequestBody EmailOccupantInviteDTO request) {
-        inviteService.createAndSendEmailInvite(request.inviteType(), request.entityId(), request.email());
+        inviteService.createAndSendEmailInvite(request.inviteType(), request.entityId(), request.email(),
+                request.leaseStartDate(), request.leaseEndDate());
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.LINK_SENT_TO_RECIPIENT.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.LINK_SENT_TO_RECIPIENT)));
     }

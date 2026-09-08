@@ -10,7 +10,6 @@ import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.lease.LeaseService;
-import org.pms.silverocean.service.lease.wrappers.InitLeaseDTO;
 import org.pms.silverocean.service.lease.wrappers.LeaseDTO;
 import org.pms.silverocean.service.lease.wrappers.LeaseMessageDTO;
 import org.pms.silverocean.service.lease.wrappers.LeaseTemplateDTO;
@@ -129,18 +128,10 @@ public class LeaseController extends OutputStreamErrorHandler {
 
     @PostMapping("/tenant/create")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_NEW_LEASE)")
-    public ResponseEntity<ResponseDTO> initializeLeaseDraft(@Valid @RequestBody InitLeaseDTO initLeaseDTO) {
-        leaseService.initializeLeaseDraft(initLeaseDTO.token(), initLeaseDTO.moveInDate(), initLeaseDTO.moveOutDate());
+    public ResponseEntity<ResponseDTO> initializeLeaseDraft(@Valid @RequestBody org.pms.silverocean.service.lease.wrappers.InitializeLeaseDTO initLeaseDTO) {
+        var result = leaseService.initializeLeaseDraft(initLeaseDTO.token());
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.LEASE_INITIALIZED.getCode(),
-                i18NService.getLocalizedMessage(ResponseCode.LEASE_INITIALIZED)));
-    }
-
-    @PutMapping("/tenant/edit/{leaseId}")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_LEASE)")
-    public ResponseEntity<ResponseDTO> tenantUpdateLeaseDraft(@PathVariable long leaseId, @Valid @RequestBody InitLeaseDTO initLeaseDTO) {
-        leaseService.tenantEditLease(leaseId, initLeaseDTO.moveInDate(), initLeaseDTO.moveOutDate());
-        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
-                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS)));
+                i18NService.getLocalizedMessage(ResponseCode.LEASE_INITIALIZED), result));
     }
 
     @PutMapping("/owner/edit/{leaseId}")

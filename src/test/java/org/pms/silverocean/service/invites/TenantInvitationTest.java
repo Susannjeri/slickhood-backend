@@ -3,7 +3,9 @@ package org.pms.silverocean.service.invites;
 import org.junit.jupiter.api.Test;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.database.pms.RoleRepo;
+import org.pms.silverocean.database.pms.LeaseDocumentTemplateRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
+import org.pms.silverocean.database.pms.entities.LeaseDocumentTemplate;
 import org.pms.silverocean.database.pms.entities.Role;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
@@ -16,6 +18,10 @@ import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.property.PropertyService;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import org.pms.silverocean.service.leasedocument.DocumentTemplateIntegrity;
+import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
@@ -30,7 +36,8 @@ class TenantInvitationTest {
     final NotificationService notifications = mock(NotificationService.class);
     final I18NService i18n = mock(I18NService.class);
     final UnitDTO unit = mock(UnitDTO.class);
-    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,null,null,null);
+    final LeaseDocumentTemplateRepo templates = mock(LeaseDocumentTemplateRepo.class);
+    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,null,null,null,templates);
 
     void unit(PMSLeaseMode mode, boolean occupied) {
         when(users.getUserId()).thenReturn(9L);
@@ -38,6 +45,13 @@ class TenantInvitationTest {
         when(properties.getUnitByIDAndLoggedInUser(77L)).thenReturn(new ResponseDTO(true,"ok","ok",unit));
         when(unit.leaseMode()).thenReturn(mode); when(unit.occupied()).thenReturn(occupied);
         when(unit.templateId()).thenReturn(1L);
+        LeaseDocumentTemplate agreement = new LeaseDocumentTemplate();
+        agreement.setId(21L); agreement.setDocumentType(LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT);
+        agreement.setBodyHtml("<html><body>Approved</body></html>");
+        agreement.setContentSha256(DocumentTemplateIntegrity.sha256(agreement.getBodyHtml()));
+        agreement.setLegalReviewRequired(false); agreement.setLegalReviewedAt(LocalDateTime.now()); agreement.setActive(true);
+        when(templates.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT))
+                .thenReturn(Optional.of(agreement));
     }
 
     @Test void landlordInvitationBindsEmailAndQueuesDelivery() {
@@ -48,13 +62,24 @@ class TenantInvitationTest {
         AtomicReference<Invite> saved = new AtomicReference<>();
         doAnswer(call -> { Invite invite = call.getArgument(0); invite.setId(88L); saved.set(invite); return null; }).when(invites).createInvite(any());
         when(invites.getInviteByInviteIdAndCreatedBy(88L,9L)).thenAnswer(call -> Optional.of(saved.get()));
-        service.createAndSendEmailInvite(InviteType.TENANT,77L," Tenant@Example.test ");
+        LocalDate start = LocalDate.now().plusDays(2), end = start.plusYears(1);
+        service.createAndSendEmailInvite(InviteType.TENANT,77L," Tenant@Example.test ",start,end);
         assertEquals("tenant@example.test",saved.get().getRecipient());
         assertEquals("TENANT",saved.get().getType());
         assertEquals(77L,saved.get().getEntityId());
+        assertEquals(start,saved.get().getLeaseStartDate());
+        assertEquals(end,saved.get().getLeaseEndDate());
+        assertEquals(21L,saved.get().getAgreementTemplateId());
         var notification = org.mockito.ArgumentCaptor.forClass(NotificationDTO.class);
         verify(notifications).queueNotification(notification.capture());
         assertEquals("tenant@example.test",notification.getValue().recipient());
+    }
+
+    @Test void tenantAssignmentRequiresLandlordDefinedLeasePeriod() {
+        unit(PMSLeaseMode.RENT,false);
+        assertThrows(PMSCustomException.class,()->service.createAndSendEmailInvite(
+                InviteType.TENANT,77L,"tenant@example.test",null,null));
+        verifyNoInteractions(invites,notifications);
     }
 
     @Test void saleAndEstateUnitsCannotSendRentalInvitations() {

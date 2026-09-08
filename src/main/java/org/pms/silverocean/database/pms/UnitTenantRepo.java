@@ -31,6 +31,10 @@ public interface UnitTenantRepo extends JpaRepository<UnitTenant, Long> {
 
     Optional<UnitTenant> findByIdAndActiveTrue(long tenantId);
 
+    @Query("SELECT COUNT(ut)>0 FROM UnitTenant ut JOIN Lease l ON l.tenantId=ut.id " +
+            "WHERE ut.unitId=:unitId AND ut.active AND l.active")
+    boolean existsActiveLeaseForUnit(long unitId);
+
     @Query("SELECT ut FROM UnitTenant ut JOIN Unit u ON u.id=ut.unitId WHERE u.propertyId=:propertyId AND u.active AND ut.active")
     List<UnitTenant> findActiveByPropertyId(long propertyId);
 

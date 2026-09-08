@@ -78,6 +78,13 @@ public class LeaseDocumentController extends OutputStreamErrorHandler {
         return ok(ResponseCode.LEASE_DOCUMENT_ACKNOWLEDGED, service.acknowledge(id));
     }
 
+    @PostMapping("/{id}/reject")
+    @PreAuthorize("hasAuthority(" + PERMISSION + ".ACKNOWLEDGE_LEASE_DOCUMENT)")
+    public ResponseEntity<ResponseDTO> reject(@PathVariable long id,
+                                               @Valid @RequestBody org.pms.silverocean.service.leasedocument.RejectLeaseDocumentRequest request) {
+        return ok(ResponseCode.GENERAL_SUCCESS, service.reject(id, request));
+    }
+
     @PostMapping("/{id}/cancel-draft")
     @PreAuthorize("hasAuthority(" + PERMISSION + ".CREATE_LEASE_DOCUMENT)")
     public ResponseEntity<ResponseDTO> cancelDraft(@PathVariable long id) {

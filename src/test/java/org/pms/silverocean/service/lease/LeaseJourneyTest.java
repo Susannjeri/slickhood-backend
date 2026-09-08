@@ -11,6 +11,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.RoleService;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.property.UnitDao;
+import org.pms.silverocean.service.invites.InviteDao;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import java.time.*;
@@ -26,6 +27,9 @@ class LeaseJourneyTest {
     @Mock RoleService roles;
     @Mock LeaseDocumentRepo documents;
     @Mock LeaseAccessService access;
+    @Mock InviteDao invites;
+    @Mock LeaseTemplateDao templates;
+    @Mock org.pms.silverocean.service.leasedocument.TenantLeaseAgreementService tenantAgreements;
     @Mock org.pms.silverocean.service.mustache.RenderService renderer;
     @InjectMocks LeaseService service;
 
@@ -74,12 +78,52 @@ class LeaseJourneyTest {
         assertThrows(PMSCustomException.class, () -> service.activateFromGovernedAgreement(1,5,4,LocalDateTime.now(),LocalDateTime.now()));
         verify(units,never()).update(any());
     }
-    @Test void tenantCannotEditDatesAfterDraftSnapshotExists() {
-        when(users.getUserId()).thenReturn(4L);
-        when(leases.getLeaseByIdAndTenantId(1L,4L)).thenReturn(Optional.of(lease()));
-        when(documents.existsCurrentAgreement(1L)).thenReturn(true);
-        assertThrows(PMSCustomException.class, () -> service.tenantEditLease(1,LocalDate.now(),LocalDate.now().plusYears(1)));
-        verify(leases,never()).saveLease(any(),any());
+    @Test void oneTenantCanInitializeLeasesForMoreThanOneDifferentUnit() {
+        Users tenant = new Users(); tenant.setId(4L); tenant.setActive(true); tenant.setFullName("Tenant One");
+        tenant.setEmail("tenant@example.test"); tenant.setPhoneNumber("+254700000001");
+        tenant.setIdentificationNumber("ID-4"); tenant.setTaxPin("A000000004Z");
+        when(users.getUserObject()).thenReturn(tenant);
+        when(leases.getLeaseFromTokenAndUser(anyString(),eq(4L))).thenReturn(Optional.empty());
+        Unit first = rentableUnit(3L,"A-1"), second = rentableUnit(4L,"B-1");
+        when(units.findByToken("first")).thenReturn(Optional.of(first));
+        when(units.findByToken("second")).thenReturn(Optional.of(second));
+        when(units.findByAndLockById(3L)).thenReturn(Optional.of(first));
+        when(units.findByAndLockById(4L)).thenReturn(Optional.of(second));
+        when(leases.hasActiveLeaseForUnit(3L)).thenReturn(false);
+        when(leases.hasActiveLeaseForUnit(4L)).thenReturn(false);
+        Invite firstInvite = tenantInvite(31L,"first"), secondInvite = tenantInvite(32L,"second");
+        when(invites.getActiveTokenForUpdate("first")).thenReturn(Optional.of(firstInvite));
+        when(invites.getActiveTokenForUpdate("second")).thenReturn(Optional.of(secondInvite));
+        LeaseTemplate template = new LeaseTemplate(); template.setId(7L); template.setLeaseMode("RENT"); template.setPetsPolicy(new byte[0]);
+        when(templates.getTemplateById(7L)).thenReturn(Optional.of(template));
+        when(units.getAllUnitCharges(anyLong())).thenReturn(java.util.List.of());
+        java.util.concurrent.atomic.AtomicLong tenancyIds = new java.util.concurrent.atomic.AtomicLong(40L);
+        doAnswer(call -> { ((UnitTenant)call.getArgument(0)).setId(tenancyIds.incrementAndGet()); return null; }).when(leases).saveUnitTenant(any());
+        java.util.concurrent.atomic.AtomicLong ids = new java.util.concurrent.atomic.AtomicLong(100L);
+        doAnswer(call -> { ((Lease)call.getArgument(0)).setId(ids.incrementAndGet()); return null; }).when(leases).createLease(any());
+        doAnswer(call -> { Lease lease=call.getArgument(0); LeaseDocument document=new LeaseDocument(); document.setId(lease.getId()+1000); document.setStatus(org.pms.silverocean.service.leasedocument.LeaseDocumentStatus.ISSUED); return document; })
+                .when(tenantAgreements).createIssuedAgreement(any(),any(),any(),eq(tenant));
+
+        var firstResult = service.initializeLeaseDraft("first");
+        var secondResult = service.initializeLeaseDraft("second");
+
+        assertNotEquals(firstResult.leaseId(),secondResult.leaseId());
+        verify(leases).hasActiveLeaseForUnit(3L);
+        verify(leases).hasActiveLeaseForUnit(4L);
+        verify(leases,times(2)).createLease(any());
+    }
+
+    @Test void aUnitWithAnActiveLeaseCannotStartAnotherTenantJourney() {
+        Users tenant = new Users(); tenant.setId(4L); tenant.setFullName("Tenant"); tenant.setEmail("tenant@example.test");
+        tenant.setPhoneNumber("+254700000001"); tenant.setIdentificationNumber("ID-4"); tenant.setTaxPin("A000000004Z");
+        when(users.getUserObject()).thenReturn(tenant);
+        when(leases.getLeaseFromTokenAndUser("token",4L)).thenReturn(Optional.empty());
+        Unit unit = rentableUnit(3L,"A-1");
+        when(units.findByToken("token")).thenReturn(Optional.of(unit));
+        when(units.findByAndLockById(3L)).thenReturn(Optional.of(unit));
+        when(leases.hasActiveLeaseForUnit(3L)).thenReturn(true);
+        assertThrows(PMSCustomException.class,()->service.initializeLeaseDraft("token"));
+        verifyNoInteractions(invites,tenantAgreements);
     }
     @Test void legacyLandlordCannotSignBeforeTenant() {
         Lease lease = lease(); lease.setGovernedDocumentRequired(false);
@@ -164,4 +208,6 @@ class LeaseJourneyTest {
     private Lease lease() { Lease l=new Lease(); l.setId(1L);l.setTenantId(2L);l.setActive(true);l.setLeaseMode("RENT");l.setGovernedDocumentRequired(true);l.setMoveInDate(LocalDate.now().plusDays(1));l.setMoveOutDate(LocalDate.now().plusYears(1));return l; }
     private UnitTenant tenancy() { UnitTenant t=new UnitTenant();t.setId(2L);t.setUnitId(3L);t.setUserId(4L);t.setActive(true);return t; }
     private Unit unit(boolean occupied) { Unit u=new Unit();u.setId(3L);u.setActive(true);u.setOccupied(occupied);u.setLeaseMode("RENT");return u; }
+    private Unit rentableUnit(long id,String ref) { Unit u=unit(false);u.setId(id);u.setRef(ref);u.setTemplateId(7L);u.setPrice(25000);u.setCurrency("KES");return u; }
+    private Invite tenantInvite(long id,String token) { Invite i=new Invite();i.setId(id);i.setToken(token);i.setType("TENANT");i.setRecipient("tenant@example.test");i.setLeaseStartDate(LocalDate.now().plusDays(1));i.setLeaseEndDate(LocalDate.now().plusYears(1));i.setAgreementTemplateId(21L);i.setExpiryDate(LocalDateTime.now().plusDays(2));i.setActive(true);return i; }
 }

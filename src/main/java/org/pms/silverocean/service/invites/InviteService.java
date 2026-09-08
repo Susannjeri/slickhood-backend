@@ -6,6 +6,7 @@ import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.database.pms.RoleRepo;
+import org.pms.silverocean.database.pms.LeaseDocumentTemplateRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.Role;
 import org.pms.silverocean.service.I18NService;
@@ -21,7 +22,10 @@ import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationChannel;
 import org.pms.silverocean.service.wrappers.EnumWrapper;
 import org.pms.silverocean.service.property.PropertyService;
+import org.pms.silverocean.service.property.PMSPropertyCategory;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
+import org.pms.silverocean.service.leasedocument.DocumentTemplateIntegrity;
 import org.pms.silverocean.service.users.StaffInviteDTO;
 import org.pms.silverocean.service.users.StaffInviteRequest;
 import org.springframework.data.domain.Page;
@@ -30,6 +34,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.EnumSet;
 import java.util.List;
@@ -61,9 +66,10 @@ public class InviteService {
     private final RoleService roleService;
     private final TeamAccessService teamAccessService;
     private final org.pms.silverocean.service.estate.EstateAccessService estateAccess;
+    private final LeaseDocumentTemplateRepo documentTemplates;
 
 
-    public InviteService(InviteDao inviteDao, PropertyService propertyService, UserDao userDao, ConfigService configService, RoleRepo roleRepo, NotificationService notificationService, I18NService i18NService, RoleService roleService, TeamAccessService teamAccessService, org.pms.silverocean.service.estate.EstateAccessService estateAccess) {
+    public InviteService(InviteDao inviteDao, PropertyService propertyService, UserDao userDao, ConfigService configService, RoleRepo roleRepo, NotificationService notificationService, I18NService i18NService, RoleService roleService, TeamAccessService teamAccessService, org.pms.silverocean.service.estate.EstateAccessService estateAccess, LeaseDocumentTemplateRepo documentTemplates) {
         this.inviteDao = inviteDao;
         this.propertyService = propertyService;
         this.userDao = userDao;
@@ -74,6 +80,7 @@ public class InviteService {
         this.roleService = roleService;
         this.teamAccessService = teamAccessService;
         this.estateAccess = estateAccess;
+        this.documentTemplates = documentTemplates;
     }
 
     public String createInviteLink(InviteType inviteType, Long entityId) {
@@ -82,7 +89,7 @@ public class InviteService {
             // always be bound to, and delivered to, a verified recipient.
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         }
-        Invite invite = createOccupantInvite(inviteType, entityId, null);
+        Invite invite = createOccupantInvite(inviteType, entityId, null, null, null);
         return formatInviteLink(configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(), invite.getToken());
     }
 
@@ -92,16 +99,23 @@ public class InviteService {
      * exposing an unbound reusable link before a recipient is known.
      */
     @Transactional
-    public void createAndSendEmailInvite(InviteType inviteType, Long entityId, String email) {
+    public void createAndSendEmailInvite(InviteType inviteType, Long entityId, String email,
+                                         LocalDate leaseStartDate, LocalDate leaseEndDate) {
         if (inviteType != InviteType.TENANT && inviteType != InviteType.HOMEOWNER) {
             throw new PMSCustomException(ResponseCode.INVALID_INVITE_TYPE);
         }
         String recipient = normalizeAndValidateEmail(email);
-        Invite invite = createOccupantInvite(inviteType, entityId, recipient);
+        Invite invite = createOccupantInvite(inviteType, entityId, recipient, leaseStartDate, leaseEndDate);
         sendInvite(invite.getId(), recipient, NotificationChannel.EMAIL);
     }
 
-    private Invite createOccupantInvite(InviteType inviteType, Long entityId, String recipient) {
+    /** Kept for non-tenant callers while the API now requires landlord-defined dates for tenant invites. */
+    public void createAndSendEmailInvite(InviteType inviteType, Long entityId, String email) {
+        createAndSendEmailInvite(inviteType, entityId, email, null, null);
+    }
+
+    private Invite createOccupantInvite(InviteType inviteType, Long entityId, String recipient,
+                                        LocalDate leaseStartDate, LocalDate leaseEndDate) {
         if (inviteType == InviteType.BUYER || inviteType == InviteType.SALES_AGENT
                 || inviteType == InviteType.ESTATE_MANAGER) {
             throw new PMSCustomException(ResponseCode.INVALID_INVITE_TYPE);
@@ -143,6 +157,21 @@ public class InviteService {
                             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
                         }
                         if (unitDTO.templateId() == null) throw new PMSCustomException(ResponseCode.MISSING_LEASE_TEMPLATE);
+                        validateTenantLeaseDates(leaseStartDate, leaseEndDate);
+                        LeaseDocumentType documentType = unitDTO.propertyType() != null
+                                && (unitDTO.propertyType().getCategory() == PMSPropertyCategory.COMMERCIAL
+                                || unitDTO.propertyType().getCategory() == PMSPropertyCategory.INDUSTRIAL)
+                                ? LeaseDocumentType.COMMERCIAL_LEASE_AGREEMENT
+                                : LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT;
+                        var agreementTemplate = documentTemplates
+                                .findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(documentType)
+                                .filter(template -> !template.isLegalReviewRequired() && template.getLegalReviewedAt() != null
+                                        && DocumentTemplateIntegrity.sha256(template.getBodyHtml())
+                                        .equals(template.getContentSha256()))
+                                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE));
+                        invite.setLeaseStartDate(leaseStartDate);
+                        invite.setLeaseEndDate(leaseEndDate);
+                        invite.setAgreementTemplateId(agreementTemplate.getId());
                     }
                 } else {
                     throw new PMSCustomException(ResponseCode.GENERAL_FAILURE);
@@ -298,8 +327,15 @@ public class InviteService {
                 }
             }
             case TENANT -> {
+                if (userDao.getUserId() != null && !recipientMatches(invite.getRecipient(), userDao.getUserObject())) {
+                    throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+                }
                 //return unit for tenant to view
                 responseDTO = propertyService.viewUnitLease(token);
+                if (responseDTO.isSuccess() && responseDTO.getData() != null && !responseDTO.getData().isEmpty()
+                        && responseDTO.getData().getFirst() instanceof UnitDTO unit) {
+                    responseDTO.setData(List.of(new TenantInviteView(unit, invite.getLeaseStartDate(), invite.getLeaseEndDate())));
+                }
                 if (userDao.getUserId() != null && !userDao.hasRole(PMSRole.TENANT)) {
                     roleService.assignRoleFromInvite(invite, null, userDao.getUserObject());
                 }
@@ -378,6 +414,18 @@ public class InviteService {
             throw new PMSCustomException(ResponseCode.INVALID_EMAIL);
         }
         return recipient;
+    }
+
+    private void validateTenantLeaseDates(LocalDate start, LocalDate end) {
+        LocalDate today = LocalDate.now(PMSUtils.getZoneId());
+        if (start == null || end == null || start.isBefore(today) || !end.isAfter(start)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA_CONSTRAINT);
+        }
+    }
+
+    private boolean recipientMatches(String recipient, org.pms.silverocean.database.pms.entities.Users user) {
+        return recipient == null || recipient.isBlank()
+                || user != null && user.getEmail() != null && recipient.equalsIgnoreCase(user.getEmail().trim());
     }
 
 

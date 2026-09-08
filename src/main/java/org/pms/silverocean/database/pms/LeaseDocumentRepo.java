@@ -20,7 +20,8 @@ public interface LeaseDocumentRepo extends JpaRepository<LeaseDocument, Long> {
     @Query("SELECT d FROM LeaseDocument d WHERE d.id=:id AND d.active AND (d.issuerUserId=:userId OR d.recipientUserId=:userId)")
     Optional<LeaseDocument> findAccessibleForUpdate(long id, long userId);
 
-    @Query("SELECT COUNT(d)>0 FROM LeaseDocument d WHERE d.leaseId=:leaseId AND d.active AND d.status NOT IN ('CANCELLED','EXPIRED') " +
+    @Query("SELECT COUNT(d)>0 FROM LeaseDocument d WHERE d.leaseId=:leaseId AND d.active " +
+            "AND d.status NOT IN ('REJECTED','CANCELLED','EXPIRED') " +
             "AND d.documentType IN ('RESIDENTIAL_LEASE_AGREEMENT','COMMERCIAL_LEASE_AGREEMENT')")
     boolean existsCurrentAgreement(long leaseId);
 
@@ -42,12 +43,12 @@ public interface LeaseDocumentRepo extends JpaRepository<LeaseDocument, Long> {
     @Query("SELECT d FROM LeaseDocument d WHERE d.leaseId=:leaseId AND d.active " +
             "AND (d.issuerUserId=:userId OR d.recipientUserId=:userId) " +
             "AND d.documentType IN ('RESIDENTIAL_LEASE_AGREEMENT','COMMERCIAL_LEASE_AGREEMENT') " +
-            "AND d.status NOT IN ('CANCELLED','EXPIRED') ORDER BY d.createdOn DESC,d.id DESC")
+            "AND d.status NOT IN ('REJECTED','CANCELLED','EXPIRED') ORDER BY d.createdOn DESC,d.id DESC")
     java.util.List<LeaseDocument> findAccessibleAgreement(long leaseId, long userId, Pageable pageable);
 
     @Query("SELECT d.id AS documentId,d.leaseId AS leaseId,d.status AS status FROM LeaseDocument d WHERE d.leaseId IN :leaseIds AND d.active " +
             "AND d.documentType IN ('RESIDENTIAL_LEASE_AGREEMENT','COMMERCIAL_LEASE_AGREEMENT') " +
-            "AND d.status NOT IN ('CANCELLED','EXPIRED') ORDER BY d.createdOn DESC,d.id DESC")
+            "AND d.status NOT IN ('REJECTED','CANCELLED','EXPIRED') ORDER BY d.createdOn DESC,d.id DESC")
     java.util.List<AgreementSummary> findCurrentAgreementsForLeases(Set<Long> leaseIds);
 
     interface AgreementSummary {
@@ -61,7 +62,7 @@ public interface LeaseDocumentRepo extends JpaRepository<LeaseDocument, Long> {
     boolean existsBySaleIdAndDocumentTypeAndStatusAndActiveTrue(long saleId, LeaseDocumentType type, LeaseDocumentStatus status);
 
     @Query("SELECT CASE WHEN COUNT(d)>0 THEN true ELSE false END FROM LeaseDocument d WHERE d.leaseId=:leaseId " +
-            "AND d.documentType=:type AND d.active=true AND d.status NOT IN ('CANCELLED','EXPIRED')")
+            "AND d.documentType=:type AND d.active=true AND d.status NOT IN ('REJECTED','CANCELLED','EXPIRED')")
     boolean existsOpen(long leaseId, LeaseDocumentType type);
 
     @Query("SELECT CASE WHEN COUNT(d)>0 THEN true ELSE false END FROM LeaseDocument d WHERE d.saleId=:saleId " +

@@ -84,10 +84,11 @@ public class LeaseService {
     private final LeaseTemplateDao leaseTemplateDao;
     private final org.pms.silverocean.database.pms.LeaseDocumentRepo documents;
     private final LeaseAccessService access;
+    private final org.pms.silverocean.service.leasedocument.TenantLeaseAgreementService tenantAgreements;
 
     static final String DEFAULT_PREFIX = "DEFAULT_";
 
-    public LeaseService(LeaseDao leaseDao, UserDao userDao, UnitDao unitDao, LeaseMessageDao leaseMessageDao, ConfigService configService, I18NService i18NService, EncryptionService encryptionService, NotificationService notificationService, RenderService renderService, RoleService roleService, InviteDao inviteDao, LeaseTemplateDao leaseTemplateDao, org.pms.silverocean.database.pms.LeaseDocumentRepo documents, LeaseAccessService access) {
+    public LeaseService(LeaseDao leaseDao, UserDao userDao, UnitDao unitDao, LeaseMessageDao leaseMessageDao, ConfigService configService, I18NService i18NService, EncryptionService encryptionService, NotificationService notificationService, RenderService renderService, RoleService roleService, InviteDao inviteDao, LeaseTemplateDao leaseTemplateDao, org.pms.silverocean.database.pms.LeaseDocumentRepo documents, LeaseAccessService access, org.pms.silverocean.service.leasedocument.TenantLeaseAgreementService tenantAgreements) {
         this.leaseDao = leaseDao;
         this.userDao = userDao;
         this.unitDao = unitDao;
@@ -102,6 +103,7 @@ public class LeaseService {
         this.leaseTemplateDao = leaseTemplateDao;
         this.documents = documents;
         this.access = access;
+        this.tenantAgreements = tenantAgreements;
     }
 
     @PostConstruct
@@ -111,19 +113,6 @@ public class LeaseService {
 
     public List<TenancyProjection> listTenancyPerLoggedInUser() {
         return leaseDao.getTenancyByUserId(userDao.getUserId());
-    }
-
-    @Transactional
-    public void tenantEditLease(long leaseId, LocalDate moveInDate, LocalDate moveOutDate) {
-        validateLeaseDates(moveInDate, moveOutDate);
-        Lease lease = leaseDao.getLeaseByIdAndTenantId(leaseId, userDao.getUserId())
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
-        if (hasFrozenTerms(lease)) {
-            throw new PMSCustomException(ResponseCode.ERROR_LEASE_ALREADY_ACCEPTED);
-        }
-        lease.setMoveInDate(moveInDate);
-        lease.setMoveOutDate(moveOutDate);
-        leaseDao.saveLease(lease, Permission.EDIT_LEASE);
     }
 
     @Transactional
@@ -157,8 +146,7 @@ public class LeaseService {
     }
 
     @Transactional
-    public void initializeLeaseDraft(String token, LocalDate moveInDate, LocalDate moveOutDate) {
-        validateLeaseDates(moveInDate, moveOutDate);
+    public org.pms.silverocean.service.lease.wrappers.LeaseInitializationResult initializeLeaseDraft(String token) {
         Users user = userDao.getUserObject();
         if (!user.isCompletedProfile()) {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
@@ -172,6 +160,10 @@ public class LeaseService {
         unit = unitDao.findByAndLockById(unit.getId())
                 .filter(u -> u.isActive() && !u.isOccupied() && "RENT".equals(u.getLeaseMode()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
+        // A tenant may rent several units, but one unit may have only one active lease journey.
+        if (leaseDao.hasActiveLeaseForUnit(unit.getId())) {
+            throw new PMSCustomException(ResponseCode.LEASE_ALREADY_EXISTS);
+        }
         Invite invite = inviteDao.getActiveTokenForUpdate(token)
                 .filter(candidate -> InviteType.TENANT.name().equals(candidate.getType()))
                 .filter(candidate -> candidate.getExpiryDate() == null || LocalDateTime.now().isBefore(candidate.getExpiryDate()))
@@ -179,6 +171,9 @@ public class LeaseService {
         if (!recipientMatches(invite.getRecipient(), user)) {
             throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
         }
+        LocalDate moveInDate = invite.getLeaseStartDate();
+        LocalDate moveOutDate = invite.getLeaseEndDate();
+        validateLeaseDates(moveInDate, moveOutDate);
         LeaseTemplate leaseTemplate = leaseTemplateDao
                 .getTemplateById(unit.getTemplateId())
                 .filter(t -> "RENT".equals(t.getLeaseMode()))
@@ -219,8 +214,11 @@ public class LeaseService {
             lease.setCharges(true);
             leaseDao.saveLease(lease, Permission.EDIT_LEASE_CHARGES);
         }
+        var agreement = tenantAgreements.createIssuedAgreement(lease, unit, invite, user);
         invite.setActive(false);
         inviteDao.updateInvite(invite);
+        return new org.pms.silverocean.service.lease.wrappers.LeaseInitializationResult(
+                lease.getId(), agreement.getId(), moveInDate, moveOutDate, agreement.getStatus().name());
     }
 
     public Page<LeaseDTO> getLeaseList(Pageable pageable) {
@@ -377,6 +375,23 @@ public class LeaseService {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         lease.setTenantSignedDate(signedAt);
         leaseDao.saveLease(lease, Permission.SIGN_LEASE);
+    }
+
+    @Transactional
+    public void rejectGovernedAgreement(long leaseId, long recipientUserId) {
+        Lease lease = leaseDao.getLeaseForUpdate(leaseId)
+                .filter(Lease::isActive).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        UnitTenant tenancy = leaseDao.getUnitTenantByTenantId(lease.getTenantId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        if (tenancy.getUserId() != recipientUserId || lease.isSigned()
+                || lease.getTenantSignedDate() != null || lease.getManagerSignedDate() != null) {
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        }
+        tenancy.setActive(false);
+        leaseDao.saveUnitTenant(tenancy);
+        lease.setLifecycleStatus("REJECTED");
+        lease.setActive(false);
+        leaseDao.saveLease(lease, Permission.EDIT_LEASE);
     }
 
     @Transactional

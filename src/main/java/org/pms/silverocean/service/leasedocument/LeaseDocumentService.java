@@ -214,6 +214,24 @@ public class LeaseDocumentService {
     }
 
     @Transactional
+    public LeaseDocumentDTO reject(long id, RejectLeaseDocumentRequest request) {
+        LeaseDocument document = mutable(id);
+        if (document.getRecipientUserId() != userDao.getUserId()
+                || !document.getDocumentType().isTenancyAgreement()
+                || (document.getStatus() != LeaseDocumentStatus.ISSUED
+                && document.getStatus() != LeaseDocumentStatus.ACKNOWLEDGED)
+                || document.getIssuerSignedAt() != null || document.getRecipientSignedAt() != null) {
+            throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
+        }
+        validateCurrentContext(document);
+        document.setRecipientRejectionReason(request.reason().trim());
+        document.setStatus(LeaseDocumentStatus.REJECTED);
+        LeaseDocument saved = documentRepo.save(document);
+        leaseService.rejectGovernedAgreement(saved.getLeaseId(), saved.getRecipientUserId());
+        return new LeaseDocumentDTO(saved);
+    }
+
+    @Transactional
     public LeaseDocumentDTO sign(long id) {
         LeaseDocument document = mutable(id);
         long userId = userDao.getUserId();

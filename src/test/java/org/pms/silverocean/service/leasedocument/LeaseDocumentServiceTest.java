@@ -295,6 +295,19 @@ class LeaseDocumentServiceTest {
         return d;
     }
 
+    @Test void tenantCanRejectAnUnsignedIssuedAgreementAndReleaseTheDraftTenancy() {
+        LeaseDocument agreement = rentalDraft(LeaseDocumentStatus.ISSUED);
+        when(users.getUserId()).thenReturn(14L);
+        when(documents.findAccessibleForUpdate(66L,14L)).thenReturn(Optional.of(agreement));
+        when(documents.save(agreement)).thenReturn(agreement);
+
+        LeaseDocumentDTO result = service.reject(66L,new RejectLeaseDocumentRequest("Dates need correction"));
+
+        assertEquals(LeaseDocumentStatus.REJECTED,result.status());
+        assertEquals("Dates need correction",result.recipientRejectionReason());
+        verify(leaseService).rejectGovernedAgreement(11L,14L);
+    }
+
     private LeaseDocument currentEstateDraft() {
         LeaseDocument d = rentalDraft(LeaseDocumentStatus.ISSUED);
         d.setLeaseId(null); d.setDocumentType(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT);

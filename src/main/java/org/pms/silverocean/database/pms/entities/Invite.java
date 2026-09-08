@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Table(name = "pms_invite", indexes = {
@@ -30,6 +31,9 @@ public class Invite extends BaseCreatorEntity implements Auditable {
     private String recipient;
     private String token;
     private LocalDateTime expiryDate;
+    private LocalDate leaseStartDate;
+    private LocalDate leaseEndDate;
+    private Long agreementTemplateId;
     private int visits = 0;
 
     @Override
@@ -41,7 +45,9 @@ public class Invite extends BaseCreatorEntity implements Auditable {
                 "\"entityId\":" + getEntityId() + "," +
                 "\"type\":\"" + type + "\"," +
                 "\"invitedRoleId\":\"" + roleId + "\"," +
-                "\"recipient\":\"" + recipient + "\"," +
+                "\"leaseStartDate\":\"" + leaseStartDate + "\"," +
+                "\"leaseEndDate\":\"" + leaseEndDate + "\"," +
+                "\"agreementTemplateId\":\"" + agreementTemplateId + "\"," +
                 "\"createdOn\":\"" + getCreatedOn() + "\"," +
                 "\"createdBy\":" + getCreatedBy() + "," +
                 "\"updatedOn\":\"" + getLastModifiedDate() + "\"" +

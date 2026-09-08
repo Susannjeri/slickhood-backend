@@ -34,7 +34,7 @@ class HomeownerInvitationTest {
     final I18NService i18n = mock(I18NService.class);
     final EstateAccessService access = mock(EstateAccessService.class);
     final UnitDTO unit = mock(UnitDTO.class);
-    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,null,null,access);
+    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,null,null,access,null);
 
     void setupUnit(PMSLeaseMode mode) {
         when(users.getUserId()).thenReturn(9L);

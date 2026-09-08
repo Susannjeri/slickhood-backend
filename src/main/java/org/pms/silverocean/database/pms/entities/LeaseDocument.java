@@ -42,4 +42,5 @@ public class LeaseDocument extends BaseCreatorEntity {
     private LocalDateTime acknowledgedAt;
     private LocalDateTime issuerSignedAt;
     private LocalDateTime recipientSignedAt;
+    @Column(length = 1000) private String recipientRejectionReason;
 }

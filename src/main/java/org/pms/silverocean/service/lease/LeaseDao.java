@@ -98,6 +98,10 @@ public class LeaseDao {
         return inviteRepo.findByUnitIdAndTenant(unitContainer.get().getId(), userId);
     }
 
+    public boolean hasActiveLeaseForUnit(long unitId) {
+        return unitTenantRepo.existsActiveLeaseForUnit(unitId);
+    }
+
     public void deleteUnsignedLeaseAndUnitTenantsByUnitIdAndLeaseId(long unitId, long leaseId) {
         leaseRepo.deactivateUnsignedActiveLeaseIdByUnitId(unitId, leaseId);
         unitTenantRepo.deactivateUnsignedUnitTenantsIdByUnitId(unitId, leaseId);

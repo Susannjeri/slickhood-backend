@@ -1,7 +1,7 @@
 package org.pms.silverocean.service.leasedocument;
 
 public enum LeaseDocumentStatus {
-    DRAFT, ISSUED, ACKNOWLEDGED, PARTIALLY_SIGNED, SIGNED, CANCELLED, EXPIRED;
+    DRAFT, ISSUED, ACKNOWLEDGED, PARTIALLY_SIGNED, SIGNED, REJECTED, CANCELLED, EXPIRED;
 
     /** Expired offers remain readable; do not wait for another draft to update their display status. */
     public static LeaseDocumentStatus displayed(org.pms.silverocean.database.pms.entities.LeaseDocument document) {
