@@ -68,11 +68,19 @@ public class InvoiceDao {
     }
 
     public Page<PMSInvoice> getPlatformInvoices(Pageable pageable, Long billedUserId) {
-        return pmsInvoiceRepo.findAll(searchPlatformInvoices(billedUserId), pageable);
+        return getPlatformInvoices(pageable, billedUserId, null);
+    }
+
+    public Page<PMSInvoice> getPlatformInvoices(Pageable pageable, Long billedUserId, Long invoiceId) {
+        return pmsInvoiceRepo.findAll(searchPlatformInvoices(billedUserId, invoiceId), pageable);
     }
 
     public Page<PMSInvoice> getInvoicesForOwnerAndTenantView(Pageable pageable, long userId, Long propertyId, Long unitId) {
-        return pmsInvoiceRepo.findAll(searchParticipantInvoices(userId, propertyId, unitId), pageable);
+        return getInvoicesForOwnerAndTenantView(pageable, userId, propertyId, unitId, null);
+    }
+
+    public Page<PMSInvoice> getInvoicesForOwnerAndTenantView(Pageable pageable, long userId, Long propertyId, Long unitId, Long invoiceId) {
+        return pmsInvoiceRepo.findAll(searchParticipantInvoices(userId, propertyId, unitId, invoiceId), pageable);
     }
 
     public Optional<PMSInvoice> getInvoiceForOwnerOrTenantView(long invoiceId, long userId) {

@@ -19,7 +19,8 @@ public class SalesController {
     @PostMapping @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SALE_PIPELINE)")
     public ResponseEntity<ResponseDTO> create(@Valid @RequestBody CreateSaleRequest request){return ok(ResponseCode.SALE_CREATED,service.create(request));}
     @GetMapping @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SALE_PIPELINE)")
-    public ResponseEntity<ResponseDTO> list(@PageableDefault(size=25,sort="createdOn") Pageable pageable){return page(service.list(pageable));}
+    public ResponseEntity<ResponseDTO> list(@PageableDefault(size=25,sort="createdOn") Pageable pageable,
+                                            @RequestParam(required=false) String search){return page(service.list(pageable,search));}
     @PutMapping("/{id}") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SALE_PIPELINE)")
     public ResponseEntity<ResponseDTO> update(@PathVariable long id,@Valid @RequestBody UpdateSaleRequest request){return ok(ResponseCode.SALE_UPDATED,service.update(id,request));}
     @PostMapping("/{id}/accept-offer") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).ACCEPT_SALE_OFFER)")

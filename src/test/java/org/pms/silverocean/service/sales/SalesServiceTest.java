@@ -362,6 +362,30 @@ class SalesServiceTest {
         return invoice;
     }
 
+    @Test void buyerDirectorySearchRemainsInsideTheSelectedSalesWorkspace() {
+        PageRequest page = PageRequest.of(0,25);
+        when(users.getUserId()).thenReturn(300L);
+        when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
+        when(users.hasPermission(Permission.VIEW_SALE_PIPELINE)).thenReturn(true);
+        when(access.selectedAssignmentId()).thenReturn(55L);
+        when(sales.findViewPageBySalesScope(300L,false,"SALES_COORDINATOR",55L,"buyer@example.com",page))
+                .thenReturn(new PageImpl<>(List.of(),page,0));
+
+        service.list(page,"  buyer@example.com  ");
+
+        verify(sales).findViewPageBySalesScope(300L,false,"SALES_COORDINATOR",55L,"buyer@example.com",page);
+    }
+
+    @Test void superAdminDoesNotReceiveAPlatformWideBuyerDirectory() {
+        PageRequest page = PageRequest.of(0,25);
+        when(users.getUserId()).thenReturn(300L);
+        when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
+
+        assertEquals(0,service.list(page).getTotalElements());
+
+        verifyNoInteractions(sales);
+    }
+
     private SaleTransaction sale(SaleStatus status) {
         SaleTransaction sale = new SaleTransaction(); sale.setId(1L); sale.setPropertyId(11L); sale.setUnitId(77L);
         sale.setBuyerUserId(200L); sale.setSalesAgentUserId(100L); sale.setStatus(status); sale.setActive(true);

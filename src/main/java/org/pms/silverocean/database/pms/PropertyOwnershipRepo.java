@@ -37,24 +37,45 @@ public interface PropertyOwnershipRepo extends JpaRepository<PropertyOwnership, 
             "FROM PropertyOwnership o JOIN Property p ON p.id=o.propertyId " +
             "LEFT JOIN Unit u ON u.id=o.unitId JOIN Users h ON h.id=o.homeownerUserId ";
     String VIEW_FILTER = " AND (:propertyId IS NULL OR o.propertyId=:propertyId) " +
-            "AND (:active IS NULL OR o.active=:active) ORDER BY o.createdOn DESC,o.id DESC";
+            "AND (:active IS NULL OR o.active=:active) " +
+            "AND (:search IS NULL OR LOWER(h.fullName) LIKE LOWER(CONCAT('%',:search,'%')) " +
+            "OR LOWER(h.email) LIKE LOWER(CONCAT('%',:search,'%')) " +
+            "OR LOWER(p.name) LIKE LOWER(CONCAT('%',:search,'%')) " +
+            "OR LOWER(COALESCE(u.ref,'')) LIKE LOWER(CONCAT('%',:search,'%'))) " +
+            "ORDER BY o.createdOn DESC,o.id DESC";
 
     @Query(VIEW_SELECT + "WHERE p.active AND p.managementMode=org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE " +
             "AND ((:owner=true AND p.createdBy=:userId) OR (:owner=false AND EXISTS (SELECT 1 FROM PropertyManager pm " +
             "WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:assignmentId AND pm.active)))" + VIEW_FILTER)
     Page<OwnershipView> findPageByEstateScope(long userId, boolean owner, String roleName, Long assignmentId,
-                                             Long propertyId, Boolean active, Pageable pageable);
+                                             Long propertyId, Boolean active, String search, Pageable pageable);
+    default Page<OwnershipView> findPageByEstateScope(long userId, boolean owner, String roleName, Long assignmentId,
+                                                      Long propertyId, Boolean active, Pageable pageable) {
+        return findPageByEstateScope(userId, owner, roleName, assignmentId, propertyId, active, null, pageable);
+    }
 
     @Query(VIEW_SELECT + "WHERE o.homeownerUserId=:userId" + VIEW_FILTER)
-    Page<OwnershipView> findPageByHomeowner(long userId, Long propertyId, Boolean active, Pageable pageable);
+    Page<OwnershipView> findPageByHomeowner(long userId, Long propertyId, Boolean active, String search, Pageable pageable);
+    default Page<OwnershipView> findPageByHomeowner(long userId, Long propertyId, Boolean active, Pageable pageable) {
+        return findPageByHomeowner(userId, propertyId, active, null, pageable);
+    }
 
     @Query(VIEW_SELECT + "WHERE p.createdBy=:userId" + VIEW_FILTER)
-    Page<OwnershipView> findPageByPropertyOwner(long userId, Long propertyId, Boolean active, Pageable pageable);
+    Page<OwnershipView> findPageByPropertyOwner(long userId, Long propertyId, Boolean active, String search, Pageable pageable);
+    default Page<OwnershipView> findPageByPropertyOwner(long userId, Long propertyId, Boolean active, Pageable pageable) {
+        return findPageByPropertyOwner(userId, propertyId, active, null, pageable);
+    }
 
     @Query(VIEW_SELECT + "WHERE EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=o.propertyId " +
             "AND pm.userId=:userId AND pm.active)" + VIEW_FILTER)
-    Page<OwnershipView> findPageByPropertyStaff(long userId, Long propertyId, Boolean active, Pageable pageable);
+    Page<OwnershipView> findPageByPropertyStaff(long userId, Long propertyId, Boolean active, String search, Pageable pageable);
+    default Page<OwnershipView> findPageByPropertyStaff(long userId, Long propertyId, Boolean active, Pageable pageable) {
+        return findPageByPropertyStaff(userId, propertyId, active, null, pageable);
+    }
 
     @Query(VIEW_SELECT + "WHERE 1=1" + VIEW_FILTER)
-    Page<OwnershipView> findAllOwnershipViews(Long propertyId, Boolean active, Pageable pageable);
+    Page<OwnershipView> findAllOwnershipViews(Long propertyId, Boolean active, String search, Pageable pageable);
+    default Page<OwnershipView> findAllOwnershipViews(Long propertyId, Boolean active, Pageable pageable) {
+        return findAllOwnershipViews(propertyId, active, null, pageable);
+    }
 }

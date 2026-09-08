@@ -143,6 +143,20 @@ class InvoiceAccessBoundaryTest {
         verify(invoices, never()).getPlatformInvoices(any(), any());
     }
 
+    @Test
+    void exactInvoiceDeepLinkStillUsesParticipantScope() {
+        PageRequest page = PageRequest.of(0, 10);
+        when(users.getUserId()).thenReturn(185L);
+        when(users.getActiveRole()).thenReturn(PMSRole.HOMEOWNER);
+        when(invoices.getInvoicesForOwnerAndTenantView(page, 185L, null, null, 501L))
+                .thenReturn(org.springframework.data.domain.Page.empty(page));
+
+        service.getInvoiceList(page, null, null, null, null, 501L);
+
+        verify(invoices).getInvoicesForOwnerAndTenantView(page, 185L, null, null, 501L);
+        verify(invoices, never()).getInvoiceById(501L);
+    }
+
     private static PMSInvoice rentalInvoice(long billedUserId, long payToUserId) {
         PMSInvoice invoice = new PMSInvoice();
         invoice.setId(3541L);

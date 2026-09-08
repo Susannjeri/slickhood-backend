@@ -14,9 +14,14 @@ public class InvoiceSpecifications {
      * their payer and recipient even when the caller is a Super Admin.
      */
     public static Specification<PMSInvoice> searchPlatformInvoices(Long tenantId) {
+        return searchPlatformInvoices(tenantId, null);
+    }
+
+    public static Specification<PMSInvoice> searchPlatformInvoices(Long tenantId, Long invoiceId) {
         return active()
                 .and((root, query, cb) -> cb.isNotNull(root.get("subscriptionPlanCode")))
-                .and(equalWhenPresent("billedUserId", tenantId));
+                .and(equalWhenPresent("billedUserId", tenantId))
+                .and(equalWhenPresent("id", invoiceId));
     }
 
     /**
@@ -25,13 +30,18 @@ public class InvoiceSpecifications {
      * silently widen access to another customer's financial records.
      */
     public static Specification<PMSInvoice> searchParticipantInvoices(long userId, Long propertyId, Long unitId) {
+        return searchParticipantInvoices(userId, propertyId, unitId, null);
+    }
+
+    public static Specification<PMSInvoice> searchParticipantInvoices(long userId, Long propertyId, Long unitId, Long invoiceId) {
         Specification<PMSInvoice> participant = (root, query, cb) -> cb.or(
                 cb.equal(root.get("billedUserId"), userId),
                 cb.equal(root.get("payToUserId"), userId));
         return active()
                 .and(participant)
                 .and(equalWhenPresent("propertyId", propertyId))
-                .and(equalWhenPresent("unitId", unitId));
+                .and(equalWhenPresent("unitId", unitId))
+                .and(equalWhenPresent("id", invoiceId));
     }
 
     private static Specification<PMSInvoice> active() {

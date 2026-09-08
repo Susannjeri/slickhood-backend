@@ -326,6 +326,32 @@ class EstateServiceTest {
         verify(users,never()).hasPermission(Permission.MANAGE_ESTATE);
     }
 
+    @Test
+    void homeownerDirectorySearchRemainsInsideTheSelectedWorkspace() {
+        PageRequest page = PageRequest.of(0, 25);
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.WORKSPACE_VIEWER);
+        when(users.hasPermission(Permission.VIEW_ESTATE)).thenReturn(true);
+        member();
+        when(ownerships.findPageByEstateScope(999L, false, "WORKSPACE_VIEWER", -5L, 11L, true, "amina", page))
+                .thenReturn(new PageImpl<>(java.util.List.of(), page, 0));
+
+        service.list(page, 11L, true, "  amina  ");
+
+        verify(ownerships).findPageByEstateScope(999L, false, "WORKSPACE_VIEWER", -5L, 11L, true, "amina", page);
+    }
+
+    @Test
+    void superAdminDoesNotReceiveAPlatformWideHomeownerDirectory() {
+        PageRequest page = PageRequest.of(0, 25);
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
+
+        assertEquals(0, service.list(page, null, null).getTotalElements());
+
+        org.mockito.Mockito.verifyNoInteractions(ownerships);
+    }
+
     private void verifyNoInvoice() {
         org.mockito.Mockito.verifyNoInteractions(invoices);
     }

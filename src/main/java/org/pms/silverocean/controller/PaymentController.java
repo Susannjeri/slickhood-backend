@@ -98,8 +98,8 @@ public class PaymentController extends OutputStreamErrorHandler {
 
     @GetMapping("/invoice/list")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_INVOICE_LIST)")
-    public ResponseEntity<ResponseDTO> listInvoice(Pageable pageable, @RequestParam Optional<Long> tenantId, @RequestParam Optional<Long> landlordId, @RequestParam Optional<Long> propertyId, @RequestParam Optional<Long> unitId) {
-        Page<InvoiceDTO> invoiceList = invoiceService.getInvoiceList(pageable, tenantId.orElse(null), landlordId.orElse(null), propertyId.orElse(null), unitId.orElse(null));
+    public ResponseEntity<ResponseDTO> listInvoice(Pageable pageable, @RequestParam Optional<Long> tenantId, @RequestParam Optional<Long> landlordId, @RequestParam Optional<Long> propertyId, @RequestParam Optional<Long> unitId, @RequestParam Optional<Long> invoiceId) {
+        Page<InvoiceDTO> invoiceList = invoiceService.getInvoiceList(pageable, tenantId.orElse(null), landlordId.orElse(null), propertyId.orElse(null), unitId.orElse(null), invoiceId.orElse(null));
         ResponseDTO responseDTO = new ResponseDTO(true, ResponseCode.INVOICE_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVOICE_LIST.getDescription()), invoiceList.getContent());
         responseDTO.setTotalElements(invoiceList.getTotalElements());
         responseDTO.setTotalPages(invoiceList.getTotalPages());

@@ -24,6 +24,7 @@ import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.common.PMSUtils;
 import java.time.LocalDate;
 import java.util.Map;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -117,14 +118,26 @@ public class EstateService {
 
     @Transactional
     public Page<OwnershipView> list(Pageable pageable, Long propertyId, Boolean active) {
+        return list(pageable, propertyId, active, null);
+    }
+
+    @Transactional
+    public Page<OwnershipView> list(Pageable pageable, Long propertyId, Boolean active, String search) {
         long userId = userDao.getUserId();
         Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize())));
+        String normalizedSearch = StringUtils.trimToNull(search);
         return switch (userDao.getActiveRole()) {
-            case HOMEOWNER -> ownershipRepo.findPageByHomeowner(userId, propertyId, active, bounded);
-            case ESTATE_MANAGER -> ownershipRepo.findPageByEstateScope(userId, true, PMSRole.ESTATE_MANAGER.name(), null, propertyId, active, bounded);
-            case SUPER_ADMIN -> ownershipRepo.findAllOwnershipViews(propertyId, active, bounded);
+            case HOMEOWNER -> normalizedSearch == null
+                    ? ownershipRepo.findPageByHomeowner(userId, propertyId, active, bounded)
+                    : ownershipRepo.findPageByHomeowner(userId, propertyId, active, normalizedSearch, bounded);
+            case ESTATE_MANAGER -> normalizedSearch == null
+                    ? ownershipRepo.findPageByEstateScope(userId, true, PMSRole.ESTATE_MANAGER.name(), null, propertyId, active, bounded)
+                    : ownershipRepo.findPageByEstateScope(userId, true, PMSRole.ESTATE_MANAGER.name(), null, propertyId, active, normalizedSearch, bounded);
+            case SUPER_ADMIN -> Page.empty(bounded);
             default -> userDao.hasPermission(Permission.VIEW_ESTATE)
-                    ? ownershipRepo.findPageByEstateScope(userId, false, userDao.getActiveRole().name(), access.selectedAssignmentId(), propertyId, active, bounded)
+                    ? normalizedSearch == null
+                        ? ownershipRepo.findPageByEstateScope(userId, false, userDao.getActiveRole().name(), access.selectedAssignmentId(), propertyId, active, bounded)
+                        : ownershipRepo.findPageByEstateScope(userId, false, userDao.getActiveRole().name(), access.selectedAssignmentId(), propertyId, active, normalizedSearch, bounded)
                     : Page.empty(bounded);
         };
     }

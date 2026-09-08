@@ -99,13 +99,23 @@ public class SalesService {
 
     @Transactional(readOnly = true)
     public Page<SaleView> list(Pageable pageable) {
+        return list(pageable, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<SaleView> list(Pageable pageable, String search) {
         long userId = users.getUserId(); Pageable bounded = bounded(pageable);
+        String normalizedSearch = StringUtils.trimToNull(search);
         return switch (users.getActiveRole()) {
-            case BUYER -> sales.findViewPageByBuyer(userId, bounded).map(SaleView::redactInternalNotes);
-            case SUPER_ADMIN -> sales.findAllActiveViews(bounded);
+            case BUYER -> (normalizedSearch == null ? sales.findViewPageByBuyer(userId, bounded)
+                    : sales.findViewPageByBuyer(userId, normalizedSearch, bounded)).map(SaleView::redactInternalNotes);
+            case SUPER_ADMIN -> Page.empty(bounded);
             default -> users.hasPermission(Permission.VIEW_SALE_PIPELINE)
-                    ? sales.findViewPageBySalesScope(userId, users.getActiveRole() == PMSRole.SALES_AGENT,
-                        users.getActiveRole().name(), users.getActiveRole() == PMSRole.SALES_AGENT ? null : access.selectedAssignmentId(), bounded)
+                    ? normalizedSearch == null
+                        ? sales.findViewPageBySalesScope(userId, users.getActiveRole() == PMSRole.SALES_AGENT,
+                            users.getActiveRole().name(), users.getActiveRole() == PMSRole.SALES_AGENT ? null : access.selectedAssignmentId(), bounded)
+                        : sales.findViewPageBySalesScope(userId, users.getActiveRole() == PMSRole.SALES_AGENT,
+                            users.getActiveRole().name(), users.getActiveRole() == PMSRole.SALES_AGENT ? null : access.selectedAssignmentId(), normalizedSearch, bounded)
                     : Page.empty(bounded);
         };
     }

@@ -272,11 +272,20 @@ public class InvoiceService {
     public Page<InvoiceDTO> getInvoiceList(Pageable pageable, Long tenantId, Long landlordId, Long propertyId, Long unitId) {
         Long userId = userDao.getUserId();
         if (userDao.getActiveRole() == PMSRole.SUPER_ADMIN) {
+            return invoiceDao.getPlatformInvoices(pageable, tenantId).map(this::mapInvoiceEntityToDTO);
+        }
+        return invoiceDao.getInvoicesForOwnerAndTenantView(pageable, userId, propertyId, unitId).map(this::mapInvoiceEntityToDTO);
+    }
+
+    public Page<InvoiceDTO> getInvoiceList(Pageable pageable, Long tenantId, Long landlordId, Long propertyId, Long unitId, Long invoiceId) {
+        if (invoiceId == null) return getInvoiceList(pageable, tenantId, landlordId, propertyId, unitId);
+        Long userId = userDao.getUserId();
+        if (userDao.getActiveRole() == PMSRole.SUPER_ADMIN) {
             // Platform administrators operate SlickHood subscription billing. They
             // must not inherit visibility into customer-to-customer invoices.
-            return invoiceDao.getPlatformInvoices(pageable, tenantId).map(this::mapInvoiceEntityToDTO);
+            return invoiceDao.getPlatformInvoices(pageable, tenantId, invoiceId).map(this::mapInvoiceEntityToDTO);
         } else {
-            return invoiceDao.getInvoicesForOwnerAndTenantView(pageable, userId, propertyId, unitId).map(this::mapInvoiceEntityToDTO);
+            return invoiceDao.getInvoicesForOwnerAndTenantView(pageable, userId, propertyId, unitId, invoiceId).map(this::mapInvoiceEntityToDTO);
         }
     }
 

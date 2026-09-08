@@ -39,7 +39,7 @@ class SalesControllerSecurityTest {
 
     @Test
     void readsRequirePipelineVisibility() throws NoSuchMethodException {
-        assertPermission("list", "VIEW_SALE_PIPELINE", Pageable.class);
+        assertPermission("list", "VIEW_SALE_PIPELINE", Pageable.class, String.class);
         assertPermission("milestones", "VIEW_SALE_PIPELINE", long.class, Pageable.class);
     }
 
