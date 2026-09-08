@@ -325,6 +325,19 @@ public class UserAuthenticationService {
         userDao.save(user);
     }
 
+    /**
+     * Attaches an email-bound invitation after OTP proof and before issuing the
+     * replacement session. This keeps password recovery in the tenant journey:
+     * the returned JWT already contains the invited role and permissions.
+     */
+    @Transactional
+    public void acceptInvitationForVerifiedUser(String email, String token) {
+        String normalizedEmail = StringUtils.trimToEmpty(email).toLowerCase(Locale.ROOT);
+        Users user = userDao.findByEmail(normalizedEmail)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.LOGIN_FAILURE_INVALID_USER));
+        roleService.assignRoleFromInvite(token, user);
+    }
+
     private void recoverEmailBoundInvitation(RegistrationDTO registrationDTO, String normalizedEmail) {
         if (registrationDTO.getRoleId() != null || StringUtils.isNotBlank(registrationDTO.getToken())) return;
         roleService.activeInviteTokenForRecipient(normalizedEmail).ifPresent(registrationDTO::setToken);

@@ -95,6 +95,10 @@ public class OtpController {
             if (StringUtils.isNotBlank(verifyOtpDTO.getPassword())) {
                 userAuthenticationService.updatePassword(verifyOtpDTO.getEmail(), verifyOtpDTO.getPassword());
             }
+            if (StringUtils.isNotBlank(verifyOtpDTO.getToken())) {
+                userAuthenticationService.acceptInvitationForVerifiedUser(
+                        verifyOtpDTO.getEmail(), verifyOtpDTO.getToken());
+            }
             LoginResponseDTO session = userAuthenticationService.createSessionForVerifiedUser(verifyOtpDTO.getEmail());
             return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.TOTP_VALIDATION_SUCCESS.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.TOTP_VALIDATION_SUCCESS), session));

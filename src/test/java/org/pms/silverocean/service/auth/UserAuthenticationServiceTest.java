@@ -70,6 +70,16 @@ class UserAuthenticationServiceTest {
     }
 
     @Test
+    void verifiedRecoveryNormalizesEmailAndAcceptsInvitationForExistingTenant() {
+        Users tenant = Users.builder().id(42L).email("tenant@example.com").build();
+        when(userDao.findByEmail("tenant@example.com")).thenReturn(Optional.of(tenant));
+
+        service.acceptInvitationForVerifiedUser("  Tenant@Example.COM ", "tenant-invite-token");
+
+        verify(roleService).assignRoleFromInvite("tenant-invite-token", tenant);
+    }
+
+    @Test
     void loginNormalizesEmailBeforeRateLimitAndLookup() {
         EmailPasswordDTO request = new EmailPasswordDTO();
         request.setEmail("  Owner@Example.COM ");

@@ -17,6 +17,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -51,6 +52,28 @@ class OtpControllerTest {
         assertTrue(response.getBody().isSuccess());
         assertEquals(session, response.getBody().getData().getFirst());
         verify(authentication).createSessionForVerifiedUser(request.getEmail());
+    }
+
+    @Test
+    void passwordRecoveryAcceptsInvitationBeforeIssuingReplacementSession() {
+        VerifyOtpDTO request = new VerifyOtpDTO();
+        request.setEmail("existing.tenant@example.com");
+        request.setCode("123456");
+        request.setChannel(OtpType.EMAIL);
+        request.setPassword("NewPassword1!");
+        request.setToken("email-bound-tenant-invite");
+        LoginResponseDTO session = new LoginResponseDTO(false, false, "access-jwt", "refresh-token");
+        when(factory.getService(OtpType.EMAIL)).thenReturn(Optional.of(otp));
+        when(otp.validateVerificationToken(request.getEmail(), request.getCode())).thenReturn(true);
+        when(authentication.createSessionForVerifiedUser(request.getEmail())).thenReturn(session);
+
+        var response = controller.verify(request);
+
+        assertTrue(response.getBody().isSuccess());
+        var ordered = inOrder(authentication);
+        ordered.verify(authentication).updatePassword(request.getEmail(), request.getPassword());
+        ordered.verify(authentication).acceptInvitationForVerifiedUser(request.getEmail(), request.getToken());
+        ordered.verify(authentication).createSessionForVerifiedUser(request.getEmail());
     }
 
     @Test

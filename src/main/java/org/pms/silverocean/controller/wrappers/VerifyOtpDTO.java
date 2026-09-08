@@ -15,6 +15,8 @@ public class VerifyOtpDTO implements Serializable {
     private String code;
     private String email;
     private OtpType channel;
+    @Size(max = 255, message = "Invitation token is too long")
+    private String token;
     @Size(min = 8, message = "Password must be at least 8 characters")
     @Pattern(
             regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).+$",
