@@ -31,6 +31,7 @@ class LeaseJourneyTest {
     @Mock LeaseTemplateDao templates;
     @Mock org.pms.silverocean.service.leasedocument.TenantLeaseAgreementService tenantAgreements;
     @Mock org.pms.silverocean.service.mustache.RenderService renderer;
+    @Mock org.pms.silverocean.service.payment.invoice.LeaseInitialBillingService initialBilling;
     @InjectMocks LeaseService service;
 
     @Test void leaseListIncludesTheCurrentAgreementStateWithoutExposingAnotherLease() {
@@ -63,6 +64,7 @@ class LeaseJourneyTest {
         service.activateFromGovernedAgreement(1,5,4,LocalDateTime.now(),LocalDateTime.now().minusMinutes(1));
         assertTrue(unit.isOccupied()); assertTrue(tenancy.isLeaseAccepted()); assertTrue(lease.isSigned());
         assertEquals("ACTIVE",lease.getLifecycleStatus()); assertTrue(lease.isPaymentDue());
+        verify(initialBilling).issue(lease,tenancy,unit);
         verify(leases).deleteUnsignedLeaseAndUnitTenantsByUnitIdAndLeaseId(3L,1L);
     }
     @Test void oneSignatureCannotActivateOrOccupyUnit() {

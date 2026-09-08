@@ -334,7 +334,8 @@ public class InviteService {
                 responseDTO = propertyService.viewUnitLease(token);
                 if (responseDTO.isSuccess() && responseDTO.getData() != null && !responseDTO.getData().isEmpty()
                         && responseDTO.getData().getFirst() instanceof UnitDTO unit) {
-                    responseDTO.setData(List.of(new TenantInviteView(unit, invite.getLeaseStartDate(), invite.getLeaseEndDate())));
+                    responseDTO.setData(List.of(new TenantInviteView(unit, invite.getLeaseStartDate(), invite.getLeaseEndDate(),
+                            invite.getLeaseStartDate(), invite.getLeaseStartDate())));
                 }
                 if (userDao.getUserId() != null && !userDao.hasRole(PMSRole.TENANT)) {
                     roleService.assignRoleFromInvite(invite, null, userDao.getUserObject());

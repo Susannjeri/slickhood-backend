@@ -62,7 +62,8 @@ public class CreateInvoiceService {
         Set<Long> idsToDeactivate = new HashSet<>();
         for (ProcessLeaseInvoiceDTO lease : leasePaymentsDueToday) {
             String leaseMode = lease.leaseMode(); // "RENT" or "SALE"
-            boolean isFirstPayment = lease.leaseDate().isEqual(lease.nextPaymentDate());
+            boolean isFirstPayment = PMSLeaseMode.SALE.name().equals(leaseMode)
+                    && lease.leaseDate().isEqual(lease.nextPaymentDate());
             Map<String, Double> invoiceAmounts = new LinkedHashMap<>();
             if (isFirstPayment && PMSLeaseMode.SALE.name().equals(leaseMode)) {
                 invoiceAmounts.put(leaseMode, lease.price());
@@ -101,12 +102,14 @@ public class CreateInvoiceService {
                 invoiceAmounts.put(charge.getChargeName() + AMOUNT, charge.getAmount());
                 updateChargeNextPayment(charge.getId(), charge.getNextPaymentDate(), period);
             } else {
+                if (period == PMSPeriod.ONE_TIME || charge.getNextPaymentDate() == null) continue;
                 if (!today.isBefore(charge.getNextPaymentDate())) {
                     switch (period) {
                         case PMSPeriod.MONTHLY, PMSPeriod.ANNUAL -> {
                             invoiceAmounts.put(charge.getChargeName() + AMOUNT, charge.getAmount());
                             updateChargeNextPayment(charge.getId(), charge.getNextPaymentDate(), period);
                         }
+                        default -> { }
                     }
                 }
             }

@@ -23,18 +23,21 @@ public record LeaseDTO(Long id,
                        boolean governedDocumentRequired,
                        String lifecycleStatus,
                        LocalDate terminationEffectiveDate, LocalDate moveInDate, double price, String currency,
+                       LocalDate firstRentDueDate, LocalDate depositDueDate, LocalDate nextRentDueDate,
                        Long agreementDocumentId, String agreementStatus) {
     public LeaseDTO(Lease lease, String tenantName, String ownerSignName) {
         this(lease.getId(), lease.getName(), PMSLeaseMode.valueOf(lease.getLeaseMode()), lease.isSelfRenew(), lease.getMoveOutDate(),
                 lease.isSigned(), tenantName, lease.getLastModifiedDate(), lease.getCreatedOn(), lease.getTenantSignedDate(),
                 lease.getManagerSignedDate(), ownerSignName, lease.isGovernedDocumentRequired(),
                 lease.getLifecycleStatus(), lease.getTerminationEffectiveDate(), lease.getMoveInDate(), lease.getPrice(), lease.getCurrency(),
+                lease.getMoveInDate(), lease.getMoveInDate(), lease.getNextPaymentDate(),
                 null, null);
     }
 
     public LeaseDTO withAgreement(Long documentId, String status) {
         return new LeaseDTO(id, name, leaseMode, selfRenew, expiryDate, signed, tenantName, lastModifiedDate,
                 lastCreatedOn, tenantSignDate, ownerSignDate, ownerSignName, governedDocumentRequired,
-                lifecycleStatus, terminationEffectiveDate, moveInDate, price, currency, documentId, status);
+                lifecycleStatus, terminationEffectiveDate, moveInDate, price, currency,
+                firstRentDueDate, depositDueDate, nextRentDueDate, documentId, status);
     }
 }

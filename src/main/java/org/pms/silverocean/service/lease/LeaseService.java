@@ -35,6 +35,7 @@ import org.pms.silverocean.service.mustache.RenderService;
 import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
+import org.pms.silverocean.service.payment.invoice.LeaseInitialBillingService;
 import org.pms.silverocean.service.property.UnitDao;
 import org.pms.silverocean.service.property.charges.PMSChargeTypes;
 import org.pms.silverocean.service.property.charges.PMSPeriod;
@@ -85,10 +86,11 @@ public class LeaseService {
     private final org.pms.silverocean.database.pms.LeaseDocumentRepo documents;
     private final LeaseAccessService access;
     private final org.pms.silverocean.service.leasedocument.TenantLeaseAgreementService tenantAgreements;
+    private final LeaseInitialBillingService initialBilling;
 
     static final String DEFAULT_PREFIX = "DEFAULT_";
 
-    public LeaseService(LeaseDao leaseDao, UserDao userDao, UnitDao unitDao, LeaseMessageDao leaseMessageDao, ConfigService configService, I18NService i18NService, EncryptionService encryptionService, NotificationService notificationService, RenderService renderService, RoleService roleService, InviteDao inviteDao, LeaseTemplateDao leaseTemplateDao, org.pms.silverocean.database.pms.LeaseDocumentRepo documents, LeaseAccessService access, org.pms.silverocean.service.leasedocument.TenantLeaseAgreementService tenantAgreements) {
+    public LeaseService(LeaseDao leaseDao, UserDao userDao, UnitDao unitDao, LeaseMessageDao leaseMessageDao, ConfigService configService, I18NService i18NService, EncryptionService encryptionService, NotificationService notificationService, RenderService renderService, RoleService roleService, InviteDao inviteDao, LeaseTemplateDao leaseTemplateDao, org.pms.silverocean.database.pms.LeaseDocumentRepo documents, LeaseAccessService access, org.pms.silverocean.service.leasedocument.TenantLeaseAgreementService tenantAgreements, LeaseInitialBillingService initialBilling) {
         this.leaseDao = leaseDao;
         this.userDao = userDao;
         this.unitDao = unitDao;
@@ -104,6 +106,7 @@ public class LeaseService {
         this.documents = documents;
         this.access = access;
         this.tenantAgreements = tenantAgreements;
+        this.initialBilling = initialBilling;
     }
 
     @PostConstruct
@@ -430,9 +433,9 @@ public class LeaseService {
         leaseDao.saveUnitTenant(tenancy);
         unit.setOccupied(true);
         unitDao.update(unit);
-        lease.setNextPaymentDate(firstRentDueDate(lease));
+        lease.setNextPaymentDate(lease.getMoveInDate());
         lease.setPaymentDue(true);
-        if (lease.isCharges()) leaseDao.updateSignedLeaseCharges(lease.getId());
+        initialBilling.issue(lease, tenancy, unit);
     }
 
     @Transactional
@@ -516,17 +519,6 @@ public class LeaseService {
                 .map(Users::getEmail).filter(email -> email != null && !email.isBlank())
                 .ifPresent(email -> notificationService.queueNotification(
                         new NotificationDTO(body, email, NotificationType.LEASE_RENEWAL_EMAIL))));
-    }
-
-    private LocalDate firstRentDueDate(Lease lease) {
-        LocalDate moveIn = Optional.ofNullable(lease.getMoveInDate()).orElse(LocalDate.now(PMSUtils.getZoneId()));
-        int requestedDay = Optional.ofNullable(lease.getRentDueDayOfMonth()).orElse(moveIn.getDayOfMonth());
-        LocalDate due = moveIn.withDayOfMonth(Math.min(requestedDay, moveIn.lengthOfMonth()));
-        if (due.isBefore(moveIn)) {
-            LocalDate next = moveIn.plusMonths(1);
-            due = next.withDayOfMonth(Math.min(requestedDay, next.lengthOfMonth()));
-        }
-        return due;
     }
 
     private void notifyLeaseParties(Lease lease, LeaseTerminationRequest request) {

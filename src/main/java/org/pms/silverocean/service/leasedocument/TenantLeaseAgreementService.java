@@ -80,7 +80,12 @@ public class TenantLeaseAgreementService {
                 .orElseThrow(this::invalid);
 
         Map<String, Object> model = model(property, unit, issuer, tenant, lease, template.getVersion());
-        String schedule = "<section><h2>Recorded lease schedule</h2><p>Pet policy: {{petsPolicy}}</p>"
+        String schedule = "<section><h2>Recorded lease schedule</h2>"
+                + "<h3>Payment timing</h3><p>The first month's rent is due on {{firstRentDueDate}}. "
+                + "Any one-time deposit recorded below is also due on {{depositDueDate}}. "
+                + "After the first payment, recurring rent is payable in advance by day {{rentDueDay}} of each month.</p>"
+                + "<p>The initial invoice is issued when both parties have signed and must be paid by the stated due date.</p>"
+                + "<p>Pet policy: {{petsPolicy}}</p>"
                 + "<h3>Additional charges</h3>{{#leaseCharges}}<p>{{name}}: {{currency}} {{amount}} ({{period}})</p>{{/leaseCharges}}"
                 + "{{^leaseCharges}}<p>No additional charges recorded.</p>{{/leaseCharges}}</section>";
         String body = insertBeforeBodyEnd(template.getBodyHtml(), schedule);
@@ -151,6 +156,8 @@ public class TenantLeaseAgreementService {
         model.put("moveInDate", lease.getMoveInDate().toString());
         model.put("moveOutDate", lease.getMoveOutDate().toString());
         model.put("rentDueDay", value(lease.getRentDueDayOfMonth()));
+        model.put("firstRentDueDate", lease.getMoveInDate().toString());
+        model.put("depositDueDate", lease.getMoveInDate().toString());
         model.put("leaseDurationMonths", value(lease.getLeaseDurationInMonths()));
         model.put("noticePeriodMonths", value(lease.getNoticePeriodInMonths()));
         model.put("depositReturnDays", value(lease.getDepositReturnDays()));
