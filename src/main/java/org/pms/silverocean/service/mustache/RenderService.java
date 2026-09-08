@@ -17,12 +17,17 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.StringWriter;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 
 @Service
 @Slf4j
 public class RenderService {
     private static final String MUSTACHE_SUFFIX = ".mustache";
+    private static final Pattern XHTML_VOID_ELEMENT = Pattern.compile(
+            "(?i)<(meta|img|br|hr|input|link)(\\b[^>]*?)(?<!/)>"
+    );
     private final Mustache.Compiler mustacheCompiler;
     private final ThreadPoolBeans threadPoolService;
     private PMSThreadPoolExecutorService renderingThreadPool;
@@ -71,7 +76,7 @@ public class RenderService {
     public void toPdf(String htmlContent, OutputStream outputStream) throws IOException {
         // 5. Stream PDF to OutputStream
         PdfRendererBuilder builder = new PdfRendererBuilder();
-        builder.withHtmlContent(htmlContent, null);
+        builder.withHtmlContent(pdfSafeHtml(htmlContent), null);
         builder.useDefaultPageSize(210, 297, PdfRendererBuilder.PageSizeUnits.MM);
         builder.toStream(outputStream);
         builder.run();
@@ -82,7 +87,7 @@ public class RenderService {
         return renderingThreadPool.submit(() -> {
             try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
                 PdfRendererBuilder builder = new PdfRendererBuilder();
-                builder.withHtmlContent(htmlContent, null);
+                builder.withHtmlContent(pdfSafeHtml(htmlContent), null);
                 builder.useDefaultPageSize(210, 297, PdfRendererBuilder.PageSizeUnits.MM);
                 builder.toStream(baos);
                 builder.run();
@@ -92,6 +97,28 @@ public class RenderService {
                 throw new RuntimeException("Failed to generate PDF asynchronously", e);
             }
         });
+    }
+
+    static String pdfSafeHtml(String htmlContent) {
+        if (htmlContent == null || htmlContent.isBlank()) {
+            return "<html><head><meta charset=\"UTF-8\"/></head><body></body></html>";
+        }
+        String html = htmlContent.strip();
+        while (html.startsWith("\uFEFF")) html = html.substring(1).stripLeading();
+        if (html.startsWith("ï»¿")) html = html.substring(3).stripLeading();
+        if (html.startsWith("```")) {
+            int firstLine = html.indexOf('\n');
+            if (firstLine >= 0) html = html.substring(firstLine + 1);
+            if (html.stripTrailing().endsWith("```")) {
+                html = html.stripTrailing();
+                html = html.substring(0, html.length() - 3).stripTrailing();
+            }
+        }
+        String lower = html.toLowerCase(Locale.ROOT);
+        if (!lower.startsWith("<!doctype") && !lower.startsWith("<html")) {
+            html = "<html><head><meta charset=\"UTF-8\"/></head><body>" + html + "</body></html>";
+        }
+        return XHTML_VOID_ELEMENT.matcher(html).replaceAll("<$1$2/>");
     }
 
 }

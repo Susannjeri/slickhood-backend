@@ -32,4 +32,43 @@ class LeaseDocumentPdfTest {
         }
         assertEquals(original,snapshot.getRenderedHtml(),"Downloading never mutates the legal snapshot");
     }
+
+    @Test void legacyMarkdownFenceAndBomAreNormalizedBeforeRendering() throws Exception {
+        LeaseDocument snapshot = new LeaseDocument(); snapshot.setId(92L);
+        snapshot.setIssuerUserId(1L); snapshot.setRecipientUserId(2L);
+        snapshot.setStatus(LeaseDocumentStatus.DRAFT);
+        snapshot.setRenderedHtml("\uFEFF```html\n<html><head><meta charset=\"UTF-8\"></head><body><h1>Legacy lease</h1><br></body></html>\n```");
+        try (var bytes = new ByteArrayOutputStream()) {
+            new RenderService(Mustache.compiler(),null).toPdf(LeaseDocumentPdf.html(snapshot),bytes);
+            try (PDDocument pdf = PDDocument.load(bytes.toByteArray())) {
+                assertTrue(new PDFTextStripper().getText(pdf).contains("Legacy lease"));
+            }
+        }
+    }
+
+    @Test void legacyHtmlFragmentIsWrappedAsACompletePdfDocument() throws Exception {
+        try (var bytes = new ByteArrayOutputStream()) {
+            new RenderService(Mustache.compiler(),null).toPdf("<h1>Lease fragment</h1><p>Readable terms</p>",bytes);
+            try (PDDocument pdf = PDDocument.load(bytes.toByteArray())) {
+                String text = new PDFTextStripper().getText(pdf);
+                assertTrue(text.contains("Lease fragment"));
+                assertTrue(text.contains("Readable terms"));
+            }
+        }
+    }
+
+    @Test void legacyUppercaseBodyStillReceivesExecutionRecordInsideTheDocument() throws Exception {
+        LeaseDocument snapshot = new LeaseDocument(); snapshot.setId(93L);
+        snapshot.setIssuerUserId(1L); snapshot.setRecipientUserId(2L);
+        snapshot.setStatus(LeaseDocumentStatus.ISSUED);
+        snapshot.setRenderedHtml("<HTML><BODY><h1>Uppercase legacy lease</h1></BODY></HTML>");
+        try (var bytes = new ByteArrayOutputStream()) {
+            new RenderService(Mustache.compiler(),null).toPdf(LeaseDocumentPdf.html(snapshot),bytes);
+            try (PDDocument pdf = PDDocument.load(bytes.toByteArray())) {
+                String text = new PDFTextStripper().getText(pdf);
+                assertTrue(text.contains("Uppercase legacy lease"));
+                assertTrue(text.contains("Electronic execution record"));
+            }
+        }
+    }
 }
