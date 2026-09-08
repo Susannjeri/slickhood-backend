@@ -57,6 +57,17 @@ class LeaseDocumentPdfTest {
         }
     }
 
+    @Test void lowercaseHtml5DoctypeFromGovernedDocumentShellIsNormalized() throws Exception {
+        String productionShape = "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"UTF-8\"/></head>"
+                + "<body><h1>Residential Lease Agreement</h1></body></html>";
+        try (var bytes = new ByteArrayOutputStream()) {
+            new RenderService(Mustache.compiler(),null).toPdf(productionShape,bytes);
+            try (PDDocument pdf = PDDocument.load(bytes.toByteArray())) {
+                assertTrue(new PDFTextStripper().getText(pdf).contains("Residential Lease Agreement"));
+            }
+        }
+    }
+
     @Test void legacyUppercaseBodyStillReceivesExecutionRecordInsideTheDocument() throws Exception {
         LeaseDocument snapshot = new LeaseDocument(); snapshot.setId(93L);
         snapshot.setIssuerUserId(1L); snapshot.setRecipientUserId(2L);

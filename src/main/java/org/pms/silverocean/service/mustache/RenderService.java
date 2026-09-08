@@ -115,6 +115,13 @@ public class RenderService {
             }
         }
         String lower = html.toLowerCase(Locale.ROOT);
+        // OpenHTMLtoPDF parses XHTML through an XML reader. Browsers accept a
+        // lowercase HTML5 doctype, but XML requires the DOCTYPE keyword to be
+        // uppercase and otherwise fails at line 1, column 3.
+        if (lower.startsWith("<!doctype")) {
+            html = "<!DOCTYPE" + html.substring("<!doctype".length());
+            lower = html.toLowerCase(Locale.ROOT);
+        }
         if (!lower.startsWith("<!doctype") && !lower.startsWith("<html")) {
             html = "<html><head><meta charset=\"UTF-8\"/></head><body>" + html + "</body></html>";
         }
