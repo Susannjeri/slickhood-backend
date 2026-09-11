@@ -23,6 +23,8 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
+import org.pms.silverocean.service.leasedocument.HomeownerAgreementService;
+import org.pms.silverocean.database.pms.entities.Invite;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
@@ -49,6 +51,7 @@ class EstateServiceTest {
     @Mock NotificationService notifications;
     @Mock I18NService i18n;
     @Mock org.pms.silverocean.service.teamaccess.WorkspaceSelectionService workspaces;
+    @Mock HomeownerAgreementService homeownerAgreements;
     private Property estate() {
         Property p = new Property(); p.setId(11L); p.setActive(true);
         p.setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE); return p;
@@ -64,7 +67,7 @@ class EstateServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new EstateService(ownerships, properties, units, users, charges, invoices, notifications, i18n, new EstateAccessService(properties, users, workspaces));
+        service = new EstateService(ownerships, properties, units, users, charges, invoices, notifications, i18n, new EstateAccessService(properties, users, workspaces), homeownerAgreements);
         unit = new Unit();
         unit.setId(77L);
         unit.setPropertyId(11L);
@@ -84,8 +87,11 @@ class EstateServiceTest {
         when(units.findAndLockById(unit.getId())).thenReturn(Optional.of(unit));
         when(properties.findByIdAndHomeownerInviter(unit.getPropertyId(), 999L)).thenReturn(Optional.of(property));
         when(ownerships.findCurrentForUpdate(unit.getId())).thenReturn(Optional.empty());
+        when(ownerships.save(any(PropertyOwnership.class))).thenAnswer(call -> call.getArgument(0));
 
-        service.createOwnershipFromInvite(unit.getId(), homeowner.getId(), 999L);
+        Invite invite = new Invite();
+        invite.setEntityId(unit.getId()); invite.setCreatedBy(999L); invite.setLeaseStartDate(LocalDate.now());
+        service.createOwnershipFromInvite(invite, homeowner.getId());
 
         ArgumentCaptor<PropertyOwnership> saved = ArgumentCaptor.forClass(PropertyOwnership.class);
         verify(ownerships).save(saved.capture());
@@ -93,6 +99,7 @@ class EstateServiceTest {
         assertEquals(unit.getId(), saved.getValue().getUnitId());
         assertEquals("HOMEOWNER_INVITE", saved.getValue().getSource());
         assertEquals(999L, saved.getValue().getCreatedBy());
+        verify(homeownerAgreements).createIssuedAgreement(saved.getValue(), unit, invite, homeowner);
     }
 
     @Test
@@ -100,16 +107,20 @@ class EstateServiceTest {
         PropertyOwnership current = new PropertyOwnership();
         current.setUnitId(unit.getId());
         current.setHomeownerUserId(homeowner.getId());
+        current.setOwnershipStart(LocalDate.now());
         current.setActive(true);
         when(users.findById(homeowner.getId())).thenReturn(Optional.of(homeowner));
         when(units.findAndLockById(unit.getId())).thenReturn(Optional.of(unit));
         when(properties.findByIdAndHomeownerInviter(unit.getPropertyId(), 999L)).thenReturn(Optional.of(estate()));
         when(ownerships.findCurrentForUpdate(unit.getId())).thenReturn(Optional.of(current));
 
-        PropertyOwnership result = service.createOwnershipFromInvite(unit.getId(), homeowner.getId(), 999L);
+        Invite invite = new Invite();
+        invite.setEntityId(unit.getId()); invite.setCreatedBy(999L); invite.setLeaseStartDate(LocalDate.now());
+        PropertyOwnership result = service.createOwnershipFromInvite(invite, homeowner.getId());
 
         assertSame(current, result);
         verify(ownerships, never()).save(current);
+        verify(homeownerAgreements).createIssuedAgreement(current, unit, invite, homeowner);
     }
 
     @Test

@@ -210,6 +210,7 @@ class RoleServiceTest {
         Users homeowner = new Users();
         homeowner.setId(200L);
         homeowner.setEmail("owner@example.com");
+        homeowner.setActive(true);
 
         when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
         when(roleRepo.findByIdAndActive(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
@@ -220,8 +221,52 @@ class RoleServiceTest {
         ResponseDTO response = roleService.assignRoleFromInvite(invite, null, homeowner);
 
         assertTrue(response.isSuccess());
-        verify(estateService).createOwnershipFromInvite(77L, homeowner.getId(), assignor.getId());
+        verify(estateService).createOwnershipFromInvite(invite, homeowner.getId());
         verify(propertyManagerService, never()).addStaffToProperty(anyLong(), anyLong(), anyLong(), any(PMSRole.class));
+        assertFalse(invite.isActive());
+    }
+
+    @Test
+    void assignRoleFromInvite_inactiveHomeowner_defersOwnershipUntilOtpActivation() {
+        Role homeownerRole = new Role(PMSRole.HOMEOWNER.getName(), PMSRole.HOMEOWNER.getDescription(), false);
+        homeownerRole.setId(12L);
+        homeownerRole.setActive(true);
+        Invite invite = new Invite();
+        invite.setId(51L);
+        invite.setRoleId(homeownerRole.getId());
+        invite.setCreatedBy(999L);
+        invite.setEntityId(77L);
+        invite.setType(InviteType.HOMEOWNER.name());
+        invite.setRecipient("owner@example.com");
+        invite.setActive(true);
+        Users assignor = new Users();
+        assignor.setId(999L);
+        assignor.setEmail("manager@example.com");
+        Users homeowner = new Users();
+        homeowner.setId(200L);
+        homeowner.setEmail("owner@example.com");
+
+        when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
+        when(roleRepo.findByIdAndActive(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
+        when(roleRepo.findById(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
+        when(userDao.findByEmail(homeowner.getEmail())).thenReturn(Optional.of(homeowner));
+        when(userRoleRepo.findByUserIdAndRoleId(homeowner.getId(), homeownerRole.getId())).thenReturn(0);
+
+        ResponseDTO response = roleService.assignRoleFromInvite(invite, null, homeowner);
+
+        assertTrue(response.isSuccess());
+        assertTrue(invite.isActive());
+        verify(estateService, never()).createOwnershipFromInvite(any(Invite.class), anyLong());
+
+        homeowner.setActive(true);
+        homeowner.setEmailVerified(true);
+        homeowner.setInviteId(invite.getId());
+        when(inviteDao.getActiveInviteById(invite.getId())).thenReturn(Optional.of(invite));
+        when(userRoleRepo.findByUserIdAndRoleId(homeowner.getId(), homeownerRole.getId())).thenReturn(1);
+
+        roleService.completeDeferredInvite(homeowner);
+
+        verify(estateService).createOwnershipFromInvite(invite, homeowner.getId());
         assertFalse(invite.isActive());
     }
 
@@ -234,6 +279,7 @@ class RoleServiceTest {
         invite.setType(InviteType.BUYER.name()); invite.setRecipient("buyer@example.com"); invite.setActive(true);
         Users assignor = new Users(); assignor.setId(999L); assignor.setEmail("sales@example.com");
         Users buyer = new Users(); buyer.setId(201L); buyer.setEmail("buyer@example.com");
+        buyer.setActive(true);
         SaleTransaction sale = new SaleTransaction(); sale.setId(88L); sale.setActive(true);
         sale.setInvitedBuyerEmail("buyer@example.com");
 

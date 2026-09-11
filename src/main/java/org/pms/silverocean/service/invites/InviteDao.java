@@ -66,6 +66,10 @@ public class InviteDao {
         return inviteRepo.findByIdAndActiveTrueAndCreatedBy(inviteId, createdBy);
     }
 
+    public Optional<Invite> getActiveInviteById(long inviteId) {
+        return inviteRepo.findByIdAndActiveTrue(inviteId);
+    }
+
     public void updateInvite(Invite invite) {
         auditLogService.createAuditLog(invite, Permission.UPDATE_INVITE);
         inviteRepo.save(invite);

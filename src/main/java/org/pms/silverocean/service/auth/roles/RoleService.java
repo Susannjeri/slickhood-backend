@@ -242,21 +242,39 @@ public class RoleService {
         if (responseDTO.isSuccess()) {
             invite.setVisits(invite.getVisits() + 1);
             InviteType inviteType = InviteType.valueOf(invite.getType());
+            Role invitedRole = roleRepo.findById(invite.getRoleId() == null ? roleId : invite.getRoleId()).orElse(null);
+            PMSRole invitedPmsRole = invitedRole == null ? null : PMSRole.roleFromSavedName(invitedRole.getName());
+            boolean entityAttachmentDeferred = !user.isActive()
+                    && invitedPmsRole != null
+                    && !invitedPmsRole.isSelfAssignable()
+                    && invite.getEntityId() != null;
             // Tenant onboarding still needs the token to create the lease after the role is attached.
             // LeaseService consumes it atomically once the draft has been created.
-            if (inviteType != InviteType.TENANT
+            if (!entityAttachmentDeferred && inviteType != InviteType.TENANT
                     && (inviteType.isExpiresAfterUse() || invite.getRoleId() != null)) {
                 invite.setActive(false);
             }
             inviteDao.updateInvite(invite);
-            roleRepo.findById(invite.getRoleId() == null ? roleId : invite.getRoleId()).ifPresent(role -> {
-                PMSRole pmsRole = PMSRole.roleFromSavedName(role.getName());
-                if (!pmsRole.isSelfAssignable() && invite.getEntityId() != null) {
-                    attachUserToEntity(invite, user.getId(), pmsRole);
-                }
-            });
+            if (!entityAttachmentDeferred && invitedPmsRole != null
+                    && !invitedPmsRole.isSelfAssignable() && invite.getEntityId() != null) {
+                attachUserToEntity(invite, user.getId(), invitedPmsRole);
+            }
         }
         return responseDTO;
+    }
+
+    /**
+     * Completes the entity-bound part of a registration invitation only after
+     * email OTP activation. This prevents ownership/agreement records from being
+     * created for an unverified address while preserving a seamless first login.
+     */
+    @Transactional
+    public void completeDeferredInvite(Users user) {
+        if (user == null || user.getId() == null || !user.isActive() || !user.isEmailVerified()
+                || user.getInviteId() == null) return;
+        inviteDao.getActiveInviteById(user.getInviteId())
+                .filter(this::notExpired)
+                .ifPresent(invite -> assignRoleFromInvite(invite, null, user));
     }
 
     private void validateInviteRecipient(Invite invite, Users user) {
@@ -305,7 +323,7 @@ public class RoleService {
 
     private void attachUserToEntity(Invite invite, long userId, PMSRole pmsRole) {
         if (PMSRole.HOMEOWNER.equals(pmsRole)) {
-            estateService.createOwnershipFromInvite(invite.getEntityId(), userId, invite.getCreatedBy());
+            estateService.createOwnershipFromInvite(invite, userId);
         } else if (PMSRole.BUYER.equals(pmsRole)) {
             var sale = saleTransactionRepo.findByIdForUpdate(invite.getEntityId())
                     .filter(candidate -> candidate.isActive()

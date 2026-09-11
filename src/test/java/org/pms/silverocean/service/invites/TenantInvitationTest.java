@@ -39,7 +39,7 @@ class TenantInvitationTest {
     final I18NService i18n = mock(I18NService.class);
     final UnitDTO unit = mock(UnitDTO.class);
     final LeaseDocumentTemplateRepo templates = mock(LeaseDocumentTemplateRepo.class);
-    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,null,null,null,templates);
+    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,null,null,null,templates,null);
 
     void unit(PMSLeaseMode mode, boolean occupied) {
         when(users.getUserId()).thenReturn(9L);

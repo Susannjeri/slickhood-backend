@@ -269,7 +269,7 @@ class LeaseDocumentServiceTest {
         verify(documents, never()).save(any());
     }
 
-    @Test void currentHomeownerAgreementCanBeSignedWithoutCreatingATenancy() {
+    @Test void currentHomeownerCanSignAgreementWithoutCreatingATenancy() {
         properties.findById(15L).orElseThrow().setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE);
         units.findById(13L).orElseThrow().setLeaseMode("SERVICE_CHARGE");
         LeaseDocument d = rentalDraft(LeaseDocumentStatus.ISSUED);
@@ -280,9 +280,24 @@ class LeaseDocumentServiceTest {
         current.setOwnershipStart(LocalDate.now().minusDays(2)); current.setCreatedOn(java.time.ZonedDateTime.now().minusDays(2));
         when(ownershipRepo.findAllByPropertyIdAndActiveTrue(15L)).thenReturn(List.of(current));
         when(ownershipRepo.findActiveForUpdate(81L)).thenReturn(Optional.of(current));
+        when(users.getUserId()).thenReturn(14L);
+        when(documents.findAccessibleForUpdate(66L,14L)).thenReturn(Optional.of(d));
         when(documents.save(d)).thenReturn(d);
         assertEquals(LeaseDocumentStatus.PARTIALLY_SIGNED, service.sign(66L).status());
-        assertNotNull(d.getIssuerSignedAt());
+        assertNotNull(d.getRecipientSignedAt());
+        verifyNoInteractions(leaseService, salesService);
+    }
+
+    @Test void currentHomeownerCanRejectUnsignedEstateAgreementWithoutTouchingATenancy() {
+        LeaseDocument d = currentEstateDraft();
+        when(users.getUserId()).thenReturn(14L);
+        when(documents.findAccessibleForUpdate(66L,14L)).thenReturn(Optional.of(d));
+        when(documents.save(d)).thenReturn(d);
+
+        LeaseDocumentDTO result = service.reject(66L, new RejectLeaseDocumentRequest("Service terms need correction"));
+
+        assertEquals(LeaseDocumentStatus.REJECTED, result.status());
+        assertEquals("Service terms need correction", result.recipientRejectionReason());
         verifyNoInteractions(leaseService, salesService);
     }
 
@@ -340,11 +355,14 @@ class LeaseDocumentServiceTest {
         LeaseDocument d = currentEstateDraft();
         d.setRenderedHtml("<html><body><h1>Estate agreement</h1><p>Acacia home A-1</p></body></html>");
         when(documents.save(d)).thenReturn(d);
-        service.sign(66L); // Estate manager may sign first; this is not a rental lease.
         when(users.getUserId()).thenReturn(14L);
         when(documents.findAccessibleForUpdate(66L,14L)).thenReturn(Optional.of(d));
-        assertEquals(LeaseDocumentStatus.SIGNED, service.sign(66L).status());
+        assertEquals(LeaseDocumentStatus.PARTIALLY_SIGNED, service.sign(66L).status());
         assertNotNull(d.getRecipientSignedAt());
+        when(users.getUserId()).thenReturn(16L);
+        when(documents.findAccessibleForUpdate(66L,16L)).thenReturn(Optional.of(d));
+        assertEquals(LeaseDocumentStatus.SIGNED, service.sign(66L).status());
+        when(users.getUserId()).thenReturn(14L);
         when(documents.findAccessible(66L,14L)).thenReturn(Optional.of(d));
         // Viewing historical evidence does not require a currently active ownership.
         clearInvocations(ownershipRepo);

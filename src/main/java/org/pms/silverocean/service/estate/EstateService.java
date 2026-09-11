@@ -29,6 +29,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
+import org.pms.silverocean.database.pms.entities.Invite;
+import org.pms.silverocean.service.leasedocument.HomeownerAgreementService;
 
 @Service
 public class EstateService {
@@ -41,14 +43,17 @@ public class EstateService {
     private final NotificationService notificationService;
     private final I18NService i18n;
     private final EstateAccessService access;
+    private final HomeownerAgreementService homeownerAgreements;
 
     public EstateService(PropertyOwnershipRepo ownershipRepo, PropertyRepo propertyRepo, UnitRepo unitRepo, UserDao userDao,
                          EstateServiceChargeRepo chargeRepo, InvoiceService invoiceService,
-                         NotificationService notificationService, I18NService i18n, EstateAccessService access) {
+                         NotificationService notificationService, I18NService i18n, EstateAccessService access,
+                         HomeownerAgreementService homeownerAgreements) {
         this.ownershipRepo = ownershipRepo; this.propertyRepo = propertyRepo; this.unitRepo = unitRepo; this.userDao = userDao;
         this.chargeRepo = chargeRepo; this.invoiceService = invoiceService;
         this.notificationService = notificationService; this.i18n = i18n;
         this.access = access;
+        this.homeownerAgreements = homeownerAgreements;
     }
 
     @Transactional
@@ -74,14 +79,21 @@ public class EstateService {
     }
 
     @Transactional
-    public PropertyOwnership createOwnershipFromInvite(long unitId, long homeownerUserId, long inviterUserId) {
+    public PropertyOwnership createOwnershipFromInvite(Invite invite, long homeownerUserId) {
+        if (invite == null || invite.getEntityId() == null || invite.getCreatedBy() == null
+                || invite.getLeaseStartDate() == null) {
+            throw new PMSCustomException(ResponseCode.INVALID_INVITE_LINK);
+        }
         Users homeowner = userDao.findById(homeownerUserId).filter(Users::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR));
-        Unit unit = unitRepo.findAndLockById(unitId).filter(u -> u.isActive() && "SERVICE_CHARGE".equals(u.getLeaseMode()))
+        Unit unit = unitRepo.findAndLockById(invite.getEntityId()).filter(u -> u.isActive() && "SERVICE_CHARGE".equals(u.getLeaseMode()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
-        propertyRepo.findByIdAndHomeownerInviter(unit.getPropertyId(), inviterUserId)
+        propertyRepo.findByIdAndHomeownerInviter(unit.getPropertyId(), invite.getCreatedBy())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
-        return createUnitOwnership(unit, homeowner.getId(), LocalDate.now(PMSUtils.getZoneId()), "HOMEOWNER_INVITE", inviterUserId);
+        PropertyOwnership ownership = createUnitOwnership(unit, homeowner.getId(), invite.getLeaseStartDate(),
+                "HOMEOWNER_INVITE", invite.getCreatedBy());
+        homeownerAgreements.createIssuedAgreement(ownership, unit, invite, homeowner);
+        return ownership;
     }
 
     private PropertyOwnership createUnitOwnership(Unit unit, long homeownerUserId, LocalDate ownershipStart,

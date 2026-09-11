@@ -35,6 +35,7 @@ public interface InviteRepo extends JpaRepository<Invite, Long> {
             "AND i.type='TENANT' AND i.active AND i.expiryDate>:now")
     int countPendingTenantInvites(String recipient, LocalDateTime now);
     Optional<Invite> findByIdAndActiveTrueAndCreatedBy(long inviteId, long createdBy);
+    Optional<Invite> findByIdAndActiveTrue(long inviteId);
     @Query("SELECT li.id as inviteId, li.entityId as entityId, u.ref as unitRef, p.name as propertyName," +
             " li.lastModifiedDate as lastAccessed, li.expiryDate as expiryDate, li.visits as visits, li.token as token" +
             " FROM Invite li JOIN Unit u ON li.entityId=u.id JOIN Property p ON u.propertyId=p.id WHERE li.createdBy=:createdBy AND li.active AND li.type=:type")

@@ -233,6 +233,7 @@ public class UserAuthenticationService {
         if (!user.isActive()) {
             throw new PMSCustomException(ResponseCode.LOGIN_FAILURE_INACTIVE_USER);
         }
+        roleService.completeDeferredInvite(user);
         String refreshToken = PMSUtils.randomMask();
         user.setRefreshToken(PMSUtils.hashToken(refreshToken));
         user.setLastLogin(ZonedDateTime.now());

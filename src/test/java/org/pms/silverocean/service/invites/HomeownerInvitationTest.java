@@ -4,7 +4,10 @@ import org.junit.jupiter.api.Test;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.database.pms.RoleRepo;
+import org.pms.silverocean.database.pms.LeaseDocumentTemplateRepo;
+import org.pms.silverocean.database.pms.PropertyAccountRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
+import org.pms.silverocean.database.pms.entities.LeaseDocumentTemplate;
 import org.pms.silverocean.database.pms.entities.Role;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
@@ -21,6 +24,9 @@ import org.pms.silverocean.service.property.PropertyService;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.time.LocalDate;
+import org.pms.silverocean.service.leasedocument.DocumentTemplateIntegrity;
+import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -34,7 +40,9 @@ class HomeownerInvitationTest {
     final I18NService i18n = mock(I18NService.class);
     final EstateAccessService access = mock(EstateAccessService.class);
     final UnitDTO unit = mock(UnitDTO.class);
-    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,null,null,access,null);
+    final LeaseDocumentTemplateRepo templates = mock(LeaseDocumentTemplateRepo.class);
+    final PropertyAccountRepo accounts = mock(PropertyAccountRepo.class);
+    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,null,null,access,templates,accounts);
 
     void setupUnit(PMSLeaseMode mode) {
         when(users.getUserId()).thenReturn(9L);
@@ -42,6 +50,16 @@ class HomeownerInvitationTest {
         when(properties.listUnits(any(),eq(Optional.empty()),eq(Optional.empty()),eq(Optional.of(77L)),eq(Optional.empty())))
                 .thenReturn(new ResponseDTO(true,"ok","ok",unit));
         when(unit.propertyId()).thenReturn(11L); when(unit.leaseMode()).thenReturn(mode);
+        if (mode == PMSLeaseMode.SERVICE_CHARGE) {
+            LeaseDocumentTemplate template = new LeaseDocumentTemplate();
+            template.setId(41L); template.setActive(true); template.setVersion(1);
+            template.setDocumentType(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT);
+            template.setBodyHtml("<html><body>{{propertyName}}</body></html>");
+            template.setContentSha256(DocumentTemplateIntegrity.sha256(template.getBodyHtml()));
+            template.setLegalReviewRequired(false); template.setLegalReviewedAt(java.time.LocalDateTime.now());
+            when(templates.findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT)).thenReturn(Optional.of(template));
+            when(accounts.countVerifiedOperatingAccounts(11L, org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT)).thenReturn(1L);
+        }
     }
     @Test void authorizedDelegateCanSendAnEmailBoundOneTimeHomeownerInvitation() {
         setupUnit(PMSLeaseMode.SERVICE_CHARGE);
@@ -51,11 +69,13 @@ class HomeownerInvitationTest {
         AtomicReference<Invite> saved = new AtomicReference<>();
         doAnswer(call -> { Invite invite = call.getArgument(0); invite.setId(88L); saved.set(invite); return null; }).when(invites).createInvite(any());
         when(invites.getInviteByInviteIdAndCreatedBy(88L,9L)).thenAnswer(call -> Optional.of(saved.get()));
-        service.createAndSendEmailInvite(InviteType.HOMEOWNER,77L," Resident@Example.test ");
+        service.createAndSendEmailInvite(InviteType.HOMEOWNER,77L," Resident@Example.test ", LocalDate.now(), null);
         verify(access).require(11L,Permission.MANAGE_ESTATE);
         assertEquals("resident@example.test",saved.get().getRecipient());
         assertEquals("HOMEOWNER",saved.get().getType());
         assertEquals(77L,saved.get().getEntityId());
+        assertEquals(LocalDate.now(),saved.get().getLeaseStartDate());
+        assertEquals(41L,saved.get().getAgreementTemplateId());
         var notification = org.mockito.ArgumentCaptor.forClass(NotificationDTO.class);
         verify(notifications).queueNotification(notification.capture());
         assertEquals("resident@example.test",notification.getValue().recipient());
@@ -63,13 +83,23 @@ class HomeownerInvitationTest {
     }
     @Test void aRentalCannotReceiveAHomeownerInvitation() {
         setupUnit(PMSLeaseMode.RENT);
-        assertThrows(PMSCustomException.class,()->service.createAndSendEmailInvite(InviteType.HOMEOWNER,77L,"resident@example.test"));
+        assertThrows(PMSCustomException.class,()->service.createAndSendEmailInvite(InviteType.HOMEOWNER,77L,"resident@example.test", LocalDate.now(), null));
         verifyNoInteractions(invites,notifications);
     }
     @Test void permissionDenialCannotSendOrCreateAnInvitation() {
         setupUnit(PMSLeaseMode.SERVICE_CHARGE);
         when(access.require(11L,Permission.MANAGE_ESTATE)).thenThrow(new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
-        assertThrows(PMSCustomException.class,()->service.createAndSendEmailInvite(InviteType.HOMEOWNER,77L,"resident@example.test"));
+        assertThrows(PMSCustomException.class,()->service.createAndSendEmailInvite(InviteType.HOMEOWNER,77L,"resident@example.test", LocalDate.now(), null));
         verifyNoInteractions(invites,notifications);
+    }
+    @Test void homeownerInvitationRequiresAConfiguredEstateReceivingAccount() {
+        setupUnit(PMSLeaseMode.SERVICE_CHARGE);
+        when(accounts.countVerifiedOperatingAccounts(11L, org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT)).thenReturn(0L);
+
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> service.createAndSendEmailInvite(InviteType.HOMEOWNER,77L,"resident@example.test", LocalDate.now(), null));
+
+        assertEquals(ResponseCode.ESTATE_ONBOARDING_SETUP_REQUIRED, error.getResponseCode());
+        verifyNoInteractions(invites, notifications);
     }
 }

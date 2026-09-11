@@ -7,6 +7,7 @@ import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.database.pms.RoleRepo;
 import org.pms.silverocean.database.pms.LeaseDocumentTemplateRepo;
+import org.pms.silverocean.database.pms.PropertyAccountRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.Role;
 import org.pms.silverocean.service.I18NService;
@@ -68,9 +69,10 @@ public class InviteService {
     private final TeamAccessService teamAccessService;
     private final org.pms.silverocean.service.estate.EstateAccessService estateAccess;
     private final LeaseDocumentTemplateRepo documentTemplates;
+    private final PropertyAccountRepo propertyAccounts;
 
 
-    public InviteService(InviteDao inviteDao, PropertyService propertyService, UserDao userDao, ConfigService configService, RoleRepo roleRepo, NotificationService notificationService, I18NService i18NService, RoleService roleService, TeamAccessService teamAccessService, org.pms.silverocean.service.estate.EstateAccessService estateAccess, LeaseDocumentTemplateRepo documentTemplates) {
+    public InviteService(InviteDao inviteDao, PropertyService propertyService, UserDao userDao, ConfigService configService, RoleRepo roleRepo, NotificationService notificationService, I18NService i18NService, RoleService roleService, TeamAccessService teamAccessService, org.pms.silverocean.service.estate.EstateAccessService estateAccess, LeaseDocumentTemplateRepo documentTemplates, PropertyAccountRepo propertyAccounts) {
         this.inviteDao = inviteDao;
         this.propertyService = propertyService;
         this.userDao = userDao;
@@ -82,6 +84,7 @@ public class InviteService {
         this.teamAccessService = teamAccessService;
         this.estateAccess = estateAccess;
         this.documentTemplates = documentTemplates;
+        this.propertyAccounts = propertyAccounts;
     }
 
     public String createInviteLink(InviteType inviteType, Long entityId) {
@@ -151,6 +154,19 @@ public class InviteService {
                         if (unitDTO.leaseMode() != org.pms.silverocean.service.lease.wrappers.PMSLeaseMode.SERVICE_CHARGE) {
                             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
                         }
+                        if (leaseStartDate == null || leaseStartDate.isAfter(LocalDate.now(PMSUtils.getZoneId()))
+                                || propertyAccounts.countVerifiedOperatingAccounts(unitDTO.propertyId(),
+                                org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT) < 1) {
+                            throw new PMSCustomException(ResponseCode.ESTATE_ONBOARDING_SETUP_REQUIRED);
+                        }
+                        var agreementTemplate = documentTemplates
+                                .findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT)
+                                .filter(template -> !template.isLegalReviewRequired() && template.getLegalReviewedAt() != null
+                                        && DocumentTemplateIntegrity.sha256(template.getBodyHtml())
+                                        .equals(template.getContentSha256()))
+                                .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE));
+                        invite.setLeaseStartDate(leaseStartDate);
+                        invite.setAgreementTemplateId(agreementTemplate.getId());
                     }
                     if (inviteType == InviteType.TENANT) {
                         if (unitDTO.leaseMode() != org.pms.silverocean.service.lease.wrappers.PMSLeaseMode.RENT

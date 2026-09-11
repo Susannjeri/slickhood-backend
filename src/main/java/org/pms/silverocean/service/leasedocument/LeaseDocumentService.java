@@ -217,7 +217,7 @@ public class LeaseDocumentService {
     public LeaseDocumentDTO reject(long id, RejectLeaseDocumentRequest request) {
         LeaseDocument document = mutable(id);
         if (document.getRecipientUserId() != userDao.getUserId()
-                || !document.getDocumentType().isTenancyAgreement()
+                || (!document.getDocumentType().isTenancyAgreement() && !document.getDocumentType().isEstateDocument())
                 || (document.getStatus() != LeaseDocumentStatus.ISSUED
                 && document.getStatus() != LeaseDocumentStatus.ACKNOWLEDGED)
                 || document.getIssuerSignedAt() != null || document.getRecipientSignedAt() != null) {
@@ -227,7 +227,9 @@ public class LeaseDocumentService {
         document.setRecipientRejectionReason(request.reason().trim());
         document.setStatus(LeaseDocumentStatus.REJECTED);
         LeaseDocument saved = documentRepo.save(document);
-        leaseService.rejectGovernedAgreement(saved.getLeaseId(), saved.getRecipientUserId());
+        if (saved.getDocumentType().isTenancyAgreement()) {
+            leaseService.rejectGovernedAgreement(saved.getLeaseId(), saved.getRecipientUserId());
+        }
         return new LeaseDocumentDTO(saved);
     }
 
@@ -242,7 +244,8 @@ public class LeaseDocumentService {
         }
         if (document.isLegalReviewRequired()) throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         validateCurrentContext(document);
-        if (document.getDocumentType().isTenancyAgreement() && document.getIssuerUserId() == userId
+        if ((document.getDocumentType().isTenancyAgreement() || document.getDocumentType().isEstateDocument())
+                && document.getIssuerUserId() == userId
                 && document.getRecipientSignedAt() == null) {
             throw new PMSCustomException(ResponseCode.LEASE_DOCUMENT_INVALID_STATE);
         }

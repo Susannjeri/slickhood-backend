@@ -63,5 +63,6 @@ class VerifiedSessionServiceTest {
         assertNotNull(saved.getValue().getRefreshToken());
         assertNotEquals(session.refreshToken(), saved.getValue().getRefreshToken());
         verify(attempts).loginSuccess(user.getEmail());
+        verify(roles).completeDeferredInvite(user);
     }
 }
