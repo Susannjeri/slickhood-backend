@@ -17,6 +17,7 @@ import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.property.PMSPropertyManagementMode;
+import org.pms.silverocean.service.teamaccess.WorkspaceSelectionService;
 
 import java.time.Year;
 import java.util.Optional;
@@ -36,23 +37,25 @@ class EstateSetupServiceTest {
     @Mock PropertyOwnershipRepo ownerships;
     @Mock EstateBudgetRepo budgets;
     @Mock UserDao users;
+    @Mock WorkspaceSelectionService workspaces;
 
     private EstateSetupService service;
 
     @BeforeEach
     void setUp() {
-        service = new EstateSetupService(properties, units, managers, accounts, ownerships, budgets, users);
+        service = new EstateSetupService(properties, units, managers, accounts, ownerships, budgets, users, workspaces);
     }
 
     @Test
     void inaccessiblePropertyDoesNotExposeSetupInformation() {
         when(users.getUserId()).thenReturn(99L);
-        when(properties.findByIdAndStaffOrOwner(10L, 99L)).thenReturn(Optional.empty());
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        when(properties.findByIdAndCreatedByAndActiveTrue(10L, 99L)).thenReturn(Optional.empty());
 
         PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.getStatus(10L));
 
         assertThat(error.getResponseCode()).isEqualTo(ResponseCode.PROPERTY_NOT_FOUND);
-        verify(units, never()).countAllByPropertyIdAndActiveTrue(10L);
+        verify(units, never()).countByPropertyIdAndLeaseModeAndActiveTrue(10L, "SERVICE_CHARGE");
     }
 
     @Test
@@ -68,7 +71,7 @@ class EstateSetupServiceTest {
     @Test
     void serviceChargeSetupRequiresHomeownersAfterUnitsAndAccount() {
         stubProperty(PMSPropertyManagementMode.SERVICE_CHARGE);
-        when(units.countAllByPropertyIdAndActiveTrue(10L)).thenReturn(20);
+        when(units.countByPropertyIdAndLeaseModeAndActiveTrue(10L, "SERVICE_CHARGE")).thenReturn(20L);
         when(accounts.countVerifiedOperatingAccounts(10L, org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT)).thenReturn(1L);
 
         EstateSetupStatus status = service.getStatus(10L);
@@ -81,7 +84,7 @@ class EstateSetupServiceTest {
     @Test
     void serviceChargeSetupIsReadyOnlyAfterOwnershipAndCurrentBudget() {
         stubProperty(PMSPropertyManagementMode.SERVICE_CHARGE);
-        when(units.countAllByPropertyIdAndActiveTrue(10L)).thenReturn(20);
+        when(units.countByPropertyIdAndLeaseModeAndActiveTrue(10L, "SERVICE_CHARGE")).thenReturn(20L);
         when(accounts.countVerifiedOperatingAccounts(10L, org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT)).thenReturn(1L);
         when(ownerships.countByPropertyIdAndActiveTrue(10L)).thenReturn(20L);
         when(budgets.countByPropertyIdAndBudgetYearAndStatusAndActiveTrue(10L, Year.now(org.pms.silverocean.common.PMSUtils.getZoneId()).getValue(), "APPROVED")).thenReturn(1L);
@@ -107,16 +110,17 @@ class EstateSetupServiceTest {
         EstateSetupStatus status = service.getStatus(10L);
 
         assertThat(status.propertyId()).isEqualTo(10L);
-        verify(properties, never()).findByIdAndStaffOrOwner(10L, 99L);
+        verify(properties, never()).findByIdAndCreatedByAndActiveTrue(10L, 99L);
     }
 
     private void stubProperty(PMSPropertyManagementMode mode) {
         when(users.getUserId()).thenReturn(99L);
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
         Property property = new Property();
         property.setId(10L);
         property.setName("Green Court");
         property.setManagementMode(mode);
         property.setActive(true);
-        when(properties.findByIdAndStaffOrOwner(10L, 99L)).thenReturn(Optional.of(property));
+        when(properties.findByIdAndCreatedByAndActiveTrue(10L, 99L)).thenReturn(Optional.of(property));
     }
 }

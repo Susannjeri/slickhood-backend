@@ -12,6 +12,7 @@ import org.pms.silverocean.database.pms.entities.UserSubscription;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
+import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
 import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 import org.pms.silverocean.service.subscription.enums.SubscriptionStatus;
 import org.pms.silverocean.service.teamaccess.TeamMembershipStatus;
@@ -159,6 +160,51 @@ public class SubscriptionEntitlementService {
         if (product != null) requireProduct(product);
     }
 
+    /**
+     * A physical property is a shared portfolio container. Owners with at least one
+     * live property product may maintain it from any of their property workspaces.
+     * Staff remain constrained by their explicitly selected workspace.
+     */
+    @Transactional(readOnly = true)
+    public void requirePropertyPortfolioAccess() {
+        if (internalStaff()) return;
+        long userId = users.getUserId();
+        SubscriptionProduct workspaceProduct = selectedWorkspaceProduct(userId);
+        if (workspaceProduct != null) {
+            requireFeature(workspaceProduct, featureForProduct(workspaceProduct));
+            return;
+        }
+        long payerId = subscriptionOwner(userId);
+        boolean allowed = List.of(SubscriptionProduct.LANDLORD, SubscriptionProduct.ESTATE_MANAGEMENT,
+                        SubscriptionProduct.PROPERTY_SALES).stream()
+                .anyMatch(product -> hasFeature(payerId, product, featureForProduct(product)));
+        if (!allowed) throw new PMSCustomException(ResponseCode.SUBSCRIPTION_ACCESS_REQUIRED);
+    }
+
+    /**
+     * Unit purpose is authoritative. An owner may use every purpose included in the
+     * account's active subscriptions. A staff member cannot escape the selected
+     * workspace boundary even when the workspace owner has other subscriptions.
+     */
+    @Transactional(readOnly = true)
+    public SubscriptionProduct requireUnitMode(PMSLeaseMode mode) {
+        if (mode == null) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        SubscriptionProduct product = productForUnitMode(mode);
+        if (internalStaff()) return product;
+        long userId = users.getUserId();
+        SubscriptionProduct workspaceProduct = selectedWorkspaceProduct(userId);
+        if (workspaceProduct != null && workspaceProduct != product) {
+            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
+        }
+        requireFeature(product, featureForProduct(product));
+        return product;
+    }
+
+    @Transactional
+    public void requireAvailableUnitQuota(PMSLeaseMode mode, LongSupplier currentUsage, long increment) {
+        requireAvailableQuota(requireUnitMode(mode), "UNITS", currentUsage, increment);
+    }
+
     private long subscriptionOwner(long userId) {
         if (primaryRoleProduct() != null) return userId;
         return sessionMembership(userId)
@@ -183,6 +229,43 @@ public class SubscriptionEntitlementService {
 
     private java.util.Optional<org.pms.silverocean.database.pms.entities.WorkspaceMembership> sessionMembership(long userId) {
         return workspaceSelection.selectedMembership(userId);
+    }
+
+    private SubscriptionProduct selectedWorkspaceProduct(long userId) {
+        if (primaryRoleProduct() != null) return null;
+        return sessionMembership(userId)
+                .flatMap(membership -> workspaces.findById(membership.getWorkspaceId()))
+                .filter(workspace -> workspace.isActive())
+                .map(workspace -> switch (workspace.getBusinessArea()) {
+                    case LANDLORD -> SubscriptionProduct.LANDLORD;
+                    case ESTATE_MANAGEMENT -> SubscriptionProduct.ESTATE_MANAGEMENT;
+                    case PROPERTY_SALE_MANAGEMENT -> SubscriptionProduct.PROPERTY_SALES;
+                }).orElse(null);
+    }
+
+    private SubscriptionProduct productForUnitMode(PMSLeaseMode mode) {
+        return switch (mode) {
+            case RENT -> SubscriptionProduct.LANDLORD;
+            case SERVICE_CHARGE -> SubscriptionProduct.ESTATE_MANAGEMENT;
+            case SALE -> SubscriptionProduct.PROPERTY_SALES;
+        };
+    }
+
+    private String featureForProduct(SubscriptionProduct product) {
+        return switch (product) {
+            case LANDLORD -> "PROPERTY_RENTALS";
+            case ESTATE_MANAGEMENT -> "ESTATE_MANAGEMENT";
+            case PROPERTY_SALES -> "PROPERTY_SALES";
+            default -> throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
+        };
+    }
+
+    private boolean hasFeature(long payerId, SubscriptionProduct product, String featureKey) {
+        return activeSubscription(payerId, product)
+                .flatMap(subscription -> plans.findByCode(subscription.getPlanCode()))
+                .flatMap(plan -> features.findTopBySubscriptionPlanAndFeatureKeyOrderByIdDesc(plan, featureKey))
+                .filter(feature -> feature.isActive() && feature.isEnabled())
+                .isPresent();
     }
 
     private SubscriptionProduct primaryRoleProduct() {

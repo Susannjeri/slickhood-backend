@@ -325,9 +325,9 @@ public class LeaseDocumentService {
                     || document.getCreatedOn() == null || current.getCreatedOn() == null
                     || document.getCreatedOn().isBefore(current.getCreatedOn()))
                 throw new PMSCustomException(ResponseCode.OWNERSHIP_NOT_FOUND);
-            // Ownership alone must not authorize an agreement for retired or reclassified inventory.
-            propertyRepo.findById(document.getPropertyId()).filter(p -> p.isActive()
-                    && p.getManagementMode() == org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE)
+            // Ownership alone must not authorize an agreement for retired inventory.
+            // The unit purpose, not the shared property's default category, governs this workflow.
+            propertyRepo.findById(document.getPropertyId()).filter(org.pms.silverocean.database.pms.entities.Property::isActive)
                     .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
             if (document.getUnitId() != null) unitRepo.findById(document.getUnitId())
                     .filter(u -> u.isActive() && u.getPropertyId() == document.getPropertyId()

@@ -174,6 +174,10 @@ public class PropertyDao {
         return propertyAccountRepo.findByActiveAndCreatedByAndCategory(accountId, userId, category);
     }
 
+    public Optional<PaymentAccount> findActiveOwnedAccount(long accountId, long userId) {
+        return propertyAccountRepo.findActiveOwnedAccount(accountId, userId);
+    }
+
     public void saveAccount(PropertyAccount propertyAccount) {
         propertyAccountRepo.save(propertyAccount);
         auditLogService.createAuditLog(propertyAccount, Permission.EDIT_PROPERTY_PARAM);

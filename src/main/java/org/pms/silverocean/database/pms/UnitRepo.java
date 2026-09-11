@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExecutor<Unit> {
+    long countByPropertyIdAndLeaseModeAndActiveTrue(long propertyId, String leaseMode);
     @Query("SELECT p.createdBy FROM Unit u JOIN Property p ON p.id=u.propertyId WHERE u.id=:unitId AND u.active AND p.active")
     Optional<Long> findPropertyOwnerId(long unitId);
     @Query("SELECT u FROM Unit u JOIN Property p ON p.id=u.propertyId WHERE u.active AND p.active AND " +
@@ -82,6 +83,9 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
     @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:inviteId AND pm.active)")
     Optional<DbUnitDTO> findDTOByIdAndManagerRoleAndInviteId(Long id, long userId, String roleName, long inviteId);
 
+    @Query("SELECT u FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:inviteId AND pm.active)")
+    Optional<Unit> findEntityByIdAndManagerRoleAndInviteId(Long id, long userId, String roleName, long inviteId);
+
     @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyOwnership o WHERE o.unitId=u.id AND o.homeownerUserId=:userId AND o.active)")
     Optional<DbUnitDTO> findDTOByIdAndHomeowner(Long id, long userId);
 
@@ -139,6 +143,10 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
 
     @Query("SELECT coalesce(count(u), 0) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE p.active AND u.active AND p.createdBy=:userId")
     int countUnitsByLandlord(long userId);
+
+    @Query("SELECT coalesce(count(u), 0) FROM Unit u JOIN Property p ON u.propertyId=p.id " +
+            "WHERE p.active AND u.active AND p.createdBy=:userId AND u.leaseMode=:leaseMode")
+    int countUnitsByOwnerAndLeaseMode(long userId, String leaseMode);
 
     @Query("SELECT COALESCE(COUNT(u), 0) FROM Unit u JOIN PropertyManager pm ON u.propertyId=pm.propertyId " +
             "WHERE u.occupied AND pm.userId=:userId AND pm.active AND u.active AND pm.roleName='PROPERTY_MANAGER'")

@@ -80,7 +80,6 @@ public class EstateService {
         Unit unit = unitRepo.findAndLockById(unitId).filter(u -> u.isActive() && "SERVICE_CHARGE".equals(u.getLeaseMode()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
         propertyRepo.findByIdAndHomeownerInviter(unit.getPropertyId(), inviterUserId)
-                .filter(property -> property.getManagementMode() == org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
         return createUnitOwnership(unit, homeowner.getId(), LocalDate.now(PMSUtils.getZoneId()), "HOMEOWNER_INVITE", inviterUserId);
     }

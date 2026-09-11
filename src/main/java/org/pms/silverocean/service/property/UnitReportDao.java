@@ -35,6 +35,10 @@ public class UnitReportDao {
         return unitRepo.countUnitsByLandlord(userId);
     }
 
+    public int countUnitsByOwnerAndLeaseMode(long userId, String leaseMode) {
+        return unitRepo.countUnitsByOwnerAndLeaseMode(userId, leaseMode);
+    }
+
     public int countActiveTenantsByOwner(long userId) {
         return unitTenantRepo.countTenantsByLandlord(userId);
     }

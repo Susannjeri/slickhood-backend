@@ -18,6 +18,12 @@ import org.pms.silverocean.database.pms.entities.PropertyAccount;
 import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.database.pms.entities.UnitCharge;
 import org.pms.silverocean.database.pms.entities.Users;
+import org.pms.silverocean.database.pms.EstateServiceChargeRepo;
+import org.pms.silverocean.database.pms.PMSInvoiceRepo;
+import org.pms.silverocean.database.pms.PropertyListingRepo;
+import org.pms.silverocean.database.pms.PropertyOwnershipRepo;
+import org.pms.silverocean.database.pms.SaleTransactionRepo;
+import org.pms.silverocean.database.pms.UnitTenantRepo;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
@@ -49,6 +55,7 @@ import org.pms.silverocean.service.property.wrappers.UnitDTO;
 import org.pms.silverocean.service.property.wrappers.UnitTypeCatalogDTO;
 import org.pms.silverocean.service.property.wrappers.UnitTenantProjection;
 import org.pms.silverocean.service.property.wrappers.UtilitiesDTO;
+import org.pms.silverocean.service.sales.SaleStatus;
 import org.pms.silverocean.service.threadpooling.PMSThreadPoolExecutorService;
 import org.pms.silverocean.service.threadpooling.ThreadPoolBeans;
 import org.pms.silverocean.service.visitor.projections.PropertyIdUnitRefPropertyNameProjection;
@@ -141,6 +148,12 @@ public class PropertyService {
     private final org.pms.silverocean.service.subscription.SubscriptionEntitlementService subscriptionEntitlements;
     private final UnitReportDao unitReportDao;
     private final org.pms.silverocean.service.teamaccess.WorkspaceSelectionService workspaceSelection;
+    private final UnitTenantRepo unitTenantRepo;
+    private final SaleTransactionRepo saleTransactionRepo;
+    private final PropertyOwnershipRepo propertyOwnershipRepo;
+    private final EstateServiceChargeRepo estateServiceChargeRepo;
+    private final PropertyListingRepo propertyListingRepo;
+    private final PMSInvoiceRepo invoiceRepo;
 
     @Value("${min.upload.image.width:300}")
     private int imageWidth;
@@ -261,17 +274,9 @@ public class PropertyService {
 
     @Transactional
     public ResponseDTO createProperty(PropertyDTO propertyDTO, MultipartFile image) {
-        var product = subscriptionEntitlements.sessionBusinessProduct();
-        subscriptionEntitlements.requireFeature(product, switch (product) {
-            case LANDLORD -> "PROPERTY_RENTALS";
-            case ESTATE_MANAGEMENT -> "ESTATE_MANAGEMENT";
-            case PROPERTY_SALES -> "PROPERTY_SALES";
-            default -> throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
-        });
-        // The active business subscription is authoritative; never trust a
-        // client-supplied managementMode to cross into another business area.
-        if (!managementModeAllowed(product, propertyDTO.managementMode())) {
-            throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
+        subscriptionEntitlements.requirePropertyPortfolioAccess();
+        if (propertyDTO.managementMode() != null) {
+            subscriptionEntitlements.requireUnitMode(defaultUnitMode(propertyDTO.managementMode()));
         }
         Users user = userDao.getUserObject();
         if (!user.isCompletedProfile()) {
@@ -300,10 +305,9 @@ public class PropertyService {
 
     @Transactional
     public ResponseDTO createUnit(UnitDTO unitDTO, MultipartFile image) {
-        var product = subscriptionEntitlements.sessionBusinessProduct();
         long subscriptionOwner = subscriptionEntitlements.subscriptionOwnerUserId();
-        subscriptionEntitlements.requireAvailableQuota(product, "UNITS",
-                () -> unitReportDao.countUnitsByOwner(subscriptionOwner), 1);
+        subscriptionEntitlements.requireAvailableUnitQuota(unitDTO.leaseMode(),
+                () -> unitReportDao.countUnitsByOwnerAndLeaseMode(subscriptionOwner, unitDTO.leaseMode().name()), 1);
         Pair<ResponseDTO, Property> validationResult = validateUnitAndImage(unitDTO, image);
         if (validationResult.getLeft() != null) {
             return validationResult.getLeft();
@@ -339,7 +343,7 @@ public class PropertyService {
 
     @Transactional
     public ResponseDTO updateUnitCharges(@RequestBody UnitChargesDTO unitChargesDTO) {
-        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitChargesDTO.unitId(), userDao.getUserId());
+        Optional<Unit> unitFromDb = findUnitForOwnerOrSelectedStaff(unitChargesDTO.unitId());
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
@@ -387,36 +391,22 @@ public class PropertyService {
             return new ResponseDTO(false, ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT));
         }
-        var product = subscriptionEntitlements.sessionBusinessProduct();
-        subscriptionEntitlements.requireSessionFeatureIfApplicable(
-                "PROPERTY_RENTALS", "ESTATE_MANAGEMENT", "PROPERTY_SALES");
-        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = findUnitForOwnerOrSelectedStaff(unitId);
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
         }
-        Optional<Property> sourceProperty = propertyDao.findByIdAndStaffOrOwner(
-                unitFromDb.get().getPropertyId(), userDao.getUserId());
-        boolean workflowMatches = false;
-        if (sourceProperty.isPresent()
-                && managementModeAllowed(product, sourceProperty.get().getManagementMode())
-                && StringUtils.isNotBlank(unitFromDb.get().getLeaseMode())) {
-            try {
-                workflowMatches = isLeaseModeCompatible(sourceProperty.get(),
-                        PMSLeaseMode.valueOf(unitFromDb.get().getLeaseMode()));
-            } catch (IllegalArgumentException ignored) {
-                // Legacy/corrupt rows must fail validation cleanly, never take
-                // down the request with a 500 response.
-            }
-        }
-        if (!workflowMatches) {
+        PMSLeaseMode sourceMode;
+        try {
+            sourceMode = PMSLeaseMode.valueOf(unitFromDb.get().getLeaseMode());
+        } catch (IllegalArgumentException | NullPointerException ignored) {
             return new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA));
         }
         long subscriptionOwner = subscriptionEntitlements.subscriptionOwnerUserId();
-        subscriptionEntitlements.requireAvailableQuota(product, "UNITS",
-                () -> unitReportDao.countUnitsByOwner(subscriptionOwner)
-                        + unitDao.countPendingUnitCopiesByPropertyOwner(subscriptionOwner), count);
+        subscriptionEntitlements.requireAvailableUnitQuota(sourceMode,
+                () -> unitReportDao.countUnitsByOwnerAndLeaseMode(subscriptionOwner, sourceMode.name())
+                        + unitDao.countPendingUnitCopiesByPropertyOwnerAndLeaseMode(subscriptionOwner, sourceMode.name()), count);
 
         BulkUnitJob bulkUnitJob = new BulkUnitJob();
         bulkUnitJob.setUnitId(unitFromDb.get().getId());
@@ -475,7 +465,7 @@ public class PropertyService {
 
     @Transactional
     public ResponseDTO deleteUnit(long unitId) {
-        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = findUnitForOwnerOrSelectedStaff(unitId);
         return unitFromDb.map(unit -> {
             if (unit.isOccupied()) {
                 unitDao.logDeleteUnitFailure(unit, i18NService.getLocalizedMessage(ResponseCode.UNIT_IS_OCCUPIED));
@@ -486,7 +476,7 @@ public class PropertyService {
             garageService.deletePath(unit.getImagePath(), true);
             int countRemainingUnits = unitDao.countActiveByPropertyId(unit.getPropertyId());
             if (countRemainingUnits < 1) {
-                Property property = propertyDao.findByIdAndStaffOrOwner(unit.getPropertyId(), userDao.getUserId()).orElse(null);
+                Property property = findPropertyForOwnerOrSelectedStaff(unit.getPropertyId()).orElse(null);
                 if (property != null) {
                     property.setHasUnits(false);
                     propertyDao.update(property);
@@ -500,7 +490,7 @@ public class PropertyService {
 
     @Transactional
     public ResponseDTO editUnit(long unitId, UnitDTO unitDTO, MultipartFile image) {
-        Optional<Property> targetProperty = propertyDao.findByIdAndStaffOrOwner(unitDTO.propertyId(), userDao.getUserId());
+        Optional<Property> targetProperty = findPropertyForOwnerOrSelectedStaff(unitDTO.propertyId());
         if (targetProperty.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY));
@@ -513,20 +503,32 @@ public class PropertyService {
             }
         }
         Property property = targetProperty.get();
-        if (!isLeaseModeCompatible(property, unitDTO.leaseMode())
-                || !unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()), unitDTO.unitType())
+        if (!unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()), unitDTO.unitType())
                 || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
             return new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA));
         }
 
         //get unit from db
-        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = findUnitForOwnerOrSelectedStaff(unitId);
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
         }
         Unit unit = unitFromDb.get();
+        if (unit.getPropertyId() != unitDTO.propertyId()) {
+            throw new PMSCustomException(ResponseCode.UNIT_PROPERTY_CHANGE_BLOCKED);
+        }
+        boolean modeChanged = !Objects.equals(unit.getLeaseMode(), unitDTO.leaseMode().name());
+        if (modeChanged) {
+            long subscriptionOwner = subscriptionEntitlements.subscriptionOwnerUserId();
+            subscriptionEntitlements.requireAvailableUnitQuota(unitDTO.leaseMode(),
+                    () -> unitReportDao.countUnitsByOwnerAndLeaseMode(
+                            subscriptionOwner, unitDTO.leaseMode().name()), 1);
+        } else {
+            subscriptionEntitlements.requireUnitMode(unitDTO.leaseMode());
+        }
+        validateModeTransition(unit, unitDTO.leaseMode());
         unit.updateFromDto(unitDTO);
         try {
             saveUnitImage(unit, image);
@@ -565,7 +567,7 @@ public class PropertyService {
         var product = subscriptionEntitlements.sessionBusinessProduct();
         subscriptionEntitlements.requireFeatureOrAddOn(product, "PROPERTY_LISTINGS",
                 org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LISTING_ADDON);
-        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = findUnitForOwnerOrSelectedStaff(unitId);
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
@@ -594,7 +596,7 @@ public class PropertyService {
     }
 
     public ResponseDTO uploadUnitSliderImages(long unitId, List<MultipartFile> images) {
-        Optional<Unit> unitFromDb = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId());
+        Optional<Unit> unitFromDb = findUnitForOwnerOrSelectedStaff(unitId);
         if (unitFromDb.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
@@ -655,15 +657,9 @@ public class PropertyService {
 
         try {
             Property property = propertyFromDb.get();
-            var product = subscriptionEntitlements.sessionBusinessProduct();
-            subscriptionEntitlements.requireFeature(product, switch (product) {
-                case LANDLORD -> "PROPERTY_RENTALS";
-                case ESTATE_MANAGEMENT -> "ESTATE_MANAGEMENT";
-                case PROPERTY_SALES -> "PROPERTY_SALES";
-                default -> throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
-            });
-            if (propertyDTO.managementMode() != null && !managementModeAllowed(product, propertyDTO.managementMode())) {
-                throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
+            subscriptionEntitlements.requirePropertyPortfolioAccess();
+            if (propertyDTO.managementMode() != null) {
+                subscriptionEntitlements.requireUnitMode(defaultUnitMode(propertyDTO.managementMode()));
             }
             property.updateFromDto(propertyDTO);
             if (image != null && image.getSize() > 0) {
@@ -681,26 +677,15 @@ public class PropertyService {
         }
     }
 
-    private boolean managementModeAllowed(org.pms.silverocean.service.subscription.enums.SubscriptionProduct product,
-                                          PMSPropertyManagementMode mode) {
-        if (mode == null) return product == org.pms.silverocean.service.subscription.enums.SubscriptionProduct.LANDLORD;
-        return switch (product) {
-            case LANDLORD -> mode == PMSPropertyManagementMode.RENTAL;
-            case ESTATE_MANAGEMENT -> mode == PMSPropertyManagementMode.SERVICE_CHARGE;
-            case PROPERTY_SALES -> mode == PMSPropertyManagementMode.SALE;
-            default -> false;
-        };
-    }
-
     private Pair<ResponseDTO, Property> validateUnitAndImage(UnitDTO unitDTO, MultipartFile image) {
-        Optional<Property> propertyOptional = propertyDao.findByIdAndStaffOrOwner(unitDTO.propertyId(), userDao.getUserId());
+        Optional<Property> propertyOptional = findPropertyForOwnerOrSelectedStaff(unitDTO.propertyId());
         if (propertyOptional.isEmpty()) {
             return Pair.of(new ResponseDTO(false, ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY)), null);
         }
         Property property = propertyOptional.get();
-        if (!isLeaseModeCompatible(property, unitDTO.leaseMode())
-                || !unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()), unitDTO.unitType())
+        subscriptionEntitlements.requireUnitMode(unitDTO.leaseMode());
+        if (!unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()), unitDTO.unitType())
                 || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
             return Pair.of(new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA)), null);
@@ -712,15 +697,26 @@ public class PropertyService {
         return Pair.of(null, property);
     }
 
-    private boolean isLeaseModeCompatible(Property property, PMSLeaseMode leaseMode) {
-        if (property == null || property.getManagementMode() == null || leaseMode == null) {
-            return false;
-        }
-        return switch (property.getManagementMode()) {
-            case RENTAL -> leaseMode == PMSLeaseMode.RENT;
-            case SALE -> leaseMode == PMSLeaseMode.SALE;
-            case SERVICE_CHARGE -> leaseMode == PMSLeaseMode.SERVICE_CHARGE;
+    private PMSLeaseMode defaultUnitMode(PMSPropertyManagementMode managementMode) {
+        return switch (managementMode) {
+            case RENTAL -> PMSLeaseMode.RENT;
+            case SALE -> PMSLeaseMode.SALE;
+            case SERVICE_CHARGE -> PMSLeaseMode.SERVICE_CHARGE;
         };
+    }
+
+    private void validateModeTransition(Unit unit, PMSLeaseMode targetMode) {
+        if (Objects.equals(unit.getLeaseMode(), targetMode.name())) return;
+        boolean activeListing = propertyListingRepo.findByUnitId(unit.getId())
+                .filter(listing -> listing.isActive()).isPresent();
+        boolean blocked = unit.isOccupied()
+                || unitTenantRepo.existsActiveLeaseForUnit(unit.getId())
+                || saleTransactionRepo.existsByUnitIdAndActiveTrueAndStatusNot(unit.getId(), SaleStatus.CANCELLED)
+                || propertyOwnershipRepo.findFirstByUnitIdAndActiveTrue(unit.getId()).isPresent()
+                || estateServiceChargeRepo.existsByUnitIdAndActiveTrue(unit.getId())
+                || invoiceRepo.existsByUnitIdAndActiveTrueAndPaidFalse(unit.getId())
+                || activeListing;
+        if (blocked) throw new PMSCustomException(ResponseCode.UNIT_MODE_CHANGE_BLOCKED);
     }
 
     private Optional<ResponseDTO> validateImage(MultipartFile image) {
@@ -913,13 +909,15 @@ public class PropertyService {
         Long userId = userDao.getUserId();
         Property property = propertyDao.findByIdAndCreatedBy(propertyId, userId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
-        AccountCategory expectedCategory = switch (property.getManagementMode()) {
-            case RENTAL -> AccountCategory.LANDLORD;
-            case SERVICE_CHARGE -> AccountCategory.ESTATE_MANAGEMENT;
-            case SALE -> AccountCategory.PROPERTY_SALES;
-        };
-        PaymentAccount paymentAccount = propertyDao.findIfAccountIsAttachable(accountId, userId, expectedCategory)
+        PaymentAccount paymentAccount = propertyDao.findActiveOwnedAccount(accountId, userId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND));
+        PMSLeaseMode accountMode = switch (paymentAccount.getCategory()) {
+            case LANDLORD -> PMSLeaseMode.RENT;
+            case ESTATE_MANAGEMENT -> PMSLeaseMode.SERVICE_CHARGE;
+            case PROPERTY_SALES -> PMSLeaseMode.SALE;
+            default -> throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);
+        };
+        subscriptionEntitlements.requireUnitMode(accountMode);
         if (!paymentAccount.isVerified()) {
             throw new PMSCustomException(ResponseCode.ERROR_ATTACHING_PARAM_TO_PROPERTY_UNVERIFIED);
         }
@@ -979,9 +977,38 @@ public class PropertyService {
     }
 
     private void requirePropertyStaffOrOwner(long propertyId) {
-        if (propertyDao.findByIdAndStaffOrOwner(propertyId, userDao.getUserId()).isEmpty()) {
+        if (findPropertyForOwnerOrSelectedStaff(propertyId).isEmpty()) {
             throw new PMSCustomException(ResponseCode.PROPERTY_FORBIDDEN_ACCESS);
         }
+    }
+
+    /**
+     * Resolve a mutation target using the active role. Customer staff are additionally
+     * constrained to the explicitly selected workspace membership; dormant roles and
+     * assignments in another workspace never grant access to a direct object id.
+     */
+    private Optional<Property> findPropertyForOwnerOrSelectedStaff(long propertyId) {
+        long userId = userDao.getUserId();
+        PMSRole activeRole = userDao.getActiveRole();
+        if (activeRole == PMSRole.LANDLORD || activeRole == PMSRole.ESTATE_MANAGER || activeRole == PMSRole.SALES_AGENT) {
+            return propertyDao.findByIdAndCreatedBy(propertyId, userId);
+        }
+        if (activeRole == null || !activeRole.isCustomerEmployeeRole()) return Optional.empty();
+        return workspaceSelection.selectedMembership(userId)
+                .flatMap(membership -> propertyDao.findByIdAndManagerRoleAndMembership(
+                        propertyId, userId, activeRole.name(), membership.getId()));
+    }
+
+    private Optional<Unit> findUnitForOwnerOrSelectedStaff(long unitId) {
+        long userId = userDao.getUserId();
+        PMSRole activeRole = userDao.getActiveRole();
+        if (activeRole == PMSRole.LANDLORD || activeRole == PMSRole.ESTATE_MANAGER || activeRole == PMSRole.SALES_AGENT) {
+            return unitDao.findByIdAndCreatedBy(unitId, userId);
+        }
+        if (activeRole == null || !activeRole.isCustomerEmployeeRole()) return Optional.empty();
+        return workspaceSelection.selectedMembership(userId)
+                .flatMap(membership -> unitDao.findEntityByIdAndManagerRoleAndMembership(
+                        unitId, userId, activeRole.name(), membership.getId()));
     }
 
     public Page<IdNameDescDTO> findAllLandlords(Pageable pageable, String landlordName) {

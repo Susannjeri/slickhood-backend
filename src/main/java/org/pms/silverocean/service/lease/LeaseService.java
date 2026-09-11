@@ -571,7 +571,8 @@ public class LeaseService {
     public void checkDocumentLeaseAccess(Lease lease) { access.check(lease); }
 
     public void renderLeaseTemplateToPdfByUnit(Long unitId, OutputStream outputStream) throws IOException {
-        Unit unit = unitDao.findByIdAndStaffOrOwner(unitId, userDao.getUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        Unit unit = unitDao.findById(unitId).orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_NOT_FOUND));
+        access.checkRentalUnitForOwnerOrSelectedStaff(unit);
 
         LeaseTemplate leaseTemplate = leaseTemplateDao
                 .getTemplateById(unit.getTemplateId())

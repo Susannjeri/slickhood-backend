@@ -187,6 +187,10 @@ public class UnitDao {
         return bulkUnitJobRepo.sumPendingCountsByPropertyOwner(ownerId);
     }
 
+    public long countPendingUnitCopiesByPropertyOwnerAndLeaseMode(long ownerId, String leaseMode) {
+        return bulkUnitJobRepo.sumPendingCountsByPropertyOwnerAndLeaseMode(ownerId, leaseMode);
+    }
+
     public int countPendingBulkUnitJob(long createdBy) {
         Integer count = bulkUnitJobRepo.countBulkUnitJobByCreatedByAndActiveTrueAndCompletedFalse(createdBy);
         if (count == null) {
@@ -294,6 +298,10 @@ public class UnitDao {
 
     public Optional<DbUnitDTO> findByIdAndManagerRoleAndMembership(Long id, long userId, String roleName, long membershipId) {
         return unitRepo.findDTOByIdAndManagerRoleAndInviteId(id, userId, roleName, -membershipId);
+    }
+
+    public Optional<Unit> findEntityByIdAndManagerRoleAndMembership(Long id, long userId, String roleName, long membershipId) {
+        return unitRepo.findEntityByIdAndManagerRoleAndInviteId(id, userId, roleName, -membershipId);
     }
 
     public Optional<DbUnitDTO> findByIdAndHomeowner(Long id, long userId) { return unitRepo.findDTOByIdAndHomeowner(id, userId); }

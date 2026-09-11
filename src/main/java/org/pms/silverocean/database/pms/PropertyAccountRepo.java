@@ -21,4 +21,7 @@ public interface PropertyAccountRepo extends JpaRepository<PropertyAccount, Long
 
     @Query("SELECT pa FROM PaymentAccount pa WHERE pa.id=:accountId AND pa.category=:category AND pa.active AND pa.createdBy=:userId")
     Optional<PaymentAccount> findByActiveAndCreatedByAndCategory(long accountId, long userId, AccountCategory category);
+
+    @Query("SELECT pa FROM PaymentAccount pa WHERE pa.id=:accountId AND pa.active AND pa.createdBy=:userId")
+    Optional<PaymentAccount> findActiveOwnedAccount(long accountId, long userId);
 }

@@ -8,7 +8,6 @@ import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
-import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.pms.silverocean.service.teamaccess.WorkspaceSelectionService;
 import org.springframework.stereotype.Service;
 
@@ -41,7 +40,6 @@ public class EstateAccessService {
                 }
             }
         }
-        return property.filter(candidate -> candidate.getManagementMode() == PMSPropertyManagementMode.SERVICE_CHARGE)
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
+        return property.orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
     }
 }

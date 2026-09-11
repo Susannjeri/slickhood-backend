@@ -59,7 +59,13 @@ class PropertyCreationTest {
                 mock(PMSMeasurementUnitsConverter.class), mock(PropertyRoutines.class), garageService,
                 mock(ThreadPoolBeans.class), mock(PaymentPlatformFactory.class), mock(AccountDao.class),
                 entitlements, mock(UnitReportDao.class),
-                mock(org.pms.silverocean.service.teamaccess.WorkspaceSelectionService.class));
+                mock(org.pms.silverocean.service.teamaccess.WorkspaceSelectionService.class),
+                mock(org.pms.silverocean.database.pms.UnitTenantRepo.class),
+                mock(org.pms.silverocean.database.pms.SaleTransactionRepo.class),
+                mock(org.pms.silverocean.database.pms.PropertyOwnershipRepo.class),
+                mock(org.pms.silverocean.database.pms.EstateServiceChargeRepo.class),
+                mock(org.pms.silverocean.database.pms.PropertyListingRepo.class),
+                mock(org.pms.silverocean.database.pms.PMSInvoiceRepo.class));
         ReflectionTestUtils.setField(service, "imageWidth", 300);
         ReflectionTestUtils.setField(service, "imageHeight", 200);
         ReflectionTestUtils.setField(service, "maxImageBytes", 10L * 1024 * 1024);

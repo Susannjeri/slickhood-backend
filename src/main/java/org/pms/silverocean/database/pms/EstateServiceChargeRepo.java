@@ -18,13 +18,13 @@ public interface EstateServiceChargeRepo extends JpaRepository<EstateServiceChar
          "c.homeownerUserId,c.invoiceId,i.ref,c.amount,c.currency,c.dueDate,c.description,i.paid,i.pendingAmount," +
          "'DUE',c.createdOn) " +
          "FROM EstateServiceCharge c JOIN Property p ON p.id=c.propertyId JOIN Unit u ON u.id=c.unitId " +
-         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND p.active " +
-         "AND p.managementMode=org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE " +
+         "JOIN PMSInvoice i ON i.id=c.invoiceId WHERE c.active AND i.active AND p.active AND u.active AND u.leaseMode='SERVICE_CHARGE' " +
          "AND (:propertyId IS NULL OR c.propertyId=:propertyId) AND ((:owner=true AND p.createdBy=:userId) OR " +
          "(:owner=false AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId " +
          "AND pm.roleName=:roleName AND pm.inviteId=:assignmentId AND pm.active))) ORDER BY c.dueDate DESC,c.id DESC")
  Page<ServiceChargeView> findPageByEstateScope(long userId, boolean owner, String roleName, Long assignmentId,
                                               Long propertyId, Pageable pageable);
+ boolean existsByUnitIdAndActiveTrue(long unitId);
  List<EstateServiceCharge> findAllByHomeownerUserIdAndActiveTrueOrderByDueDateDesc(long userId);
  @Query("SELECT c FROM EstateServiceCharge c JOIN PropertyManager pm ON pm.propertyId=c.propertyId WHERE c.active AND pm.active AND pm.userId=:userId AND pm.roleName=:roleName ORDER BY c.dueDate DESC")
  List<EstateServiceCharge> findAllByManager(long userId,String roleName);

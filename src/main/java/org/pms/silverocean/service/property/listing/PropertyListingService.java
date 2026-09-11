@@ -74,7 +74,7 @@ public class PropertyListingService {
             listing.setCreatedBy(userId);
             listing.setActive(true);
         }
-        listing.setListingType(listingType(unit.getProperty()));
+        listing.setListingType(listingType(unit));
         listing.setHeadline(StringUtils.defaultIfBlank(StringUtils.trim(request.headline()), defaultHeadline(unit)));
         listing.setDescription(StringUtils.defaultIfBlank(StringUtils.trim(request.description()), defaultDescription(unit)));
         listing.setImageManifest(buildImageManifest(unit));
@@ -259,10 +259,9 @@ public class PropertyListingService {
     private void validateForPublication(Unit unit) {
         Property property = unit.getProperty();
         if (!unit.isActive() || property == null || !property.isActive()) badRequest("Only active properties and units can be published");
-        String mode = String.valueOf(property.getManagementMode());
-        if (!("RENTAL".equals(mode) && "RENT".equals(unit.getLeaseMode()))
-                && !("SALE".equals(mode) && "SALE".equals(unit.getLeaseMode())))
-            badRequest("Only matching rental or sale properties and units can be listed; estate homes are not rental listings");
+        String mode = unit.getLeaseMode();
+        if (!List.of("RENT", "SALE").contains(mode))
+            badRequest("Only rental or sale units can be listed; estate homes are not public listings");
         if ("SALE".equals(mode) && listings.hasReservedOrCompletedSale(unit.getId()))
             badRequest("A reserved or completed sale cannot be advertised as available");
         if (unit.isOccupied()) badRequest("An occupied unit cannot be published");
@@ -279,9 +278,9 @@ public class PropertyListingService {
     private AdminListing admin(PropertyListing l) { return new AdminListing(l.getId(),l.getPublicSlug(),l.getUnitId(),l.getStatus(),l.getListingType(),l.getHeadline(),l.getPublisherUserId(),l.getPublishedAt(),l.getExpiresAt(),l.getSuspensionReason()); }
     private InquiryView inquiryView(PropertyListingInquiry i) { PropertyListing l=i.getListing(); return new InquiryView(i.getId(),l.getId(),l.getPublicSlug(),l.getHeadline(),i.getName(),i.getEmail(),i.getPhone(),i.getMessage(),i.getStatus(),i.getCreatedOn()); }
     private Publication publication(PropertyListing l) { return new Publication(l.getPublicSlug(),l.getStatus(),l.getPublishedAt(),l.getExpiresAt()); }
-    private String defaultHeadline(Unit u) { return readable(u.getUnitType())+" at "+u.getProperty().getName()+("SALE".equals(listingType(u.getProperty()))?" for sale":" to rent"); }
+    private String defaultHeadline(Unit u) { return readable(u.getUnitType())+" at "+u.getProperty().getName()+("SALE".equals(listingType(u))?" for sale":" to rent"); }
     private String defaultDescription(Unit u) { return "Discover this "+readable(u.getUnitType()).toLowerCase(Locale.ROOT)+" in "+approximate(u.getProperty().getAddress())+". Contact the owner or appointed agent through Slickhood to arrange a viewing."; }
-    private String listingType(Property p) { return "SALE".equalsIgnoreCase(String.valueOf(p.getManagementMode())) ? "SALE" : "RENT"; }
+    private String listingType(Unit u) { return "SALE".equalsIgnoreCase(u.getLeaseMode()) ? "SALE" : "RENT"; }
     private String normalizeType(String type) { if (StringUtils.isBlank(type)) return null; String value=type.trim().toUpperCase(Locale.ROOT); if (!List.of("RENT","SALE").contains(value)) badRequest("Listing type must be RENT or SALE"); return value; }
     private String cleanFilter(String value) { value=StringUtils.trimToNull(value); if(value!=null&&value.length()>80) badRequest("Filter is too long"); return value; }
     private String slug(Unit u) { String base=(u.getProperty().getName()+"-"+u.getUnitType()).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+","-").replaceAll("(^-|-$)",""); if(base.length()>130)base=base.substring(0,130); return base+"-"+UUID.randomUUID().toString().replace("-",""); }

@@ -23,12 +23,12 @@ class SalesAccessServiceTest {
   when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);when(users.hasPermission(Permission.MANAGE_SALE_PIPELINE)).thenReturn(true);
   assertThrows(PMSCustomException.class,()->access.require(1,Permission.MANAGE_SALE_PIPELINE));verifyNoInteractions(properties);
  }
- @Test void salesOwnerCannotOperateRentalProperty() {
+ @Test void salesOwnerCanOperateSaleUnitsInsideAPropertyWithAnotherDefaultMode() {
   Property p=new Property();p.setManagementMode(PMSPropertyManagementMode.RENTAL);
   when(users.getActiveRole()).thenReturn(PMSRole.SALES_AGENT);when(users.getUserId()).thenReturn(10L);
   when(users.hasPermission(Permission.MANAGE_SALE_PIPELINE)).thenReturn(true);
   when(properties.findByIdAndCreatedByAndActiveTrue(1L,10L)).thenReturn(Optional.of(p));
-  assertThrows(PMSCustomException.class,()->access.require(1,Permission.MANAGE_SALE_PIPELINE));
+  assertSame(p,access.require(1,Permission.MANAGE_SALE_PIPELINE));
  }
  @Test void staffRequiresExactSelectedAssignment() {
   when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);when(users.getUserId()).thenReturn(10L);

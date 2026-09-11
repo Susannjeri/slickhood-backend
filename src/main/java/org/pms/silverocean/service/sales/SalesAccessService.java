@@ -7,7 +7,6 @@ import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
-import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.pms.silverocean.service.teamaccess.WorkspaceSelectionService;
 import org.springframework.stereotype.Service;
 
@@ -33,7 +32,6 @@ public class SalesAccessService {
                 if (assignment != null) result = properties.findByIdAndManagerRoleAndInviteId(propertyId, users.getUserId(), role.name(), assignment);
             }
         }
-        return result.filter(p -> p.getManagementMode() == PMSPropertyManagementMode.SALE)
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
+        return result.orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
     }
 }

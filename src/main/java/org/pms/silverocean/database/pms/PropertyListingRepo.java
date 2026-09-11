@@ -12,10 +12,8 @@ import java.util.Optional;
 import java.util.List;
 
 public interface PropertyListingRepo extends JpaRepository<PropertyListing, Long> {
-    String AVAILABLE_INVENTORY = "AND ((l.listingType='RENT' AND u.leaseMode='RENT' " +
-            "AND p.managementMode=org.pms.silverocean.service.property.PMSPropertyManagementMode.RENTAL) " +
+    String AVAILABLE_INVENTORY = "AND ((l.listingType='RENT' AND u.leaseMode='RENT') " +
             "OR (l.listingType='SALE' AND u.leaseMode='SALE' " +
-            "AND p.managementMode=org.pms.silverocean.service.property.PMSPropertyManagementMode.SALE " +
             "AND NOT EXISTS (SELECT 1 FROM SaleTransaction s WHERE s.unitId=u.id AND s.active " +
             "AND s.status NOT IN ('LEAD','VIEWING','OFFERED','CANCELLED')))) ";
 

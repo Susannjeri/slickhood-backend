@@ -28,5 +28,9 @@ public interface BulkUnitJobRepo extends JpaRepository<BulkUnitJob, Long> {
             "WHERE j.active AND NOT j.completed AND p.createdBy=:ownerId")
     long sumPendingCountsByPropertyOwner(long ownerId);
 
+    @Query("SELECT COALESCE(SUM(j.count), 0) FROM BulkUnitJob j JOIN Unit u ON u.id=j.unitId JOIN Property p ON p.id=u.propertyId " +
+            "WHERE j.active AND NOT j.completed AND p.createdBy=:ownerId AND u.leaseMode=:leaseMode")
+    long sumPendingCountsByPropertyOwnerAndLeaseMode(long ownerId, String leaseMode);
+
     Integer countBulkUnitJobByCreatedByAndActiveTrueAndCompletedFalse(long createdBy);
 }

@@ -38,13 +38,13 @@ class EstateAccessServiceTest {
         assertSame(estate, service.require(11L,Permission.MANAGE_ESTATE));
         verifyNoInteractions(workspaces);
     }
-    @Test void rentalAndSalePropertiesCannotBeUsedAsEstates() {
+    @Test void estateWorkflowCanUseAUnitInsideAnySharedPropertyContainer() {
         when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
         when(users.hasPermission(Permission.MANAGE_ESTATE)).thenReturn(true);
         when(properties.findByIdAndCreatedByAndActiveTrue(11L,9L)).thenReturn(Optional.of(estate));
         for (var mode : new PMSPropertyManagementMode[]{PMSPropertyManagementMode.RENTAL,PMSPropertyManagementMode.SALE}) {
             estate.setManagementMode(mode);
-            assertThrows(PMSCustomException.class, () -> service.require(11L,Permission.MANAGE_ESTATE));
+            assertSame(estate, service.require(11L,Permission.MANAGE_ESTATE));
         }
     }
     @Test void dormantEstateRoleDoesNotPermitLandlordEstateManagement() {

@@ -324,7 +324,7 @@ class LeaseDocumentServiceTest {
 
     @Test void homeownerCannotSignReclassifiedEstateInventory() {
         currentEstateDraft();
-        properties.findById(15L).orElseThrow().setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.RENTAL);
+        units.findById(13L).orElseThrow().setLeaseMode("RENT");
         assertThrows(PMSCustomException.class, () -> service.sign(66L));
         verify(documents, never()).save(any());
     }

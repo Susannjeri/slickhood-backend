@@ -44,7 +44,7 @@ public interface PropertyOwnershipRepo extends JpaRepository<PropertyOwnership, 
             "OR LOWER(COALESCE(u.ref,'')) LIKE LOWER(CONCAT('%',:search,'%'))) " +
             "ORDER BY o.createdOn DESC,o.id DESC";
 
-    @Query(VIEW_SELECT + "WHERE p.active AND p.managementMode=org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE " +
+    @Query(VIEW_SELECT + "WHERE p.active AND (o.unitId IS NULL OR (u.active AND u.leaseMode='SERVICE_CHARGE')) " +
             "AND ((:owner=true AND p.createdBy=:userId) OR (:owner=false AND EXISTS (SELECT 1 FROM PropertyManager pm " +
             "WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:assignmentId AND pm.active)))" + VIEW_FILTER)
     Page<OwnershipView> findPageByEstateScope(long userId, boolean owner, String roleName, Long assignmentId,

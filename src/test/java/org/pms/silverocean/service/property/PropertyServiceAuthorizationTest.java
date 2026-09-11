@@ -60,7 +60,13 @@ class PropertyServiceAuthorizationTest {
                 mock(AccountDao.class),
                 mock(org.pms.silverocean.service.subscription.SubscriptionEntitlementService.class),
                 mock(UnitReportDao.class),
-                mock(org.pms.silverocean.service.teamaccess.WorkspaceSelectionService.class));
+                mock(org.pms.silverocean.service.teamaccess.WorkspaceSelectionService.class),
+                mock(org.pms.silverocean.database.pms.UnitTenantRepo.class),
+                mock(org.pms.silverocean.database.pms.SaleTransactionRepo.class),
+                mock(org.pms.silverocean.database.pms.PropertyOwnershipRepo.class),
+                mock(org.pms.silverocean.database.pms.EstateServiceChargeRepo.class),
+                mock(org.pms.silverocean.database.pms.PropertyListingRepo.class),
+                mock(org.pms.silverocean.database.pms.PMSInvoiceRepo.class));
         when(userDao.getUserId()).thenReturn(7L);
     }
 
@@ -69,7 +75,7 @@ class PropertyServiceAuthorizationTest {
         UnitDTO request = new UnitDTO(99L, "A-1", null, 10.0,
                 new MeasurementUnitsDTO(1, "sqm"), Set.of(), null,
                 1000.0, "KES", 1L);
-        when(propertyDao.findByIdAndCreatedBy(99L, 7L)).thenReturn(Optional.empty());
+        when(propertyDao.findByIdAndStaffOrOwner(99L, 7L)).thenReturn(Optional.empty());
 
         ResponseDTO response = propertyService.editUnit(11L, request, null);
 
@@ -99,19 +105,20 @@ class PropertyServiceAuthorizationTest {
     }
 
     @Test
-    void estatePropertyOnlyAcceptsEstateManagementPaymentAccount() {
+    void mixedUsePropertyAcceptsAnyOwnedPropertyPaymentAccountCategory() {
         Property property = new Property();
         property.setManagementMode(PMSPropertyManagementMode.SERVICE_CHARGE);
         PaymentAccount account = new PaymentAccount();
         account.setVerified(true);
+        account.setCategory(AccountCategory.ESTATE_MANAGEMENT);
         when(propertyDao.findByIdAndCreatedBy(9L, 7L)).thenReturn(Optional.of(property));
-        when(propertyDao.findIfAccountIsAttachable(12L, 7L, AccountCategory.ESTATE_MANAGEMENT))
+        when(propertyDao.findActiveOwnedAccount(12L, 7L))
                 .thenReturn(Optional.of(account));
         when(propertyDao.findPropertyAccountByIdAndProperty(12L, 9L)).thenReturn(Optional.empty());
 
         propertyService.attachAccountToProperty(12L, 9L);
 
         verify(propertyDao).saveAccount(any());
-        verify(propertyDao, never()).findIfAccountIsAttachable(12L, 7L, AccountCategory.LANDLORD);
+        verify(propertyDao).findActiveOwnedAccount(12L, 7L);
     }
 }

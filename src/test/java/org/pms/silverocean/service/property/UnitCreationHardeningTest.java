@@ -10,11 +10,13 @@ import org.pms.silverocean.database.pms.entities.BulkUnitJob;
 import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.database.pms.entities.Utility;
+import org.pms.silverocean.database.pms.entities.WorkspaceMembership;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.config.ConfigDTO;
 import org.pms.silverocean.service.config.enums.PMSConfigs;
@@ -61,6 +63,13 @@ class UnitCreationHardeningTest {
     private PropertyRoutines routines;
     private org.pms.silverocean.service.subscription.SubscriptionEntitlementService entitlements;
     private UnitReportDao unitReports;
+    private org.pms.silverocean.database.pms.UnitTenantRepo unitTenants;
+    private org.pms.silverocean.database.pms.SaleTransactionRepo sales;
+    private org.pms.silverocean.database.pms.PropertyOwnershipRepo ownerships;
+    private org.pms.silverocean.database.pms.EstateServiceChargeRepo serviceCharges;
+    private org.pms.silverocean.database.pms.PropertyListingRepo listings;
+    private org.pms.silverocean.database.pms.PMSInvoiceRepo invoices;
+    private org.pms.silverocean.service.teamaccess.WorkspaceSelectionService workspaces;
     private PropertyService service;
 
     @BeforeEach
@@ -81,12 +90,19 @@ class UnitCreationHardeningTest {
                 mock(PMSMeasurementUnitsConverter.class), routines = mock(PropertyRoutines.class), storage,
                 mock(ThreadPoolBeans.class), mock(PaymentPlatformFactory.class), mock(AccountDao.class),
                 entitlements, unitReports = mock(UnitReportDao.class),
-                mock(org.pms.silverocean.service.teamaccess.WorkspaceSelectionService.class));
+                workspaces = mock(org.pms.silverocean.service.teamaccess.WorkspaceSelectionService.class),
+                unitTenants = mock(org.pms.silverocean.database.pms.UnitTenantRepo.class),
+                sales = mock(org.pms.silverocean.database.pms.SaleTransactionRepo.class),
+                ownerships = mock(org.pms.silverocean.database.pms.PropertyOwnershipRepo.class),
+                serviceCharges = mock(org.pms.silverocean.database.pms.EstateServiceChargeRepo.class),
+                listings = mock(org.pms.silverocean.database.pms.PropertyListingRepo.class),
+                invoices = mock(org.pms.silverocean.database.pms.PMSInvoiceRepo.class));
         ReflectionTestUtils.setField(service, "imageWidth", 300);
         ReflectionTestUtils.setField(service, "imageHeight", 200);
         ReflectionTestUtils.setField(service, "maxImageBytes", 10L * 1024 * 1024);
         ReflectionTestUtils.setField(service, "maxImagePixels", 40_000_000L);
         when(users.getUserId()).thenReturn(77L);
+        when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
         Utility utility = new Utility();
         utility.setId(1L);
         utility.setActive(true);
@@ -95,9 +111,9 @@ class UnitCreationHardeningTest {
     }
 
     @Test
-    void createUnitIsTransactionalAndAllowsAuthorizedEstateStaff() throws Exception {
+    void createUnitIsTransactionalAndAllowsAnOwnerToMixSubscribedUnitCategories() throws Exception {
         Property property = property(PMSPropertyManagementMode.SERVICE_CHARGE);
-        when(properties.findByIdAndStaffOrOwner(9L, 77L)).thenReturn(Optional.of(property));
+        when(properties.findByIdAndCreatedBy(9L, 77L)).thenReturn(Optional.of(property));
         doAnswer(call -> { ((Unit) call.getArgument(0)).setId(31L); return null; }).when(units).save(any(Unit.class));
 
         var response = service.createUnit(request(PMSLeaseMode.SERVICE_CHARGE), validPng());
@@ -105,24 +121,44 @@ class UnitCreationHardeningTest {
         Method method = PropertyService.class.getMethod("createUnit", UnitDTO.class, org.springframework.web.multipart.MultipartFile.class);
         assertThat(method.getAnnotation(Transactional.class)).isNotNull();
         assertThat(response.isSuccess()).isTrue();
-        verify(properties).findByIdAndStaffOrOwner(9L, 77L);
+        verify(properties).findByIdAndCreatedBy(9L, 77L);
         verify(units).save(any(Unit.class));
         verify(storage).uploadBytes(eq("77/9/31/unit-cover.png"), any(), eq("image/png"));
     }
 
     @Test
-    void unitWorkflowMustMatchThePropertyWorkflow() throws Exception {
-        when(properties.findByIdAndStaffOrOwner(9L, 77L)).thenReturn(Optional.of(property(PMSPropertyManagementMode.SERVICE_CHARGE)));
+    void physicalPropertyCanContainUnitsForDifferentSubscribedWorkflows() throws Exception {
+        when(properties.findByIdAndCreatedBy(9L, 77L)).thenReturn(Optional.of(property(PMSPropertyManagementMode.SERVICE_CHARGE)));
+        doAnswer(call -> { ((Unit) call.getArgument(0)).setId(32L); return null; }).when(units).save(any(Unit.class));
 
         var response = service.createUnit(request(PMSLeaseMode.RENT), validPng());
 
-        assertThat(response.getCode()).isEqualTo(ResponseCode.INVALID_FIELD_DATA.getCode());
+        assertThat(response.isSuccess()).isTrue();
+        verify(entitlements).requireAvailableUnitQuota(eq(PMSLeaseMode.RENT), any(), eq(1L));
+        verify(units).save(any(Unit.class));
+    }
+
+    @Test
+    void delegatedStaffMutationIsBoundToTheSelectedWorkspace() throws Exception {
+        when(users.getActiveRole()).thenReturn(PMSRole.SALES_COORDINATOR);
+        WorkspaceMembership selected = new WorkspaceMembership();
+        selected.setId(44L);
+        when(workspaces.selectedMembership(77L)).thenReturn(Optional.of(selected));
+        when(properties.findByIdAndManagerRoleAndMembership(9L, 77L, PMSRole.SALES_COORDINATOR.name(), 44L))
+                .thenReturn(Optional.empty());
+
+        var response = service.createUnit(request(PMSLeaseMode.SALE), validPng());
+
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(response.getCode()).isEqualTo(ResponseCode.UNIT_CREATION_FAILED_MISSING_PROPERTY.getCode());
+        verify(properties).findByIdAndManagerRoleAndMembership(9L, 77L, PMSRole.SALES_COORDINATOR.name(), 44L);
+        verify(properties, never()).findByIdAndStaffOrOwner(9L, 77L);
         verify(units, never()).save(any(Unit.class));
     }
 
     @Test
     void disabledCatalogMappingBlocksUnitCreation() throws Exception {
-        when(properties.findByIdAndStaffOrOwner(9L, 77L))
+        when(properties.findByIdAndCreatedBy(9L, 77L))
                 .thenReturn(Optional.of(property(PMSPropertyManagementMode.SERVICE_CHARGE)));
         when(unitTypes.isAllowed(PMSPropertyType.APARTMENT_BLOCK, PMSUnitTypes.APARTMENT_UNIT))
                 .thenReturn(false);
@@ -136,8 +172,68 @@ class UnitCreationHardeningTest {
     }
 
     @Test
+    void categoryChangeIsBlockedWhileAnActiveLeaseExists() {
+        Property property = property(PMSPropertyManagementMode.RENTAL);
+        Unit unit = new Unit();
+        unit.setId(31L);
+        unit.setPropertyId(9L);
+        unit.setLeaseMode(PMSLeaseMode.RENT.name());
+        when(properties.findByIdAndCreatedBy(9L, 77L)).thenReturn(Optional.of(property));
+        when(units.findByIdAndCreatedBy(31L, 77L)).thenReturn(Optional.of(unit));
+        when(unitTenants.existsActiveLeaseForUnit(31L)).thenReturn(true);
+
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> service.editUnit(31L, request(PMSLeaseMode.SALE), null));
+
+        assertThat(error.getResponseCode()).isEqualTo(ResponseCode.UNIT_MODE_CHANGE_BLOCKED);
+        verify(units, never()).update(any(Unit.class));
+    }
+
+    @Test
+    void inactiveUnitCanChangeCategoryWithoutLosingHistory() {
+        Property property = property(PMSPropertyManagementMode.RENTAL);
+        Unit unit = new Unit();
+        unit.setId(31L);
+        unit.setPropertyId(9L);
+        unit.setLeaseMode(PMSLeaseMode.RENT.name());
+        when(properties.findByIdAndCreatedBy(9L, 77L)).thenReturn(Optional.of(property));
+        when(units.findByIdAndCreatedBy(31L, 77L)).thenReturn(Optional.of(unit));
+        when(unitReports.countUnitsByOwnerAndLeaseMode(77L, PMSLeaseMode.SALE.name())).thenReturn(2);
+        doAnswer(call -> {
+            assertThat(((LongSupplier) call.getArgument(1)).getAsLong()).isEqualTo(2L);
+            return null;
+        }).when(entitlements).requireAvailableUnitQuota(eq(PMSLeaseMode.SALE), any(), eq(1L));
+
+        var response = service.editUnit(31L, request(PMSLeaseMode.SALE), null);
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(unit.getLeaseMode()).isEqualTo(PMSLeaseMode.SALE.name());
+        verify(entitlements).requireAvailableUnitQuota(eq(PMSLeaseMode.SALE), any(), eq(1L));
+        verify(unitReports).countUnitsByOwnerAndLeaseMode(77L, PMSLeaseMode.SALE.name());
+        verify(units).update(unit);
+    }
+
+    @Test
+    void existingUnitCannotBeSilentlyMovedToAnotherPhysicalProperty() {
+        Property destination = property(PMSPropertyManagementMode.SALE);
+        destination.setId(10L);
+        Unit unit = new Unit();
+        unit.setId(31L);
+        unit.setPropertyId(9L);
+        unit.setLeaseMode(PMSLeaseMode.RENT.name());
+        when(properties.findByIdAndCreatedBy(10L, 77L)).thenReturn(Optional.of(destination));
+        when(units.findByIdAndCreatedBy(31L, 77L)).thenReturn(Optional.of(unit));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> service.editUnit(31L, request(10L, PMSLeaseMode.SALE), null));
+
+        assertThat(error.getResponseCode()).isEqualTo(ResponseCode.UNIT_PROPERTY_CHANGE_BLOCKED);
+        verify(units, never()).update(any(Unit.class));
+    }
+
+    @Test
     void storageFailurePropagatesInsteadOfBeingReportedAsADuplicate() throws Exception {
-        when(properties.findByIdAndStaffOrOwner(9L, 77L)).thenReturn(Optional.of(property(PMSPropertyManagementMode.SERVICE_CHARGE)));
+        when(properties.findByIdAndCreatedBy(9L, 77L)).thenReturn(Optional.of(property(PMSPropertyManagementMode.SERVICE_CHARGE)));
         doAnswer(call -> { ((Unit) call.getArgument(0)).setId(31L); return null; }).when(units).save(any(Unit.class));
         doThrow(new PMSCustomException(ResponseCode.GENERAL_FAILURE)).when(storage).uploadBytes(anyString(), any(), anyString());
 
@@ -151,7 +247,7 @@ class UnitCreationHardeningTest {
     void duplicateChargeTypesAreRejectedAtTheServiceBoundary() {
         Unit unit = new Unit();
         unit.setId(31L);
-        when(units.findByIdAndStaffOrOwner(31L, 77L)).thenReturn(Optional.of(unit));
+        when(units.findByIdAndCreatedBy(31L, 77L)).thenReturn(Optional.of(unit));
         ChargeType chargeType = new ChargeType();
         chargeType.setId(5L);
         chargeType.setActive(true);
@@ -172,7 +268,7 @@ class UnitCreationHardeningTest {
 
         assertThat(response.isSuccess()).isFalse();
         assertThat(response.getCode()).isEqualTo(ResponseCode.NUMBER_EXCEEDS_ALLOWED_LIMIT.getCode());
-        verify(units, never()).findByIdAndStaffOrOwner(31L, 77L);
+        verify(units, never()).findByIdAndCreatedBy(31L, 77L);
     }
 
     @Test
@@ -184,14 +280,13 @@ class UnitCreationHardeningTest {
         source.setPropertyId(9L);
         source.setRef("A-01");
         source.setLeaseMode(PMSLeaseMode.RENT.name());
-        when(units.findByIdAndStaffOrOwner(31L, 77L)).thenReturn(Optional.of(source));
-        when(properties.findByIdAndStaffOrOwner(9L, 77L)).thenReturn(Optional.of(property(PMSPropertyManagementMode.RENTAL)));
-        when(unitReports.countUnitsByOwner(77L)).thenReturn(1);
-        when(units.countPendingUnitCopiesByPropertyOwner(77L)).thenReturn(2L);
+        when(units.findByIdAndCreatedBy(31L, 77L)).thenReturn(Optional.of(source));
+        when(unitReports.countUnitsByOwnerAndLeaseMode(77L, PMSLeaseMode.RENT.name())).thenReturn(1);
+        when(units.countPendingUnitCopiesByPropertyOwnerAndLeaseMode(77L, PMSLeaseMode.RENT.name())).thenReturn(2L);
         doAnswer(call -> {
-            ((LongSupplier) call.getArgument(2)).getAsLong();
+            ((LongSupplier) call.getArgument(1)).getAsLong();
             return null;
-        }).when(entitlements).requireAvailableQuota(any(), eq("UNITS"), any(), eq(12L));
+        }).when(entitlements).requireAvailableUnitQuota(eq(PMSLeaseMode.RENT), any(), eq(12L));
         doAnswer(call -> {
             BulkUnitJob job = call.getArgument(0);
             job.setId(901L);
@@ -203,7 +298,7 @@ class UnitCreationHardeningTest {
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.getData()).hasSize(1);
         assertThat(response.getData().get(0).toString()).contains("jobId=901", "count=12", "status=QUEUED");
-        verify(units).countPendingUnitCopiesByPropertyOwner(77L);
+        verify(units).countPendingUnitCopiesByPropertyOwnerAndLeaseMode(77L, PMSLeaseMode.RENT.name());
         verify(routines).scheduleDuplicateUnitJob(eq(901L), any());
     }
 
@@ -238,7 +333,11 @@ class UnitCreationHardeningTest {
     }
 
     private UnitDTO request(PMSLeaseMode mode) {
-        return new UnitDTO(9L, " A-01 ", PMSUnitTypes.APARTMENT_UNIT, 80D,
+        return request(9L, mode);
+    }
+
+    private UnitDTO request(long propertyId, PMSLeaseMode mode) {
+        return new UnitDTO(propertyId, " A-01 ", PMSUnitTypes.APARTMENT_UNIT, 80D,
                 new MeasurementUnitsDTO(1, "Square metres"), Set.of(1L), mode, 5000D, "KES", null);
     }
 

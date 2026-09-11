@@ -6,10 +6,10 @@ import org.pms.silverocean.database.pms.PropertyRepo;
 import org.pms.silverocean.database.pms.UnitRepo;
 import org.pms.silverocean.database.pms.entities.Lease;
 import org.pms.silverocean.database.pms.entities.Property;
+import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
-import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.pms.silverocean.service.teamaccess.WorkspaceSelectionService;
 import org.springframework.stereotype.Service;
 
@@ -38,8 +38,24 @@ public class LeaseAccessService {
             Long assignment = selectedAssignmentId();
             if (assignment != null) property = properties.findByIdAndManagerRoleAndInviteId(unit.getPropertyId(), users.getUserId(), role.name(), assignment);
         }
-        property.filter(p -> p.getManagementMode() == PMSPropertyManagementMode.RENTAL).orElseThrow(this::denied);
+        property.orElseThrow(this::denied);
         if (!lease.isActive() || !"RENT".equals(lease.getLeaseMode())) throw denied();
+    }
+
+    public void checkRentalUnitForOwnerOrSelectedStaff(Unit unit) {
+        if (unit == null || !unit.isActive() || !"RENT".equals(unit.getLeaseMode())) throw denied();
+        PMSRole role = users.getActiveRole();
+        java.util.Optional<Property> property = java.util.Optional.empty();
+        if (role == PMSRole.LANDLORD) {
+            property = properties.findByIdAndCreatedByAndActiveTrue(unit.getPropertyId(), users.getUserId());
+        } else if (role != null && role.isCustomerEmployeeRole()) {
+            Long assignment = selectedAssignmentId();
+            if (assignment != null) {
+                property = properties.findByIdAndManagerRoleAndInviteId(
+                        unit.getPropertyId(), users.getUserId(), role.name(), assignment);
+            }
+        }
+        property.orElseThrow(this::denied);
     }
 
     private PMSCustomException denied() { return new PMSCustomException(ResponseCode.LEASE_NOT_FOUND); }

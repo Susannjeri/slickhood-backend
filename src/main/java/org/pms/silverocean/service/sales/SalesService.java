@@ -19,7 +19,6 @@ import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.payment.invoice.InvoiceService;
-import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -74,7 +73,6 @@ public class SalesService {
     public SaleTransaction create(CreateSaleRequest request) {
         long actorId = users.getUserId();
         Property property = requireSaleProperty(request.propertyId(), actorId);
-        if (property.getManagementMode() != PMSPropertyManagementMode.SALE) throw invalid();
         Users buyer = resolveBuyer(request);
         String buyerEmail = buyer != null ? buyer.getEmail().trim().toLowerCase(Locale.ROOT)
                 : request.buyerEmail().trim().toLowerCase(Locale.ROOT);
