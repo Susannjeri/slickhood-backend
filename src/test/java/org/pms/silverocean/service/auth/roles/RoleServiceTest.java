@@ -298,6 +298,7 @@ class RoleServiceTest {
         when(userDao.findByEmail(buyer.getEmail())).thenReturn(Optional.of(buyer));
         when(userRoleRepo.findByUserIdAndRoleId(201L, 13L)).thenReturn(0);
         when(saleTransactionRepo.findByIdForUpdate(88L)).thenReturn(Optional.of(sale));
+        when(saleTransactionRepo.save(sale)).thenReturn(sale);
 
         ResponseDTO response = roleService.assignRoleFromInvite(invite, null, buyer);
 
