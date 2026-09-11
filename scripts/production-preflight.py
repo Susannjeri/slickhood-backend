@@ -323,7 +323,11 @@ def check_external_apis(preflight: Preflight, config: dict[str, str]) -> None:
         paystack_key = required(preflight, config, "Paystack key", "payment.paystack.secret-key", "PAYSTACK_SECRET_KEY")
         paystack_base = resolve(config, "payment.paystack.api-url", "PAYSTACK_API_URL", default="https://api.paystack.co").rstrip("/")
         if paystack_key:
-            result = check_provider_http(preflight, "Paystack", f"{paystack_base}/bank?country=kenya&perPage=1",
+            # Use an authenticated account endpoint for the deployment gate. The
+            # public bank-directory endpoint can return 403 for otherwise valid
+            # Kenyan sandbox integrations, so it is not a reliable credential
+            # or egress check. No transaction data is logged by this preflight.
+            result = check_provider_http(preflight, "Paystack", f"{paystack_base}/transaction/totals",
                                          {"Authorization": f"Bearer {paystack_key}"}, {200})
             if result:
                 try:
