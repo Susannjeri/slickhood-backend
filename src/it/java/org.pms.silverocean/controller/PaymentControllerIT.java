@@ -38,7 +38,9 @@ class PaymentControllerIT {
 
     @BeforeEach
     void setUp() {
-        PaymentController controller = new PaymentController(invoiceService, i18NService, paymentService, paymentReceiptService);
+        PaymentController controller = new PaymentController(invoiceService, i18NService, paymentService,
+                paymentReceiptService, org.mockito.Mockito.mock(
+                        org.pms.silverocean.service.payment.platforms.paystack.PaystackPlatform.class));
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
         when(i18NService.getLocalizedMessage(ResponseCode.MPESA_PAYMENT_INITIALIZED))
                 .thenReturn("Payment initialized");

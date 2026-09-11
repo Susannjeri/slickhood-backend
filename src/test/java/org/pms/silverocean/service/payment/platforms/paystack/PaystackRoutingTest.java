@@ -7,6 +7,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.pms.silverocean.database.pms.entities.*;
 import org.pms.silverocean.service.RestTemplateService;
+import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -102,5 +103,32 @@ class PaystackRoutingTest {
         platform.handleCallBack(new PaystackCallbackDTO("{\"event\":\"charge.success\",\"data\":{\"reference\":\"601\"}}", "127.0.0.1"));
         verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), anyDouble());
         assertEquals("verification_failed", payment.getStatus());
+    }
+
+    @Test void browserReturnReconcilesOnlyTheAuthenticatedPayerAndStillVerifiesWithPaystack() {
+        invoice.setSubscriptionPlanCode("BRONZE");
+        platform.processPayment(invoice, null, 71L);
+        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
+        when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
+        doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
+                new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test")))
+                .when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
+        doAnswer(call -> { invoice.setPaid(true); invoice.setPendingAmount(0); return null; })
+                .when(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(100.0));
+
+        var result = platform.confirmBrowserReturn("601", "127.0.0.1");
+
+        assertTrue(result.paid());
+        assertEquals("INV-TEST", result.invoiceRef());
+        verify(payments).findPaymentByIDAndUserId(601L, 22L);
+        verify(http).sendGetRequest(contains("/transaction/verify/601"), any(),
+                eq(PaystackPlatform.PaystackVerifyResponse.class));
+    }
+
+    @Test void browserReturnCannotReconcileAnotherUsersPayment() {
+        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.empty());
+        assertThrows(PMSCustomException.class,
+                () -> platform.confirmBrowserReturn("601", "127.0.0.1"));
+        verifyNoInteractions(http);
     }
 }

@@ -171,6 +171,36 @@ public class PaystackPlatform extends PaymentPlatform {
         }
     }
 
+    /**
+     * Confirms a hosted-checkout browser return without trusting any status sent by the browser.
+     * The reference is SlickHood's payment id, access is restricted to the billed user, and the
+     * final state is obtained directly from Paystack using the server-side secret.
+     */
+    public PaystackReturnConfirmation confirmBrowserReturn(String reference, String sourceIp) {
+        final long paymentId;
+        try {
+            if (StringUtils.isBlank(reference) || !reference.matches("[0-9]{1,19}")) {
+                throw new NumberFormatException("invalid reference");
+            }
+            paymentId = Long.parseLong(reference);
+        } catch (NumberFormatException exception) {
+            throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+        }
+
+        PMSPayment payment = paymentDao.findPaymentByIDAndUserId(paymentId, userDao.getUserId())
+                .filter(candidate -> PaymentChannel.PAYSTACK.getName().equals(candidate.getChannel()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED));
+
+        PMSInvoice invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED));
+        if (!invoice.isPaid() && payment.isInProgress()) {
+            verifyAndSettle(payment, sourceIp);
+            invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference())
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED));
+        }
+        return new PaystackReturnConfirmation(invoice.getRef(), invoice.isPaid(), payment.getStatus());
+    }
+
     private void verifyAndSettle(PMSPayment payment, String sourceIp) {
         PaystackVerifyResponse response = restTemplateService.sendGetRequest(
                 apiUrl + VERIFY_PATH + payment.getId(), authHeaders(), PaystackVerifyResponse.class);
@@ -247,5 +277,8 @@ public class PaystackPlatform extends PaymentPlatform {
     @JsonIgnoreProperties(ignoreUnknown = true)
     record PaystackTransaction(long id, String status, String reference, long amount, String currency,
                                @JsonProperty("gateway_response") String gatewayResponse, String domain) {
+    }
+
+    public record PaystackReturnConfirmation(String invoiceRef, boolean paid, String paymentStatus) {
     }
 }

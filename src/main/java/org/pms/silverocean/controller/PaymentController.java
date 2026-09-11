@@ -1,6 +1,7 @@
 package org.pms.silverocean.controller;
 
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.pms.silverocean.common.ResponseCode;
@@ -18,6 +19,8 @@ import org.pms.silverocean.service.payment.wrappers.PaymentChannelDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentInitRequest;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
+import org.pms.silverocean.service.payment.platforms.paystack.PaystackPlatform;
+import org.pms.silverocean.common.PMSUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ContentDisposition;
@@ -45,13 +48,24 @@ public class PaymentController extends OutputStreamErrorHandler {
     private final InvoiceService invoiceService;
     private final PaymentService paymentService;
     private final PaymentReceiptService paymentReceiptService;
+    private final PaystackPlatform paystackPlatform;
 
     public PaymentController(InvoiceService invoiceService, I18NService i18NService, PaymentService paymentService,
-                             PaymentReceiptService paymentReceiptService) {
+                             PaymentReceiptService paymentReceiptService, PaystackPlatform paystackPlatform) {
         super(i18NService);
         this.invoiceService = invoiceService;
         this.paymentService = paymentService;
         this.paymentReceiptService = paymentReceiptService;
+        this.paystackPlatform = paystackPlatform;
+    }
+
+    @PostMapping("/paystack/confirm")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ResponseDTO> confirmPaystackReturn(
+            @RequestParam String reference, HttpServletRequest request) {
+        var confirmation = paystackPlatform.confirmBrowserReturn(reference, PMSUtils.getIPAddress(request));
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), confirmation));
     }
 
     @GetMapping(value = "/view/receipt")
