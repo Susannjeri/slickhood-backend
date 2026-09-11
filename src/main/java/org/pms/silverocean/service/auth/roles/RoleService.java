@@ -12,6 +12,7 @@ import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.Permission;
 import org.pms.silverocean.database.pms.entities.Role;
 import org.pms.silverocean.database.pms.entities.RolePermission;
+import org.pms.silverocean.database.pms.entities.SaleTransaction;
 import org.pms.silverocean.database.pms.entities.UserRole;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
