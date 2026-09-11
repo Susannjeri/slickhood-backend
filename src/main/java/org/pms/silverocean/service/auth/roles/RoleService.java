@@ -261,7 +261,7 @@ public class RoleService {
             inviteDao.updateInvite(invite);
             if (!entityAttachmentDeferred && invitedPmsRole != null
                     && !invitedPmsRole.isSelfAssignable() && invite.getEntityId() != null) {
-                attachUserToEntity(invite, user.getId(), invitedPmsRole);
+                attachUserToEntity(invite, user, invitedPmsRole);
             }
         }
         return responseDTO;
@@ -325,7 +325,8 @@ public class RoleService {
         return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY));
     }
 
-    private void attachUserToEntity(Invite invite, long userId, PMSRole pmsRole) {
+    private void attachUserToEntity(Invite invite, Users user, PMSRole pmsRole) {
+        long userId = user.getId();
         if (PMSRole.HOMEOWNER.equals(pmsRole)) {
             estateService.createOwnershipFromInvite(invite, userId);
         } else if (PMSRole.BUYER.equals(pmsRole)) {
@@ -340,8 +341,7 @@ public class RoleService {
             if (saved.getStatus() == org.pms.silverocean.service.sales.SaleStatus.OFFERED
                     && saved.getOfferAmount() != null && invite.getAgreementTemplateId() != null
                     && invite.getLeaseEndDate() != null) {
-                buyerOffers.createIssuedOffer(saved, invite, userDao.findById(userId).orElseThrow(
-                        () -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR)));
+                buyerOffers.createIssuedOffer(saved, invite, user);
             }
         } else if (pmsRole.isCustomerEmployeeRole()) {
             propertyManagerService.addStaffToProperty(invite.getId(), userId, invite.getEntityId(), pmsRole);
