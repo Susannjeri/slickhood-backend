@@ -322,6 +322,31 @@ public class InviteService {
             throw new PMSCustomException(ResponseCode.EXPIRED_INVITE_LINK);
         }
         notificationService.queueNotification(notificationDTO);
+        if (channel == NotificationChannel.EMAIL) {
+            String inviteLink = formatInviteLink(
+                    configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(),
+                    invite.getToken());
+            notificationService.queueInAppNotificationForExistingUser(
+                    boundRecipient,
+                    "INVITE_RECEIVED",
+                    "You have a new " + inviteDisplayName(inviteType)
+                            + " invitation. Review it securely: " + inviteLink);
+        }
+    }
+
+    private String inviteDisplayName(InviteType inviteType) {
+        return switch (inviteType) {
+            case TENANT -> "tenant";
+            case HOMEOWNER -> "homeowner";
+            case BUYER -> "property buyer";
+            case PROPERTY_MANAGER -> "property manager";
+            case ESTATE_MANAGER -> "estate manager";
+            case SALES_AGENT -> "property sales";
+            case ASSET_PORTFOLIO_MANAGER -> "wealth workspace";
+            case FINANCE -> "finance";
+            case GUARD -> "smart gate";
+            case USER -> "SlickHood";
+        };
     }
 
     public ResponseDTO validateToken(String token) {

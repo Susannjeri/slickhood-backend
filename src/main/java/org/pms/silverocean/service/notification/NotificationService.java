@@ -16,6 +16,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.util.Map;
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
@@ -35,6 +36,37 @@ public class NotificationService {
         long notificationId = createNotification(notificationDTO.recipient(), notificationDTO.formattedMessage(), notificationDTO.notificationType());
         events.publishEvent(new NotificationQueued(notificationId, notificationDTO));
         return notificationId;
+    }
+
+    /**
+     * Stores an actionable notification for an existing active SlickHood user without
+     * invoking an external delivery provider. The email-bound recipient is checked
+     * here so callers cannot accidentally create account-visible alerts for arbitrary
+     * addresses that do not belong to an active account.
+     */
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
+    public boolean queueInAppNotificationForExistingUser(String recipient, String type, String message) {
+        if (recipient == null || recipient.isBlank() || type == null || type.isBlank()
+                || message == null || message.isBlank()) {
+            return false;
+        }
+        String normalizedRecipient = recipient.trim().toLowerCase(Locale.ROOT);
+        if (userDao.findByEmail(normalizedRecipient).filter(Users::isActive).isEmpty()) {
+            return false;
+        }
+
+        Notification notification = new Notification();
+        notification.setType(type);
+        notification.setRecipient(normalizedRecipient);
+        notification.setMessage(encryptionService.encrypt(message));
+        notification.setChannel("IN_APP");
+        notification.setDelivered(true);
+        notification.setRetry(false);
+        notification.setRetries(0);
+        notification.setUpdatedOn(LocalDateTime.now());
+        notification.setActive(true);
+        notificationDao.save(notification);
+        return true;
     }
 
     @Async

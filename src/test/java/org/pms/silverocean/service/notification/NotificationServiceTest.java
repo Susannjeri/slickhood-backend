@@ -21,8 +21,51 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class NotificationServiceTest {
+    @Test
+    void inAppNotificationIsStoredForExistingActiveUserWithoutExternalDelivery() {
+        EncryptionService encryption = mock(EncryptionService.class);
+        NotificationDao dao = mock(NotificationDao.class);
+        UserDao users = mock(UserDao.class);
+        ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+        Users recipient = Users.builder().email("member@example.com").build();
+        recipient.setActive(true);
+        when(users.findByEmail("member@example.com")).thenReturn(java.util.Optional.of(recipient));
+        when(encryption.encrypt("Review invitation: https://app.slickhood.com/lease/onboard?token=safe"))
+                .thenReturn(new byte[]{9, 1});
+        NotificationService service = new NotificationService(encryption, dao, users, Map.of(), events);
+
+        assertThat(service.queueInAppNotificationForExistingUser(
+                " Member@Example.com ", "INVITE_RECEIVED",
+                "Review invitation: https://app.slickhood.com/lease/onboard?token=safe")).isTrue();
+
+        ArgumentCaptor<Notification> stored = ArgumentCaptor.forClass(Notification.class);
+        verify(dao).save(stored.capture());
+        assertThat(stored.getValue().getRecipient()).isEqualTo("member@example.com");
+        assertThat(stored.getValue().getChannel()).isEqualTo("IN_APP");
+        assertThat(stored.getValue().getType()).isEqualTo("INVITE_RECEIVED");
+        assertThat(stored.getValue().isDelivered()).isTrue();
+        assertThat(stored.getValue().isRetry()).isFalse();
+        verifyNoInteractions(events);
+    }
+
+    @Test
+    void inAppNotificationIsNotStoredForUnknownOrInactiveAccount() {
+        EncryptionService encryption = mock(EncryptionService.class);
+        NotificationDao dao = mock(NotificationDao.class);
+        UserDao users = mock(UserDao.class);
+        ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+        when(users.findByEmail("missing@example.com")).thenReturn(java.util.Optional.empty());
+        NotificationService service = new NotificationService(encryption, dao, users, Map.of(), events);
+
+        assertThat(service.queueInAppNotificationForExistingUser(
+                "missing@example.com", "INVITE_RECEIVED", "Review invitation")).isFalse();
+
+        verifyNoInteractions(dao, encryption, events);
+    }
+
     @Test
     void queuePersistsBeforePublishingAndDeliveryStartsOnlyFromAfterCommitListener() {
         EncryptionService encryption = mock(EncryptionService.class);

@@ -77,6 +77,25 @@ class TenantInvitationTest {
         assertEquals("tenant@example.test",notification.getValue().recipient());
     }
 
+    @Test void existingTenantAlsoReceivesAnActionableInAppInvitation() {
+        unit(PMSLeaseMode.RENT,false);
+        when(config.getConfigByName(PMSConfigs.INVITE_LINK_URL)).thenReturn(() -> new ConfigDTO(2,"url","https://app.slickhood.test/invite",0,false));
+        when(i18n.getLocalizedMessage(anyString())).thenReturn("Open your unit invitation: %s");
+        Role tenantRole = new Role(); tenantRole.setId(6L); when(roles.findByName("Tenant")).thenReturn(Optional.of(tenantRole));
+        Users existingTenant = Users.builder().email("tenant@example.test").build(); existingTenant.setActive(true);
+        when(users.findByEmail("tenant@example.test")).thenReturn(Optional.of(existingTenant));
+        AtomicReference<Invite> saved = new AtomicReference<>();
+        doAnswer(call -> { Invite invite = call.getArgument(0); invite.setId(88L); saved.set(invite); return null; }).when(invites).createInvite(any());
+        when(invites.getInviteByInviteIdAndCreatedBy(88L,9L)).thenAnswer(call -> Optional.of(saved.get()));
+        LocalDate start = LocalDate.now().plusDays(2);
+
+        service.createAndSendEmailInvite(InviteType.TENANT,77L,"tenant@example.test",start,start.plusYears(1));
+
+        verify(notifications).queueInAppNotificationForExistingUser(
+                eq("tenant@example.test"), eq("INVITE_RECEIVED"),
+                contains("https://app.slickhood.test/invite"));
+    }
+
     @Test void tenantAssignmentRequiresLandlordDefinedLeasePeriod() {
         unit(PMSLeaseMode.RENT,false);
         assertThrows(PMSCustomException.class,()->service.createAndSendEmailInvite(

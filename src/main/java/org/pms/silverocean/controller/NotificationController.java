@@ -56,7 +56,7 @@ public class NotificationController {
     }
 
     @GetMapping("/mine")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_MY_NOTIFICATIONS)")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ResponseDTO> getMyNotifications(Pageable pageable) {
         Page<MyNotificationDTO> notifications = notificationReportService.getMyNotifications(pageable);
         ResponseDTO body = new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(),
@@ -68,7 +68,7 @@ public class NotificationController {
     }
 
     @PatchMapping("/mine/{id}/read")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_MY_NOTIFICATIONS)")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ResponseDTO> markMyNotificationRead(@PathVariable long id) {
         MyNotificationDTO notification = notificationReportService.markMyNotificationRead(id);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(),
