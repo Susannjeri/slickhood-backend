@@ -289,6 +289,11 @@ class RentalPaymentMySqlIT {
         sale.setStatus(org.pms.silverocean.service.sales.SaleStatus.CANCELLED);sales.saveAndFlush(sale);
         assertTrue(propertyListings.findPublicBySlug(listing.getPublicSlug(),ZonedDateTime.now()).isPresent());
         property.setManagementMode(org.pms.silverocean.service.property.PMSPropertyManagementMode.SERVICE_CHARGE);properties.saveAndFlush(property);
+        // A physical property may contain several unit purposes. Its legacy/default
+        // mode must not hide an otherwise valid sale listing.
+        assertTrue(propertyListings.findPublicBySlug(listing.getPublicSlug(),ZonedDateTime.now()).isPresent());
+        // The unit purpose is authoritative for marketplace eligibility.
+        unit.setLeaseMode("RENT");units.saveAndFlush(unit);
         assertTrue(propertyListings.findPublicBySlug(listing.getPublicSlug(),ZonedDateTime.now()).isEmpty());
     }
 
