@@ -23,6 +23,7 @@ import org.pms.silverocean.service.auth.wrappers.RoleWrapper;
 import org.pms.silverocean.service.invites.InviteDao;
 import org.pms.silverocean.service.invites.InviteType;
 import org.pms.silverocean.service.estate.EstateService;
+import org.pms.silverocean.service.leasedocument.BuyerOfferDocumentService;
 import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.kyc.KycService;
 import org.pms.silverocean.service.teamaccess.TeamAccessService;
@@ -57,8 +58,9 @@ public class RoleService {
     private final TeamAccessService teamAccessService;
     private final EstateService estateService;
     private final SaleTransactionRepo saleTransactionRepo;
+    private final BuyerOfferDocumentService buyerOffers;
 
-    public RoleService(UserRoleRepo userRoleRepo, PermissionRepo permissionRepo, RoleRepo roleRepo, PropertyManagerService propertyManagerService, UserDao userDao, RolePermissionRepo rolePermissionRepo, I18NService i18NService, AuditLogService auditLogService, InviteDao inviteDao, KycService kycService, TeamAccessService teamAccessService, EstateService estateService, SaleTransactionRepo saleTransactionRepo) {
+    public RoleService(UserRoleRepo userRoleRepo, PermissionRepo permissionRepo, RoleRepo roleRepo, PropertyManagerService propertyManagerService, UserDao userDao, RolePermissionRepo rolePermissionRepo, I18NService i18NService, AuditLogService auditLogService, InviteDao inviteDao, KycService kycService, TeamAccessService teamAccessService, EstateService estateService, SaleTransactionRepo saleTransactionRepo, BuyerOfferDocumentService buyerOffers) {
         this.userRoleRepo = userRoleRepo;
         this.permissionRepo = permissionRepo;
         this.roleRepo = roleRepo;
@@ -72,6 +74,7 @@ public class RoleService {
         this.teamAccessService = teamAccessService;
         this.estateService = estateService;
         this.saleTransactionRepo = saleTransactionRepo;
+        this.buyerOffers = buyerOffers;
     }
 
     /**
@@ -332,7 +335,13 @@ public class RoleService {
                             && (candidate.getBuyerUserId() == null || candidate.getBuyerUserId() == userId))
                     .orElseThrow(() -> new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
             sale.setBuyerUserId(userId);
-            saleTransactionRepo.save(sale);
+            SaleTransaction saved = saleTransactionRepo.save(sale);
+            if (saved.getStatus() == org.pms.silverocean.service.sales.SaleStatus.OFFERED
+                    && saved.getOfferAmount() != null && invite.getAgreementTemplateId() != null
+                    && invite.getLeaseEndDate() != null) {
+                buyerOffers.createIssuedOffer(saved, invite, userDao.findById(userId).orElseThrow(
+                        () -> new PMSCustomException(ResponseCode.LOAD_USER_ERROR)));
+            }
         } else if (pmsRole.isCustomerEmployeeRole()) {
             propertyManagerService.addStaffToProperty(invite.getId(), userId, invite.getEntityId(), pmsRole);
         }

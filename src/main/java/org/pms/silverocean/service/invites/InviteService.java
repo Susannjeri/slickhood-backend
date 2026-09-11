@@ -204,8 +204,16 @@ public class InviteService {
         return invite;
     }
 
-    public String createBuyerInvite(long saleId, String email) {
+    public Invite createBuyerInvite(long saleId, String email, LocalDate responseDueDate) {
         String recipient = normalizeAndValidateEmail(email);
+        if (responseDueDate != null && !responseDueDate.isAfter(LocalDate.now(PMSUtils.getZoneId()))) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA_CONSTRAINT);
+        }
+        var offerTemplate = documentTemplates
+                .findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER)
+                .filter(template -> !template.isLegalReviewRequired() && template.getLegalReviewedAt() != null
+                        && DocumentTemplateIntegrity.sha256(template.getBodyHtml()).equals(template.getContentSha256()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SALES_ONBOARDING_SETUP_REQUIRED));
         Invite invite = new Invite();
         invite.setCreatedBy(userDao.getUserId());
         invite.setToken(PMSUtils.randomMask());
@@ -216,9 +224,15 @@ public class InviteService {
         invite.setType(InviteType.BUYER.name());
         invite.setRoleId(getRoleFromInviteType(InviteType.BUYER));
         invite.setRecipient(recipient);
+        invite.setLeaseEndDate(responseDueDate);
+        invite.setAgreementTemplateId(offerTemplate.getId());
         inviteDao.createInvite(invite);
         sendInvite(invite.getId(), recipient, NotificationChannel.EMAIL);
-        return formatInviteLink(configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(), invite.getToken());
+        return invite;
+    }
+
+    public Invite createBuyerInvite(long saleId, String email) {
+        return createBuyerInvite(saleId, email, null);
     }
 
     public StaffInviteDTO createInternalStaffInvite(StaffInviteRequest request) {

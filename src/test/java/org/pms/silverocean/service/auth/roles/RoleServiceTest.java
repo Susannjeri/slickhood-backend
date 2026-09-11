@@ -33,7 +33,10 @@ import org.pms.silverocean.service.subscription.SubscriptionProvisioningService;
 import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.kyc.KycService;
 import org.pms.silverocean.service.teamaccess.TeamAccessService;
+import org.pms.silverocean.service.leasedocument.BuyerOfferDocumentService;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -92,6 +95,9 @@ class RoleServiceTest {
 
     @Mock
     private SaleTransactionRepo saleTransactionRepo;
+
+    @Mock
+    private BuyerOfferDocumentService buyerOfferDocumentService;
 
     @InjectMocks
     private RoleService roleService;
@@ -277,11 +283,14 @@ class RoleServiceTest {
         Invite invite = new Invite();
         invite.setId(42L); invite.setRoleId(13L); invite.setCreatedBy(999L); invite.setEntityId(88L);
         invite.setType(InviteType.BUYER.name()); invite.setRecipient("buyer@example.com"); invite.setActive(true);
+        invite.setAgreementTemplateId(71L); invite.setLeaseEndDate(LocalDate.now().plusDays(14));
         Users assignor = new Users(); assignor.setId(999L); assignor.setEmail("sales@example.com");
         Users buyer = new Users(); buyer.setId(201L); buyer.setEmail("buyer@example.com");
         buyer.setActive(true);
         SaleTransaction sale = new SaleTransaction(); sale.setId(88L); sale.setActive(true);
         sale.setInvitedBuyerEmail("buyer@example.com");
+        sale.setStatus(org.pms.silverocean.service.sales.SaleStatus.OFFERED);
+        sale.setOfferAmount(new BigDecimal("14500000"));
 
         when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
         when(roleRepo.findByIdAndActive(13L)).thenReturn(Optional.of(buyerRole));
@@ -295,6 +304,7 @@ class RoleServiceTest {
         assertTrue(response.isSuccess());
         assertEquals(201L, sale.getBuyerUserId());
         verify(saleTransactionRepo).save(sale);
+        verify(buyerOfferDocumentService).createIssuedOffer(sale, invite, buyer);
         verify(propertyManagerService, never()).addStaffToProperty(anyLong(), anyLong(), anyLong(), any(PMSRole.class));
     }
 

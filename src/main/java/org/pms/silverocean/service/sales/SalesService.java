@@ -13,6 +13,7 @@ import org.pms.silverocean.service.estate.EstateService;
 import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
 import org.pms.silverocean.service.leasedocument.LeaseDocumentStatus;
 import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
+import org.pms.silverocean.service.leasedocument.BuyerOfferDocumentService;
 import org.pms.silverocean.service.invites.InviteService;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.notification.NotificationDTO;
@@ -55,11 +56,14 @@ public class SalesService {
     private final PMSInvoiceRepo invoices;
     private final InvoiceService invoiceService;
     private final SalesAccessService access;
+    private final PaymentAccountRepo paymentAccounts;
+    private final BuyerOfferDocumentService offerDocuments;
 
     public SalesService(SaleTransactionRepo sales, PropertyRepo properties, UnitRepo units, UserDao users,
                         EstateService estates, SaleMilestoneRepo milestones, InviteService invites,
                         NotificationService notifications, I18NService i18n, LeaseDocumentRepo documents,
-                        PMSInvoiceRepo invoices, InvoiceService invoiceService, SalesAccessService access) {
+                        PMSInvoiceRepo invoices, InvoiceService invoiceService, SalesAccessService access,
+                        PaymentAccountRepo paymentAccounts, BuyerOfferDocumentService offerDocuments) {
         this.sales = sales; this.properties = properties; this.units = units; this.users = users;
         this.estates = estates; this.milestones = milestones; this.invites = invites;
         this.notifications = notifications; this.i18n = i18n;
@@ -67,12 +71,24 @@ public class SalesService {
         this.invoices = invoices;
         this.invoiceService = invoiceService;
         this.access = access;
+        this.paymentAccounts = paymentAccounts;
+        this.offerDocuments = offerDocuments;
     }
 
     @Transactional
     public SaleTransaction create(CreateSaleRequest request) {
         long actorId = users.getUserId();
         Property property = requireSaleProperty(request.propertyId(), actorId);
+        if (paymentAccounts.countByCreatedByAndCategoryAndActiveTrueAndVerifiedTrue(property.getCreatedBy(),
+                org.pms.silverocean.service.account.enums.AccountCategory.PROPERTY_SALES) < 1) {
+            throw new PMSCustomException(ResponseCode.SALES_ONBOARDING_SETUP_REQUIRED);
+        }
+        boolean automatedOffer = request.offerAmount() != null || request.responseDueDate() != null;
+        if (automatedOffer && (request.offerAmount() == null || request.responseDueDate() == null
+                || request.offerAmount().signum() <= 0
+                || !request.responseDueDate().isAfter(LocalDate.now(PMSUtils.getZoneId())))) {
+            throw invalid();
+        }
         Users buyer = resolveBuyer(request);
         String buyerEmail = buyer != null ? buyer.getEmail().trim().toLowerCase(Locale.ROOT)
                 : request.buyerEmail().trim().toLowerCase(Locale.ROOT);
@@ -87,11 +103,13 @@ public class SalesService {
         SaleTransaction sale = new SaleTransaction();
         sale.setPropertyId(property.getId()); sale.setUnitId(unit.getId()); sale.setSalesAgentUserId(actorId);
         sale.setBuyerUserId(buyer == null ? null : buyer.getId()); sale.setInvitedBuyerEmail(buyerEmail);
-        sale.setStatus(SaleStatus.LEAD); sale.setAskingPrice(request.askingPrice());
+        sale.setStatus(automatedOffer ? SaleStatus.OFFERED : SaleStatus.LEAD); sale.setAskingPrice(request.askingPrice());
+        sale.setOfferAmount(request.offerAmount());
         sale.setCurrency(request.currency().trim().toUpperCase()); sale.setNotes(StringUtils.trimToNull(request.notes()));
         sale.setCreatedBy(actorId); sale.setActive(true);
         SaleTransaction saved = sales.save(sale);
-        invites.createBuyerInvite(saved.getId(), buyerEmail);
+        Invite invite = invites.createBuyerInvite(saved.getId(), buyerEmail, request.responseDueDate());
+        if (automatedOffer && buyer != null) offerDocuments.createIssuedOffer(saved, invite, buyer);
         return saved;
     }
 

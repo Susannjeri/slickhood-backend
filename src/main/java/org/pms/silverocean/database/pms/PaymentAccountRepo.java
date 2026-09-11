@@ -17,6 +17,8 @@ public interface PaymentAccountRepo extends JpaRepository<PaymentAccount, Long>,
     Page<PaymentAccount> findByCreatedByAndActiveTrue(Long createdBy, Pageable pageable);
     Optional<PaymentAccount> findByIdAndActiveTrue(Long id);
     Optional<PaymentAccount> findByIdAndActiveTrueAndCreatedBy(long id, long createdBy);
+    long countByCreatedByAndCategoryAndActiveTrueAndVerifiedTrue(long createdBy,
+            org.pms.silverocean.service.account.enums.AccountCategory category);
 
     @Query("SELECT pa FROM PaymentAccount pa JOIN PropertyAccount pa2 ON pa.id=pa2.accountId " +
             "WHERE pa2.propertyId=:propertyId AND pa2.active AND pa.active AND pa.verified AND " +

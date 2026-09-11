@@ -6,8 +6,16 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 public record CreateSaleRequest(@Positive long propertyId, @NotNull @Positive Long unitId, @Positive Long buyerUserId,
                                 @Email @Size(max=254) String buyerEmail,
                                 @NotNull @Positive BigDecimal askingPrice, @NotBlank @jakarta.validation.constraints.Size(max=12) String currency,
-                                @jakarta.validation.constraints.Size(max=1000) String notes) {}
+                                @jakarta.validation.constraints.Size(max=1000) String notes,
+                                @Positive BigDecimal offerAmount,
+                                @jakarta.validation.constraints.Future LocalDate responseDueDate) {
+    public CreateSaleRequest(long propertyId, Long unitId, Long buyerUserId, String buyerEmail,
+                             BigDecimal askingPrice, String currency, String notes) {
+        this(propertyId, unitId, buyerUserId, buyerEmail, askingPrice, currency, notes, null, null);
+    }
+}

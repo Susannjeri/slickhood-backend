@@ -6,6 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.common.ResponseCode;
+import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.database.pms.*;
 import org.pms.silverocean.database.pms.entities.*;
 import org.pms.silverocean.service.PMSCustomException;
@@ -17,6 +18,8 @@ import org.pms.silverocean.service.invites.InviteService;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.payment.invoice.InvoiceService;
+import org.pms.silverocean.service.leasedocument.BuyerOfferDocumentService;
+import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -43,6 +46,8 @@ class SalesServiceTest {
     @Mock PMSInvoiceRepo invoices;
     @Mock InvoiceService invoiceService;
     @Mock SalesAccessService access;
+    @Mock PaymentAccountRepo paymentAccounts;
+    @Mock BuyerOfferDocumentService offerDocuments;
     SalesService service;
     Property property;
     Unit unit;
@@ -51,12 +56,14 @@ class SalesServiceTest {
     @BeforeEach
     void setUp() {
         service = new SalesService(sales, properties, units, users, estates, milestones, invites, notifications, i18n,
-                documents, invoices, invoiceService, access);
+                documents, invoices, invoiceService, access, paymentAccounts, offerDocuments);
         property = new Property(); property.setId(11L); property.setActive(true); property.setCreatedBy(100L);
         property.setManagementMode(PMSPropertyManagementMode.SALE);
         unit = new Unit(); unit.setId(77L); unit.setPropertyId(11L); unit.setActive(true); unit.setLeaseMode("SALE"); unit.setCurrency("KES");
         buyer = new Users(); buyer.setId(200L); buyer.setActive(true); buyer.setEmail("buyer@example.com");
         lenient().when(properties.findById(11L)).thenReturn(Optional.of(property));
+        lenient().when(paymentAccounts.countByCreatedByAndCategoryAndActiveTrueAndVerifiedTrue(100L,
+                AccountCategory.PROPERTY_SALES)).thenReturn(1L);
     }
 
     @Test
@@ -74,7 +81,7 @@ class SalesServiceTest {
 
         assertEquals("KES", created.getCurrency());
         assertEquals("direct sale", created.getNotes());
-        verify(invites).createBuyerInvite(1L, "buyer@example.com");
+        verify(invites).createBuyerInvite(1L, "buyer@example.com", null);
         assertEquals(SaleStatus.LEAD, created.getStatus());
         verify(sales).existsByUnitIdAndActiveTrueAndStatusNot(77L, SaleStatus.CANCELLED);
     }
@@ -111,7 +118,40 @@ class SalesServiceTest {
 
         assertEquals("newbuyer@example.com", created.getInvitedBuyerEmail());
         assertEquals(null, created.getBuyerUserId());
-        verify(invites).createBuyerInvite(2L, "newbuyer@example.com");
+        verify(invites).createBuyerInvite(2L, "newbuyer@example.com", null);
+    }
+
+    @Test
+    void simpleSaleInviteIssuesFrozenOfferImmediatelyForExistingBuyer() {
+        when(users.getUserId()).thenReturn(100L);
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        when(users.findById(200L)).thenReturn(Optional.of(buyer));
+        when(units.findAndLockById(77L)).thenReturn(Optional.of(unit));
+        when(sales.save(any())).thenAnswer(invocation -> { SaleTransaction value = invocation.getArgument(0); value.setId(3L); return value; });
+        Invite invite = new Invite(); invite.setId(44L);
+        java.time.LocalDate due = java.time.LocalDate.now(PMSUtils.getZoneId()).plusDays(7);
+        when(invites.createBuyerInvite(3L, "buyer@example.com", due)).thenReturn(invite);
+
+        SaleTransaction created = service.create(new CreateSaleRequest(11L, 77L, 200L, null,
+                new BigDecimal("15000000"), "KES", null, new BigDecimal("14500000"), due));
+
+        assertEquals(SaleStatus.OFFERED, created.getStatus());
+        assertEquals(new BigDecimal("14500000"), created.getOfferAmount());
+        verify(offerDocuments).createIssuedOffer(created, invite, buyer);
+    }
+
+    @Test
+    void saleCannotStartUntilOwnerHasVerifiedReceivingAccount() {
+        when(users.getUserId()).thenReturn(100L);
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        when(paymentAccounts.countByCreatedByAndCategoryAndActiveTrueAndVerifiedTrue(100L,
+                AccountCategory.PROPERTY_SALES)).thenReturn(0L);
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.create(
+                new CreateSaleRequest(11L, 77L, 200L, null, BigDecimal.TEN, "KES", null)));
+
+        assertEquals(ResponseCode.SALES_ONBOARDING_SETUP_REQUIRED, error.getResponseCode());
+        verifyNoInteractions(units, invites);
     }
 
     @Test
