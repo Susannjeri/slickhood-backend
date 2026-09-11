@@ -33,6 +33,12 @@ public enum PaymentChannel {
     )),
     PAYSTACK("Paystack", "Card and mobile money payments: SlickHood subscriptions or a verified recipient subaccount", List.of(
             new AccountPropertyDefinition(PaymentPropertyKeys.SUBACCOUNT_CODE, "paystack.subaccount.code", "paystack.subaccount.code.description", true, true)
+    )),
+    PESAWISE("PesaWise", "PesaWise M-Pesa sandbox checkout with provider-side payment verification", List.of(
+            new AccountPropertyDefinition(PaymentPropertyKeys.PESAWISE_API_KEY, "pesawise.api.key", "pesawise.api.key.description", true, false),
+            new AccountPropertyDefinition(PaymentPropertyKeys.PESAWISE_API_SECRET, "pesawise.api.secret", "pesawise.api.secret.description", true, false),
+            new AccountPropertyDefinition(PaymentPropertyKeys.PESAWISE_BALANCE_ID, "pesawise.balance.id", "pesawise.balance.id.description", false, true),
+            new AccountPropertyDefinition(PaymentPropertyKeys.PESAWISE_WEBHOOK_SECRET, "pesawise.webhook.secret", "pesawise.webhook.secret.description", true, false)
     ));
 
     private final String name;

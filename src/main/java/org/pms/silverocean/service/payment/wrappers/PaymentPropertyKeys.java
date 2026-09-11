@@ -29,4 +29,10 @@ public class PaymentPropertyKeys {
 
     // Paystack
     public static final String SUBACCOUNT_CODE = "subaccount_code";
+
+    // PesaWise (distinct names keep cross-provider property lookup unambiguous)
+    public static final String PESAWISE_API_KEY = "pesawise_api_key";
+    public static final String PESAWISE_API_SECRET = "pesawise_api_secret";
+    public static final String PESAWISE_BALANCE_ID = "pesawise_balance_id";
+    public static final String PESAWISE_WEBHOOK_SECRET = "pesawise_webhook_secret";
 }

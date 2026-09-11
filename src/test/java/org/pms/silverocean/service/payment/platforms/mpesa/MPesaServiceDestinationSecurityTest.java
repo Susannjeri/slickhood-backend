@@ -14,12 +14,16 @@ import org.pms.silverocean.service.RestTemplateService;
 import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.config.ConfigService;
+import org.pms.silverocean.service.config.ConfigDTO;
+import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.eventlogger.EventService;
 import org.pms.silverocean.service.param.ParamService;
 import org.pms.silverocean.service.payment.PaymentDao;
 import org.pms.silverocean.service.payment.UpdatePaymentService;
+import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.AuthenticationResponse;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.MPesaPaymentDTO;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.MPesaPaymentResponseDTO;
+import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.MPesaSTKPushRequest;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.Body;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.CallbackItem;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.CallbackMetadata;
@@ -27,13 +31,18 @@ import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.payment.wrappers.PaymentPropertyKeys;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.STKCallback;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.STKCallbackResponse;
+import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.STKResponseDTO;
+import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
+import org.springframework.http.HttpHeaders;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -152,6 +161,48 @@ class MPesaServiceDestinationSecurityTest {
 
         verify(updatePaymentService).setInvoiceToPaid(invoice, "RCPT-1", 500D);
         assertThat(payment.getProviderReceipt()).isEqualTo("RCPT-1");
+        assertThat(payment.getThirdPartyTransId()).isEqualTo("CHECKOUT-1");
+    }
+
+    @Test
+    void successfulStkInitializationPersistsCheckoutRequestIdBeforeReturning() {
+        PMSInvoice invoice = invoice();
+        List<String> persistedRequestIds = new ArrayList<>();
+        doAnswer(invocation -> {
+            persistedRequestIds.add(((PMSPayment) invocation.getArgument(0)).getThirdPartyTransId());
+            return null;
+        }).when(paymentDao).savePMSPayment(any(PMSPayment.class));
+
+        when(paramService.getParamByAccountIdAndType(eq(91L),
+                eq(PaymentChannel.MPESA.findProperty(PaymentPropertyKeys.PAYBILL)), eq(44L)))
+                .thenReturn("174379");
+        when(paramService.getParamByAccountIdAndType(eq(91L),
+                eq(PaymentChannel.MPESA.findProperty(PaymentPropertyKeys.STK_PASSKEY)), eq(44L)))
+                .thenReturn("sandbox-passkey");
+        when(paramService.getParamByAccountIdAndType(eq(91L),
+                eq(PaymentChannel.MPESA.findProperty(PaymentPropertyKeys.CONSUMER_KEY)), eq(44L)))
+                .thenReturn("sandbox-key");
+        when(paramService.getParamByAccountIdAndType(eq(91L),
+                eq(PaymentChannel.MPESA.findProperty(PaymentPropertyKeys.CONSUMER_SECRET)), eq(44L)))
+                .thenReturn("sandbox-secret");
+        when(configService.getConfigByName(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL))
+                .thenReturn(() -> config("MPESA_STK_CALLBACK_BASE_URL", "https://app.slickhood.com/api/callback/stk?token=safe"));
+        when(configService.getConfigByName(PMSConfigs.MPESA_STK_AUTH_URL))
+                .thenReturn(() -> config("MPESA_STK_AUTH_URL", "https://sandbox.safaricom.co.ke/oauth"));
+        when(configService.getConfigByName(PMSConfigs.MPESA_STK_INIT_URL))
+                .thenReturn(() -> config("MPESA_STK_INIT_URL", "https://sandbox.safaricom.co.ke/stk"));
+        when(restTemplateService.sendGetRequest(eq("https://sandbox.safaricom.co.ke/oauth"),
+                any(HttpHeaders.class), eq(AuthenticationResponse.class)))
+                .thenReturn(new AuthenticationResponse("access-token", "3600"));
+        when(restTemplateService.sendPostRequest(eq("https://sandbox.safaricom.co.ke/stk"),
+                any(MPesaSTKPushRequest.class), any(HttpHeaders.class), eq(STKResponseDTO.class)))
+                .thenReturn(new STKResponseDTO("MERCHANT-1", "CHECKOUT-PERSISTED-1", "0",
+                        "Accepted", "Check your phone"));
+
+        PaymentResponse response = service.initPayment(invoice, "+254700000000", 91L);
+
+        assertThat(response.success()).isTrue();
+        assertThat(persistedRequestIds).containsExactly(null, "CHECKOUT-PERSISTED-1");
     }
 
     private PMSInvoice invoice() {
@@ -161,6 +212,7 @@ class MPesaServiceDestinationSecurityTest {
         invoice.setPropertyId(44L);
         invoice.setPaymentAccountId(91L);
         invoice.setPayToUserId(77L);
+        invoice.setDescription("Test invoice".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         invoice.setPendingAmount(500D);
         invoice.setActive(true);
         return invoice;
@@ -201,5 +253,9 @@ class MPesaServiceDestinationSecurityTest {
                 new CallbackItem("MpesaReceiptNumber", receipt)));
         return new STKCallbackResponse(new Body(new STKCallback(
                 "MERCHANT-1", "CHECKOUT-1", resultCode, "result", metadata)));
+    }
+
+    private ConfigDTO config(String name, String value) {
+        return new ConfigDTO(1L, name, value, 0, false);
     }
 }

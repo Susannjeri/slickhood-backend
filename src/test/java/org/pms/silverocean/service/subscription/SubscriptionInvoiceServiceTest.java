@@ -53,6 +53,7 @@ class SubscriptionInvoiceServiceTest {
         ArgumentCaptor<PMSInvoice> invoice = ArgumentCaptor.forClass(PMSInvoice.class);
         verify(invoiceDao).createInvoice(invoice.capture());
         assertEquals(99L, invoice.getValue().getPayToUserId());
+        assertEquals(12L, invoice.getValue().getPaymentAccountId());
         assertEquals(0L, invoice.getValue().getPropertyId());
         assertEquals("INV-SUB-1", result.invoiceRef());
     }

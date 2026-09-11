@@ -78,6 +78,10 @@ public class SubscriptionInvoiceService {
         invoice.setCurrency(currency);
         invoice.setBilledUserId(billedUserId);
         invoice.setPayToUserId(paymentAccount.getCreatedBy());
+        // Pin the exact verified platform destination selected at checkout.
+        // Provider callbacks use this immutable link to prove that a receipt
+        // belongs to the intended SlickHood account before settling the bill.
+        invoice.setPaymentAccountId(paymentAccountId);
         invoice.setActive(true);
         invoice.setPaid(false);
         invoice.setTransactionInProgress(false);

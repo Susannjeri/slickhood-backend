@@ -107,6 +107,7 @@ public class MPesaService extends PaymentPlatform {
         return initPayment(pmsInvoice, msisdn, accountId);
     }
 
+    @Override
     public PaymentResponse initPayment(PMSInvoice pmsInvoice, String msisdn, long accountId) throws PaymentRequestException {
         if (StringUtils.isBlank(msisdn)) {
             log.info("MSISDN is blank {}", msisdn);
@@ -129,6 +130,7 @@ public class MPesaService extends PaymentPlatform {
 
         PMSPayment stkPayment = new PMSPayment(mpesaSTKPushRequest, accountId);
         stkPayment.setPayToUserId(pmsInvoice.getPayToUserId());
+        boolean responsePersisted = false;
         try {
             AccountFilterDetails accountFilterDetails = new AccountFilterDetails(accountId, pmsInvoice.getPropertyId());
             TokenStore token = tokenCache.get(accountFilterDetails);
@@ -148,6 +150,14 @@ public class MPesaService extends PaymentPlatform {
             stkPayment.setStatus(stkResponseDTO.responseCode());
             stkPayment.setStatusDesc(stkResponseDTO.responseDescription());
             boolean success = "0".equals(stkResponseDTO.responseCode());
+
+            // The asynchronous Safaricom callback is correlated by
+            // CheckoutRequestID. Persist it before returning to the browser;
+            // otherwise a fast callback cannot find this payment and the
+            // invoice remains permanently in progress even though M-Pesa
+            // collected the money.
+            paymentDao.savePMSPayment(stkPayment);
+            responsePersisted = true;
 
             return new PaymentResponse(
                     success,
@@ -187,7 +197,9 @@ public class MPesaService extends PaymentPlatform {
             stkPayment.setStatus("585");
             stkPayment.setStatusDesc("unhandled.exception");
         } finally {
-            paymentDao.savePMSPayment(stkPayment);
+            if (!responsePersisted) {
+                paymentDao.savePMSPayment(stkPayment);
+            }
             eventService.flushByTId(stkPayment.getId());
         }
         return new PaymentResponse(false, ResponseCode.MPESA_PAYMENT_INITIALIZATION_FAILED);
@@ -391,7 +403,6 @@ public class MPesaService extends PaymentPlatform {
                                 && stkPaymentMatchesInvoiceDestination(pmsPayment, invoice.orElseThrow());
                         if (valid) {
                             pmsPayment.setProviderReceipt(receipt.orElseThrow());
-                            pmsPayment.setThirdPartyTransId(receipt.orElseThrow());
                             paymentDao.savePMSPayment(pmsPayment);
                             updatePaymentService.setInvoiceToPaid(invoice.orElseThrow(), receipt.orElseThrow(), callbackAmount.orElseThrow().doubleValue());
                         } else {

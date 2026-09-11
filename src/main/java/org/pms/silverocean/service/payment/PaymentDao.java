@@ -3,6 +3,7 @@ package org.pms.silverocean.service.payment;
 import org.pms.silverocean.database.pms.entities.PMSPayment;
 import org.pms.silverocean.database.pms.PMSPaymentRepo;
 import org.pms.silverocean.service.payment.platforms.mpesa.TransactionCategory;
+import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,11 @@ public class PaymentDao {
 
     public Optional<PMSPayment> findPaymentByThirdPartyID(String thirdPartyTransId) {
         return pmsPaymentRepo.findByThirdPartyTransId(thirdPartyTransId);
+    }
+
+    public Optional<PMSPayment> findLatestInProgressPayment(String invoiceRef, PaymentChannel channel) {
+        return pmsPaymentRepo.findFirstByBillReferenceAndChannelAndInProgressTrueOrderByCreatedOnDesc(
+                invoiceRef, channel.getName());
     }
 
     public boolean callbackAlreadyProcessed(String thirdPartyTransId, String billReference,

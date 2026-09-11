@@ -1,9 +1,7 @@
 package org.pms.silverocean.service.payment;
 
 
-import org.apache.commons.lang3.StringUtils;
 import org.pms.silverocean.database.pms.entities.PMSInvoice;
-import org.pms.silverocean.service.payment.platforms.mpesa.MPesaService;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
 
@@ -20,11 +18,7 @@ public abstract class PaymentPlatform {
         PaymentResponse response = null;
         try {
 
-            if (PaymentChannel.MPESA.equals(this.channelType()) && StringUtils.isNotBlank(phoneNumber)) {
-                response = ((MPesaService) this).initPayment(pmsInvoice, phoneNumber, accountId);
-            } else {
-                response = initPayment(pmsInvoice, accountId);
-            }
+            response = initPayment(pmsInvoice, phoneNumber, accountId);
         } finally {
             if (response == null || !response.success()) {
                 pmsInvoice.setTransactionInProgress(false);
@@ -35,6 +29,12 @@ public abstract class PaymentPlatform {
     }
 
     protected abstract PaymentResponse initPayment(PMSInvoice pmsInvoice, long accountId) throws PaymentRequestException;
+
+    /** Providers that collect from a phone can override this without coupling the base class to them. */
+    protected PaymentResponse initPayment(PMSInvoice pmsInvoice, String phoneNumber, long accountId)
+            throws PaymentRequestException {
+        return initPayment(pmsInvoice, accountId);
+    }
 
     protected abstract boolean isActive();
 

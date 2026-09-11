@@ -13,6 +13,8 @@ import java.util.Optional;
 
 public interface PMSPaymentRepo extends JpaRepository<PMSPayment, Long>, JpaSpecificationExecutor<PMSPayment> {
     Optional<PMSPayment> findByThirdPartyTransId(String thirdPartyTransId);
+    Optional<PMSPayment> findFirstByBillReferenceAndChannelAndInProgressTrueOrderByCreatedOnDesc(
+            String billReference, String channel);
 
     boolean existsByChannelAndProviderReceiptAndIdNot(String channel, String providerReceipt, Long id);
 

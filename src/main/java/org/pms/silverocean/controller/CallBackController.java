@@ -27,6 +27,7 @@ import org.pms.silverocean.service.payment.platforms.pesalink.wrappers.PesalinkC
 import org.pms.silverocean.service.payment.platforms.pesalink.wrappers.PesalinkCallbackType;
 import org.pms.silverocean.service.payment.platforms.pesalink.wrappers.PesalinkValidatePaymentRequestDTO;
 import org.pms.silverocean.service.payment.platforms.paystack.PaystackCallbackDTO;
+import org.pms.silverocean.service.payment.platforms.pesawise.PesawiseCallbackDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -190,6 +191,18 @@ public class CallBackController {
         }
         PaymentCallBackResponse response = paymentPlatformFactory.getPlatform(PaymentChannel.PAYSTACK)
                 .handleCallBack(new PaystackCallbackDTO(rawBody, PMSUtils.getIPAddress(request)));
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/pesawise")
+    public ResponseEntity<PaymentCallBackResponse> receivePesawiseCallback(
+            HttpServletRequest request,
+            @RequestHeader(value = "x-secret-hash", required = false) String secretHash,
+            @RequestHeader(value = "x-event-type", required = false) String eventType,
+            @RequestBody String rawBody) {
+        PaymentCallBackResponse response = paymentPlatformFactory.getPlatform(PaymentChannel.PESAWISE)
+                .handleCallBack(new PesawiseCallbackDTO(rawBody, secretHash, eventType,
+                        PMSUtils.getIPAddress(request)));
         return ResponseEntity.ok(response);
     }
 
