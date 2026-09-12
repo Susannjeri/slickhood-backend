@@ -102,7 +102,7 @@ public class SalesService {
         BigDecimal authoritativeAskingPrice = BigDecimal.valueOf(unit.getPrice());
         if (request.askingPrice().compareTo(authoritativeAskingPrice) != 0) throw invalid();
         if (sales.existsByUnitIdAndActiveTrueAndStatusNot(unit.getId(), SaleStatus.CANCELLED))
-            throw new PMSCustomException(ResponseCode.DATA_INTEGRITY_VIOLATION);
+            throw new PMSCustomException(ResponseCode.SALE_UNIT_ALREADY_ACTIVE);
         SaleTransaction sale = new SaleTransaction();
         sale.setPropertyId(property.getId()); sale.setUnitId(unit.getId()); sale.setSalesAgentUserId(actorId);
         sale.setBuyerUserId(buyer == null ? null : buyer.getId()); sale.setInvitedBuyerEmail(buyerEmail);

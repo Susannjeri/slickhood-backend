@@ -98,7 +98,7 @@ class SalesServiceTest {
         PMSCustomException exception = assertThrows(PMSCustomException.class, () -> service.create(
                 new CreateSaleRequest(11L, 77L, 200L, null, new BigDecimal("15000000"), "KES", null)));
 
-        assertEquals(ResponseCode.DATA_INTEGRITY_VIOLATION, exception.getResponseCode());
+        assertEquals(ResponseCode.SALE_UNIT_ALREADY_ACTIVE, exception.getResponseCode());
         verify(sales, never()).save(any());
     }
 
