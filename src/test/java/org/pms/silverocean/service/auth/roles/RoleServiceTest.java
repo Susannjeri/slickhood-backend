@@ -145,9 +145,6 @@ class RoleServiceTest {
 
         when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
         when(roleRepo.findByIdAndActive(testRole3.getId())).thenReturn(Optional.of(testRole3));
-        when(userDao.findByEmail(existingUser.getEmail())).thenReturn(Optional.of(existingUser));
-
-
         when(userRoleRepo.findByUserIdAndRoleId(existingUser.getId(), testRole3.getId())).thenReturn(0);
 
         // Act
@@ -163,6 +160,7 @@ class RoleServiceTest {
         // Ensure existing role was not modified
         verify(userRoleRepo, never()).delete(any(UserRole.class));
         verify(userRoleRepo, never()).save(new UserRole(existingUser.getId(), testRole.getId())); // existing one untouched
+        verify(userDao, never()).findByEmail(existingUser.getEmail());
     }
 
 
@@ -187,7 +185,6 @@ class RoleServiceTest {
 
         when(userDao.findById(100L)).thenReturn(Optional.of(assignor));
         when(roleRepo.findByIdAndActive(2L)).thenReturn(Optional.of(testRole3));
-        when(userDao.findByEmail(assignee.getEmail())).thenReturn(Optional.of(assignee));
         when(userRoleRepo.findByUserIdAndRoleId(anyLong(), anyLong())).thenReturn(0);
         // Act
         ResponseDTO response = roleService.assignRoleFromInvite(invite, null, assignee);
@@ -221,7 +218,6 @@ class RoleServiceTest {
         when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
         when(roleRepo.findByIdAndActive(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
         when(roleRepo.findById(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
-        when(userDao.findByEmail(homeowner.getEmail())).thenReturn(Optional.of(homeowner));
         when(userRoleRepo.findByUserIdAndRoleId(homeowner.getId(), homeownerRole.getId())).thenReturn(0);
 
         ResponseDTO response = roleService.assignRoleFromInvite(invite, null, homeowner);
@@ -255,7 +251,6 @@ class RoleServiceTest {
         when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
         when(roleRepo.findByIdAndActive(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
         when(roleRepo.findById(homeownerRole.getId())).thenReturn(Optional.of(homeownerRole));
-        when(userDao.findByEmail(homeowner.getEmail())).thenReturn(Optional.of(homeowner));
         when(userRoleRepo.findByUserIdAndRoleId(homeowner.getId(), homeownerRole.getId())).thenReturn(0);
 
         ResponseDTO response = roleService.assignRoleFromInvite(invite, null, homeowner);
@@ -295,7 +290,6 @@ class RoleServiceTest {
         when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
         when(roleRepo.findByIdAndActive(13L)).thenReturn(Optional.of(buyerRole));
         when(roleRepo.findById(13L)).thenReturn(Optional.of(buyerRole));
-        when(userDao.findByEmail(buyer.getEmail())).thenReturn(Optional.of(buyer));
         when(userRoleRepo.findByUserIdAndRoleId(201L, 13L)).thenReturn(0);
         when(saleTransactionRepo.findByIdForUpdate(88L)).thenReturn(Optional.of(sale));
         when(saleTransactionRepo.save(sale)).thenReturn(sale);
@@ -342,7 +336,6 @@ class RoleServiceTest {
 
         when(roleRepo.findByIdAndActive(anyLong())).thenReturn(Optional.of(testRole));
         when(userDao.findById(anyLong())).thenReturn(Optional.of(testUser));
-        when(userDao.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
         when(userRoleRepo.findByUserIdAndRoleId(user.getId(), testRole.getId())).thenReturn(1);
 
         // Act
@@ -373,7 +366,6 @@ class RoleServiceTest {
         when(userDao.findById(1L)).thenReturn(Optional.of(testUser));
         when(roleRepo.findByIdAndActive(6L)).thenReturn(Optional.of(tenantRole));
         when(roleRepo.findById(6L)).thenReturn(Optional.of(tenantRole));
-        when(userDao.findByEmail("tenant@example.com")).thenReturn(Optional.of(tenant));
 
         roleService.assignPendingTenantRoleIfMissing(tenant);
 
@@ -445,7 +437,6 @@ class RoleServiceTest {
         when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
         when(roleRepo.findByIdAndActive(9L)).thenReturn(Optional.of(supportRole));
         when(roleRepo.findById(9L)).thenReturn(Optional.of(supportRole));
-        when(userDao.findByEmail(staff.getEmail())).thenReturn(Optional.of(staff));
         when(userRoleRepo.findByUserIdAndRoleId(staff.getId(), supportRole.getId())).thenReturn(0);
 
         ResponseDTO response = roleService.assignRoleFromInvite(invite, null, staff);
@@ -619,7 +610,6 @@ class RoleServiceTest {
         when(userDao.findById(999L)).thenReturn(Optional.of(assignor));
         when(roleRepo.findByIdAndActive(17L)).thenReturn(Optional.of(tenantRole));
         when(roleRepo.findById(17L)).thenReturn(Optional.of(tenantRole));
-        when(userDao.findByEmail(tenant.getEmail())).thenReturn(Optional.of(tenant));
         when(userRoleRepo.findByUserIdAndRoleId(202L, 17L)).thenReturn(0);
 
         ResponseDTO response = roleService.assignRoleFromInvite(invite, null, tenant);

@@ -242,7 +242,7 @@ public class RoleService {
         if (!notExpired(invite)) throw new PMSCustomException(ResponseCode.INVALID_OR_EXPIRED_TOKEN);
         validateInviteRecipient(invite, user);
         String assignorEmail = userDao.findById(invite.getCreatedBy()).map(Users::getEmail).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
-        ResponseDTO responseDTO = assignRole(invite.getRoleId() == null ? roleId : invite.getRoleId(), user.getEmail(), assignorEmail);
+        ResponseDTO responseDTO = assignRole(invite.getRoleId() == null ? roleId : invite.getRoleId(), user, assignorEmail);
         if (responseDTO.isSuccess()) {
             invite.setVisits(invite.getVisits() + 1);
             InviteType inviteType = InviteType.valueOf(invite.getType());
@@ -299,7 +299,7 @@ public class RoleService {
         return invite.getExpiryDate() == null || java.time.LocalDateTime.now().isBefore(invite.getExpiryDate());
     }
 
-    private ResponseDTO assignRole(long roleId, String assigneeEmail, String assignorEmail) {
+    private ResponseDTO assignRole(long roleId, Users user, String assignorEmail) {
         Optional<Role> roleByID = roleRepo.findByIdAndActive(roleId);
         if (roleByID.isEmpty()) {
             return new ResponseDTO(false, ResponseCode.INVALID_ROLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_ROLE));
@@ -309,14 +309,15 @@ public class RoleService {
             log.warn("Blocked application-level assignment of platform-owner role {}", role.getId());
             return new ResponseDTO(false, ResponseCode.INVALID_ROLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_ROLE));
         }
-        if (assignorEmail.equals(assigneeEmail) && !role.isSelfAssignable()) {
+        if (assignorEmail.equals(user.getEmail()) && !role.isSelfAssignable()) {
             return new ResponseDTO(false, ResponseCode.ROLE_NOT_SELF_ASSIGNABLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_NOT_SELF_ASSIGNABLE));
         }
-        Optional<Users> users = getUserByEmail(assigneeEmail);
-        if (users.isEmpty()) {
+        // The caller has already authenticated and loaded this account. A
+        // second database lookup can fail independently and used to turn a
+        // valid existing-user invitation into "Invalid user details".
+        if (user == null || user.getId() == null || user.getEmail() == null) {
             throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
         }
-        Users user = users.get();
         if (userRoleRepo.findByUserIdAndRoleId(user.getId(), role.getId()) > 0) {
             return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY));
         }
