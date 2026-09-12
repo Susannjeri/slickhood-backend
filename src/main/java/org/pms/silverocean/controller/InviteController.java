@@ -9,6 +9,7 @@ import org.pms.silverocean.controller.wrappers.ShareInviteDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.invites.InviteDTO;
 import org.pms.silverocean.service.invites.InviteService;
+import org.pms.silverocean.service.invites.InviteTokenInspection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
@@ -76,6 +77,13 @@ public class InviteController {
     public ResponseEntity<ResponseDTO> validateInviteToken(@RequestParam String token) {
         ResponseDTO response = inviteService.validateToken(token);
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/inspect")
+    public ResponseEntity<ResponseDTO> inspectInviteToken(@RequestParam String token) {
+        InviteTokenInspection inspection = inviteService.inspectToken(token);
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.VALID_INVITE_LINK.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.VALID_INVITE_LINK), inspection));
     }
 
     @PatchMapping("/update")

@@ -419,6 +419,35 @@ public class InviteService {
         return responseDTO;
     }
 
+    /**
+     * Checks whether an invitation can still be used without accepting it,
+     * assigning a role, or incrementing any visit counters.
+     */
+    public InviteTokenInspection inspectToken(String token) {
+        if (token == null || token.isBlank()) {
+            throw new PMSCustomException(ResponseCode.INVALID_INVITE_LINK);
+        }
+        if (teamAccessService.isTeamToken(token)) {
+            var inspection = teamAccessService.inspect(token);
+            if (inspection.status() != org.pms.silverocean.service.teamaccess.TeamMembershipStatus.PENDING
+                    || inspection.expiresAt() == null
+                    || !LocalDateTime.now().isBefore(inspection.expiresAt())) {
+                throw new PMSCustomException(ResponseCode.INVALID_INVITE_LINK);
+            }
+            return tokenInspection("TEAM", inspection.expiresAt());
+        }
+        Invite invite = inviteDao.getInviteByToken(token, true)
+                .filter(candidate -> candidate.getExpiryDate() != null
+                        && LocalDateTime.now().isBefore(candidate.getExpiryDate()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVITE_LINK));
+        return tokenInspection(invite.getType(), invite.getExpiryDate());
+    }
+
+    private InviteTokenInspection tokenInspection(String type, LocalDateTime expiresAt) {
+        long validForSeconds = Math.max(0, Duration.between(LocalDateTime.now(), expiresAt).toSeconds());
+        return new InviteTokenInspection(type, expiresAt, validForSeconds);
+    }
+
     public Page<InviteDTO> getUserInvites(Pageable pageable, Long unitId) {
         Page<Invite> invites;
         if (unitId != null) {

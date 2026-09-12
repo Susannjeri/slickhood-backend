@@ -3,10 +3,12 @@ package org.pms.silverocean.controller;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.EmailOccupantInviteDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.invites.InviteService;
+import org.pms.silverocean.service.invites.InviteTokenInspection;
 import org.pms.silverocean.service.invites.InviteType;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
@@ -18,6 +20,7 @@ import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
 /** Exercise the actual method-security proxy; UI permissions alone are not authorization. */
@@ -75,5 +78,17 @@ class HomeownerInviteAuthorizationTest {
         authenticate(Permission.CREATE_INVITE, Permission.SHARE_INVITE);
         controller.createAndEmailOccupantInvite(request(InviteType.TENANT));
         verify(invitations).createAndSendEmailInvite(InviteType.TENANT, 77L, "homeowner@example.test", null, null);
+    }
+
+    @Test void publicInspectionUsesTheReadOnlyServicePath() {
+        var expiresAt = java.time.LocalDateTime.now().plusDays(1);
+        when(invitations.inspectToken("still-valid")).thenReturn(new InviteTokenInspection("TENANT", expiresAt, 86_400));
+
+        var response = controller.inspectInviteToken("still-valid");
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals(ResponseCode.VALID_INVITE_LINK.getCode(), response.getBody().getCode());
+        verify(invitations).inspectToken("still-valid");
+        verify(invitations, never()).validateToken(anyString());
     }
 }

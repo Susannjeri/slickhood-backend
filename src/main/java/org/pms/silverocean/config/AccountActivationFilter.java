@@ -38,7 +38,7 @@ public class AccountActivationFilter extends OncePerRequestFilter {
     private static final Set<String> ALLOWED_PREFIXES = Set.of(
             "/auth/", "/otp/", "/kyc/", "/role/", "/helpdesk/",
             "/user/details", "/user/verify/contact", "/user/update/contact",
-            "/actuator/health", "/error", "/deployed-hash", "/invite/validate", "/team-access/invitations/accept",
+            "/actuator/health", "/error", "/deployed-hash", "/invite/validate", "/invite/inspect", "/team-access/invitations/accept",
             "/sp/directory/", "/soko/catalog/", "/affiliate/public/", "/public/property-listings");
 
     private final UserDao userDao;
