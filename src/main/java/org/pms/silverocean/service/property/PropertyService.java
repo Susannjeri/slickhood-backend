@@ -788,6 +788,7 @@ public class PropertyService {
 
     public ResponseDTO listProperty(Pageable pageable, Optional<String> searchParam, Optional<Long> propertyId,
                                     Optional<PMSPropertyManagementMode> managementMode,
+                                    Optional<PMSLeaseMode> unitLeaseMode,
                                     BiFunction<Property, Long, String> getUserRoleInProperty) {
         Users user = userDao.getUserObject();
         if (!user.isCompletedProfile()) {
@@ -798,22 +799,27 @@ public class PropertyService {
             return getPropertyByIdAndOwnerOrStaff(propertyId.get());
         }
         Long membershipId = workspaceSelection.selectedMembership(user.getId()).map(org.pms.silverocean.database.pms.entities.WorkspaceMembership::getId).orElse(null);
-        Page<PropertyDTO> filteredProperty = propertyDao.findAll(searchParam, managementMode, true, user.getId(), userDao.getActiveRole(), pageable, membershipId, getUserRoleInProperty, garageService::getPresignedUrl);
+        Page<PropertyDTO> filteredProperty = propertyDao.findAll(searchParam, managementMode, unitLeaseMode, true,
+                user.getId(), userDao.getActiveRole(), pageable, membershipId, getUserRoleInProperty,
+                garageService::getPresignedUrl);
         return new ResponseDTO(true, ResponseCode.PROPERTY_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.PROPERTY_LIST), filteredProperty.toList(),
                 filteredProperty.getTotalPages(), filteredProperty.getTotalElements(), filteredProperty.getSize());
     }
 
     public Page<IdNameDescDTO> listPropertyListForKeyValue(Pageable pageable, Optional<String> searchParam,
-                                                           Optional<PMSPropertyManagementMode> managementMode) {
+                                                           Optional<PMSPropertyManagementMode> managementMode,
+                                                           Optional<PMSLeaseMode> unitLeaseMode) {
         Users user = userDao.getUserObject();
         if (!user.isCompletedProfile()) {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
         }
         if (userDao.hasRole(PMSRole.SUPER_ADMIN)) {
-            return propertyDao.findAllForKeyValue(searchParam, managementMode, true, null, PMSRole.SUPER_ADMIN, pageable, null);
+            return propertyDao.findAllForKeyValue(searchParam, managementMode, unitLeaseMode, true, null,
+                    PMSRole.SUPER_ADMIN, pageable, null);
         }
         Long membershipId = workspaceSelection.selectedMembership(user.getId()).map(org.pms.silverocean.database.pms.entities.WorkspaceMembership::getId).orElse(null);
-        return propertyDao.findAllForKeyValue(searchParam, managementMode, true, user.getId(), userDao.getActiveRole(), pageable, membershipId);
+        return propertyDao.findAllForKeyValue(searchParam, managementMode, unitLeaseMode, true, user.getId(),
+                userDao.getActiveRole(), pageable, membershipId);
     }
 
     private ResponseDTO getPropertyByIdAndOwnerOrStaff(long propertyId) {

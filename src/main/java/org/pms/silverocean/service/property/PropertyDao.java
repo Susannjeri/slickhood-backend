@@ -16,6 +16,7 @@ import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.property.wrappers.PropertyDTO;
+import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
 import org.pms.silverocean.service.wrappers.IdNameDescDTO;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.springframework.data.domain.Page;
@@ -121,19 +122,23 @@ public class PropertyDao {
     public Optional<Property> findByIdAndBuyer(Long id, long userId) { return propertyRepo.findByIdAndBuyer(id, userId); }
 
     public Page<PropertyDTO> findAll(Optional<String> filter, Optional<PMSPropertyManagementMode> managementMode,
+                                     Optional<PMSLeaseMode> unitLeaseMode,
                                      boolean activeOnly, long userId, PMSRole activeRole, Pageable pageable,
                                      Long workspaceMembershipId,
                                      BiFunction<Property, Long, String> getUserRoleInProperty, Function<String, String> getSignedImagePath) {
 
-        return propertyRepo.findAll(searchProperty(filter, managementMode, activeOnly, userId, activeRole, workspaceMembershipId), pageable)
+        return propertyRepo.findAll(searchProperty(filter, managementMode, unitLeaseMode, activeOnly, userId,
+                        activeRole, workspaceMembershipId), pageable)
                 .map(property -> new PropertyDTO(property, getUserRoleInProperty.apply(property, userId),
                         getSignedImagePath.apply(Objects.toString(property.getImagePath(), "") + "/" + Objects.toString(property.getThumbnail(), ""))));
     }
 
     public Page<IdNameDescDTO> findAllForKeyValue(Optional<String> filter, Optional<PMSPropertyManagementMode> managementMode,
+                                                  Optional<PMSLeaseMode> unitLeaseMode,
                                                   boolean activeOnly, Long userId, PMSRole activeRole, Pageable pageable,
                                                   Long workspaceMembershipId) {
-        return propertyRepo.findAll(searchProperty(filter, managementMode, activeOnly, userId, activeRole, workspaceMembershipId), pageable)
+        return propertyRepo.findAll(searchProperty(filter, managementMode, unitLeaseMode, activeOnly, userId,
+                        activeRole, workspaceMembershipId), pageable)
                 .map(property -> new IdNameDescDTO(property.getId(), property.getName()));
     }
 

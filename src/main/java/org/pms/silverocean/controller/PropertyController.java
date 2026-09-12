@@ -11,6 +11,7 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.param.ParamAndPropertyDTO;
 import org.pms.silverocean.service.property.PMSPropertyType;
 import org.pms.silverocean.service.property.PMSPropertyManagementMode;
+import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
 import org.pms.silverocean.service.property.PropertyService;
 import org.pms.silverocean.service.property.wrappers.PropertyDTO;
 import org.pms.silverocean.service.wrappers.IdNameDescDTO;
@@ -131,16 +132,20 @@ public class PropertyController extends BasePropertyController {
     public ResponseEntity<ResponseDTO> getPropertyList(@RequestParam Optional<String> search,
                                                        @RequestParam Optional<Long> propertyId,
                                                        @RequestParam Optional<PMSPropertyManagementMode> managementMode,
+                                                       @RequestParam Optional<PMSLeaseMode> unitLeaseMode,
                                                        Pageable pageable) {
-        return ResponseEntity.ok(propertyService.listProperty(pageable, search, propertyId, managementMode, this::determineUserRoleInProperty));
+        return ResponseEntity.ok(propertyService.listProperty(pageable, search, propertyId, managementMode,
+                unitLeaseMode, this::determineUserRoleInProperty));
     }
 
     @GetMapping("/list/key/value")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_PROPERTY_LIST)")
     public ResponseEntity<ResponseDTO> getPropertyListForKeyValue(@RequestParam Optional<String> search,
                                                                   @RequestParam Optional<PMSPropertyManagementMode> managementMode,
+                                                                  @RequestParam Optional<PMSLeaseMode> unitLeaseMode,
                                                                   Pageable pageable) {
-        Page<IdNameDescDTO> propertyKeyValueDTOS = propertyService.listPropertyListForKeyValue(pageable, search, managementMode);
+        Page<IdNameDescDTO> propertyKeyValueDTOS = propertyService.listPropertyListForKeyValue(pageable, search,
+                managementMode, unitLeaseMode);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(), i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), propertyKeyValueDTOS.toList(),
                 propertyKeyValueDTOS.getTotalPages(), propertyKeyValueDTOS.getTotalElements(), propertyKeyValueDTOS.getSize()));
     }

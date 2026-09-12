@@ -154,10 +154,12 @@ public class InviteService {
                         if (unitDTO.leaseMode() != org.pms.silverocean.service.lease.wrappers.PMSLeaseMode.SERVICE_CHARGE) {
                             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
                         }
-                        if (leaseStartDate == null || leaseStartDate.isAfter(LocalDate.now(PMSUtils.getZoneId()))
-                                || propertyAccounts.countVerifiedOperatingAccounts(unitDTO.propertyId(),
+                        if (leaseStartDate == null || leaseStartDate.isAfter(LocalDate.now(PMSUtils.getZoneId()))) {
+                            throw new PMSCustomException(ResponseCode.HOMEOWNER_AGREEMENT_DATE_INVALID);
+                        }
+                        if (propertyAccounts.countVerifiedOperatingAccounts(unitDTO.propertyId(),
                                 org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT) < 1) {
-                            throw new PMSCustomException(ResponseCode.ESTATE_ONBOARDING_SETUP_REQUIRED);
+                            throw new PMSCustomException(ResponseCode.ESTATE_RECEIVING_ACCOUNT_REQUIRED);
                         }
                         var agreementTemplate = documentTemplates
                                 .findFirstByDocumentTypeAndActiveTrueOrderByVersionDesc(LeaseDocumentType.ESTATE_RESIDENTIAL_AGREEMENT)

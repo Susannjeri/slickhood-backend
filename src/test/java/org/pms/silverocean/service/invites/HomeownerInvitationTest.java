@@ -99,7 +99,18 @@ class HomeownerInvitationTest {
         PMSCustomException error = assertThrows(PMSCustomException.class,
                 () -> service.createAndSendEmailInvite(InviteType.HOMEOWNER,77L,"resident@example.test", LocalDate.now(), null));
 
-        assertEquals(ResponseCode.ESTATE_ONBOARDING_SETUP_REQUIRED, error.getResponseCode());
+        assertEquals(ResponseCode.ESTATE_RECEIVING_ACCOUNT_REQUIRED, error.getResponseCode());
+        verifyNoInteractions(invites, notifications);
+    }
+
+    @Test void homeownerInvitationExplainsAnInvalidAgreementDateSeparately() {
+        setupUnit(PMSLeaseMode.SERVICE_CHARGE);
+
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> service.createAndSendEmailInvite(InviteType.HOMEOWNER, 77L,
+                        "resident@example.test", LocalDate.now().plusDays(1), null));
+
+        assertEquals(ResponseCode.HOMEOWNER_AGREEMENT_DATE_INVALID, error.getResponseCode());
         verifyNoInteractions(invites, notifications);
     }
 }
