@@ -95,15 +95,18 @@ public class SalesService {
         if (buyer != null && (buyer.getId() == actorId || buyer.getId() == property.getCreatedBy())) throw invalid();
         Unit unit = units.findAndLockById(request.unitId())
                 .filter(candidate -> candidate.isActive() && candidate.getPropertyId() == property.getId()
+                        && !candidate.isOccupied() && candidate.getPrice() > 0
                         && PMSLeaseMode.SALE.name().equals(candidate.getLeaseMode()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
         if (unit.getCurrency() == null || !unit.getCurrency().equalsIgnoreCase(request.currency())) throw invalid();
+        BigDecimal authoritativeAskingPrice = BigDecimal.valueOf(unit.getPrice());
+        if (request.askingPrice().compareTo(authoritativeAskingPrice) != 0) throw invalid();
         if (sales.existsByUnitIdAndActiveTrueAndStatusNot(unit.getId(), SaleStatus.CANCELLED))
             throw new PMSCustomException(ResponseCode.DATA_INTEGRITY_VIOLATION);
         SaleTransaction sale = new SaleTransaction();
         sale.setPropertyId(property.getId()); sale.setUnitId(unit.getId()); sale.setSalesAgentUserId(actorId);
         sale.setBuyerUserId(buyer == null ? null : buyer.getId()); sale.setInvitedBuyerEmail(buyerEmail);
-        sale.setStatus(automatedOffer ? SaleStatus.OFFERED : SaleStatus.LEAD); sale.setAskingPrice(request.askingPrice());
+        sale.setStatus(automatedOffer ? SaleStatus.OFFERED : SaleStatus.LEAD); sale.setAskingPrice(authoritativeAskingPrice);
         sale.setOfferAmount(request.offerAmount());
         sale.setCurrency(request.currency().trim().toUpperCase()); sale.setNotes(StringUtils.trimToNull(request.notes()));
         sale.setCreatedBy(actorId); sale.setActive(true);

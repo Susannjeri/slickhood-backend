@@ -59,7 +59,7 @@ class SalesServiceTest {
                 documents, invoices, invoiceService, access, paymentAccounts, offerDocuments);
         property = new Property(); property.setId(11L); property.setActive(true); property.setCreatedBy(100L);
         property.setManagementMode(PMSPropertyManagementMode.SALE);
-        unit = new Unit(); unit.setId(77L); unit.setPropertyId(11L); unit.setActive(true); unit.setLeaseMode("SALE"); unit.setCurrency("KES");
+        unit = new Unit(); unit.setId(77L); unit.setPropertyId(11L); unit.setActive(true); unit.setLeaseMode("SALE"); unit.setCurrency("KES"); unit.setPrice(15000000);
         buyer = new Users(); buyer.setId(200L); buyer.setActive(true); buyer.setEmail("buyer@example.com");
         lenient().when(properties.findById(11L)).thenReturn(Optional.of(property));
         lenient().when(paymentAccounts.countByCreatedByAndCategoryAndActiveTrueAndVerifiedTrue(100L,
@@ -96,9 +96,39 @@ class SalesServiceTest {
         when(sales.existsByUnitIdAndActiveTrueAndStatusNot(77L, SaleStatus.CANCELLED)).thenReturn(true);
 
         PMSCustomException exception = assertThrows(PMSCustomException.class, () -> service.create(
-                new CreateSaleRequest(11L, 77L, 200L, null, BigDecimal.TEN, "KES", null)));
+                new CreateSaleRequest(11L, 77L, 200L, null, new BigDecimal("15000000"), "KES", null)));
 
         assertEquals(ResponseCode.DATA_INTEGRITY_VIOLATION, exception.getResponseCode());
+        verify(sales, never()).save(any());
+    }
+
+    @Test
+    void buyerInvitationUsesTheLockedUnitPriceAndRejectsStaleOrManipulatedValues() {
+        when(users.getUserId()).thenReturn(100L);
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        when(users.findById(200L)).thenReturn(Optional.of(buyer));
+        when(units.findAndLockById(77L)).thenReturn(Optional.of(unit));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.create(
+                new CreateSaleRequest(11L, 77L, 200L, null, new BigDecimal("1"), "KES", null)));
+
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
+        verify(sales, never()).save(any());
+        verifyNoInteractions(invites);
+    }
+
+    @Test
+    void occupiedUnitCannotReceiveANewBuyerInvitation() {
+        unit.setOccupied(true);
+        when(users.getUserId()).thenReturn(100L);
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        when(users.findById(200L)).thenReturn(Optional.of(buyer));
+        when(units.findAndLockById(77L)).thenReturn(Optional.of(unit));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.create(
+                new CreateSaleRequest(11L, 77L, 200L, null, new BigDecimal("15000000"), "KES", null)));
+
+        assertEquals(ResponseCode.UNIT_NOT_FOUND, error.getResponseCode());
         verify(sales, never()).save(any());
     }
 
@@ -114,7 +144,7 @@ class SalesServiceTest {
         });
 
         SaleTransaction created = service.create(new CreateSaleRequest(11L, 77L, null,
-                " NewBuyer@Example.com ", BigDecimal.TEN, "KES", null));
+                " NewBuyer@Example.com ", new BigDecimal("15000000"), "KES", null));
 
         assertEquals("newbuyer@example.com", created.getInvitedBuyerEmail());
         assertEquals(null, created.getBuyerUserId());
@@ -148,7 +178,7 @@ class SalesServiceTest {
                 AccountCategory.PROPERTY_SALES)).thenReturn(0L);
 
         PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.create(
-                new CreateSaleRequest(11L, 77L, 200L, null, BigDecimal.TEN, "KES", null)));
+                new CreateSaleRequest(11L, 77L, 200L, null, new BigDecimal("15000000"), "KES", null)));
 
         assertEquals(ResponseCode.SALES_ONBOARDING_SETUP_REQUIRED, error.getResponseCode());
         verifyNoInteractions(units, invites);
