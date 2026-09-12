@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
 
 import java.util.Optional;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/notification")
@@ -65,6 +66,14 @@ public class NotificationController {
         body.setTotalPages(notifications.getTotalPages());
         body.setTotalElements(notifications.getTotalElements());
         return ResponseEntity.ok(body);
+    }
+
+    @GetMapping("/mine/unread-count")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ResponseDTO> getMyUnreadNotificationCount() {
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.NOTIFICATION_LIST),
+                Map.of("count", notificationReportService.getMyUnreadNotificationCount())));
     }
 
     @PatchMapping("/mine/{id}/read")

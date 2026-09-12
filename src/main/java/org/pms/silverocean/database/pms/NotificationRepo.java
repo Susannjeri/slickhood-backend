@@ -37,6 +37,9 @@ public interface NotificationRepo extends JpaRepository<Notification, Long>, Jpa
     @Query("SELECT n FROM Notification n WHERE n.active AND n.recipient IN :recipients ORDER BY n.createdOn DESC")
     Page<Notification> findAllForRecipients(Pageable pageable, Collection<String> recipients);
 
+    @Query("SELECT COUNT(n) FROM Notification n WHERE n.active AND n.viewedOn IS NULL AND n.recipient IN :recipients")
+    long countUnreadForRecipients(@Param("recipients") Collection<String> recipients);
+
     @Query("SELECT n.id FROM Notification n WHERE n.active AND n.delivered=false AND n.retry=true " +
             "AND n.channel=:channel AND n.retries<:maxRetries " +
             "AND (n.updatedOn IS NULL OR n.updatedOn<=:eligibleBefore) ORDER BY n.updatedOn,n.id")

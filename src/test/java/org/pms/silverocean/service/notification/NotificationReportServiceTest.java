@@ -82,6 +82,25 @@ class NotificationReportServiceTest {
     }
 
     @Test
+    void unreadCountUsesOnlyTheAuthenticatedUsersRecipientVariants() {
+        Users user = new Users();
+        user.setEmail("Owner@Example.com");
+        user.setPhoneNumber("+254700000001");
+        when(users.getUserObject()).thenReturn(user);
+        when(notifications.countUnreadForRecipients(any())).thenReturn(4L);
+
+        long count = new NotificationReportService(notifications, sms, users, encryption)
+                .getMyUnreadNotificationCount();
+
+        assertThat(count).isEqualTo(4L);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Collection<String>> recipients = ArgumentCaptor.forClass(Collection.class);
+        verify(notifications).countUnreadForRecipients(recipients.capture());
+        assertThat(recipients.getValue()).containsExactlyInAnyOrder(
+                "Owner@Example.com", "owner@example.com", "+254700000001", "254700000001");
+    }
+
+    @Test
     void userCannotMarkAnotherRecipientsNotificationRead() {
         Users user = new Users();
         user.setEmail("owner@example.com");

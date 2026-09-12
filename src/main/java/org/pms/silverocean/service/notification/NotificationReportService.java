@@ -62,6 +62,11 @@ public class NotificationReportService {
         });
     }
 
+    public long getMyUnreadNotificationCount() {
+        Users user = userDao.getUserObject();
+        return user == null ? 0 : notificationDao.countUnreadForRecipients(recipients(user));
+    }
+
     public MyNotificationDTO markMyNotificationRead(long id) {
         Users user = userDao.getUserObject();
         if (user == null) throw new AccessDeniedException("Authenticated user is required");
