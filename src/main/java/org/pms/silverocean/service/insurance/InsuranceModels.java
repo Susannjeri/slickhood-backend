@@ -86,8 +86,10 @@ public final class InsuranceModels {
             @NotBlank @Pattern(regexp="[A-Z]{3}") String currency,@NotNull @DecimalMin("0.00") BigDecimal basePremium,
             @NotNull @DecimalMin("0.00") BigDecimal taxesLevies,@NotNull @DecimalMin("0.01") BigDecimal totalPremium,
             @Size(max=1000) String excessDetails,@NotBlank @Size(max=12000) String coverageSummary,
-            @Size(max=12000) String exclusions,@NotNull @FutureOrPresent LocalDate validUntil) {}
+            @Size(max=12000) String exclusions,@NotNull @FutureOrPresent LocalDate validUntil,
+            @Positive Long sourceExchangeId) {}
     public record QuoteDispatchRequest(@NotBlank String companyCode) {}
+    public record QuoteDispatchBatchRequest(@NotNull @Size(min=3,max=20) List<@NotBlank String> companyCodes) {}
     public record SelectQuoteRequest(@Positive long quoteId) {}
     public record PaymentRequest(@Positive Long paymentConfigurationId,
             @NotNull @DecimalMin("0.01") BigDecimal amount,@NotBlank @Pattern(regexp="[A-Z]{3}") String currency,
@@ -108,9 +110,9 @@ public final class InsuranceModels {
     public record RenewalPaymentRequest(@Positive long paymentConfigurationId,@NotBlank @Size(max=120) String paymentReference,@NotNull LocalDateTime paidAt) {}
     public record RenewalCompleteRequest(@NotBlank @Size(max=120) String policyNumber) {}
 
-    public record QuoteView(long id,long companyId,String companyCode,String companyName,String quoteNumber,String status,
+    public record QuoteView(long id,long companyId,String companyCode,String companyName,String companyLogoUrl,String quoteNumber,String status,
             String currency,BigDecimal basePremium,BigDecimal taxesLevies,BigDecimal totalPremium,String excessDetails,
-            String coverageSummary,String exclusions,LocalDate validUntil) {}
+            String coverageSummary,String exclusions,LocalDate validUntil,Long sourceExchangeId) {}
     public record PaymentView(long id,long quoteId,Long paymentConfigurationId,BigDecimal amount,String currency,String paymentReference,LocalDateTime paidAt,
             String status,String rejectionReason,String remittanceReference,LocalDateTime remittedAt,boolean proofAvailable,String proofContentType) {}
     public record CaseView(long id,String reference,String productCode,String status,String fullName,String email,String phone,

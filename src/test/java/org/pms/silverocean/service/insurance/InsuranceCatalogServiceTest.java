@@ -15,6 +15,9 @@ import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.AccountService;
 import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
+import org.springframework.mock.web.MockMultipartFile;
 
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +37,8 @@ class InsuranceCatalogServiceTest {
     @Mock AccountDao accounts;
     @Mock AccountService accountService;
     @Mock UserDao users;
+    @Mock GarageService garageService;
+    @Mock UploadMalwarePolicy malwarePolicy;
     @InjectMocks InsuranceService service;
 
     private InsuranceCompany apa;
@@ -87,5 +92,21 @@ class InsuranceCatalogServiceTest {
         assertThat(result.logoUrl()).isEqualTo("/insurance/brands/pioneer.webp");
         assertThat(result.active()).isTrue();
         verify(companies).save(any(InsuranceCompany.class));
+    }
+
+    @Test
+    void managerCanUploadAValidatedPrivatePartnerLogo() throws Exception {
+        byte[] png = new byte[]{(byte)0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a};
+        when(companies.findByCodeIgnoreCase("APA")).thenReturn(Optional.of(apa));
+        when(companies.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(garageService.getPresignedUrlForStoredObject("insurance/companies/8/logo.png"))
+                .thenReturn("https://files.example/apa-logo");
+
+        var result = service.uploadCompanyLogo("APA", new MockMultipartFile("file","apa.png","image/png",png));
+
+        assertThat(result.logoUrl()).isEqualTo("https://files.example/apa-logo");
+        assertThat(apa.getLogoFileRef()).isEqualTo("insurance/companies/8/logo.png");
+        verify(malwarePolicy).requireSafe(png);
+        verify(garageService).uploadBytes("insurance/companies/8/logo.png",png,"image/png");
     }
 }

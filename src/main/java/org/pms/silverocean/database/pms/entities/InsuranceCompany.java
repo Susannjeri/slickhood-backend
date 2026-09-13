@@ -24,6 +24,9 @@ public class InsuranceCompany extends BaseCreatorEntity {
     @Column(length = 800)
     private String logoUrl;
 
+    @Column(length = 800)
+    private String logoFileRef;
+
     @Column(length = 1000)
     private String description;
 

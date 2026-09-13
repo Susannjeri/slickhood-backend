@@ -14,11 +14,17 @@ import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.account.dto.AccountDTO;
 import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.net.URI;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -36,6 +42,10 @@ public class InsuranceService {
     private final AccountDao accountDao;
     private final AccountService accountService;
     private final UserDao userDao;
+    private final GarageService garageService;
+    private final UploadMalwarePolicy malwarePolicy;
+
+    private static final long MAX_LOGO_SIZE = 2L * 1024 * 1024;
 
     public List<CompanyView> companies() {
         return companyRepo.findByActiveTrueOrderByNameAsc().stream().map(this::view).toList();
@@ -73,6 +83,18 @@ public class InsuranceService {
     public CompanyAdminView deactivateCompany(String companyCode) {
         InsuranceCompany company = anyCompany(companyCode);
         company.setActive(false);
+        return adminView(companyRepo.save(company));
+    }
+
+    @Transactional("pmsDBTransactionManager")
+    public CompanyAdminView uploadCompanyLogo(String companyCode, MultipartFile file) throws IOException {
+        InsuranceCompany company = anyCompany(companyCode);
+        byte[] content = file.getBytes();
+        String extension = validatedLogoExtension(file.getContentType(), content);
+        String reference = "insurance/companies/" + company.getId() + "/logo." + extension;
+        malwarePolicy.requireSafe(content);
+        garageService.uploadBytes(reference, content, file.getContentType());
+        company.setLogoFileRef(reference);
         return adminView(companyRepo.save(company));
     }
 
@@ -174,12 +196,34 @@ public class InsuranceService {
     }
 
     private CompanyView view(InsuranceCompany c) {
-        return new CompanyView(c.getId(), c.getCode(), c.getName(), c.getLogoUrl(), c.getDescription(), c.isActive());
+        return new CompanyView(c.getId(), c.getCode(), c.getName(), resolvedLogoUrl(c), c.getDescription(), c.isActive());
     }
 
     private CompanyAdminView adminView(InsuranceCompany c) {
-        return new CompanyAdminView(c.getId(), c.getCode(), c.getName(), c.getLogoUrl(), c.getDescription(),
+        return new CompanyAdminView(c.getId(), c.getCode(), c.getName(), resolvedLogoUrl(c), c.getDescription(),
                 c.getQuotationEmail(), c.getClaimsEmail(), c.getRenewalsEmail(), c.isActive());
+    }
+
+    private String resolvedLogoUrl(InsuranceCompany company) {
+        return company.getLogoFileRef() == null || company.getLogoFileRef().isBlank()
+                ? company.getLogoUrl() : garageService.getPresignedUrlForStoredObject(company.getLogoFileRef());
+    }
+
+    private String validatedLogoExtension(String contentType, byte[] bytes) {
+        if (bytes.length == 0 || bytes.length > MAX_LOGO_SIZE || contentType == null) {
+            throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
+        }
+        boolean jpeg = "image/jpeg".equalsIgnoreCase(contentType) && bytes.length >= 3
+                && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xd8 && (bytes[2] & 0xff) == 0xff;
+        boolean png = "image/png".equalsIgnoreCase(contentType) && bytes.length >= 8
+                && Arrays.equals(Arrays.copyOf(bytes, 8), new byte[]{(byte)0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a});
+        boolean webp = "image/webp".equalsIgnoreCase(contentType) && bytes.length >= 12
+                && new String(bytes, 0, 4, StandardCharsets.US_ASCII).equals("RIFF")
+                && new String(bytes, 8, 4, StandardCharsets.US_ASCII).equals("WEBP");
+        if (jpeg) return "jpg";
+        if (png) return "png";
+        if (webp) return "webp";
+        throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);
     }
 
     private void apply(InsuranceCompany company, String name, String logoUrl, String description,

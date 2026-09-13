@@ -64,7 +64,7 @@ public class InsuranceController {
     @PostMapping("/admin/cases/{id}/assign") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).REVIEW_INSURANCE_APPLICATIONS)") public ResponseEntity<ResponseDTO> assign(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.AssignmentRequest r){return ok(operations.assign(id,r));}
     @PostMapping("/admin/cases/{id}/status") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).REVIEW_INSURANCE_APPLICATIONS)") public ResponseEntity<ResponseDTO> caseStatus(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.CaseStatusRequest r){return ok(operations.updateCaseStatus(id,r));}
     @PostMapping("/admin/cases/{id}/quotes") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_QUOTES)") public ResponseEntity<ResponseDTO> addQuote(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.QuoteRequest r){return ok(operations.addQuote(id,r));}
-    @PostMapping("/admin/cases/{id}/request-quote") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_QUOTES)") public ResponseEntity<ResponseDTO> requestQuote(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.QuoteDispatchRequest r){return ok(operations.requestInsurerQuote(id,r));}
+    @PostMapping("/admin/cases/{id}/request-quotes") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_QUOTES)") public ResponseEntity<ResponseDTO> requestQuotes(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.QuoteDispatchBatchRequest r){return ok(operations.requestInsurerQuotes(id,r));}
     @PostMapping("/admin/cases/{caseId}/quotes/{quoteId}/publish") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).APPROVE_INSURANCE_QUOTES)") public ResponseEntity<ResponseDTO> publishQuote(@PathVariable long caseId,@PathVariable long quoteId){return ok(operations.publishQuote(caseId,quoteId));}
     @PostMapping("/admin/payments/{id}/decision") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VERIFY_INSURANCE_PAYMENTS)") public ResponseEntity<ResponseDTO> paymentDecision(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.PaymentDecisionRequest r){return ok(operations.decidePayment(id,r));}
     @PostMapping("/admin/payments/{id}/remit") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VERIFY_INSURANCE_PAYMENTS)") public ResponseEntity<ResponseDTO> remit(@PathVariable long id,@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.RemittanceRequest r){return ok(operations.remit(id,r));}
@@ -94,6 +94,10 @@ public class InsuranceController {
         return ok(service.companyEmailConfigurations());
     }
 
+    @GetMapping("/admin/quotation-companies")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_QUOTES)")
+    public ResponseEntity<ResponseDTO> quotationCompanies() { return ok(service.companyEmailConfigurations()); }
+
     @GetMapping("/admin/companies")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_CATALOG)")
     public ResponseEntity<ResponseDTO> adminCompanies() { return ok(service.adminCompanies()); }
@@ -109,6 +113,12 @@ public class InsuranceController {
     public ResponseEntity<ResponseDTO> updateCompany(@PathVariable String code,
             @Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.CompanyUpdateRequest request) {
         return ok(service.updateCompany(code, request));
+    }
+
+    @PostMapping(value="/admin/companies/{code}/logo", consumes="multipart/form-data")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_INSURANCE_CATALOG)")
+    public ResponseEntity<ResponseDTO> uploadCompanyLogo(@PathVariable String code, @RequestParam MultipartFile file) throws IOException {
+        return ok(service.uploadCompanyLogo(code, file));
     }
 
     @DeleteMapping("/admin/companies/{code}")
