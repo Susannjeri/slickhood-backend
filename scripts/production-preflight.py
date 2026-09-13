@@ -471,6 +471,14 @@ def check_aws_data_plane(preflight: Preflight, config: dict[str, str], bucket: s
             preflight.pass_("Textract DetectDocumentText permission and reachability")
         else:
             preflight.fail("Textract DetectDocumentText permission and reachability", "AWS request failed")
+        analyze = run([
+            aws_path, "textract", "analyze-document", "--region", region,
+            "--document", document, "--feature-types", "FORMS", "TABLES",
+        ], env=child_env, timeout=30)
+        if analyze.returncode == 0:
+            preflight.pass_("Textract AnalyzeDocument permission and reachability")
+        else:
+            preflight.fail("Textract AnalyzeDocument permission and reachability", "AWS request failed")
     finally:
         if uploaded:
             deleted = run([

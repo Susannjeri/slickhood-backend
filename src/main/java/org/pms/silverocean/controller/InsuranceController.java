@@ -36,6 +36,7 @@ public class InsuranceController {
 
     @GetMapping("/agency") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> agency(){return ok(operations.agency());}
     @GetMapping("/products") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> products(){return ok(operations.products());}
+    @PostMapping(value="/proposal-ocr/marine-idf",consumes="multipart/form-data") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> extractMarineIdf(@RequestParam MultipartFile file)throws IOException{return ok(operations.extractMarineIdf(file));}
     @PostMapping("/cases") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> createCase(@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.CaseRequest r){return ok(operations.create(r));}
     @GetMapping("/cases") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> myCases(){return ok(operations.mine());}
     @GetMapping("/cases/{id}") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> myCase(@PathVariable long id){return ok(operations.myCase(id));}

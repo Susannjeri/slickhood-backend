@@ -21,7 +21,8 @@ Git history, or a world-readable host file.
 Delete the inline IAM policy `temporary-permission` from IAM user
 `slickhood-storage-prod`. It granted Lightsail recovery access and is not an
 application permission. The application principal must have only the S3 data
-plane permissions for this bucket and `textract:DetectDocumentText`; it must not
+plane permissions for this bucket plus `textract:DetectDocumentText` for KYC and
+`textract:AnalyzeDocument` for IDF/IM0 form extraction; it must not
 have IAM, Lightsail, bucket-policy, public-access, or lifecycle administration.
 
 Lightsail instances do not provide the EC2 instance-profile flow used by this
@@ -53,7 +54,7 @@ required encrypt/decrypt/data-key actions for that one KMS key.
     {
       "Sid": "SlickhoodTextract",
       "Effect": "Allow",
-      "Action": "textract:DetectDocumentText",
+      "Action": ["textract:DetectDocumentText", "textract:AnalyzeDocument"],
       "Resource": "*"
     }
   ]
@@ -193,7 +194,8 @@ sudo python3 /tmp/slickhood-backend-release/production-preflight.py \
 ```
 
 The script prints only check names and PASS/FAIL summaries. Its Textract test
-creates a random object under `preflight/`, calls `DetectDocumentText`, and deletes
+creates a random object under `preflight/`, calls both `DetectDocumentText` and
+`AnalyzeDocument` with the form/table features used by the application, and deletes
 the object in a `finally` cleanup. A cleanup failure blocks deployment.
 
 Use `--expected-flyway-version 71` for the pre-install check on the existing

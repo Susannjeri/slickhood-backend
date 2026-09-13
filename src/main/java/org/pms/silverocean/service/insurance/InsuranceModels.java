@@ -77,6 +77,10 @@ public final class InsuranceModels {
             @Size(max=8000) String riskDetails,@NotNull @Size(max=100) Map<String,Object> proposalData,
             @NotNull Boolean consent) {}
     public record CaseStatusRequest(@NotBlank @Pattern(regexp="ADVISER_ASSIGNED|INFORMATION_REQUIRED|WITHDRAWN") String status,@Size(max=1000) String note) {}
+    public record MarineIdfOcrView(String idfNumber,String importerName,String importerPin,String origin,
+            String portOfDischarge,String hsCode,String descriptionAndApplication,String fobValue,
+            String transportMode,String netMass,String quantity,String unitOfMeasure,double confidence,
+            List<String> reviewFields,String extractionReference) {}
     public record AssignmentRequest(@Positive long adviserUserId) {}
     public record QuoteRequest(@Positive long companyId,@Size(max=80) String quoteNumber,
             @NotBlank @Pattern(regexp="[A-Z]{3}") String currency,@NotNull @DecimalMin("0.00") BigDecimal basePremium,
