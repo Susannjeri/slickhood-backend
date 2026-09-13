@@ -20,6 +20,7 @@ public class InsuranceCase extends BaseCreatorEntity {
  @Column(nullable=false,length=3) private String currency;
  private LocalDate coverStartDate;
  @Lob @Column(columnDefinition="TEXT") private String riskDetails;
+ @Lob @Column(columnDefinition="LONGTEXT") private String proposalDataJson;
  @Column(nullable=false) private LocalDateTime consentAt;
  private Long assignedAdviserId;
  private LocalDateTime submittedAt;

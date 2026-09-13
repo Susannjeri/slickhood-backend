@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.pms.silverocean.database.pms.entities.base.BaseActiveEntity;
 import java.time.LocalDate;
+import java.math.BigDecimal;
 
 @Table(name = "pms_invoice", indexes = {
         @Index(name = "idx_invoice_unit_id", columnList = "unitId"),
@@ -48,5 +49,8 @@ public class PMSInvoice extends BaseActiveEntity {
     /** RENTAL, SERVICE_CHARGE, SALE or SUBSCRIPTION. Drives presentation only; payment routing remains account based. */
     private String billingType;
     private LocalDate dueDate;
+    /** Set only on a fee invoice. The unique source link makes assessment idempotent and non-compounding. */
+    private Long lateFeeSourceInvoiceId;
+    private BigDecimal lateFeePercentageRate;
 
 }

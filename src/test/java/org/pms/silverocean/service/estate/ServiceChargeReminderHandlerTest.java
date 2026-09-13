@@ -15,18 +15,16 @@ import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.auth.dao.UserDao;
-import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
+import org.pms.silverocean.service.payment.latefee.LateFeePolicyService;
 
 import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class ServiceChargeReminderHandlerTest {
@@ -36,6 +34,7 @@ class ServiceChargeReminderHandlerTest {
     @Mock UserDao users;
     @Mock I18NService i18n;
     @Mock NotificationService notifications;
+    @Mock LateFeePolicyService lateFees;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
@@ -53,11 +52,35 @@ class ServiceChargeReminderHandlerTest {
 
         handler().handle(event(ServiceChargeReminderEvent.Phase.OVERDUE));
 
-        ArgumentCaptor<NotificationDTO> sent = ArgumentCaptor.forClass(NotificationDTO.class);
-        verify(notifications).queueNotification(sent.capture());
-        assertThat(sent.getValue().recipient()).isEqualTo("owner@example.com");
-        assertThat(sent.getValue().notificationType()).isEqualTo(NotificationType.SERVICE_CHARGE_OVERDUE_EMAIL);
-        assertThat(sent.getValue().formattedMessage()).contains("2500.00 KES", "A-101", "INV-9");
+        ArgumentCaptor<String> sent = ArgumentCaptor.forClass(String.class);
+        verify(notifications).queueEmailAndInApp(eq("owner@example.com"),
+                eq(NotificationType.SERVICE_CHARGE_OVERDUE_EMAIL),sent.capture(),
+                eq("SERVICE_CHARGE_OVERDUE"),anyString());
+        assertThat(sent.getValue()).contains("2500.00 KES", "A-101", "INV-9");
+    }
+
+    @Test
+    void overdueEventAlsoAlertsTheEstatePayeeWithoutEndingOwnership() throws Exception {
+        EstateServiceCharge charge = charge();
+        PMSInvoice invoice = invoice(false); invoice.setBilledUserId(20L); invoice.setPayToUserId(30L);
+        Users homeowner = user(20L, "owner@example.com", "Amina Owner");
+        Users estateManager = user(30L, "estate@example.com", "Estate Manager");
+        Unit unit = new Unit(); unit.setId(77L); unit.setRef("A-101");
+        when(charges.findById(5L)).thenReturn(Optional.of(charge));
+        when(invoices.getInvoiceById(9L)).thenReturn(Optional.of(invoice));
+        when(users.findById(20L)).thenReturn(Optional.of(homeowner));
+        when(users.findById(30L)).thenReturn(Optional.of(estateManager));
+        when(units.findById(77L)).thenReturn(Optional.of(unit));
+        when(i18n.getLocalizedMessage(NotificationType.SERVICE_CHARGE_OVERDUE_EMAIL.getBody()))
+                .thenReturn("Hello %s, balance %s %s for %s due %s invoice %s");
+        when(i18n.getLocalizedMessage(NotificationType.RECEIVABLE_OVERDUE_EMAIL.getBody()))
+                .thenReturn("Invoice %s balance %s %s due %s");
+
+        handler().handle(event(ServiceChargeReminderEvent.Phase.OVERDUE));
+
+        verify(notifications).queueEmailAndInApp(eq("estate@example.com"),
+                eq(NotificationType.RECEIVABLE_OVERDUE_EMAIL), anyString(),
+                eq("SERVICE_CHARGE_RECEIVABLE_OVERDUE"), contains("must not be ended automatically"));
     }
 
     @Test
@@ -67,7 +90,7 @@ class ServiceChargeReminderHandlerTest {
 
         handler().handle(event(ServiceChargeReminderEvent.Phase.PRE_DUE));
 
-        verify(notifications, never()).queueNotification(org.mockito.ArgumentMatchers.any());
+        verify(notifications, never()).queueEmailAndInApp(anyString(), any(), anyString(), anyString(), anyString());
     }
 
     @Test void deferredDueDateSuppressesOldOverdueNotice() throws Exception {
@@ -75,7 +98,7 @@ class ServiceChargeReminderHandlerTest {
         when(charges.findById(5L)).thenReturn(Optional.of(charge));
         when(invoices.getInvoiceById(9L)).thenReturn(Optional.of(invoice(false)));
         handler().handle(event(ServiceChargeReminderEvent.Phase.OVERDUE));
-        verify(notifications,never()).queueNotification(org.mockito.ArgumentMatchers.any());
+        verify(notifications,never()).queueEmailAndInApp(anyString(), any(), anyString(), anyString(), anyString());
     }
 
     @Test void zeroBalanceSuppressesReminderEvenWhenLegacyPaidFlagIsFalse() throws Exception {
@@ -83,11 +106,11 @@ class ServiceChargeReminderHandlerTest {
         when(charges.findById(5L)).thenReturn(Optional.of(charge()));
         when(invoices.getInvoiceById(9L)).thenReturn(Optional.of(invoice));
         handler().handle(event(ServiceChargeReminderEvent.Phase.OVERDUE));
-        verify(notifications,never()).queueNotification(org.mockito.ArgumentMatchers.any());
+        verify(notifications,never()).queueEmailAndInApp(anyString(), any(), anyString(), anyString(), anyString());
     }
 
     private ServiceChargeReminderHandler handler() {
-        return new ServiceChargeReminderHandler(mapper, charges, invoices, units, users, i18n, notifications);
+        return new ServiceChargeReminderHandler(mapper, charges, invoices, units, users, i18n, notifications, lateFees);
     }
     private DomainEventOutbox event(ServiceChargeReminderEvent.Phase phase) throws Exception {
         DomainEventOutbox event = new DomainEventOutbox();
@@ -101,5 +124,8 @@ class ServiceChargeReminderHandlerTest {
     private PMSInvoice invoice(boolean paid) {
         PMSInvoice invoice = new PMSInvoice(); invoice.setId(9L); invoice.setRef("INV-9"); invoice.setCurrency("KES");
         invoice.setPendingAmount(2500); invoice.setPaid(paid); invoice.setActive(true); return invoice;
+    }
+    private Users user(long id, String email, String name) {
+        Users user = new Users(); user.setId(id); user.setActive(true); user.setEmail(email); user.setFullName(name); return user;
     }
 }

@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 public final class InsuranceModels {
     private InsuranceModels() {}
@@ -62,18 +63,19 @@ public final class InsuranceModels {
             String correlationId, String messageType, String direction, String status,
             String senderAddress, String recipientAddress, String subject, String bodyHash,
             String externalMessageId, String inReplyTo, java.time.LocalDateTime sentAt,
-            java.time.LocalDateTime receivedAt, String lastError) {}
+            java.time.LocalDateTime receivedAt, String lastError, String body) {}
 
     public record ProductView(String code,String name,String description,List<String> subjectTypes) {}
     public record AgencyView(String code,String name,String supportEmail,String supportPhone,String logoUrl) {}
 
     public record CaseRequest(
-            @NotBlank @Pattern(regexp="MOTOR|DOMESTIC|FIRE_ALLIED|WIBA_EL|ALL_RISKS|MEDICAL|MARINE_CARGO|TRAVEL") String productCode,
+            @NotBlank @Pattern(regexp="MOTOR|DOMESTIC|FIRE_ALLIED|WIBA_EL|CONTRACTORS_ALL_RISK|MEDICAL|MARINE_CARGO|TRAVEL|GOODS_IN_TRANSIT") String productCode,
             @NotBlank @Size(max=160) String fullName,@Email @NotBlank String email,
-            @NotBlank @Size(max=40) String phone,@NotBlank @Pattern(regexp="PERSON|VEHICLE|PROPERTY|BUSINESS|EMPLOYEES|GOODS|TRIP|VALUABLES") String subjectType,
+            @NotBlank @Size(max=40) String phone,@NotBlank @Pattern(regexp="PERSON|VEHICLE|TRAILER|PRIME_MOVER|BUS|PSV|TOUR_VAN|SPECIAL_TYPE|PROPERTY|HOUSEHOLD_ITEMS|EMPLOYEES|GOODS|TRIP|FAMILY_INDIVIDUAL|CORPORATE|PROJECT") String subjectType,
             @NotBlank @Size(max=1000) String subjectDescription,@DecimalMin("0.01") BigDecimal sumInsured,
             @NotBlank @Pattern(regexp="[A-Z]{3}") String currency,LocalDate coverStartDate,
-            @Size(max=8000) String riskDetails,@NotNull Boolean consent) {}
+            @Size(max=8000) String riskDetails,@NotNull @Size(max=100) Map<String,Object> proposalData,
+            @NotNull Boolean consent) {}
     public record CaseStatusRequest(@NotBlank @Pattern(regexp="ADVISER_ASSIGNED|INFORMATION_REQUIRED|WITHDRAWN") String status,@Size(max=1000) String note) {}
     public record AssignmentRequest(@Positive long adviserUserId) {}
     public record QuoteRequest(@Positive long companyId,@Size(max=80) String quoteNumber,
@@ -81,6 +83,7 @@ public final class InsuranceModels {
             @NotNull @DecimalMin("0.00") BigDecimal taxesLevies,@NotNull @DecimalMin("0.01") BigDecimal totalPremium,
             @Size(max=1000) String excessDetails,@NotBlank @Size(max=12000) String coverageSummary,
             @Size(max=12000) String exclusions,@NotNull @FutureOrPresent LocalDate validUntil) {}
+    public record QuoteDispatchRequest(@NotBlank String companyCode) {}
     public record SelectQuoteRequest(@Positive long quoteId) {}
     public record PaymentRequest(@Positive Long paymentConfigurationId,
             @NotNull @DecimalMin("0.01") BigDecimal amount,@NotBlank @Pattern(regexp="[A-Z]{3}") String currency,
@@ -108,7 +111,8 @@ public final class InsuranceModels {
             String status,String rejectionReason,String remittanceReference,LocalDateTime remittedAt,boolean proofAvailable,String proofContentType) {}
     public record CaseView(long id,String reference,String productCode,String status,String fullName,String email,String phone,
             String subjectType,String subjectDescription,BigDecimal sumInsured,String currency,LocalDate coverStartDate,String riskDetails,
-            Long assignedAdviserId,LocalDateTime submittedAt,Long selectedQuoteId,List<QuoteView> quotes,List<PaymentView> payments) {}
+            Map<String,Object> proposalData,Long assignedAdviserId,LocalDateTime submittedAt,Long selectedQuoteId,
+            List<QuoteView> quotes,List<PaymentView> payments) {}
     public record PolicyView(long id,long caseId,String policyNumber,String companyName,String productCode,String status,
             LocalDate startDate,LocalDate endDate,String renewalStatus) {}
     public record RenewalOfferView(long id,long policyId,String quoteNumber,String currency,BigDecimal basePremium,BigDecimal taxesLevies,

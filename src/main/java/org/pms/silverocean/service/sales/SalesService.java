@@ -16,7 +16,6 @@ import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
 import org.pms.silverocean.service.leasedocument.BuyerOfferDocumentService;
 import org.pms.silverocean.service.invites.InviteService;
 import org.pms.silverocean.service.I18NService;
-import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.payment.invoice.InvoiceService;
@@ -363,7 +362,11 @@ public class SalesService {
         String body = String.format(i18n.getLocalizedMessage(NotificationType.SALE_STATUS_EMAIL.getBody()),
                 org.springframework.web.util.HtmlUtils.htmlEscape(StringUtils.defaultIfBlank(name, "Customer")),
                 sale.getPropertyId(), sale.getUnitId(), sale.getStatus(), org.springframework.web.util.HtmlUtils.htmlEscape(suffix));
-        notifications.queueNotification(new NotificationDTO(body, recipient, NotificationType.SALE_STATUS_EMAIL));
+        notifications.queueEmailAndInApp(recipient, NotificationType.SALE_STATUS_EMAIL, body,
+                "PROPERTY_SALE_" + sale.getStatus().name(),
+                "Property sale for unit " + sale.getUnitId() + " is now "
+                        + sale.getStatus().name().toLowerCase(Locale.ROOT).replace('_', ' ')
+                        + ". Open /dashboard/sales to review the transaction, documents and next step.");
     }
 
     private Pageable bounded(Pageable pageable) { return PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize()))); }

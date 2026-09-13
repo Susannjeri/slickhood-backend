@@ -8,11 +8,12 @@ import org.pms.silverocean.database.pms.entities.DomainEventOutbox;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.architecture.events.DomainEventHandler;
 import org.pms.silverocean.service.auth.dao.UserDao;
-import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
+import org.pms.silverocean.service.payment.latefee.LateFeePolicyService;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -27,10 +28,12 @@ public class ServiceChargeReminderHandler implements DomainEventHandler {
     private final UserDao users;
     private final I18NService i18n;
     private final NotificationService notifications;
+    private final LateFeePolicyService lateFees;
 
     @Override public String eventType() { return ServiceChargeReminderEvent.TYPE; }
 
     @Override
+    @Transactional("pmsDBTransactionManager")
     public void handle(DomainEventOutbox event) throws Exception {
         ServiceChargeReminderEvent requested = objectMapper.readValue(event.getPayload(), ServiceChargeReminderEvent.class);
         var charge = charges.findById(requested.chargeId()).filter(item -> item.isActive()).orElse(null);
@@ -40,6 +43,7 @@ public class ServiceChargeReminderHandler implements DomainEventHandler {
         java.time.LocalDate today = java.time.LocalDate.now(org.pms.silverocean.common.PMSUtils.getZoneId());
         if (requested.phase() == ServiceChargeReminderEvent.Phase.OVERDUE && !charge.getDueDate().isBefore(today)) return;
         if (requested.phase() == ServiceChargeReminderEvent.Phase.PRE_DUE && charge.getDueDate().isBefore(today)) return;
+        if (requested.phase() == ServiceChargeReminderEvent.Phase.OVERDUE) lateFees.assess(invoice.getId());
         var homeowner = users.findById(charge.getHomeownerUserId()).filter(item -> item.isActive()).orElse(null);
         if (homeowner == null || homeowner.getEmail() == null || homeowner.getEmail().isBlank()) return;
         var unit = units.findById(charge.getUnitId()).orElse(null);
@@ -49,7 +53,28 @@ public class ServiceChargeReminderHandler implements DomainEventHandler {
         String amount = BigDecimal.valueOf(invoice.getPendingAmount()).setScale(2, RoundingMode.HALF_UP).toPlainString();
         String body = String.format(i18n.getLocalizedMessage(type.getBody()), escape(homeowner.getFullName()), amount,
                 escape(invoice.getCurrency()), escape(unitRef), charge.getDueDate(), escape(invoice.getRef()));
-        notifications.queueNotification(new NotificationDTO(body, homeowner.getEmail(), type));
+        String phaseLabel = requested.phase() == ServiceChargeReminderEvent.Phase.OVERDUE ? "overdue" : "due soon";
+        notifications.queueEmailAndInApp(homeowner.getEmail(), type, body,
+                requested.phase() == ServiceChargeReminderEvent.Phase.OVERDUE
+                        ? "SERVICE_CHARGE_OVERDUE" : "SERVICE_CHARGE_DUE_SOON",
+                "Service charge invoice " + invoice.getRef() + " for unit " + unitRef + " is " + phaseLabel
+                        + ". Balance: " + invoice.getCurrency() + " " + amount
+                        + ". Open /dashboard/invoices to review or pay it.");
+        if (requested.phase() == ServiceChargeReminderEvent.Phase.OVERDUE
+                && invoice.getPayToUserId() > 0 && invoice.getPayToUserId() != invoice.getBilledUserId()) {
+            users.findById(invoice.getPayToUserId()).filter(item -> item.isActive())
+                    .filter(payee -> payee.getEmail() != null && !payee.getEmail().isBlank())
+                    .ifPresent(payee -> {
+                        NotificationType payeeType = NotificationType.RECEIVABLE_OVERDUE_EMAIL;
+                        String payeeBody = String.format(i18n.getLocalizedMessage(payeeType.getBody()),
+                                escape(invoice.getRef()), amount, escape(invoice.getCurrency()), charge.getDueDate());
+                        notifications.queueEmailAndInApp(payee.getEmail(), payeeType, payeeBody,
+                                "SERVICE_CHARGE_RECEIVABLE_OVERDUE",
+                                "Homeowner invoice " + invoice.getRef() + " for unit " + unitRef + " has "
+                                        + invoice.getCurrency() + " " + amount + " outstanding since " + charge.getDueDate()
+                                        + ". Open /dashboard/invoices to review it. Ownership must not be ended automatically for arrears.");
+                    });
+        }
     }
 
     private static String escape(String value) {

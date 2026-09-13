@@ -67,6 +67,19 @@ public class UpdatePaymentService {
         }
         invoiceDao.saveInvoice(invoice);
 
+        if (invoice.getCustomerEmail() != null && !invoice.getCustomerEmail().isBlank()) {
+            BigDecimal balance = BigDecimal.valueOf(invoice.getPendingAmount())
+                    .setScale(2, java.math.RoundingMode.HALF_UP);
+            String receiptBody = String.format(i18NService.getLocalizedMessage(NotificationType.PAYMENT_RECEIPT_EMAIL.getBody()),
+                    thirdPartyId, invoice.getCurrency(), appliedAmount.doubleValue(), invoice.getRef(),
+                    balance.doubleValue(), invoice.getCurrency());
+            notificationService.queueEmailAndInApp(invoice.getCustomerEmail(), NotificationType.PAYMENT_RECEIPT_EMAIL,
+                    receiptBody, nowFullyPaid ? "INVOICE_PAID" : "PARTIAL_PAYMENT_RECEIVED",
+                    "Payment " + thirdPartyId + " of " + invoice.getCurrency() + " " + appliedAmount.toPlainString()
+                            + " was applied to invoice " + invoice.getRef() + ". Outstanding balance: "
+                            + invoice.getCurrency() + " " + balance.toPlainString() + ". Open /dashboard/invoices to view the receipt.");
+        }
+
         if(nowFullyPaid)publishInvoicePaid(invoice,thirdPartyId,invoice.getAmount());
     }
 

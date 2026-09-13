@@ -36,6 +36,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -110,6 +111,21 @@ public class InvoiceService {
                 salesRecipientUserId, paymentAccountId);
     }
 
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
+    public PMSInvoice createLateFeeInvoice(PMSInvoice source, BigDecimal fee, BigDecimal percentageRate,
+                                           LocalDate assessedOn) {
+        if (source == null || source.getId() == null || fee == null || fee.signum() <= 0
+                || percentageRate == null || percentageRate.signum() <= 0
+                || source.getLateFeeSourceInvoiceId() != null) {
+            throw new PMSCustomException(ResponseCode.GENERAL_FAILURE);
+        }
+        String label = "Late payment fee (" + percentageRate.stripTrailingZeros().toPlainString()
+                + "% of outstanding invoice " + source.getRef() + ")";
+        return createScopedInvoice(source.getUnitId(), source.getBilledUserId(), Map.of(label, fee.doubleValue()),
+                source.getBillingType(), assessedOn, source.getPayToUserId(), source.getPaymentAccountId(),
+                source.getCurrency(), source.getId(), percentageRate);
+    }
+
     private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
                                            String billingType, LocalDate dueDate, Long payToUserId, Long paymentAccountId) {
         return createScopedInvoice(unitId, billedUserId, invoiceAmounts, billingType, dueDate, payToUserId, paymentAccountId, null);
@@ -118,6 +134,14 @@ public class InvoiceService {
     private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
                                            String billingType, LocalDate dueDate, Long payToUserId, Long paymentAccountId,
                                            String currencyOverride) {
+        return createScopedInvoice(unitId, billedUserId, invoiceAmounts, billingType, dueDate, payToUserId,
+                paymentAccountId, currencyOverride, null, null);
+    }
+
+    private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
+                                           String billingType, LocalDate dueDate, Long payToUserId, Long paymentAccountId,
+                                           String currencyOverride, Long lateFeeSourceInvoiceId,
+                                           BigDecimal lateFeePercentageRate) {
         Unit unit = unitDao.findById(unitId).orElseThrow();
 
         double totalAmount = 0.0;
@@ -160,6 +184,8 @@ public class InvoiceService {
         pmsInvoice.setPendingAmount(totalAmount);
         pmsInvoice.setBillingType(billingType);
         pmsInvoice.setDueDate(dueDate);
+        pmsInvoice.setLateFeeSourceInvoiceId(lateFeeSourceInvoiceId);
+        pmsInvoice.setLateFeePercentageRate(lateFeePercentageRate);
 
         userDao.findById(billedUserId).ifPresent(user -> {
             pmsInvoice.setCustomerPhoneNumber(user.getPhoneNumber());

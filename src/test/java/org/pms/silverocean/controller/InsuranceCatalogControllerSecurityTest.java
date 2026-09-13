@@ -15,5 +15,9 @@ class InsuranceCatalogControllerSecurityTest {
                 .getAnnotation(PreAuthorize.class).value()).contains("MANAGE_INSURANCE_CATALOG");
         assertThat(InsuranceController.class.getMethod("updateCompany", String.class, InsuranceModels.CompanyUpdateRequest.class)
                 .getAnnotation(PreAuthorize.class).value()).contains("MANAGE_INSURANCE_CATALOG");
+        assertThat(InsuranceController.class.getMethod("deactivateCompany", String.class)
+                .getAnnotation(PreAuthorize.class).value()).contains("MANAGE_INSURANCE_CATALOG");
+        assertThat(InsuranceController.class.getMethod("requestQuote", long.class, InsuranceModels.QuoteDispatchRequest.class)
+                .getAnnotation(PreAuthorize.class).value()).contains("MANAGE_INSURANCE_QUOTES");
     }
 }

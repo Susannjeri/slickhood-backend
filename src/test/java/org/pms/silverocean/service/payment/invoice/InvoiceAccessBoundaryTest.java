@@ -3,6 +3,7 @@ package org.pms.silverocean.service.payment.invoice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.common.ResponseCode;
@@ -25,6 +26,8 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -155,6 +158,45 @@ class InvoiceAccessBoundaryTest {
 
         verify(invoices).getInvoicesForOwnerAndTenantView(page, 185L, null, null, 501L);
         verify(invoices, never()).getInvoiceById(501L);
+    }
+
+    @Test
+    void lateFeeInvoicePreservesTheOriginalPaymentAndWorkspaceBoundary() {
+        PMSInvoice source = rentalInvoice(185L, 175L);
+        source.setPaymentAccountId(91L);
+        Unit unit = new Unit();
+        unit.setId(512L);
+        unit.setRef("GT009");
+        unit.setPropertyId(78L);
+        unit.setCurrency("KES");
+        when(units.findById(512L)).thenReturn(Optional.of(unit));
+        doAnswer(invocation -> {
+            PMSInvoice saved = invocation.getArgument(0);
+            saved.setId(3542L);
+            saved.setRef("INV-DD6");
+            return null;
+        }).when(invoices).createInvoice(any(PMSInvoice.class));
+
+        LocalDate assessedOn = LocalDate.of(2026, 9, 13);
+        PMSInvoice result = service.createLateFeeInvoice(source, new BigDecimal("750.00"),
+                new BigDecimal("2.50"), assessedOn);
+
+        ArgumentCaptor<PMSInvoice> persisted = ArgumentCaptor.forClass(PMSInvoice.class);
+        verify(invoices).createInvoice(persisted.capture());
+        PMSInvoice fee = persisted.getValue();
+        assertEquals(185L, fee.getBilledUserId());
+        assertEquals(175L, fee.getPayToUserId());
+        assertEquals(91L, fee.getPaymentAccountId());
+        assertEquals(512L, fee.getUnitId());
+        assertEquals(78L, fee.getPropertyId());
+        assertEquals("RENTAL", fee.getBillingType());
+        assertEquals("KES", fee.getCurrency());
+        assertEquals(750.00, fee.getAmount());
+        assertEquals(750.00, fee.getPendingAmount());
+        assertEquals(assessedOn, fee.getDueDate());
+        assertEquals(3541L, fee.getLateFeeSourceInvoiceId());
+        assertEquals(0, new BigDecimal("2.50").compareTo(fee.getLateFeePercentageRate()));
+        assertEquals(fee, result);
     }
 
     private static PMSInvoice rentalInvoice(long billedUserId, long payToUserId) {

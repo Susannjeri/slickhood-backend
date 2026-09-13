@@ -7,6 +7,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.database.pms.LeaseDocumentRepo;
 import org.pms.silverocean.database.pms.entities.*;
 import org.pms.silverocean.service.PMSCustomException;
+import org.pms.silverocean.service.I18NService;
+import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.RoleService;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
@@ -32,6 +34,8 @@ class LeaseJourneyTest {
     @Mock org.pms.silverocean.service.leasedocument.TenantLeaseAgreementService tenantAgreements;
     @Mock org.pms.silverocean.service.mustache.RenderService renderer;
     @Mock org.pms.silverocean.service.payment.invoice.LeaseInitialBillingService initialBilling;
+    @Mock I18NService i18nService;
+    @Mock NotificationService notificationService;
     @InjectMocks LeaseService service;
 
     @Test void leaseListIncludesTheCurrentAgreementStateWithoutExposingAnotherLease() {
@@ -175,17 +179,30 @@ class LeaseJourneyTest {
 
     @Test void terminationStopsFutureBillingAndReleasesUnitWithoutDeletingAgreements() {
         Lease lease = lease(); lease.setSigned(true); lease.setPaymentDue(true);
-        lease.setLifecycleStatus("NOTICE_GIVEN");
+        lease.setLifecycleStatus("NOTICE_GIVEN"); lease.setTerminationEffectiveDate(LocalDate.now());
         Unit unit = unit(true); UnitTenant tenancy = tenancy(); tenancy.setLeaseAccepted(true);
         when(leases.getTerminationCandidates(any(),any())).thenReturn(java.util.List.of(lease),java.util.List.of());
         when(leases.getUnitTenantByTenantId(2L)).thenReturn(Optional.of(tenancy));
         when(leases.getUnitByTenantId(2L)).thenReturn(Optional.of(unit));
+        when(units.findPropertyOwnerId(3L)).thenReturn(Optional.of(5L));
+        Users tenantUser=new Users(); tenantUser.setId(4L); tenantUser.setActive(true); tenantUser.setEmail("tenant@example.test");
+        Users ownerUser=new Users(); ownerUser.setId(5L); ownerUser.setActive(true); ownerUser.setEmail("landlord@example.test");
+        when(users.findById(4L)).thenReturn(Optional.of(tenantUser));
+        when(users.findById(5L)).thenReturn(Optional.of(ownerUser));
+        when(i18nService.getLocalizedMessage(org.pms.silverocean.service.notification.common.NotificationType.LEASE_TERMINATED_EMAIL.getBody()))
+                .thenReturn("Lease %s ended on %s");
         service.finalizeDueTerminations();
         service.finalizeDueTerminations();
         assertEquals("TERMINATED",lease.getLifecycleStatus());
         assertFalse(lease.isActive()); assertFalse(lease.isPaymentDue());
         assertFalse(tenancy.isActive()); assertFalse(tenancy.isLeaseAccepted()); assertFalse(unit.isOccupied());
         verify(units,times(1)).update(unit);
+        verify(notificationService).queueEmailAndInApp(eq("tenant@example.test"),
+                eq(org.pms.silverocean.service.notification.common.NotificationType.LEASE_TERMINATED_EMAIL),
+                anyString(),eq("LEASE_TERMINATED"),contains("Historical documents remain available"));
+        verify(notificationService).queueEmailAndInApp(eq("landlord@example.test"),
+                eq(org.pms.silverocean.service.notification.common.NotificationType.LEASE_TERMINATED_EMAIL),
+                anyString(),eq("LEASE_TERMINATED"),contains("Historical documents remain available"));
         verifyNoInteractions(documents);
     }
 

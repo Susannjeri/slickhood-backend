@@ -144,7 +144,7 @@ public class InsuranceCorrespondenceService {
         return new EmailExchangeView(e.getId(), company.getCode(), company.getName(), e.getCaseReference(),
                 e.getCorrelationId(), e.getMessageType(), e.getDirection(), e.getStatus(), e.getSenderAddress(),
                 e.getRecipientAddress(), e.getSubject(), e.getBodyHash(), e.getExternalMessageId(), e.getInReplyTo(),
-                e.getSentAt(), e.getReceivedAt(), e.getLastError());
+                e.getSentAt(), e.getReceivedAt(), e.getLastError(), encryptionService.decrypt(e.getEncryptedBody()).decryptedValue());
     }
 
     private String normalizeReference(String value) {

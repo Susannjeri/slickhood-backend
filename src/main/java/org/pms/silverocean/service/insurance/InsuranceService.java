@@ -69,6 +69,13 @@ public class InsuranceService {
         return adminView(companyRepo.save(company));
     }
 
+    @Transactional("pmsDBTransactionManager")
+    public CompanyAdminView deactivateCompany(String companyCode) {
+        InsuranceCompany company = anyCompany(companyCode);
+        company.setActive(false);
+        return adminView(companyRepo.save(company));
+    }
+
     public List<CompanyEmailConfigurationView> companyEmailConfigurations() {
         return companyRepo.findByActiveTrueOrderByNameAsc().stream().map(this::emailView).toList();
     }
@@ -84,7 +91,9 @@ public class InsuranceService {
     }
 
     public List<PaymentConfigurationView> customerPaymentOptions(String companyCode) {
-        InsuranceCompany company = company(companyCode);
+        // An inactive partner cannot receive new proposals, but an already-selected
+        // historical quotation must remain payable through its effective route.
+        InsuranceCompany company = anyCompany(companyCode);
         LocalDate today = LocalDate.now();
         Map<org.pms.silverocean.service.payment.wrappers.PaymentChannel, InsurancePaymentConfiguration> current =
                 configurationRepo.findByCompanyIdAndActiveTrueOrderByPaymentChannelAsc(company.getId()).stream()
@@ -98,7 +107,7 @@ public class InsuranceService {
     }
 
     public List<PaymentConfigurationView> adminPaymentConfigurations(String companyCode) {
-        InsuranceCompany company = company(companyCode);
+        InsuranceCompany company = anyCompany(companyCode);
         return configurationRepo.findByCompanyIdOrderByPaymentChannelAscVersionDesc(company.getId()).stream()
                 .map(c -> paymentView(company, c, false)).toList();
     }

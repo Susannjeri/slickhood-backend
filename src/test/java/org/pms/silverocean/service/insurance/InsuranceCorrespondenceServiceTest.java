@@ -16,6 +16,7 @@ import org.pms.silverocean.database.pms.entities.InsuranceEmailExchange;
 import org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.security.EncryptionService;
+import org.pms.silverocean.service.security.DecryptDTO;
 
 import java.util.Optional;
 
@@ -55,6 +56,7 @@ class InsuranceCorrespondenceServiceTest {
         when(exchanges.findByCorrelationId("corr-1")).thenReturn(Optional.of(outbound));
         when(companies.findById(2L)).thenReturn(Optional.of(company));
         when(encryption.encrypt("Quote response")).thenReturn(new byte[]{1, 2, 3});
+        when(encryption.decrypt(any(byte[].class))).thenReturn(new DecryptDTO(false, "Quote response"));
         when(exchanges.save(any())).thenAnswer(invocation -> {
             InsuranceEmailExchange value = invocation.getArgument(0);
             value.setId(6L);

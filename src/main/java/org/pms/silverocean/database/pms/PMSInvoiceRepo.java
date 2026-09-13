@@ -21,9 +21,15 @@ import java.util.List;
 public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpecificationExecutor<PMSInvoice> {
     boolean existsByUnitIdAndActiveTrueAndPaidFalse(long unitId);
     @Query("SELECT i FROM PMSInvoice i WHERE i.active=true AND i.paid=false AND i.pendingAmount>0 " +
-            "AND i.billingType='RENTAL' AND i.dueDate<:today AND i.id>:afterId ORDER BY i.id")
+            "AND i.lateFeeSourceInvoiceId IS NULL AND i.billingType='RENTAL' AND i.dueDate<:today AND i.id>:afterId ORDER BY i.id")
     List<PMSInvoice> findRentalReminderCandidates(@Param("today") java.time.LocalDate today,
             @Param("afterId") long afterId, Pageable pageable);
+    @Query("SELECT i FROM PMSInvoice i WHERE i.active=true AND i.paid=false AND i.pendingAmount>0 " +
+            "AND i.lateFeeSourceInvoiceId IS NULL AND i.billingType IN :billingTypes AND i.dueDate<:today AND i.id>:afterId ORDER BY i.id")
+    List<PMSInvoice> findReceivableReminderCandidates(@Param("today") java.time.LocalDate today,
+            @Param("billingTypes") java.util.Collection<String> billingTypes,
+            @Param("afterId") long afterId, Pageable pageable);
+    boolean existsByLateFeeSourceInvoiceId(long sourceInvoiceId);
     List<PMSInvoice> findAllByPropertyIdInAndActiveTrueAndPaidFalse(List<Long> propertyIds);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT i FROM PMSInvoice i WHERE i.id = :id")

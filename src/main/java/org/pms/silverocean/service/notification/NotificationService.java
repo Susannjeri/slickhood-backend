@@ -69,6 +69,22 @@ public class NotificationService {
         return true;
     }
 
+    /**
+     * Queues the customer email and mirrors the same business event into the
+     * authenticated notification centre when the recipient already has an
+     * active SlickHood account. External delivery and the in-app record remain
+     * separate evidence: an accepted email is not represented as an in-app
+     * delivery, and a missing account does not prevent the email invitation or
+     * lifecycle notice from being queued.
+     */
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
+    public void queueEmailAndInApp(String recipient, NotificationType emailType,
+                                   String emailMessage, String inAppType, String inAppMessage) {
+        if (recipient == null || recipient.isBlank()) return;
+        queueNotification(new NotificationDTO(emailMessage, recipient, emailType));
+        queueInAppNotificationForExistingUser(recipient, inAppType, inAppMessage);
+    }
+
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void deliverAfterCommit(NotificationQueued queued) {

@@ -18,7 +18,6 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.springframework.stereotype.Service;
 import org.pms.silverocean.service.payment.invoice.InvoiceService;
 import org.pms.silverocean.service.I18NService;
-import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.common.PMSUtils;
@@ -181,7 +180,10 @@ public class EstateService {
                             org.springframework.web.util.HtmlUtils.htmlEscape(java.util.Objects.toString(homeowner.getFullName(), "")),
                             org.springframework.web.util.HtmlUtils.htmlEscape(location), endDate,
                             org.springframework.web.util.HtmlUtils.htmlEscape(java.util.Objects.toString(reason, "")));
-                    notificationService.queueNotification(new NotificationDTO(body, homeowner.getEmail(), NotificationType.OWNERSHIP_ENDED_EMAIL));
+                    notificationService.queueEmailAndInApp(homeowner.getEmail(), NotificationType.OWNERSHIP_ENDED_EMAIL,
+                            body, "OWNERSHIP_RECORD_ENDED",
+                            "Your ownership record for " + location + " ended on " + endDate
+                                    + ". Open /dashboard/estate to review the historical record. Contact estate management if this is incorrect.");
                 });
     }
 

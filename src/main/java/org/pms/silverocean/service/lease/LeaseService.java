@@ -503,6 +503,7 @@ public class LeaseService {
                 unit.setOccupied(false);
                 unitDao.update(unit);
             }
+            notifyTerminationCompleted(lease, tenancy, unit);
         }
     }
 
@@ -517,8 +518,10 @@ public class LeaseService {
                 lease.getId(), lease.getMoveOutDate());
         new HashSet<>(List.of(tenancy.getUserId(), ownerId)).forEach(id -> userDao.findById(id)
                 .map(Users::getEmail).filter(email -> email != null && !email.isBlank())
-                .ifPresent(email -> notificationService.queueNotification(
-                        new NotificationDTO(body, email, NotificationType.LEASE_RENEWAL_EMAIL))));
+                .ifPresent(email -> notificationService.queueEmailAndInApp(email,
+                        NotificationType.LEASE_RENEWAL_EMAIL, body, "LEASE_RENEWED",
+                        "Lease " + lease.getId() + " renewed through " + lease.getMoveOutDate()
+                                + ". Open /dashboard/lease/operations to review it.")));
     }
 
     private void notifyLeaseParties(Lease lease, LeaseTerminationRequest request) {
@@ -532,8 +535,26 @@ public class LeaseService {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.PROPERTY_NOT_FOUND));
         new HashSet<>(List.of(tenancy.getUserId(), ownerId)).forEach(id -> userDao.findById(id)
                 .map(Users::getEmail).filter(email -> email != null && !email.isBlank())
-                .ifPresent(email -> notificationService.queueNotification(
-                        new NotificationDTO(body, email, NotificationType.LEASE_TERMINATION_EMAIL))));
+                .ifPresent(email -> notificationService.queueEmailAndInApp(email,
+                        NotificationType.LEASE_TERMINATION_EMAIL, body, "LEASE_TERMINATION_NOTICE",
+                        "A termination notice was recorded for lease " + lease.getId() + ", effective "
+                                + request.effectiveDate() + ". Open /dashboard/lease/operations to review the notice and next steps.")));
+    }
+
+    private void notifyTerminationCompleted(Lease lease, UnitTenant tenancy, Unit unit) {
+        if (tenancy == null || unit == null) return;
+        LocalDate endedOn = Optional.ofNullable(lease.getTerminationEffectiveDate())
+                .orElse(LocalDate.now(PMSUtils.getZoneId()));
+        String body = String.format(i18NService.getLocalizedMessage(NotificationType.LEASE_TERMINATED_EMAIL.getBody()),
+                lease.getId(), endedOn);
+        long ownerId = unitDao.findPropertyOwnerId(unit.getId()).orElse(0L);
+        new HashSet<>(List.of(tenancy.getUserId(), ownerId)).stream().filter(id -> id > 0).forEach(id ->
+                userDao.findById(id).filter(Users::isActive).map(Users::getEmail)
+                        .filter(email -> email != null && !email.isBlank())
+                        .ifPresent(email -> notificationService.queueEmailAndInApp(email,
+                                NotificationType.LEASE_TERMINATED_EMAIL, body, "LEASE_TERMINATED",
+                                "Lease " + lease.getId() + " ended on " + endedOn
+                                        + ". Historical documents remain available in /dashboard/documents.")));
     }
 
     @Transactional
