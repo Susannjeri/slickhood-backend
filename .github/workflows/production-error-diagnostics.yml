@@ -1,0 +1,33 @@
+name: Production Backend Error Diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Inspect redacted backend database errors
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -eu
+            log_file="$(mktemp)"
+            trap 'rm -f -- "$log_file"' EXIT
+            sudo journalctl -u pms.service --since '45 minutes ago' --no-pager >"$log_file" 2>/dev/null || true
+            echo 'SQL error classifications'
+            grep -Eo 'SQL Error: [0-9]+, SQLState: [0-9A-Z]+' "$log_file" | sort | uniq -c || true
+            echo 'Named constraints or keys'
+            grep -Ei 'for key|constraint' "$log_file" | grep -Eio '[A-Za-z0-9_.-]*(constraint|uk_|fk_|chk_|key)[A-Za-z0-9_.-]*' | sort | uniq -c || true
+            echo 'Affected columns'
+            grep -Eo "Column '[A-Za-z0-9_.-]+' cannot be null|Data too long for column '[A-Za-z0-9_.-]+'" "$log_file" | sed -E "s/.*'([A-Za-z0-9_.-]+)'.*/\1/" | sort | uniq -c || true
+            echo 'Persistence exception classes'
+            grep -Eo '(DataIntegrityViolationException|ConstraintViolationException|SQLIntegrityConstraintViolationException|JpaSystemException)' "$log_file" | sort | uniq -c || true
