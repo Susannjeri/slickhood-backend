@@ -66,7 +66,7 @@ public class InsuranceOperationsService {
  }
 
  @Transactional("pmsDBTransactionManager") public CaseView create(CaseRequest r){
-  if(!Boolean.TRUE.equals(r.consent())||r.coverStartDate()!=null&&r.coverStartDate().isBefore(LocalDate.now()))throw invalid();
+  if(!Boolean.TRUE.equals(r.consent())||r.coverStartDate().isBefore(LocalDate.now()))throw invalid();
   validateProposal(r.productCode(),r.subjectType(),r.proposalData());
   Map<String,Object> normalizedProposal=normalizedProposal(r.productCode(),r.proposalData());String proposalJson=proposalJson(normalizedProposal);if(proposalJson.length()>100_000)throw invalid();
   InsuranceCase c=new InsuranceCase();c.setAgencyId(agencyEntity().getId());c.setCustomerUserId(uid());c.setReference(ref("INS"));c.setProductCode(r.productCode());

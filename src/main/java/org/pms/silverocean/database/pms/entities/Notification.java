@@ -2,6 +2,8 @@ package org.pms.silverocean.database.pms.entities;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
+import jakarta.persistence.Lob;
+import jakarta.persistence.Column;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -22,6 +24,8 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Notification extends BaseActiveEntity {
+    @Lob
+    @Column(columnDefinition = "MEDIUMBLOB")
     private byte[] message;
     private String recipient;
     private String channel;

@@ -73,7 +73,7 @@ public final class InsuranceModels {
             @NotBlank @Size(max=160) String fullName,@Email @NotBlank String email,
             @NotBlank @Size(max=40) String phone,@NotBlank @Pattern(regexp="PERSON|VEHICLE|TRAILER|PRIME_MOVER|BUS|PSV|TOUR_VAN|SPECIAL_TYPE|PROPERTY|HOUSEHOLD_ITEMS|EMPLOYEES|GOODS|TRIP|FAMILY_INDIVIDUAL|CORPORATE|PROJECT") String subjectType,
             @NotBlank @Size(max=1000) String subjectDescription,@DecimalMin("0.01") BigDecimal sumInsured,
-            @NotBlank @Pattern(regexp="[A-Z]{3}") String currency,LocalDate coverStartDate,
+            @NotBlank @Pattern(regexp="[A-Z]{3}") String currency,@NotNull @FutureOrPresent LocalDate coverStartDate,
             @Size(max=8000) String riskDetails,@NotNull @Size(max=100) Map<String,Object> proposalData,
             @NotNull Boolean consent) {}
     public record CaseStatusRequest(@NotBlank @Pattern(regexp="ADVISER_ASSIGNED|INFORMATION_REQUIRED|WITHDRAWN") String status,@Size(max=1000) String note) {}
