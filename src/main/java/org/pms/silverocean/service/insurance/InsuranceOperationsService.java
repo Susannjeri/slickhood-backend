@@ -49,7 +49,7 @@ public class InsuranceOperationsService {
  private final InsuranceStaffDirectoryService staffDirectory;
  private final ObjectMapper objectMapper;
  private final InsuranceCorrespondenceService correspondenceService;
- private final UserDao userDao; private final AccountService accountService; private final GarageService garageService; private final UploadMalwarePolicy malwarePolicy; private final NotificationService notifications; private final I18NService i18n;
+ private final UserDao userDao; private final UserRoleRepo userRoleRepo; private final AccountService accountService; private final GarageService garageService; private final UploadMalwarePolicy malwarePolicy; private final NotificationService notifications; private final I18NService i18n;
  @Value("${app.public-url:https://slickhood.com}") private String publicUrl;
 
  public AgencyView agency(){var a=agencyEntity();return new AgencyView(a.getCode(),a.getName(),a.getSupportEmail(),a.getSupportPhone(),a.getLogoUrl());}
@@ -116,7 +116,7 @@ public class InsuranceOperationsService {
   if(data==null)throw invalid();
   switch(product){
     case "MOTOR"->{requiredRows(data,"vehicles","insuredType","registrationNumber","makeModel","driverAge","estimatedValue");positiveRows(data,"vehicles","estimatedValue");for(Object row:(List<?>)data.get("vehicles")){Map<?,?> vehicle=(Map<?,?>)row;String insuredType=String.valueOf(vehicle.get("insuredType"));if(!Set.of("VEHICLE","TRAILER","PRIME_MOVER","BUS","PSV","TOUR_VAN","SPECIAL_TYPE").contains(insuredType))throw invalid();if("SPECIAL_TYPE".equals(insuredType)&&(vehicle.get("specialType")==null||String.valueOf(vehicle.get("specialType")).isBlank()))throw invalid();BigDecimal age=number(vehicle.get("driverAge"));if(age.stripTrailingZeros().scale()>0||age.compareTo(BigDecimal.valueOf(16))<0||age.compareTo(BigDecimal.valueOf(100))>0)throw invalid();}}
-    case "DOMESTIC"->{requiredRows(data,"domesticItems","propertyLocation","itemDescription","value");positiveRows(data,"domesticItems","value");if("PROPERTY".equals(subject)){if(!userDao.hasRole(PMSRole.LANDLORD))throw forbidden();}else if("HOUSEHOLD_ITEMS".equals(subject)){if(!userDao.hasRole(PMSRole.LANDLORD)&&!userDao.hasRole(PMSRole.TENANT))throw forbidden();}else throw invalid();}
+    case "DOMESTIC"->{requiredRows(data,"domesticItems","propertyLocation","itemDescription","value");positiveRows(data,"domesticItems","value");if("PROPERTY".equals(subject)){if(!hasAssignedRole(PMSRole.LANDLORD))throw forbidden();}else if("HOUSEHOLD_ITEMS".equals(subject)){if(!hasAssignedRole(PMSRole.LANDLORD)&&!hasAssignedRole(PMSRole.TENANT))throw forbidden();}else throw invalid();}
    case "FIRE_ALLIED"->{requiredRows(data,"insuredItems","description","value");positiveRows(data,"insuredItems","value");}
    case "WIBA_EL"->{requiredRows(data,"workforce","jobDescription","monthlySalary","employeeCount");positiveRows(data,"workforce","monthlySalary","employeeCount");}
     case "CONTRACTORS_ALL_RISK","ALL_RISKS"->{requiredRows(data,"projects","projectValue","projectName","projectSiteLocation","constructionType","thirdPartyLiabilityEstimate");positiveRows(data,"projects","projectValue","thirdPartyLiabilityEstimate");}
@@ -141,6 +141,7 @@ public class InsuranceOperationsService {
  private BigDecimal calculatedSumInsured(String product,Map<String,Object> data){return switch(product){case "MOTOR"->sumRows(data,"vehicles","estimatedValue");case "DOMESTIC"->sumRows(data,"domesticItems","value");case "FIRE_ALLIED"->sumRows(data,"insuredItems","value");case "WIBA_EL"->sumRows(data,"workforce","annualSalary");case "CONTRACTORS_ALL_RISK"->sumRows(data,"projects","projectValue");case "MARINE_CARGO"->sumRows(data,"consignments","estimatedCargoValue");case "GOODS_IN_TRANSIT"->sumRows(data,"cargoItems","annualCarryValue");default->null;};}
  private String totalKey(String product){return switch(product){case "WIBA_EL"->"totalAnnualPayroll";case "CONTRACTORS_ALL_RISK"->"totalContractValue";case "MARINE_CARGO"->"totalEstimatedCargoValue";case "GOODS_IN_TRANSIT"->"totalEstimatedAnnualCarry";default->"totalEstimatedValue";};}
  private BigDecimal sumRows(Map<String,Object> data,String collection,String field){Object value=data.get(collection);if(!(value instanceof List<?> rows))throw invalid();BigDecimal total=BigDecimal.ZERO;for(Object item:rows){if(!(item instanceof Map<?,?> row))throw invalid();total=total.add(number(row.get(field)));}return total;}
+ private boolean hasAssignedRole(PMSRole role){return userRoleRepo.findByUserId(uid()).stream().anyMatch(assigned->role.getName().equals(assigned.getName()));}
  private String proposalJson(Map<String,Object> data){try{return objectMapper.writeValueAsString(data);}catch(Exception e){throw invalid();}}
  private Map<String,Object> proposalData(String json){if(StringUtils.isBlank(json))return Map.of();try{return objectMapper.readValue(json,new TypeReference<>(){});}catch(Exception e){return Map.of();}}
  private QuoteView quoteView(InsuranceQuote q){return quoteView(q,companyRepo.findById(q.getCompanyId()).orElseThrow(this::notFound));}
