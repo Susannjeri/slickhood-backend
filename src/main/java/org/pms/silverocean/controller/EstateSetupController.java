@@ -5,6 +5,7 @@ import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.estate.EstateSetupService;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,7 +23,9 @@ public class EstateSetupController {
     @GetMapping("/properties/{propertyId}")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_PROPERTY)")
     public ResponseEntity<ResponseDTO> getStatus(@PathVariable long propertyId) {
-        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
-                i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), service.getStatus(propertyId)));
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
+                        i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), service.getStatus(propertyId)));
     }
 }
