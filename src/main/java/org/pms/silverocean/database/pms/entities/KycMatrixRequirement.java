@@ -22,6 +22,8 @@ public class KycMatrixRequirement extends BaseCreatorEntity implements Auditable
     private String profileScope;
     private String acceptedDocumentTypes;
     private String conditionDescription;
+    private String conditionRule;
+    private String conditionValue;
     private Integer validityDays;
     private Integer renewalLeadDays;
 

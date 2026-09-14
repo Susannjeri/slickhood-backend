@@ -29,6 +29,7 @@ public class SokoController {
     private ResponseEntity<ResponseDTO> ok(Object data){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),data));}
     @GetMapping("/catalog") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> catalog(Pageable pageable,@RequestParam(required=false)Long storeId,@RequestParam(required=false)String category,@RequestParam(required=false)String query,@RequestParam(required=false)Double latitude,@RequestParam(required=false)Double longitude,@RequestParam(required=false)Double radiusKm){var p=service.catalog(pageable,storeId,category,query,latitude,longitude,radiusKm);return page(p);}
     @GetMapping("/catalog/{storeId}") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> store(@PathVariable long storeId){return ok(service.storeDetail(storeId));}
+    @GetMapping("/categories") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> categories(){return ok(org.pms.silverocean.service.soko.SokoGroceryCategory.views());}
     @PostMapping("/store") public ResponseEntity<ResponseDTO> createStore(@RequestBody @Valid SokoRequests.StoreUpsert r){return ok(service.createStore(r));}
     @PutMapping("/store/{id}") public ResponseEntity<ResponseDTO> updateStore(@PathVariable long id,@RequestBody @Valid SokoRequests.StoreUpsert r){return ok(service.updateStore(id,r));}
     @PutMapping("/store/{id}/publish") public ResponseEntity<ResponseDTO> publishStore(@PathVariable long id){return ok(service.publishStore(id));}
@@ -55,6 +56,8 @@ public class SokoController {
     @GetMapping("/order/my") public ResponseEntity<ResponseDTO> myOrders(Pageable pageable){return page(service.myOrders(pageable));}
     @GetMapping("/order/merchant") public ResponseEntity<ResponseDTO> merchantOrders(Pageable pageable){return page(service.merchantOrders(pageable));}
     @GetMapping("/order/{id}/delivery-code") public ResponseEntity<ResponseDTO> deliveryCode(@PathVariable long id){return ok(service.deliveryCode(id));}
+    @PostMapping("/order/{id}/delivery-code/recovery/request") public ResponseEntity<ResponseDTO> requestCodeRecovery(@PathVariable long id){return ok(service.requestDeliveryCodeRecovery(id,null));}
+    @PostMapping("/order/{id}/delivery-code/recovery/confirm") public ResponseEntity<ResponseDTO> confirmCodeRecovery(@PathVariable long id,@RequestBody @Valid SokoRequests.DeliveryCodeRecoveryConfirm request){return ok(service.confirmDeliveryCodeRecovery(id,request));}
     @PutMapping("/order/{id}/delivery/confirm") public ResponseEntity<ResponseDTO> confirmDelivery(@PathVariable long id,@RequestBody @Valid SokoRequests.DeliveryConfirmation request){return ok(service.confirmDelivery(id,request));}
     @PutMapping(value="/order/{id}/delivery/proof",consumes=MediaType.MULTIPART_FORM_DATA_VALUE) public ResponseEntity<ResponseDTO> proof(@PathVariable long id,@RequestPart("proof") MultipartFile proof)throws IOException{return ok(service.uploadDeliveryProof(id,proof));}
     @GetMapping("/order/{id}/delivery/proof") public ResponseEntity<ResponseDTO> proof(@PathVariable long id){return ok(service.deliveryProof(id));}

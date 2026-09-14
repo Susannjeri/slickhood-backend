@@ -78,6 +78,7 @@ public enum NotificationType {
     SOKO_MODERATION_EMAIL("email.soko.moderation.subject", "email.soko.moderation.body", true, NotificationChannel.EMAIL),
     SOKO_ORDER_STATUS_EMAIL("email.soko.order.status.subject", "email.soko.order.status.body", true, NotificationChannel.EMAIL),
     SOKO_DELIVERY_CODE_EMAIL("email.soko.delivery.code.subject", "email.soko.delivery.code.body", true, NotificationChannel.EMAIL),
+    SOKO_DELIVERY_RECOVERY_EMAIL("email.soko.delivery.recovery.subject", "email.soko.delivery.recovery.body", true, NotificationChannel.EMAIL),
     HELPDESK_ESCALATION_EMAIL("email.helpdesk.escalation.subject", "email.helpdesk.escalation.body", true, NotificationChannel.EMAIL),
     HELPDESK_AGENT_REPLY_EMAIL("email.helpdesk.agent.reply.subject", "email.helpdesk.agent.reply.body", true, NotificationChannel.EMAIL),
     HELPDESK_SLA_BREACH_EMAIL("email.helpdesk.sla.breach.subject", "email.helpdesk.sla.breach.body", true, NotificationChannel.EMAIL),

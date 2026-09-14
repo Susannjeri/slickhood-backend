@@ -106,6 +106,15 @@ class SokoServiceTest {
         assertThrows(PMSCustomException.class,()->service.deliveryCode(9L));
     }
 
+    @Test void supportInvalidatesOldCodeAndStartsBuyerVerifiedRecoveryWithoutSeeingReplacement(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setName("Fresh Corner");store.setActive(true);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setOrderNumber("SOKO-9");order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");order.setEncryptedDeliveryCode(new byte[]{9});order.setActive(true);
+        var buyer=new org.pms.silverocean.database.pms.entities.Users();buyer.setId(4L);buyer.setEmail("buyer@example.com");buyer.setEmailVerified(true);buyer.setActive(true);
+        when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);when(users.getUserId()).thenReturn(99L);when(users.findById(4L)).thenReturn(Optional.of(buyer));when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(orders.save(any())).thenAnswer(i->i.getArgument(0));when(encryption.encrypt(anyString())).thenReturn(new byte[]{1,2,3});when(i18n.getLocalizedMessage(anyString())).thenReturn("Order %s OTP %s expires %s");when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of());
+        service.reissueDeliveryCode(9L,new SokoRequests.CodeReissue("Buyer cannot access the original email"));
+        assertNull(order.getEncryptedDeliveryCode());assertArrayEquals(new byte[]{1,2,3},order.getDeliveryRecoveryOtp());assertEquals(99L,order.getDeliveryRecoveryRequestedBy());assertEquals(1,order.getDeliveryRecoveryRequestCount());verify(notifications).queueNotification(any());
+    }
+
     @Test void checkoutLocksSelectedVariationAndUsesItsPriceAndStock(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setName("Fresh Corner");store.setStatus("PUBLISHED");store.setActive(true);store.setPickupEnabled(true);store.setCurrency("KES");store.setPaymentAccountId(3L);
         var account=new org.pms.silverocean.database.pms.entities.PaymentAccount();account.setActive(true);account.setVerified(true);account.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);account.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);

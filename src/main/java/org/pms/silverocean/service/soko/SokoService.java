@@ -78,6 +78,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 public class SokoService {
     private static final String DRAFT="DRAFT", PENDING_REVIEW="PENDING_REVIEW", PUBLISHED="PUBLISHED", REJECTED="REJECTED", SUSPENDED="SUSPENDED", OUT_OF_STOCK="OUT_OF_STOCK";
     private static final SecureRandom SECURE_RANDOM=new SecureRandom();
+    private static final java.util.regex.Pattern RESTRICTED_PRODUCT=java.util.regex.Pattern.compile("(?i)\\b(alcohol|beer|wine|spirit|cigarette|tobacco|vape|cannabis|marijuana|firearm|ammunition|weapon)\\b");
     private final SokoStoreRepo storeRepo;
     private final SokoProductRepo productRepo;
     private final SokoProductImageRepo productImageRepo;
@@ -97,6 +98,9 @@ public class SokoService {
     private final MarketplaceKycGate marketplaceKycGate;
     @Value("${soko.stock-reservation-minutes:20}") private long reservationMinutes;
     @Value("${soko.delivery-code-valid-hours:24}") private long deliveryCodeValidHours;
+    @Value("${soko.delivery-recovery-otp-valid-minutes:10}") private long deliveryRecoveryOtpValidMinutes;
+    @Value("${soko.delivery-recovery-cooldown-seconds:60}") private long deliveryRecoveryCooldownSeconds;
+    @Value("${soko.delivery-recovery-max-requests-per-day:3}") private int deliveryRecoveryMaxRequestsPerDay;
     private static final ObjectMapper JSON = new ObjectMapper();
     @Autowired(required=false) private AuditLogService auditLogService;
 
@@ -297,7 +301,51 @@ public class SokoService {
     @Transactional public OrderDetail confirmCollection(long orderId){SokoOrder o=assignedOrder(orderId,"ASSIGNMENT_ACCEPTED");o.setStatus("DISPATCHED");o.setCollectedAt(now());o.setDispatchedAt(now());generateDeliveryCode(o);orderRepo.save(o);audit(o,"SOKO_DELIVERY_COLLECTED");notifyOrder(o,"Out for delivery","The rider collected your order and is on the way.");return detail(o);}
     @Transactional public OrderDetail failDelivery(long orderId,SokoRequests.DeliveryException request){SokoOrder o=assignedOrder(orderId,null);if(!List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED","DISPATCHED").contains(o.getStatus()))throw invalid();o.setStatus("DELIVERY_FAILED");o.setDeliveryFailedAt(now());o.setDeliveryExceptionReason(request.reason().trim());clearDeliveryCode(o);releaseRider(o,false);orderRepo.save(o);notifyOrder(o,"Delivery attempt failed",request.reason());return detail(o);}
     @Transactional public OrderDetail returnDelivery(long orderId,SokoRequests.DeliveryException request){SokoOrder o=assignedOrder(orderId,"DELIVERY_FAILED");o.setStatus("RETURNED");o.setReturnedAt(now());o.setDeliveryExceptionReason(request.reason().trim());if("PAID".equals(o.getPaymentStatus()))o.setRefundStatus("REQUESTED");orderRepo.save(o);notifyOrder(o,"Order returned",request.reason());return detail(o);}
-    @Transactional public OrderDetail reissueDeliveryCode(long orderId,SokoRequests.CodeReissue request){requireSuperAdmin();SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);if(!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified())throw invalid();generateDeliveryCode(o);o.setDeliveryCodeReissuedAt(now());o.setDeliveryCodeReissuedBy(userDao.getUserId());o.setDeliveryCodeReissueReason(request.reason().trim());orderRepo.save(o);notifyOrder(o,"New delivery code issued","Support replaced the previous code. Only the buyer can view the new code.");return detail(o);}
+    @Transactional public OrderDetail reissueDeliveryCode(long orderId,SokoRequests.CodeReissue request){requireSuperAdmin();return requestDeliveryCodeRecovery(orderId,request.reason());}
+
+    @Transactional
+    public OrderDetail requestDeliveryCodeRecovery(long orderId,String supportReason){
+        SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);
+        long actor=userDao.getUserId();boolean support=StringUtils.isNotBlank(supportReason);
+        if(support)requireSuperAdmin();else if(o.getCustomerUserId()!=actor)throw forbidden();
+        if(!"DELIVERY".equals(o.getDeliveryMethod())||!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified())throw invalid();
+        var buyer=userDao.findById(o.getCustomerUserId()).filter(u->u.isActive()&&u.isEmailVerified()&&StringUtils.isNotBlank(u.getEmail()))
+                .orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Verify the buyer's email before recovering a delivery code."));
+        ZonedDateTime timestamp=now();
+        if(o.getDeliveryRecoveryWindowStartedAt()==null||o.getDeliveryRecoveryWindowStartedAt().plusHours(24).isBefore(timestamp)){
+            o.setDeliveryRecoveryWindowStartedAt(timestamp);o.setDeliveryRecoveryRequestCount(0);
+        }
+        if(o.getDeliveryRecoveryRequestedAt()!=null&&o.getDeliveryRecoveryRequestedAt().plusSeconds(Math.max(30,deliveryRecoveryCooldownSeconds)).isAfter(timestamp))
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"A verification code was just sent. Wait one minute before requesting another.");
+        if(o.getDeliveryRecoveryRequestCount()>=Math.max(1,deliveryRecoveryMaxRequestsPerDay))
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Delivery-code recovery has reached today's limit. Contact support and try again after 24 hours.");
+        String otp=String.format(Locale.ROOT,"%06d",SECURE_RANDOM.nextInt(1_000_000));
+        // A recovery request means the original code can no longer be trusted.
+        // Invalidate it before sending the identity challenge; only the buyer can
+        // generate a replacement by completing the fresh-contact OTP check.
+        clearDeliveryCode(o);
+        o.setDeliveryRecoveryOtp(encryptionService.encrypt(otp));o.setDeliveryRecoveryOtpExpiresAt(timestamp.plusMinutes(Math.max(5,Math.min(deliveryRecoveryOtpValidMinutes,30))));
+        o.setDeliveryRecoveryRequestedAt(timestamp);o.setDeliveryRecoveryRequestCount(o.getDeliveryRecoveryRequestCount()+1);o.setDeliveryRecoveryOtpAttempts(0);
+        o.setDeliveryRecoveryRequestedBy(actor);o.setDeliveryRecoverySupportReason(StringUtils.left(StringUtils.trimToNull(supportReason),1000));
+        orderRepo.save(o);audit(o,support?"SOKO_DELIVERY_RECOVERY_ASSISTED":"SOKO_DELIVERY_RECOVERY_REQUESTED");
+        String body=String.format(i18n.getLocalizedMessage(NotificationType.SOKO_DELIVERY_RECOVERY_EMAIL.getBody()),HtmlUtils.htmlEscape(o.getOrderNumber()),otp,o.getDeliveryRecoveryOtpExpiresAt());
+        notificationService.queueNotification(new NotificationDTO(body,buyer.getEmail(),NotificationType.SOKO_DELIVERY_RECOVERY_EMAIL));
+        return detail(o);
+    }
+
+    @Transactional(noRollbackFor=PMSCustomException.class)
+    public OrderDetail confirmDeliveryCodeRecovery(long orderId,SokoRequests.DeliveryCodeRecoveryConfirm request){
+        SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);
+        if(o.getCustomerUserId()!=userDao.getUserId())throw forbidden();
+        if(!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified()||o.getDeliveryRecoveryOtp()==null||o.getDeliveryRecoveryOtpExpiresAt()==null||!o.getDeliveryRecoveryOtpExpiresAt().isAfter(now()))throw invalid();
+        if(o.getDeliveryRecoveryOtpAttempts()>=5)throw forbidden();
+        o.setDeliveryRecoveryOtpAttempts(o.getDeliveryRecoveryOtpAttempts()+1);
+        String expected=encryptionService.decrypt(o.getDeliveryRecoveryOtp()).decryptedValue();
+        if(!constantTimeEquals(expected,request.otp())){orderRepo.save(o);throw invalid();}
+        generateDeliveryCode(o);o.setDeliveryCodeReissuedAt(now());o.setDeliveryCodeReissuedBy(userDao.getUserId());o.setDeliveryCodeReissueReason("Buyer identity confirmed using a fresh email OTP.");
+        o.setDeliveryRecoveryOtp(null);o.setDeliveryRecoveryOtpExpiresAt(null);o.setDeliveryRecoveryCompletedAt(now());
+        orderRepo.save(o);audit(o,"SOKO_DELIVERY_CODE_RECOVERED");return detail(o);
+    }
 
     @Transactional
     public void completePaidInvoice(String invoiceRef,String providerReference){orderRepo.findByInvoiceRefAndActiveTrue(invoiceRef).ifPresent(o->{if("UNPAID".equals(o.getPaymentStatus())){o.setPaymentStatus("PAID");if("EXPIRED".equals(o.getStatus())||"CANCELLED".equals(o.getStatus()))o.setRefundStatus("REQUESTED");else o.setStatus("PAID");orderRepo.save(o);}});}
@@ -314,7 +362,8 @@ public class SokoService {
     @Scheduled(fixedDelayString="${soko.reservation-expiry-scan-ms:300000}") @Transactional public void expireReservations(){for(SokoOrder o:orderRepo.findExpiredReservations(now(),PageRequest.of(0,100,Sort.by("reservationExpiresAt")))){restoreStock(o);o.setStatus("EXPIRED");o.setCancelledAt(now());o.setCancellationReason("Payment reservation expired");orderRepo.save(o);}}
 
     private void applyStore(SokoStore s,SokoRequests.StoreUpsert r){s.setName(r.name().trim());s.setDescription(StringUtils.trimToNull(r.description()));s.setPhoneNumber(StringUtils.trimToNull(r.phoneNumber()));s.setAddress(StringUtils.trimToNull(r.address()));s.setLatitude(r.latitude());s.setLongitude(r.longitude());s.setServiceRadiusKm(r.serviceRadiusKm()==null?BigDecimal.valueOf(25):r.serviceRadiusKm());s.setPickupEnabled(r.pickupEnabled());s.setDeliveryEnabled(r.deliveryEnabled());s.setDeliveryFee(zero(r.deliveryFee()));s.setCurrency(r.currency().trim().toUpperCase(Locale.ROOT));s.setPaymentAccountId(r.paymentAccountId());if(!s.isPickupEnabled()&&!s.isDeliveryEnabled())throw invalid();if((s.getLatitude()==null)!=(s.getLongitude()==null))throw invalid();}
-    private void applyProduct(SokoProduct p,SokoRequests.ProductUpsert r,SokoStore store){p.setName(r.name().trim());p.setDescription(StringUtils.trimToNull(r.description()));p.setCategory(r.category().trim());p.setUnit(r.unit().trim());p.setPrice(r.price());p.setCurrency(store.getCurrency());if(r.variations()!=null||p.getId()==0)p.setStockQuantity(r.variations()!=null&&!r.variations().isEmpty()?r.variations().stream().mapToInt(v->v.stockQuantity()==null?0:v.stockQuantity()).sum():r.stockQuantity());p.setImageUrl(safeLegacyImageUrl(r.imageUrl()));if(List.of(OUT_OF_STOCK,"PAUSED").contains(p.getStatus())&&p.getStockQuantity()>0)p.setStatus(DRAFT);}
+    private void applyProduct(SokoProduct p,SokoRequests.ProductUpsert r,SokoStore store){validateAllowedGrocery(r.name(),r.description());p.setName(r.name().trim());p.setDescription(StringUtils.trimToNull(r.description()));p.setCategory(SokoGroceryCategory.normalize(r.category()));p.setUnit(r.unit().trim());p.setPrice(r.price());p.setCurrency(store.getCurrency());if(r.variations()!=null||p.getId()==0)p.setStockQuantity(r.variations()!=null&&!r.variations().isEmpty()?r.variations().stream().mapToInt(v->v.stockQuantity()==null?0:v.stockQuantity()).sum():r.stockQuantity());p.setImageUrl(safeLegacyImageUrl(r.imageUrl()));if(List.of(OUT_OF_STOCK,"PAUSED").contains(p.getStatus())&&p.getStockQuantity()>0)p.setStatus(DRAFT);}
+    private void validateAllowedGrocery(String name,String description){String text=StringUtils.defaultString(name)+" "+StringUtils.defaultString(description);if(RESTRICTED_PRODUCT.matcher(text).find())throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Soko is for groceries only. Alcohol and restricted products cannot be listed.");}
     private void syncVariations(SokoProduct p,List<SokoRequests.ProductVariation> requested){List<SokoProductVariation> old=productVariationRepo.findAllByProductIdAndActiveTrueOrderByNameAscValueAsc(p.getId());old.forEach(v->v.setActive(false));if(!old.isEmpty())productVariationRepo.saveAll(old);List<SokoProductVariation> saved=new ArrayList<>();Set<String> keys=new java.util.HashSet<>();for(SokoRequests.ProductVariation r:requested==null?List.<SokoRequests.ProductVariation>of():requested){String key=(r.name().trim()+"\u0000"+r.value().trim()).toLowerCase(Locale.ROOT);if(!keys.add(key))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Product variation names and values must be unique.");SokoProductVariation v=new SokoProductVariation();v.setProductId(p.getId());v.setName(r.name().trim());v.setValue(r.value().trim());v.setPriceAdjustment(zero(r.priceAdjustment()));v.setStockQuantity(r.stockQuantity());v.setCreatedBy(userDao.getUserId());v.setActive(true);saved.add(productVariationRepo.save(v));}try{p.setVariationsJson(saved.isEmpty()?null:JSON.writeValueAsString(saved.stream().map(v->new VariationView(v.getId(),v.getName(),v.getValue(),v.getPriceAdjustment(),v.getStockQuantity())).toList()));}catch(Exception e){throw invalid();}}
     private record VariationView(long id,String name,String value,BigDecimal priceAdjustment,int stockQuantity){}
     private Map<Long,List<String>> imageUrlsByProduct(List<Long> ids){if(ids.isEmpty())return Map.of();return productImageRepo.findAllByProductIdInAndActiveTrueOrderByProductIdAscDisplayOrderAsc(ids).stream().collect(Collectors.groupingBy(SokoProductImage::getProductId,Collectors.mapping(i->garageService.getPresignedUrlForStoredObject(i.getFileRef()),Collectors.toList())));}

@@ -92,4 +92,5 @@ public final class SokoRequests {
                                 @Size(max=1000) String reason) {}
     public record DeliveryException(@NotBlank @Size(max=1000) String reason) {}
     public record CodeReissue(@NotBlank @Size(max=1000) String reason) {}
+    public record DeliveryCodeRecoveryConfirm(@NotBlank @Pattern(regexp="\\d{6}") String otp) {}
 }

@@ -32,9 +32,9 @@ class KycMatrixServiceTest {
 
     @BeforeEach void setup(){service=new KycMatrixService(releases,requirements,users,audit,categories);}
 
-    @Test void conditionalRequirementNeedsHumanReadableCondition(){
+    @Test void conditionalRequirementNeedsMachineEvaluatedRule(){
         KycMatrixRelease draft=release(2L,2,"DRAFT");when(releases.findFirstByStatusAndActiveTrueOrderByVersionNoDesc("DRAFT")).thenReturn(Optional.of(draft));
-        var request=new KycMatrixRequests.RequirementUpsert("SOKO_CATEGORY","PHARMACY","Pharmacy","PHARMACY_LICENSE","Pharmacy licence","CONDITIONAL","BOTH","PROFESSIONAL_CERTIFICATE",null,365,30,true);
+        var request=new KycMatrixRequests.RequirementUpsert("SOKO_CATEGORY","FRESH_PRODUCE","Fresh produce","SUPPLIER_DOCUMENT","Supplier document","CONDITIONAL","BOTH","PROFESSIONAL_CERTIFICATE","Required for selected suppliers",null,null,365,30,true);
         assertThrows(PMSCustomException.class,()->service.add(request));
     }
 

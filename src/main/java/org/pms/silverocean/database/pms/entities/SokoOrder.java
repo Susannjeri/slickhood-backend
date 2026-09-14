@@ -78,6 +78,15 @@ public class SokoOrder extends BaseCreatorEntity implements Auditable {
     private ZonedDateTime deliveryCodeReissuedAt;
     private Long deliveryCodeReissuedBy;
     @jakarta.persistence.Column(length=1000) private String deliveryCodeReissueReason;
+    @JsonIgnore private byte[] deliveryRecoveryOtp;
+    private ZonedDateTime deliveryRecoveryOtpExpiresAt;
+    private ZonedDateTime deliveryRecoveryRequestedAt;
+    private ZonedDateTime deliveryRecoveryWindowStartedAt;
+    private int deliveryRecoveryRequestCount;
+    private int deliveryRecoveryOtpAttempts;
+    private ZonedDateTime deliveryRecoveryCompletedAt;
+    private Long deliveryRecoveryRequestedBy;
+    @jakarta.persistence.Column(length=1000) private String deliveryRecoverySupportReason;
     private String deliveryProofContentType;
     private Long deliveryProofSize;
     @Override public String toAuditJSON(){return "{\"id\":"+getId()+",\"orderNumber\":\""+orderNumber+"\",\"status\":\""+status+"\",\"paymentStatus\":\""+paymentStatus+"\",\"refundStatus\":\""+refundStatus+"\",\"settlementStatus\":\""+settlementStatus+"\"}";}

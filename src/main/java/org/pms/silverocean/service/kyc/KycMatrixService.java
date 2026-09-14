@@ -123,10 +123,15 @@ public class KycMatrixService {
         row.setScopeLabel(request.scopeLabel().trim()); row.setRequirementCode(request.requirementCode().trim().toUpperCase(Locale.ROOT));
         row.setRequirementLabel(request.requirementLabel().trim()); row.setObligation(request.obligation()); row.setProfileScope(request.profileScope());
         row.setAcceptedDocumentTypes(validateTypes(request.acceptedDocumentTypes()));
-        row.setConditionDescription(StringUtils.trimToNull(request.conditionDescription())); row.setValidityDays(request.validityDays());
+        row.setConditionDescription(StringUtils.trimToNull(request.conditionDescription()));
+        row.setConditionRule("CONDITIONAL".equals(row.getObligation())?StringUtils.trimToNull(request.conditionRule()):null);
+        row.setConditionValue("CONDITIONAL".equals(row.getObligation())?StringUtils.upperCase(StringUtils.trimToNull(request.conditionValue())):null);
+        row.setValidityDays(request.validityDays());
         row.setRenewalLeadDays(request.renewalLeadDays()); row.setActive(request.active());
-        if ("CONDITIONAL".equals(row.getObligation()) && StringUtils.isBlank(row.getConditionDescription()))
-            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA, "Conditional requirements need a clear condition.");
+        if ("CONDITIONAL".equals(row.getObligation()) && StringUtils.isBlank(row.getConditionRule()))
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA, "Choose a machine-evaluated rule for every conditional requirement.");
+        if ("CONDITIONAL".equals(row.getObligation()) && !"NON_PASSPORT_IDENTITY".equals(row.getConditionRule()) && StringUtils.isBlank(row.getConditionValue()))
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA, "Enter the value the conditional rule should evaluate.");
         if (row.getValidityDays() != null && row.getRenewalLeadDays() != null && row.getRenewalLeadDays() >= row.getValidityDays())
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA, "Renewal notice must be shorter than the validity period.");
     }
@@ -140,8 +145,8 @@ public class KycMatrixService {
     private String cleanScopeType(String value) { String result = value.trim().toUpperCase(Locale.ROOT); if (!Set.of("COMMON","PROVIDER_TYPE","SERVICE_CATEGORY","SOKO_CATEGORY").contains(result)) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA); return result; }
     private String cleanKey(String value) { String result = value.trim().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_-]", "_"); if (result.isBlank() || result.length() > 120) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA); return result; }
     private String key(KycMatrixRequirement r) { return r.getScopeType() + "|" + r.getScopeKey() + "|" + r.getRequirementCode(); }
-    private String signature(KycMatrixRequirement r) { return String.join("|", r.getRequirementLabel(), r.getObligation(), r.getProfileScope(), r.getAcceptedDocumentTypes(), StringUtils.defaultString(r.getConditionDescription()), String.valueOf(r.getValidityDays()), String.valueOf(r.getRenewalLeadDays()), String.valueOf(r.isActive())); }
-    private KycMatrixRequirement copy(KycMatrixRequirement s, long releaseId, Long actor) { KycMatrixRequirement r = new KycMatrixRequirement(); r.setReleaseId(releaseId); r.setCreatedBy(actor); r.setScopeType(s.getScopeType()); r.setScopeKey(s.getScopeKey()); r.setScopeLabel(s.getScopeLabel()); r.setRequirementCode(s.getRequirementCode()); r.setRequirementLabel(s.getRequirementLabel()); r.setObligation(s.getObligation()); r.setProfileScope(s.getProfileScope()); r.setAcceptedDocumentTypes(s.getAcceptedDocumentTypes()); r.setConditionDescription(s.getConditionDescription()); r.setValidityDays(s.getValidityDays()); r.setRenewalLeadDays(s.getRenewalLeadDays()); r.setActive(s.isActive()); return r; }
+    private String signature(KycMatrixRequirement r) { return String.join("|", r.getRequirementLabel(), r.getObligation(), r.getProfileScope(), r.getAcceptedDocumentTypes(), StringUtils.defaultString(r.getConditionDescription()), StringUtils.defaultString(r.getConditionRule()), StringUtils.defaultString(r.getConditionValue()), String.valueOf(r.getValidityDays()), String.valueOf(r.getRenewalLeadDays()), String.valueOf(r.isActive())); }
+    private KycMatrixRequirement copy(KycMatrixRequirement s, long releaseId, Long actor) { KycMatrixRequirement r = new KycMatrixRequirement(); r.setReleaseId(releaseId); r.setCreatedBy(actor); r.setScopeType(s.getScopeType()); r.setScopeKey(s.getScopeKey()); r.setScopeLabel(s.getScopeLabel()); r.setRequirementCode(s.getRequirementCode()); r.setRequirementLabel(s.getRequirementLabel()); r.setObligation(s.getObligation()); r.setProfileScope(s.getProfileScope()); r.setAcceptedDocumentTypes(s.getAcceptedDocumentTypes()); r.setConditionDescription(s.getConditionDescription()); r.setConditionRule(s.getConditionRule()); r.setConditionValue(s.getConditionValue()); r.setValidityDays(s.getValidityDays()); r.setRenewalLeadDays(s.getRenewalLeadDays()); r.setActive(s.isActive()); return r; }
     private void syncServiceCategories(KycMatrixRelease draft,Long actor){
         var rows=requirements.findAllByReleaseIdOrderByScopeTypeAscScopeLabelAscRequirementLabelAsc(draft.getId()).stream().filter(r->"SERVICE_CATEGORY".equals(r.getScopeType())).toList();
         for(var group:rows.stream().collect(Collectors.groupingBy(KycMatrixRequirement::getScopeKey)).values()){

@@ -19,6 +19,8 @@ public final class KycMatrixRequests {
             @NotBlank @Pattern(regexp = "INDIVIDUAL|COMPANY|BOTH") String profileScope,
             @NotBlank @Size(max = 1000) String acceptedDocumentTypes,
             @Size(max = 1000) String conditionDescription,
+            @Pattern(regexp = "NON_PASSPORT_IDENTITY|PROFILE_IS|VERIFIED_DOCUMENT_PRESENT|VERIFIED_DOCUMENT_MISSING") String conditionRule,
+            @Size(max = 120) String conditionValue,
             @Min(1) @Max(3650) Integer validityDays,
             @Min(0) @Max(365) Integer renewalLeadDays,
             boolean active) {}
