@@ -112,6 +112,21 @@ class JWTFilterTest {
     }
 
     @Test
+    void exposesCanonicalSpringRoleAuthorityForSavedRoleNames() throws Exception {
+        stubValidatedToken(claims("current-session", List.of(
+                role("Superadmin", "view_subscription_plan")
+        )), true);
+        request.addHeader(JWTFilter.ACTIVE_ROLE_HEADER, "Superadmin");
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication().getAuthorities())
+                .extracting("authority")
+                .contains("ROLE_SUPERADMIN", "ROLE_SUPER_ADMIN", "view_subscription_plan");
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
     void requestedRoleMustBeAssignedToTheToken() throws Exception {
         when(i18nService.getLocalizedMessage(anyString())).thenReturn("Invalid token");
         stubValidatedToken(claims("current-session", List.of(role("Landlord", "view_property"))), true);

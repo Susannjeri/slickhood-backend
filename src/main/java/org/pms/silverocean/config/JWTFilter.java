@@ -13,6 +13,7 @@ import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.common.StaticStrings;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.auth.JwtService;
+import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -20,6 +21,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.CollectionUtils;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +70,12 @@ public class JWTFilter extends GenericFilter {
                             authorities.add(
                                     new SimpleGrantedAuthority("ROLE_" + roleName.toUpperCase())
                             );
+                            Arrays.stream(PMSRole.values())
+                                    .filter(knownRole -> normalizeRole(knownRole.getName()).equals(normalizeRole(roleName)))
+                                    .findFirst()
+                                    .map(PMSRole::name)
+                                    .map(name -> new SimpleGrantedAuthority("ROLE_" + name))
+                                    .ifPresent(authorities::add);
                             httpRequest.setAttribute(ACTIVE_ROLE_ATTRIBUTE, roleName);
                         }
 
