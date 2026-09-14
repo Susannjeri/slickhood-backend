@@ -232,8 +232,25 @@ public class RoleService {
             teamAccessService.accept(inviteToken);
             return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY));
         }
-        Invite invite = inviteDao.getInviteByToken(inviteToken, true).filter(this::notExpired)
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_OR_EXPIRED_TOKEN));
+        Optional<Invite> activeInvite = inviteDao.getInviteByToken(inviteToken, true).filter(this::notExpired);
+        if (activeInvite.isEmpty()) {
+            Invite consumedHomeownerInvite = inviteDao.getInviteByToken(inviteToken, false)
+                    .filter(this::notExpired)
+                    .filter(invite -> InviteType.HOMEOWNER.name().equals(invite.getType()))
+                    .filter(invite -> invite.getVisits() > 0)
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_OR_EXPIRED_TOKEN));
+            validateInviteRecipient(consumedHomeownerInvite, user);
+            if (consumedHomeownerInvite.getRoleId() == null
+                    || userRoleRepo.findByUserIdAndRoleId(user.getId(), consumedHomeownerInvite.getRoleId()) == 0) {
+                throw new PMSCustomException(ResponseCode.INVALID_OR_EXPIRED_TOKEN);
+            }
+            // The first acceptance already attached the homeowner and created
+            // the agreement. Sign-in with the same email is an idempotent
+            // continuation; it must not create a second ownership record.
+            return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY));
+        }
+        Invite invite = activeInvite.get();
         return assignRoleFromInvite(invite, null, user);
     }
 

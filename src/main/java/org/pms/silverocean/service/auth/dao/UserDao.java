@@ -88,7 +88,9 @@ public class UserDao {
     }
 
     public Long getUserId() {
-        String username = SecurityContextHolder.getContext().getAuthentication().getPrincipal().toString();
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getPrincipal() == null) return null;
+        String username = authentication.getPrincipal().toString();
         return findByEmail(username).map(Users::getId).orElse(null);
     }
 
@@ -97,7 +99,9 @@ public class UserDao {
     }
 
     public Users getUserObject() {
-        String username = SecurityContextHolder.getContext().getAuthentication().getPrincipal().toString();
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getPrincipal() == null) return null;
+        String username = authentication.getPrincipal().toString();
         if (StringUtils.isBlank(username)) {
             return null;
         }

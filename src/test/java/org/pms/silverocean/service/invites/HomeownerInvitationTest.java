@@ -9,9 +9,11 @@ import org.pms.silverocean.database.pms.PropertyAccountRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.LeaseDocumentTemplate;
 import org.pms.silverocean.database.pms.entities.Role;
+import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.auth.roles.RoleService;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.config.ConfigDTO;
 import org.pms.silverocean.service.config.ConfigService;
@@ -22,9 +24,11 @@ import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.property.PropertyService;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import org.pms.silverocean.service.teamaccess.TeamAccessService;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import org.pms.silverocean.service.leasedocument.DocumentTemplateIntegrity;
 import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
 import static org.junit.jupiter.api.Assertions.*;
@@ -42,7 +46,9 @@ class HomeownerInvitationTest {
     final UnitDTO unit = mock(UnitDTO.class);
     final LeaseDocumentTemplateRepo templates = mock(LeaseDocumentTemplateRepo.class);
     final PropertyAccountRepo accounts = mock(PropertyAccountRepo.class);
-    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,null,null,access,templates,accounts);
+    final RoleService roleService = mock(RoleService.class);
+    final TeamAccessService teamAccess = mock(TeamAccessService.class);
+    final InviteService service = new InviteService(invites,properties,users,config,roles,notifications,i18n,roleService,teamAccess,access,templates,accounts);
 
     void setupUnit(PMSLeaseMode mode) {
         when(users.getUserId()).thenReturn(9L);
@@ -112,5 +118,76 @@ class HomeownerInvitationTest {
 
         assertEquals(ResponseCode.HOMEOWNER_AGREEMENT_DATE_INVALID, error.getResponseCode());
         verifyNoInteractions(invites, notifications);
+    }
+
+    @Test void consumedHomeownerInvitationRemainsUsableOnlyForItsAuthenticatedRecipient() {
+        Invite invite = consumedHomeownerInvite("resident@example.test");
+        Users recipient = new Users();
+        recipient.setId(51L);
+        recipient.setEmail("Resident@Example.test");
+        recipient.setActive(true);
+        recipient.setEmailVerified(true);
+        when(teamAccess.isTeamToken("already-used")).thenReturn(false);
+        when(invites.getInviteByToken("already-used", true)).thenReturn(Optional.empty());
+        when(invites.getInviteByToken("already-used", false)).thenReturn(Optional.of(invite));
+        when(users.getUserObject()).thenReturn(recipient);
+        when(users.getUserId()).thenReturn(recipient.getId());
+        when(i18n.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY)).thenReturn("Role ready");
+
+        ResponseDTO response = service.validateToken("already-used");
+
+        assertTrue(response.isSuccess());
+        assertEquals(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), response.getCode());
+        assertEquals("/dashboard/documents?type=ESTATE_RESIDENTIAL_AGREEMENT", response.getData().getFirst());
+        verifyNoInteractions(roleService);
+    }
+
+    @Test void consumedHomeownerInvitationCannotBeReusedByAnotherAccount() {
+        Invite invite = consumedHomeownerInvite("resident@example.test");
+        Users other = new Users();
+        other.setId(52L);
+        other.setEmail("other@example.test");
+        other.setActive(true);
+        other.setEmailVerified(true);
+        when(teamAccess.isTeamToken("already-used")).thenReturn(false);
+        when(invites.getInviteByToken("already-used", true)).thenReturn(Optional.empty());
+        when(invites.getInviteByToken("already-used", false)).thenReturn(Optional.of(invite));
+        when(users.getUserObject()).thenReturn(other);
+        when(users.getUserId()).thenReturn(other.getId());
+
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> service.validateToken("already-used"));
+
+        assertEquals(ResponseCode.INVALID_INVITE_LINK, error.getResponseCode());
+        verifyNoInteractions(roleService);
+    }
+
+    @Test void loggedOutRecipientOfConsumedHomeownerInvitationIsSentToSignIn() {
+        Invite invite = consumedHomeownerInvite("resident@example.test");
+        when(teamAccess.isTeamToken("already-used")).thenReturn(false);
+        when(invites.getInviteByToken("already-used", true)).thenReturn(Optional.empty());
+        when(invites.getInviteByToken("already-used", false)).thenReturn(Optional.of(invite));
+        when(users.getUserObject()).thenReturn(null);
+        when(users.getUserId()).thenReturn(null);
+        when(config.getConfigByName(PMSConfigs.REGISTRATION_PAGE_URL)).thenReturn(
+                () -> new ConfigDTO(3, "registration", "https://app.slickhood.test/register", 0, false));
+
+        ResponseDTO response = service.validateToken("already-used");
+
+        assertTrue(response.isSuccess());
+        assertEquals(ResponseCode.ASSIGNED_ROLE_REGISTRATION_REQUIRED.getCode(), response.getCode());
+        assertTrue(response.getData().getFirst().toString().contains("already-used"));
+        verifyNoInteractions(roleService);
+    }
+
+    private Invite consumedHomeownerInvite(String recipient) {
+        Invite invite = new Invite();
+        invite.setType(InviteType.HOMEOWNER.name());
+        invite.setRecipient(recipient);
+        invite.setToken("already-used");
+        invite.setVisits(1);
+        invite.setActive(false);
+        invite.setExpiryDate(LocalDateTime.now().plusDays(1));
+        return invite;
     }
 }

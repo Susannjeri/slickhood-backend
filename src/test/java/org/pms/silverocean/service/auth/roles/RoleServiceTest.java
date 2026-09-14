@@ -50,6 +50,7 @@ import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -630,6 +631,48 @@ class RoleServiceTest {
 
         assertEquals(ResponseCode.INVALID_OR_EXPIRED_TOKEN, exception.getResponseCode());
         verify(userRoleRepo, never()).save(any());
+    }
+
+    @Test
+    void signedInHomeownerCanResumeAConsumedInvitationWithoutDuplicateOwnership() {
+        Invite invite = new Invite();
+        invite.setRoleId(19L);
+        invite.setType(InviteType.HOMEOWNER.name());
+        invite.setRecipient(testUser.getEmail());
+        invite.setVisits(1);
+        invite.setActive(false);
+        invite.setExpiryDate(java.time.LocalDateTime.now().plusDays(1));
+        when(teamAccessService.isTeamToken("consumed-homeowner")).thenReturn(false);
+        when(inviteDao.getInviteByToken("consumed-homeowner", true)).thenReturn(Optional.empty());
+        when(inviteDao.getInviteByToken("consumed-homeowner", false)).thenReturn(Optional.of(invite));
+        when(userRoleRepo.findByUserIdAndRoleId(testUser.getId(), 19L)).thenReturn(1);
+
+        ResponseDTO response = roleService.assignRoleFromInvite("consumed-homeowner", testUser);
+
+        assertTrue(response.isSuccess());
+        assertEquals(1, invite.getVisits());
+        verify(inviteDao, never()).updateInvite(any());
+        verifyNoInteractions(estateService);
+    }
+
+    @Test
+    void anotherAccountCannotResumeAConsumedHomeownerInvitation() {
+        Invite invite = new Invite();
+        invite.setRoleId(19L);
+        invite.setType(InviteType.HOMEOWNER.name());
+        invite.setRecipient("homeowner@example.test");
+        invite.setVisits(1);
+        invite.setActive(false);
+        invite.setExpiryDate(java.time.LocalDateTime.now().plusDays(1));
+        when(teamAccessService.isTeamToken("forwarded-consumed-homeowner")).thenReturn(false);
+        when(inviteDao.getInviteByToken("forwarded-consumed-homeowner", true)).thenReturn(Optional.empty());
+        when(inviteDao.getInviteByToken("forwarded-consumed-homeowner", false)).thenReturn(Optional.of(invite));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> roleService.assignRoleFromInvite("forwarded-consumed-homeowner", testUser));
+
+        assertEquals(ResponseCode.INVALID_USER_DETAILS, error.getResponseCode());
+        verifyNoInteractions(estateService);
     }
 
     @Test

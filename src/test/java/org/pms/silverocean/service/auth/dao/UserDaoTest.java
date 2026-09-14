@@ -9,6 +9,7 @@ import org.pms.silverocean.database.pms.entities.Users;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -27,5 +28,14 @@ class UserDaoTest {
         Users saved = assertDoesNotThrow(() -> new UserDao(userRepo).save(user));
 
         assertEquals(501L, saved.getId());
+    }
+
+    @Test
+    void publicInvitationChecksHaveNoUserWhenSecurityContextIsEmpty() {
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        UserDao users = new UserDao(userRepo);
+
+        assertNull(users.getUserId());
+        assertNull(users.getUserObject());
     }
 }

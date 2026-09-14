@@ -10,6 +10,7 @@ import org.pms.silverocean.database.pms.LeaseDocumentTemplateRepo;
 import org.pms.silverocean.database.pms.PropertyAccountRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.Role;
+import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -364,14 +365,31 @@ public class InviteService {
                     i18NService.getLocalizedMessage(ResponseCode.ASSIGNED_ROLE_REGISTRATION_REQUIRED),
                     formatInviteLink(configService.getConfigByName(PMSConfigs.REGISTRATION_PAGE_URL).get().stringValue(), token));
         }
-        Invite invite = inviteDao.getInviteByToken(token, true).filter(
-                inviteFromDb -> LocalDateTime.now().isBefore(inviteFromDb.getExpiryDate())
-        ).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVITE_LINK));
+        Invite invite = usableInvite(token)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVITE_LINK));
 
         InviteType inviteType = InviteType.valueOf(invite.getType());
         ResponseDTO responseDTO = null;
         switch (inviteType) {
-            case GUARD, PROPERTY_MANAGER, ASSET_PORTFOLIO_MANAGER, FINANCE, HOMEOWNER, BUYER -> {
+            case HOMEOWNER -> {
+                if (userDao.getUserId() != null) {
+                    responseDTO = invite.isActive()
+                            ? roleService.assignRoleFromInvite(invite, null, userDao.getUserObject())
+                            : new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(),
+                            i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY));
+                    if (responseDTO.isSuccess()) {
+                        responseDTO.setData(List.of("/dashboard/documents?type=ESTATE_RESIDENTIAL_AGREEMENT"));
+                    }
+                } else {
+                    responseDTO = new ResponseDTO(true, ResponseCode.ASSIGNED_ROLE_REGISTRATION_REQUIRED.getCode(),
+                            i18NService.getLocalizedMessage(ResponseCode.ASSIGNED_ROLE_REGISTRATION_REQUIRED),
+                            List.of(
+                                    formatInviteLink(configService.getConfigByName(PMSConfigs.REGISTRATION_PAGE_URL).get().stringValue(), token),
+                                    "/dashboard/documents?type=ESTATE_RESIDENTIAL_AGREEMENT"
+                            ));
+                }
+            }
+            case GUARD, PROPERTY_MANAGER, ASSET_PORTFOLIO_MANAGER, FINANCE, BUYER -> {
                 if (userDao.getUserId() != null) {
                     //assign user role and ADD user to property
                     responseDTO = roleService.assignRoleFromInvite(invite, null, userDao.getUserObject());
@@ -438,11 +456,36 @@ public class InviteService {
             }
             return tokenInspection("TEAM", inspection.expiresAt());
         }
-        Invite invite = inviteDao.getInviteByToken(token, true)
-                .filter(candidate -> candidate.getExpiryDate() != null
-                        && LocalDateTime.now().isBefore(candidate.getExpiryDate()))
+        Invite invite = usableInvite(token)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVITE_LINK));
         return tokenInspection(invite.getType(), invite.getExpiryDate());
+    }
+
+    /**
+     * Active invitations are usable by anyone holding the token. A successfully
+     * consumed homeowner invitation may lead a logged-out holder to sign-in, but
+     * completion remains restricted to the authenticated email-bound recipient
+     * until the original expiry. This makes the landing page idempotent without
+     * reopening revoked or forwarded invitations.
+     */
+    private Optional<Invite> usableInvite(String token) {
+        LocalDateTime now = LocalDateTime.now();
+        Optional<Invite> active = inviteDao.getInviteByToken(token, true)
+                .filter(candidate -> candidate.getExpiryDate() != null && now.isBefore(candidate.getExpiryDate()));
+        if (active.isPresent()) return active;
+
+        Optional<Invite> consumedHomeownerInvite = inviteDao.getInviteByToken(token, false)
+                .filter(candidate -> InviteType.HOMEOWNER.name().equals(candidate.getType()))
+                .filter(candidate -> candidate.getVisits() > 0)
+                .filter(candidate -> candidate.getRecipient() != null && !candidate.getRecipient().isBlank())
+                .filter(candidate -> candidate.getExpiryDate() != null && now.isBefore(candidate.getExpiryDate()));
+        if (consumedHomeownerInvite.isEmpty() || userDao == null) return Optional.empty();
+        Users user = userDao.getUserObject();
+        // A logged-out holder may proceed only to sign-in/registration. Once
+        // authenticated, the same token is accepted solely for its bound email.
+        if (user == null) return consumedHomeownerInvite;
+        if (user.getEmail() == null) return Optional.empty();
+        return consumedHomeownerInvite.filter(candidate -> recipientMatches(candidate.getRecipient(), user));
     }
 
     private InviteTokenInspection tokenInspection(String type, LocalDateTime expiresAt) {
@@ -530,7 +573,7 @@ public class InviteService {
         }
     }
 
-    private boolean recipientMatches(String recipient, org.pms.silverocean.database.pms.entities.Users user) {
+    private boolean recipientMatches(String recipient, Users user) {
         return recipient == null || recipient.isBlank()
                 || user != null && user.getEmail() != null && recipient.equalsIgnoreCase(user.getEmail().trim());
     }
