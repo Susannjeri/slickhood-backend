@@ -1,6 +1,7 @@
 package org.pms.silverocean.service.subscription;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.pms.silverocean.controller.wrappers.SubscriptionCurrentDTO;
 import org.pms.silverocean.controller.wrappers.SubscriptionPlanSummaryRestDTO;
 import org.pms.silverocean.database.pms.PlanFeatureRepo;
@@ -25,6 +26,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SubscriptionManagementServiceTest {
@@ -109,6 +111,32 @@ class SubscriptionManagementServiceTest {
         assertThat(overview.activeAddOns()).singleElement()
                 .extracting(addOnResult -> addOnResult.productKey())
                 .isEqualTo(SubscriptionProduct.PORTFOLIO_MANAGEMENT_ADDON.name());
+    }
+
+    @Test
+    void administratorRenewalEditIsPersistedAndAudited() {
+        UserDao users = mock(UserDao.class);
+        UserSubscriptionRepo subscriptions = mock(UserSubscriptionRepo.class);
+        SubscriptionEventRepo events = mock(SubscriptionEventRepo.class);
+        SubscriptionManagementService service = new SubscriptionManagementService(users, subscriptions,
+                mock(SubscriptionPlanRepo.class), mock(PlanFeatureRepo.class), events, mock(PMSInvoiceRepo.class),
+                mock(UnitReportDao.class), mock(SubscriptionProvisioningService.class),
+                mock(SubscriptionInvoiceService.class), mock(NotificationService.class));
+        UserSubscription subscription = subscription(SubscriptionProduct.LANDLORD, "LANDLORD_BRONZE", null);
+        subscription.setId(22L);
+        subscription.setAutoRenew(false);
+        when(subscriptions.findByIdAndActiveTrue(22L)).thenReturn(Optional.of(subscription));
+        when(users.getUserId()).thenReturn(99L);
+
+        service.updateSubscriberAutoRenew(22L, true);
+
+        assertThat(subscription.isAutoRenew()).isTrue();
+        verify(subscriptions).save(subscription);
+        ArgumentCaptor<org.pms.silverocean.database.pms.entities.SubscriptionEvent> event =
+                ArgumentCaptor.forClass(org.pms.silverocean.database.pms.entities.SubscriptionEvent.class);
+        verify(events).save(event.capture());
+        assertThat(event.getValue().getNotes()).isEqualTo("admin_enabled:true");
+        assertThat(event.getValue().getCreatedBy()).isEqualTo(99L);
     }
 
     private UserSubscription subscription(SubscriptionProduct product, String planCode, ZonedDateTime endAt) {

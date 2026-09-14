@@ -116,8 +116,9 @@ public class LeaseController extends OutputStreamErrorHandler {
 
     @GetMapping(value = "/list")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_ACTIVE_LEASE)")
-    public ResponseEntity<ResponseDTO> getLeaseList(Pageable pageable) {
-        Page<LeaseDTO> leaseDTOPage = leaseService.getLeaseList(pageable);
+    public ResponseEntity<ResponseDTO> getLeaseList(Pageable pageable,
+                                                     @RequestParam(required = false) String search) {
+        Page<LeaseDTO> leaseDTOPage = leaseService.getLeaseList(pageable, search);
         ResponseDTO body = new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), leaseDTOPage.getContent());
         body.setSize(leaseDTOPage.getSize());

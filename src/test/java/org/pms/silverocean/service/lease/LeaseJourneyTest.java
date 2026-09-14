@@ -47,7 +47,7 @@ class LeaseJourneyTest {
         var dto = new org.pms.silverocean.service.lease.wrappers.LeaseDTO(lease, "Tenant", null);
         when(users.getUserId()).thenReturn(4L);
         when(users.getActiveRole()).thenReturn(PMSRole.TENANT);
-        when(leases.getScopedLeaseList(eq(4L), eq(PMSRole.TENANT.name()), isNull(), any()))
+        when(leases.getScopedLeaseList(eq(4L), eq(PMSRole.TENANT.name()), isNull(), isNull(), any()))
                 .thenReturn(new PageImpl<>(java.util.List.of(dto)));
         when(documents.findCurrentAgreementsForLeases(java.util.Set.of(1L)))
                 .thenReturn(java.util.List.of(agreement));

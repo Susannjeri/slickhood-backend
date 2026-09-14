@@ -25,7 +25,9 @@ import org.pms.silverocean.service.subscription.enums.SubscriptionStatus;
 import org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode;
 import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -146,6 +148,28 @@ public class SubscriptionManagementService {
         return invoiceRepo
                 .findByBilledUserIdAndSubscriptionPlanCodeIsNotNullOrderByCreatedOnDesc(currentUserId(), pageable)
                 .map(SubscriptionBillingItemDTO::from);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<SubscriptionSubscriberView> subscribers(Pageable pageable, String search,
+                                                         String statusValue, String productValue) {
+        String normalizedSearch = StringUtils.isBlank(search) ? null : search.trim();
+        SubscriptionStatus status = parseStatus(statusValue);
+        SubscriptionProduct product = parseProduct(productValue);
+        Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()),
+                Math.min(100, Math.max(1, pageable.getPageSize())),
+                Sort.by(Sort.Direction.DESC, "createdOn"));
+        return userSubscriptionRepo.findSubscriberViews(normalizedSearch, status, product, bounded);
+    }
+
+    @Transactional
+    public void updateSubscriberAutoRenew(long subscriptionId, boolean enabled) {
+        UserSubscription subscription = userSubscriptionRepo.findByIdAndActiveTrue(subscriptionId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_CURRENT_ABSENT));
+        subscription.setAutoRenew(enabled);
+        userSubscriptionRepo.save(subscription);
+        saveEvent(subscription, SubscriptionEventType.AUTO_RENEW_UPDATED,
+                "admin_enabled:" + enabled, currentUserId());
     }
 
     @Transactional
@@ -317,6 +341,14 @@ public class SubscriptionManagementService {
         try { return SubscriptionProduct.valueOf(productValue.trim().toUpperCase()); }
         catch (IllegalArgumentException error) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_PRODUCT_MISMATCH);
+        }
+    }
+
+    private SubscriptionStatus parseStatus(String statusValue) {
+        if (StringUtils.isBlank(statusValue)) return null;
+        try { return SubscriptionStatus.valueOf(statusValue.trim().toUpperCase()); }
+        catch (IllegalArgumentException error) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         }
     }
 

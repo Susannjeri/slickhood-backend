@@ -16,15 +16,20 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.account.AccountService;
 import org.pms.silverocean.service.subscription.SubscriptionProvisioningService;
 import org.pms.silverocean.service.subscription.SubscriptionManagementService;
+import org.pms.silverocean.service.subscription.SubscriptionAdminUpdateRequest;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/subscription")
@@ -113,6 +118,29 @@ public class SubscriptionController {
         response.setTotalPages(page.getTotalPages());
         response.setSize(page.getSize());
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/admin/subscribers")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ResponseDTO> subscribers(Pageable pageable,
+                                                    @RequestParam(required = false) String search,
+                                                    @RequestParam(required = false) String status,
+                                                    @RequestParam(required = false) String product) {
+        Page<?> subscribers = subscriptionManagementService.subscribers(pageable, search, status, product);
+        ResponseDTO response = new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), subscribers.getContent());
+        response.setTotalElements(subscribers.getTotalElements());
+        response.setTotalPages(subscribers.getTotalPages());
+        response.setSize(subscribers.getSize());
+        return ResponseEntity.ok(response);
+    }
+
+    @PatchMapping("/admin/subscribers/{id}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ResponseDTO> updateSubscriber(@PathVariable long id,
+                                                         @Valid @RequestBody SubscriptionAdminUpdateRequest body) {
+        subscriptionManagementService.updateSubscriberAutoRenew(id, body.autoRenew());
+        return ok(null);
     }
 
     @PostMapping("/auto-renew")

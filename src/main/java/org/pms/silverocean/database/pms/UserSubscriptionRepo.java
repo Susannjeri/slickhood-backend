@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
+import org.pms.silverocean.service.subscription.SubscriptionSubscriberView;
 import java.time.ZonedDateTime;
 
 import java.util.List;
@@ -48,4 +50,23 @@ public interface UserSubscriptionRepo extends JpaRepository<UserSubscription, Lo
 
     List<UserSubscription> findAllByStatusAndActiveTrueAndEndAtLessThanEqual(
             SubscriptionStatus status, ZonedDateTime endAt);
+
+    @Query(value = "SELECT new org.pms.silverocean.service.subscription.SubscriptionSubscriberView(" +
+            "s.id,u.id,u.fullName,u.email,u.phoneNumber,u.accountStatus,s.role,s.productKey,s.planCode,s.status," +
+            "s.startAt,s.endAt,s.autoRenew,s.createdOn) FROM UserSubscription s JOIN Users u ON u.id=s.createdBy " +
+            "WHERE s.active AND u.active AND (:status IS NULL OR s.status=:status) " +
+            "AND (:product IS NULL OR s.productKey=:product) AND (:search IS NULL " +
+            "OR LOWER(COALESCE(u.fullName,'')) LIKE LOWER(CONCAT('%',:search,'%')) " +
+            "OR LOWER(u.email) LIKE LOWER(CONCAT('%',:search,'%')) " +
+            "OR LOWER(s.planCode) LIKE LOWER(CONCAT('%',:search,'%'))) ORDER BY s.createdOn DESC,s.id DESC",
+            countQuery = "SELECT COUNT(s) FROM UserSubscription s JOIN Users u ON u.id=s.createdBy " +
+                    "WHERE s.active AND u.active AND (:status IS NULL OR s.status=:status) " +
+                    "AND (:product IS NULL OR s.productKey=:product) AND (:search IS NULL " +
+                    "OR LOWER(COALESCE(u.fullName,'')) LIKE LOWER(CONCAT('%',:search,'%')) " +
+                    "OR LOWER(u.email) LIKE LOWER(CONCAT('%',:search,'%')) " +
+                    "OR LOWER(s.planCode) LIKE LOWER(CONCAT('%',:search,'%')))")
+    Page<SubscriptionSubscriberView> findSubscriberViews(String search, SubscriptionStatus status,
+                                                          SubscriptionProduct product, Pageable pageable);
+
+    Optional<UserSubscription> findByIdAndActiveTrue(long id);
 }

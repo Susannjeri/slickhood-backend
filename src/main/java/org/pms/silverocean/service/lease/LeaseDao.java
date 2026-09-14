@@ -162,8 +162,8 @@ public class LeaseDao {
     public Page<LeaseDTO> getLeaseList(long userId, boolean privileged, Pageable pageable) {
         return leaseRepo.findAccessibleLeases(userId, privileged, pageable);
     }
-    public Page<LeaseDTO> getScopedLeaseList(long userId, String roleName, Long assignmentId, Pageable pageable) {
-        return leaseRepo.findScopedLeases(userId, roleName, assignmentId, pageable);
+    public Page<LeaseDTO> getScopedLeaseList(long userId, String roleName, Long assignmentId, String search, Pageable pageable) {
+        return leaseRepo.findScopedLeases(userId, roleName, assignmentId, search, pageable);
     }
 
     public List<Lease> getTerminationCandidates(LocalDate today, Pageable pageable) {

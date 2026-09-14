@@ -24,20 +24,29 @@ public record LeaseDTO(Long id,
                        String lifecycleStatus,
                        LocalDate terminationEffectiveDate, LocalDate moveInDate, double price, String currency,
                        LocalDate firstRentDueDate, LocalDate depositDueDate, LocalDate nextRentDueDate,
-                       Long agreementDocumentId, String agreementStatus) {
+                       Long agreementDocumentId, String agreementStatus,
+                       Long propertyId, String propertyName, Long unitId, String unitRef,
+                       Long tenantUserId, String tenantEmail, String tenantPhoneNumber) {
     public LeaseDTO(Lease lease, String tenantName, String ownerSignName) {
+        this(lease, tenantName, ownerSignName, null, null, null, null, null, null, null);
+    }
+
+    public LeaseDTO(Lease lease, String tenantName, String ownerSignName,
+                    Long propertyId, String propertyName, Long unitId, String unitRef,
+                    Long tenantUserId, String tenantEmail, String tenantPhoneNumber) {
         this(lease.getId(), lease.getName(), PMSLeaseMode.valueOf(lease.getLeaseMode()), lease.isSelfRenew(), lease.getMoveOutDate(),
                 lease.isSigned(), tenantName, lease.getLastModifiedDate(), lease.getCreatedOn(), lease.getTenantSignedDate(),
                 lease.getManagerSignedDate(), ownerSignName, lease.isGovernedDocumentRequired(),
                 lease.getLifecycleStatus(), lease.getTerminationEffectiveDate(), lease.getMoveInDate(), lease.getPrice(), lease.getCurrency(),
                 lease.getMoveInDate(), lease.getMoveInDate(), lease.getNextPaymentDate(),
-                null, null);
+                null, null, propertyId, propertyName, unitId, unitRef, tenantUserId, tenantEmail, tenantPhoneNumber);
     }
 
     public LeaseDTO withAgreement(Long documentId, String status) {
         return new LeaseDTO(id, name, leaseMode, selfRenew, expiryDate, signed, tenantName, lastModifiedDate,
                 lastCreatedOn, tenantSignDate, ownerSignDate, ownerSignName, governedDocumentRequired,
                 lifecycleStatus, terminationEffectiveDate, moveInDate, price, currency,
-                firstRentDueDate, depositDueDate, nextRentDueDate, documentId, status);
+                firstRentDueDate, depositDueDate, nextRentDueDate, documentId, status,
+                propertyId, propertyName, unitId, unitRef, tenantUserId, tenantEmail, tenantPhoneNumber);
     }
 }
