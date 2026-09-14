@@ -15,8 +15,9 @@ public final class LateFeePolicyModels {
     public record Update(
             @NotNull @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal percentageRate,
             @Min(0) @Max(365) int graceDays,
+            @DecimalMin("0.01") BigDecimal maximumFee,
             boolean enabled) {}
 
-    public record View(String billingType, BigDecimal percentageRate, int graceDays, boolean enabled,
+    public record View(String billingType, BigDecimal percentageRate, int graceDays, BigDecimal maximumFee, boolean enabled,
                        boolean configured, LocalDate effectiveFrom) {}
 }

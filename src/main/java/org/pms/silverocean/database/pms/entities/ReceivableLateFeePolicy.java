@@ -25,6 +25,8 @@ public class ReceivableLateFeePolicy extends BaseCreatorEntity {
     private BigDecimal percentageRate = BigDecimal.ZERO;
     @Column(nullable = false)
     private int graceDays;
+    @Column(precision = 19, scale = 2)
+    private BigDecimal maximumFee;
     @Column(nullable = false)
     private LocalDate effectiveFrom;
     @Column(nullable = false)

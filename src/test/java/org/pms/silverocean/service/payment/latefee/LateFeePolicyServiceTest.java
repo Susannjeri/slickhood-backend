@@ -43,11 +43,13 @@ class LateFeePolicyServiceTest {
             ReceivableLateFeePolicy saved = invocation.getArgument(0); saved.setId(7L); return saved;
         });
 
-        var result = service().save("sale", new LateFeePolicyModels.Update(new BigDecimal("2.50"), 3, true));
+        var result = service().save("sale", new LateFeePolicyModels.Update(
+                new BigDecimal("2.50"), 3, new BigDecimal("500.00"), true));
 
         assertThat(result.configured()).isTrue();
         assertThat(result.percentageRate()).isEqualByComparingTo("2.5000");
         assertThat(result.graceDays()).isEqualTo(3);
+        assertThat(result.maximumFee()).isEqualByComparingTo("500.00");
         assertThat(result.enabled()).isTrue();
     }
 
@@ -84,6 +86,27 @@ class LateFeePolicyServiceTest {
         when(invoices.findByIdForUpdate(10L)).thenReturn(Optional.of(fee));
         assertThat(service().assess(10L)).isEmpty();
         verifyNoInteractions(policies, invoiceService, notifications);
+    }
+
+    @Test
+    void configuredMaximumCapsPercentageFee() {
+        PMSInvoice source = source();
+        ReceivableLateFeePolicy policy = new ReceivableLateFeePolicy();
+        policy.setCreatedBy(41L); policy.setBillingType("SALE");
+        policy.setPercentageRate(new BigDecimal("10.0000")); policy.setMaximumFee(new BigDecimal("40.00"));
+        policy.setGraceDays(0); policy.setEnabled(true); policy.setActive(true);
+        policy.setEffectiveFrom(LocalDate.now().minusDays(30));
+        PMSInvoice fee = new PMSInvoice(); fee.setId(12L); fee.setRef("INV-C"); fee.setAmount(40); fee.setActive(true);
+        when(invoices.findByIdForUpdate(10L)).thenReturn(Optional.of(source));
+        when(policies.findByCreatedByAndBillingTypeAndActiveTrue(41L, "SALE")).thenReturn(Optional.of(policy));
+        when(invoiceService.createLateFeeInvoice(eq(source), any(), eq(policy.getPercentageRate()), any())).thenReturn(fee);
+        when(users.findById(anyLong())).thenReturn(Optional.empty());
+
+        service().assess(10L);
+
+        ArgumentCaptor<BigDecimal> amount = ArgumentCaptor.forClass(BigDecimal.class);
+        verify(invoiceService).createLateFeeInvoice(eq(source), amount.capture(), eq(policy.getPercentageRate()), any());
+        assertThat(amount.getValue()).isEqualByComparingTo("40.00");
     }
 
     private LateFeePolicyService service() {

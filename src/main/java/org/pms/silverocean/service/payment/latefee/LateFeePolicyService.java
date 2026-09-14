@@ -43,7 +43,8 @@ public class LateFeePolicyService {
         long billerId = authorisedBiller(billingType);
         return policies.findByCreatedByAndBillingTypeAndActiveTrue(billerId, billingType)
                 .map(policy -> view(policy, true))
-                .orElse(new LateFeePolicyModels.View(billingType, BigDecimal.ZERO.setScale(4), 0, false, false, null));
+                .orElse(new LateFeePolicyModels.View(billingType, BigDecimal.ZERO.setScale(4), 0, null,
+                        false, false, null));
     }
 
     @Transactional
@@ -62,6 +63,8 @@ public class LateFeePolicyService {
         }
         policy.setPercentageRate(rate);
         policy.setGraceDays(request.graceDays());
+        policy.setMaximumFee(request.maximumFee() == null ? null
+                : request.maximumFee().setScale(2, RoundingMode.HALF_UP));
         policy.setEffectiveFrom(LocalDate.now(PMSUtils.getZoneId()));
         policy.setEnabled(request.enabled());
         return view(policies.save(policy), true);
@@ -88,6 +91,7 @@ public class LateFeePolicyService {
         BigDecimal principal = BigDecimal.valueOf(source.getPendingAmount()).setScale(2, RoundingMode.HALF_UP);
         BigDecimal fee = principal.multiply(policy.getPercentageRate())
                 .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        if (policy.getMaximumFee() != null) fee = fee.min(policy.getMaximumFee());
         if (fee.signum() <= 0) return Optional.empty();
         PMSInvoice feeInvoice = invoiceService.createLateFeeInvoice(source, fee, policy.getPercentageRate(), today);
         notifyAssessment(source, feeInvoice, principal, policy.getPercentageRate());
@@ -122,7 +126,8 @@ public class LateFeePolicyService {
 
     private LateFeePolicyModels.View view(ReceivableLateFeePolicy policy, boolean configured) {
         return new LateFeePolicyModels.View(policy.getBillingType(), policy.getPercentageRate(),
-                policy.getGraceDays(), policy.isEnabled(), configured, policy.getEffectiveFrom());
+                policy.getGraceDays(), policy.getMaximumFee(), policy.isEnabled(), configured,
+                policy.getEffectiveFrom());
     }
 
     private long authorisedBiller(String billingType) {
