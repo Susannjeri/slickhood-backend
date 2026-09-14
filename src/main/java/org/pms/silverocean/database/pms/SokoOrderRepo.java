@@ -20,6 +20,7 @@ public interface SokoOrderRepo extends JpaRepository<SokoOrder, Long> {
     Page<SokoOrder> findAllByCustomerUserIdAndActiveTrue(long customerUserId,Pageable pageable);
     List<SokoOrder> findAllByStoreIdInAndActiveTrueOrderByCreatedOnDesc(List<Long> storeIds);
     Page<SokoOrder> findAllByStoreIdInAndActiveTrue(List<Long> storeIds,Pageable pageable);
+    Page<SokoOrder> findAllByRiderIdInAndActiveTrue(List<Long> riderIds,Pageable pageable);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<SokoOrder> findByInvoiceRefAndActiveTrue(String invoiceRef);
     Optional<SokoOrder> findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(long customerUserId,String checkoutIdempotencyKey);

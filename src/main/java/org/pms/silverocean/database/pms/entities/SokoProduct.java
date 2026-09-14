@@ -17,7 +17,7 @@ import java.time.ZonedDateTime;
         @Index(name = "idx_soko_product_catalog", columnList = "status,category,active")
 })
 @Getter @Setter @NoArgsConstructor
-public class SokoProduct extends BaseCreatorEntity {
+public class SokoProduct extends BaseCreatorEntity implements Auditable {
     private long storeId;
     private String name;
     private String description;
@@ -28,7 +28,10 @@ public class SokoProduct extends BaseCreatorEntity {
     private int stockQuantity;
     private String imageUrl;
     private String status;
+    @jakarta.persistence.Column(columnDefinition="TEXT")
+    private String variationsJson;
     private ZonedDateTime moderatedAt;
     private Long moderatedByUserId;
     @jakarta.persistence.Column(length=1000) private String moderationReason;
+    @Override public String toAuditJSON(){return "{\"id\":"+getId()+",\"storeId\":"+storeId+",\"status\":\""+status+"\",\"stockQuantity\":"+stockQuantity+"}";}
 }

@@ -9,6 +9,7 @@ import java.time.ZonedDateTime;
 
 public interface KycDocumentRepo extends JpaRepository<KycDocument, Long> {
     List<KycDocument> findByCaseIdAndActiveTrueOrderByCreatedOnDesc(long caseId);
+    List<KycDocument> findByUserIdAndActiveTrueAndStatusOrderByCreatedOnDesc(long userId, String status);
     Optional<KycDocument> findByIdAndUserId(long id, long userId);
     boolean existsByUserIdAndSha256AndActiveTrue(long userId, String sha256);
     List<KycDocument> findByActiveTrueAndReverificationDueAtLessThanEqualAndStatusNot(

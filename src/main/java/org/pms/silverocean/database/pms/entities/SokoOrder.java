@@ -19,7 +19,7 @@ import java.time.ZonedDateTime;
         @Index(name = "idx_soko_order_invoice", columnList = "invoiceRef", unique = true)
 })
 @Getter @Setter @NoArgsConstructor
-public class SokoOrder extends BaseCreatorEntity {
+public class SokoOrder extends BaseCreatorEntity implements Auditable {
     private String orderNumber;
     private long storeId;
     private long customerUserId;
@@ -67,6 +67,18 @@ public class SokoOrder extends BaseCreatorEntity {
     private String deliveryProofReference;
     private ZonedDateTime deliveryProofAt;
     private ZonedDateTime expectedArrivalAt;
+    private ZonedDateTime assignedAt;
+    private ZonedDateTime assignmentAcceptedAt;
+    private ZonedDateTime collectedAt;
+    private ZonedDateTime deliveryFailedAt;
+    private ZonedDateTime returnedAt;
+    @jakarta.persistence.Column(length=1000) private String deliveryExceptionReason;
+    private ZonedDateTime deliveryCodeExpiresAt;
+    private ZonedDateTime deliveryCodeLockedAt;
+    private ZonedDateTime deliveryCodeReissuedAt;
+    private Long deliveryCodeReissuedBy;
+    @jakarta.persistence.Column(length=1000) private String deliveryCodeReissueReason;
     private String deliveryProofContentType;
     private Long deliveryProofSize;
+    @Override public String toAuditJSON(){return "{\"id\":"+getId()+",\"orderNumber\":\""+orderNumber+"\",\"status\":\""+status+"\",\"paymentStatus\":\""+paymentStatus+"\",\"refundStatus\":\""+refundStatus+"\",\"settlementStatus\":\""+settlementStatus+"\"}";}
 }

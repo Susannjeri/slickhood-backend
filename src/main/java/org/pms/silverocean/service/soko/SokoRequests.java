@@ -39,9 +39,22 @@ public final class SokoRequests {
             @NotBlank @Size(max=40) String unit,
             @NotNull @DecimalMin("0.01") BigDecimal price,
             @Min(0) int stockQuantity,
-            @Size(max=800) String imageUrl) {}
+            @Size(max=800) String imageUrl,
+            @Size(max=30) List<@Valid ProductVariation> variations) {
+        public ProductUpsert(Long storeId,String name,String description,String category,String unit,BigDecimal price,int stockQuantity,String imageUrl){this(storeId,name,description,category,unit,price,stockQuantity,imageUrl,List.of());}
+    }
 
-    public record CheckoutItem(@NotNull Long productId, @Min(1) @Max(10_000) int quantity) {}
+    public record ProductVariation(Long id,
+                                   @NotBlank @Size(max=80) String name,
+                                   @NotBlank @Size(max=120) String value,
+                                   @DecimalMin("0.00") BigDecimal priceAdjustment,
+                                   @NotNull @Min(0) Integer stockQuantity) {
+        public ProductVariation(String name,String value,BigDecimal priceAdjustment,Integer stockQuantity){this(null,name,value,priceAdjustment,stockQuantity);}
+    }
+
+    public record CheckoutItem(@NotNull Long productId, @Min(1) @Max(10_000) int quantity, Long variationId) {
+        public CheckoutItem(Long productId,int quantity){this(productId,quantity,null);}
+    }
 
     public record Checkout(
             @NotNull Long storeId,
@@ -75,4 +88,8 @@ public final class SokoRequests {
     public enum FinanceStatus { REQUESTED, PROCESSING, CONFIRMED, FAILED }
     public record FinanceUpdate(@NotNull FinanceType type,@NotNull FinanceStatus status,@NotNull @DecimalMin("0.01") BigDecimal amount,@Size(max=120) String providerReference) {}
     public record ModerationDecision(@NotBlank @Pattern(regexp="APPROVE|REJECT|SUSPEND|REACTIVATE") String decision,@Size(max=1000) String reason) {}
+    public record RiderDecision(@NotBlank @Pattern(regexp="VERIFY|ACTIVATE|SUSPEND|REJECT") String decision,
+                                @Size(max=1000) String reason) {}
+    public record DeliveryException(@NotBlank @Size(max=1000) String reason) {}
+    public record CodeReissue(@NotBlank @Size(max=1000) String reason) {}
 }

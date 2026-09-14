@@ -19,6 +19,9 @@ public class SokoOrderItem extends BaseCreatorEntity {
     private long orderId;
     private long productId;
     private String productName;
+    private Long variationId;
+    private String variationName;
+    private String variationValue;
     private String unit;
     private BigDecimal unitPrice;
     private int quantity;

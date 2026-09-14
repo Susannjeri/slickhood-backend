@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Set;
+import java.util.LinkedHashSet;
 
 @Service
 @Slf4j
@@ -189,7 +190,13 @@ public class ProviderServiceService {
             Set<String> presentTypes = requireVerified
                     ? documentDao.findVerifiedDocumentTypesByServiceId(service.getId())
                     : documentDao.findUploadedDocumentTypesByServiceId(service.getId());
-            boolean allPresent = required.stream().allMatch(dt -> presentTypes.contains(dt.name()));
+            presentTypes = new LinkedHashSet<>(presentTypes == null ? Set.of() : presentTypes);
+            Set<String> reusable = requireVerified
+                    ? documentDao.findReusableVerifiedDocumentTypes(service.getProfileId(), service.getCategoryId())
+                    : documentDao.findReusableUploadedDocumentTypes(service.getProfileId(), service.getCategoryId());
+            if (reusable != null) presentTypes.addAll(reusable);
+            Set<String> resolvedPresentTypes = presentTypes;
+            boolean allPresent = required.stream().allMatch(dt -> resolvedPresentTypes.contains(dt.name()));
             if (!allPresent) {
                 throw new PMSCustomException(ResponseCode.SP_SERVICE_MISSING_REQUIRED_DOCUMENTS);
             }

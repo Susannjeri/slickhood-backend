@@ -780,10 +780,13 @@ public class KycService {
     }
 
     private Set<String> missingRequirements(KycCase kycCase, Users user) {
+        ZonedDateTime now = ZonedDateTime.now();
         Set<KycDocumentType> uploaded = currentDocuments(kycCase, user).stream()
                 .filter(doc -> !DocumentStatus.REJECTED.name().equals(doc.getStatus()))
                 .filter(doc -> !DocumentStatus.REVIEW_REQUIRED.name().equals(doc.getStatus()))
                 .filter(doc -> !DocumentStatus.SUPERSEDED.name().equals(doc.getStatus()))
+                .filter(doc -> doc.getExpiresAt() == null || doc.getExpiresAt().isAfter(now))
+                .filter(doc -> doc.getReverificationDueAt() == null || doc.getReverificationDueAt().isAfter(now))
                 .map(doc -> KycDocumentType.valueOf(doc.getDocumentType())).collect(Collectors.toSet());
         Set<KycRequirement> effective = effectiveRequirements(user, uploaded);
         Set<String> missing = effective.stream().filter(KycRequirement::required)

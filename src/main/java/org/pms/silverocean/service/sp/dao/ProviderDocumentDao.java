@@ -46,4 +46,7 @@ public class ProviderDocumentDao {
     public Set<String> findVerifiedDocumentTypesByServiceId(long serviceId) {
         return repo.findVerifiedDocumentTypesByServiceId(serviceId);
     }
+
+    public Set<String> findReusableUploadedDocumentTypes(long profileId,long categoryId){return repo.findReusableUploadedDocumentTypes(profileId,categoryId);}
+    public Set<String> findReusableVerifiedDocumentTypes(long profileId,long categoryId){return repo.findReusableVerifiedDocumentTypes(profileId,categoryId);}
 }

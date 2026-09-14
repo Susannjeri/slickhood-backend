@@ -36,6 +36,8 @@ public class SokoController {
     @PostMapping("/product") public ResponseEntity<ResponseDTO> createProduct(@RequestBody @Valid SokoRequests.ProductUpsert r){return ok(service.createProduct(r));}
     @PutMapping("/product/{id}") public ResponseEntity<ResponseDTO> updateProduct(@PathVariable long id,@RequestBody @Valid SokoRequests.ProductUpsert r){return ok(service.updateProduct(id,r));}
     @PutMapping("/product/{id}/publish") public ResponseEntity<ResponseDTO> publishProduct(@PathVariable long id){return ok(service.publishProduct(id));}
+    @PutMapping("/product/{id}/pause") public ResponseEntity<ResponseDTO> pauseProduct(@PathVariable long id){return ok(service.pauseProduct(id));}
+    @DeleteMapping("/product/{id}") public ResponseEntity<ResponseDTO> removeProduct(@PathVariable long id){service.removeProduct(id);return ok(null);}
     @GetMapping("/product/my") public ResponseEntity<ResponseDTO> myProducts(@RequestParam long storeId){return ok(service.myProducts(storeId));}
     @PutMapping(value="/product/{id}/images",consumes=MediaType.MULTIPART_FORM_DATA_VALUE) public ResponseEntity<ResponseDTO> productImages(@PathVariable long id,@RequestPart("images") List<MultipartFile> images)throws IOException{return ok(service.replaceProductImages(id,images));}
     @GetMapping("/product/{id}/images") public ResponseEntity<ResponseDTO> productImages(@PathVariable long id){return ok(service.productImages(id));}
@@ -44,6 +46,11 @@ public class SokoController {
     @GetMapping("/rider/my") public ResponseEntity<ResponseDTO> myRiders(@RequestParam long storeId){return ok(service.myRiders(storeId));}
     @PutMapping("/rider/{id}/availability") public ResponseEntity<ResponseDTO> riderAvailability(@PathVariable long id,@RequestParam String availability){return ok(service.setRiderAvailability(id,availability));}
     @DeleteMapping("/rider/{id}") public ResponseEntity<ResponseDTO> removeRider(@PathVariable long id){service.removeRider(id);return ok(null);}
+    @GetMapping("/rider/assignments") public ResponseEntity<ResponseDTO> riderAssignments(Pageable pageable){return page(service.riderAssignments(pageable));}
+    @PutMapping("/order/{id}/rider/accept") public ResponseEntity<ResponseDTO> acceptAssignment(@PathVariable long id){return ok(service.acceptAssignment(id));}
+    @PutMapping("/order/{id}/rider/collect") public ResponseEntity<ResponseDTO> confirmCollection(@PathVariable long id){return ok(service.confirmCollection(id));}
+    @PutMapping("/order/{id}/rider/fail") public ResponseEntity<ResponseDTO> failDelivery(@PathVariable long id,@RequestBody @Valid SokoRequests.DeliveryException request){return ok(service.failDelivery(id,request));}
+    @PutMapping("/order/{id}/rider/return") public ResponseEntity<ResponseDTO> returnDelivery(@PathVariable long id,@RequestBody @Valid SokoRequests.DeliveryException request){return ok(service.returnDelivery(id,request));}
     @PostMapping("/order/checkout") public ResponseEntity<ResponseDTO> checkout(@RequestHeader(value="Idempotency-Key",required=false) String idempotencyKey,@RequestBody @Valid SokoRequests.Checkout r){return ok(service.checkout(r,idempotencyKey));}
     @GetMapping("/order/my") public ResponseEntity<ResponseDTO> myOrders(Pageable pageable){return page(service.myOrders(pageable));}
     @GetMapping("/order/merchant") public ResponseEntity<ResponseDTO> merchantOrders(Pageable pageable){return page(service.merchantOrders(pageable));}
@@ -60,5 +67,8 @@ public class SokoController {
     @GetMapping("/admin/products") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminProducts(Pageable pageable){return page(service.adminProducts(pageable));}
     @PutMapping("/admin/products/{id}/moderation") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> moderateProduct(@PathVariable long id,@RequestBody @Valid SokoRequests.ModerationDecision request){return ok(service.moderateProduct(id,request));}
     @GetMapping("/admin/orders") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminOrders(Pageable pageable){return page(service.adminOrders(pageable));}
+    @GetMapping("/admin/riders") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminRiders(Pageable pageable){return page(service.adminRiders(pageable));}
+    @PutMapping("/admin/riders/{id}/decision") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> riderDecision(@PathVariable long id,@RequestBody @Valid SokoRequests.RiderDecision request){return ok(service.riderDecision(id,request));}
+    @PostMapping("/admin/orders/{id}/delivery-code/reissue") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> reissueCode(@PathVariable long id,@RequestBody @Valid SokoRequests.CodeReissue request){return ok(service.reissueDeliveryCode(id,request));}
     private ResponseEntity<ResponseDTO> page(Page<?> p){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),p.getContent(),p.getTotalPages(),p.getTotalElements(),p.getSize()));}
 }

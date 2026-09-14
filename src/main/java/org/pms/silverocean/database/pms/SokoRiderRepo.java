@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 public interface SokoRiderRepo extends JpaRepository<SokoRider,Long> {
     List<SokoRider> findAllByStoreIdAndActiveTrueOrderByDisplayName(long storeId);
@@ -16,4 +18,6 @@ public interface SokoRiderRepo extends JpaRepository<SokoRider,Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from SokoRider r where r.id=:id and r.storeId=:storeId and r.active=true")
     Optional<SokoRider> findForUpdate(long id,long storeId);
+    Page<SokoRider> findAllByActiveTrue(Pageable pageable);
+    List<SokoRider> findAllByUserIdAndActiveTrue(long userId);
 }

@@ -21,4 +21,10 @@ public interface ProviderDocumentRepo extends JpaRepository<ProviderDocument, Lo
 
     @Query("SELECT d.documentType FROM ProviderDocument d WHERE d.serviceId = :serviceId AND d.verificationStatus = 'VERIFIED' AND d.active = true")
     Set<String> findVerifiedDocumentTypesByServiceId(long serviceId);
+
+    @Query("SELECT DISTINCT d.documentType FROM ProviderDocument d JOIN ProviderService s ON s.id=d.serviceId WHERE s.profileId=:profileId AND s.categoryId=:categoryId AND d.active=true AND s.active=true")
+    Set<String> findReusableUploadedDocumentTypes(long profileId,long categoryId);
+
+    @Query("SELECT DISTINCT d.documentType FROM ProviderDocument d JOIN ProviderService s ON s.id=d.serviceId WHERE s.profileId=:profileId AND s.categoryId=:categoryId AND d.verificationStatus='VERIFIED' AND d.active=true AND s.active=true AND (d.expiryDate IS NULL OR d.expiryDate>CURRENT_TIMESTAMP)")
+    Set<String> findReusableVerifiedDocumentTypes(long profileId,long categoryId);
 }
