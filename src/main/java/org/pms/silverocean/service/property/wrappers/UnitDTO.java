@@ -39,12 +39,13 @@ public record UnitDTO(
         Long templateId,
         Long leaseId,
         Boolean tenantSigned,
-        Boolean ownerSigned
+        Boolean ownerSigned,
+        UnitLifecycleDTO lifecycle
         ) {
-    public UnitDTO(DbUnitDTO dbUnitDTO, String thumbNail,  Set<UtilitiesDTO> utilities, List<String> images, MeasurementUnitsDTO measurementUnits, Long leaseId, Boolean tenantSigned, Boolean ownerSigned) {
+    public UnitDTO(DbUnitDTO dbUnitDTO, String thumbNail,  Set<UtilitiesDTO> utilities, List<String> images, MeasurementUnitsDTO measurementUnits, Long leaseId, Boolean tenantSigned, Boolean ownerSigned, UnitLifecycleDTO lifecycle) {
         this(dbUnitDTO.propertyId(), dbUnitDTO.ref(), dbUnitDTO.unitType(), dbUnitDTO.propertyType(), dbUnitDTO.size(),
                 measurementUnits, utilities, PMSLeaseMode.valueOf(dbUnitDTO.leaseMode()), dbUnitDTO.price(), dbUnitDTO.currency(),
-                dbUnitDTO.occupied(), dbUnitDTO.advertise(), thumbNail, images, dbUnitDTO.unitId(), dbUnitDTO.templateId(), leaseId, tenantSigned, ownerSigned);
+                dbUnitDTO.occupied(), dbUnitDTO.advertise(), thumbNail, images, dbUnitDTO.unitId(), dbUnitDTO.templateId(), leaseId, tenantSigned, ownerSigned, lifecycle);
     }
 
     public UnitDTO(Long propertyId,
@@ -59,6 +60,6 @@ public record UnitDTO(
                    Long templateId) {
         this(propertyId, ref, unitType, null, size,
                 measurementUnits, utilities.stream().map(UtilitiesDTO::new).collect(Collectors.toSet()), leaseMode,
-                price, currency, false, false, null, null, null, templateId, null, null, null);
+                price, currency, false, false, null, null, null, templateId, null, null, null, null);
     }
 }

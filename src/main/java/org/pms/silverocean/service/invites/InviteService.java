@@ -143,6 +143,10 @@ public class InviteService {
                 if (entityId == null) {
                     throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
                 }
+                // Serialize invitation creation for this inventory item. The
+                // lifecycle check below is then authoritative even when two
+                // browser tabs submit at nearly the same time.
+                propertyService.lockUnitForInvitation(entityId);
                 ResponseDTO responseDTO = inviteType == InviteType.HOMEOWNER
                         ? propertyService.listUnits(org.springframework.data.domain.PageRequest.of(0,1), Optional.empty(), Optional.empty(), Optional.of(entityId), Optional.empty())
                         : propertyService.getUnitByIDAndLoggedInUser(entityId);
@@ -150,6 +154,9 @@ public class InviteService {
                     throw new PMSCustomException(ResponseCode.UNIT_NOT_FOUND);
                 }
                 if (responseDTO.getData().get(0) instanceof UnitDTO unitDTO) {
+                    if (unitDTO.lifecycle() != null && unitDTO.lifecycle().invitationBlocked()) {
+                        throw new PMSCustomException(ResponseCode.INVITE_ALREADY_EXISTS);
+                    }
                     if (inviteType == InviteType.HOMEOWNER) {
                         estateAccess.require(unitDTO.propertyId(), org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_ESTATE);
                         if (unitDTO.leaseMode() != org.pms.silverocean.service.lease.wrappers.PMSLeaseMode.SERVICE_CHARGE) {
@@ -236,6 +243,11 @@ public class InviteService {
 
     public Invite createBuyerInvite(long saleId, String email) {
         return createBuyerInvite(saleId, email, null);
+    }
+
+    @Transactional
+    public void cancelBuyerInvitation(long saleId) {
+        inviteDao.deactivateInvitesForEntity(saleId, InviteType.BUYER);
     }
 
     public StaffInviteDTO createInternalStaffInvite(StaffInviteRequest request) {
@@ -505,6 +517,9 @@ public class InviteService {
 
     public void updateInvite(long id, boolean active) {
         Optional<Invite> inviteFromDb = inviteDao.getInviteByInviteIdAndCreatedBy(id, userDao.getUserId());
+        if (inviteFromDb.isEmpty() && !active) {
+            inviteFromDb = inviteDao.getActiveInviteById(id).filter(this::canCancelScopedOccupantInvite);
+        }
         if (inviteFromDb.isEmpty()) {
             return;
         }
@@ -514,6 +529,26 @@ public class InviteService {
             invite.setExpiryDate(LocalDateTime.now().plusDays(configService.getConfigByName(PMSConfigs.INVITE_LINK_EXPIRY_DAYS).get().intValue()));
         }
         inviteDao.updateInvite(invite);
+    }
+
+    private boolean canCancelScopedOccupantInvite(Invite invite) {
+        InviteType type;
+        try {
+            type = InviteType.valueOf(invite.getType());
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+        if (type != InviteType.TENANT && type != InviteType.HOMEOWNER) return false;
+        ResponseDTO response = type == InviteType.HOMEOWNER
+                ? propertyService.listUnits(org.springframework.data.domain.PageRequest.of(0, 1), Optional.empty(),
+                Optional.empty(), Optional.of(invite.getEntityId()), Optional.empty())
+                : propertyService.getUnitByIDAndLoggedInUser(invite.getEntityId());
+        if (!response.isSuccess() || response.getData() == null || response.getData().isEmpty()
+                || !(response.getData().getFirst() instanceof UnitDTO unit)) return false;
+        if (type == InviteType.HOMEOWNER) {
+            estateAccess.require(unit.propertyId(), org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_ESTATE);
+        }
+        return true;
     }
 
     public ResponseDTO getSupportedInviteTypes() {

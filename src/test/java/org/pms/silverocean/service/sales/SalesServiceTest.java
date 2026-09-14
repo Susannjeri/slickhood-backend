@@ -398,6 +398,21 @@ class SalesServiceTest {
         assertEquals(SaleStatus.AGREEMENT,sale.getStatus());
     }
 
+    @Test void cancellingBuyerJourneyRevokesItsInvitationBeforeUnitCanBeInvitedAgain() {
+        SaleTransaction sale = sale(SaleStatus.OFFERED);
+        when(users.getUserId()).thenReturn(100L);
+        when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        when(sales.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        SaleTransaction cancelled = service.update(1L,
+                new UpdateSaleRequest(SaleStatus.CANCELLED, null, "Buyer withdrew"));
+
+        assertEquals(SaleStatus.CANCELLED, cancelled.getStatus());
+        verify(invites).cancelBuyerInvitation(1L);
+        verify(sales).save(sale);
+    }
+
     @Test void refundedInvoiceCannotBeHiddenBehindAnEarlierFundedMilestone() {
         SaleTransaction sale = sale(SaleStatus.COMPLETION);
         PMSInvoice invoice = stubSettledEscrow(sale);

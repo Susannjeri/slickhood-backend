@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.pms.silverocean.service.estate.OwnershipView;
+import org.pms.silverocean.database.pms.entities.LeaseDocument;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,6 +21,10 @@ public interface PropertyOwnershipRepo extends JpaRepository<PropertyOwnership, 
     boolean existsByPropertyIdAndHomeownerUserIdAndActiveTrue(long propertyId, long homeownerUserId);
     Optional<PropertyOwnership> findBySourceSaleTransactionId(Long saleId);
     Optional<PropertyOwnership> findFirstByUnitIdAndActiveTrue(Long unitId);
+    @Query("SELECT d FROM LeaseDocument d WHERE d.unitId=:unitId AND d.active " +
+            "AND d.documentType='ESTATE_RESIDENTIAL_AGREEMENT' " +
+            "AND d.status NOT IN ('REJECTED','CANCELLED','EXPIRED') ORDER BY d.createdOn DESC")
+    List<LeaseDocument> findCurrentEstateAgreement(long unitId, Pageable pageable);
     List<PropertyOwnership> findAllByHomeownerUserIdOrderByCreatedOnDesc(long userId);
     @Query("SELECT o FROM PropertyOwnership o JOIN Property p ON p.id=o.propertyId WHERE p.createdBy=:userId ORDER BY o.createdOn DESC")
     List<PropertyOwnership> findAllByPropertyOwner(long userId);

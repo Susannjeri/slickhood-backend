@@ -15,6 +15,7 @@ import org.pms.silverocean.database.pms.entities.BulkUnitJob;
 import org.pms.silverocean.database.pms.entities.ChargeType;
 import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.database.pms.entities.UnitCharge;
+import org.pms.silverocean.database.pms.entities.Invite;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.database.pms.entities.Utility;
 import org.pms.silverocean.service.PMSCustomException;
@@ -24,7 +25,6 @@ import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.invites.InviteType;
 import org.pms.silverocean.service.lease.wrappers.LeaseIdTenantSignDateDTO;
 import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
-import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.property.wrappers.DbUnitDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyNameAddressAndTypeProjection;
 import org.pms.silverocean.service.property.wrappers.TenantNameEmailPhoneAndUnitRefProjection;
@@ -262,6 +262,26 @@ public class UnitDao {
 
     public Optional<LeaseIdTenantSignDateDTO> getLeaseIdByTenantsUserIdAndUnitId(long userId, long unitId) {
         return unitTenantRepo.getUnsignedActiveLeaseIdByTenantsUserIdAndUnitId(userId, unitId);
+    }
+
+    public Optional<LeaseIdTenantSignDateDTO> getCurrentLeaseStatus(long unitId) {
+        return unitTenantRepo.findCurrentLeaseStatus(unitId, org.springframework.data.domain.PageRequest.of(0, 1))
+                .stream().findFirst();
+    }
+
+    public boolean hasActiveTenantJourney(long unitId) {
+        return unitTenantRepo.existsByUnitIdAndActiveTrue(unitId);
+    }
+
+    public Optional<Invite> getActiveInvite(long entityId, InviteType inviteType) {
+        return inviteRepo.findActiveByUnitAndType(entityId, inviteType.name(), LocalDateTime.now(),
+                org.springframework.data.domain.PageRequest.of(0, 1)).stream().findFirst();
+    }
+
+    public void lockUnitForInvitation(long unitId) {
+        unitRepo.findAndLockById(unitId)
+                .filter(Unit::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
     }
 
     public List<Users> findPropertyManagersByUnit(long unitId) {

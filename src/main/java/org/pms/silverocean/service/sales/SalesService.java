@@ -153,6 +153,9 @@ public class SalesService {
             throw invalidTransition();
         }
         requireMilestones(sale, request.status()); transition(sale, request.status());
+        if (request.status() == SaleStatus.CANCELLED) {
+            invites.cancelBuyerInvitation(sale.getId());
+        }
         if (request.notes() != null) sale.setNotes(StringUtils.trimToNull(request.notes()));
         if (request.status() == SaleStatus.COMPLETED) {
             if (sale.getBuyerUserId() == null) throw invalidTransition();

@@ -35,6 +35,13 @@ public interface UnitTenantRepo extends JpaRepository<UnitTenant, Long> {
             "WHERE ut.unitId=:unitId AND ut.active AND l.active")
     boolean existsActiveLeaseForUnit(long unitId);
 
+    boolean existsByUnitIdAndActiveTrue(long unitId);
+
+    @Query("SELECT new org.pms.silverocean.service.lease.wrappers.LeaseIdTenantSignDateDTO(l.id, l.tenantSignedDate, l.managerSignedDate)" +
+            " FROM UnitTenant ut JOIN Lease l ON l.tenantId=ut.id WHERE ut.unitId=:unitId " +
+            "AND ut.active AND l.active ORDER BY l.createdOn DESC")
+    List<LeaseIdTenantSignDateDTO> findCurrentLeaseStatus(long unitId, org.springframework.data.domain.Pageable pageable);
+
     @Query("SELECT ut FROM UnitTenant ut JOIN Unit u ON u.id=ut.unitId WHERE u.propertyId=:propertyId AND u.active AND ut.active")
     List<UnitTenant> findActiveByPropertyId(long propertyId);
 

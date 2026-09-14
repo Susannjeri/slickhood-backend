@@ -13,6 +13,7 @@ import org.pms.silverocean.controller.wrappers.UnitChargesDTO;
 import org.pms.silverocean.database.pms.entities.BulkUnitJob;
 import org.pms.silverocean.database.pms.entities.Param;
 import org.pms.silverocean.database.pms.entities.PaymentAccount;
+import org.pms.silverocean.database.pms.entities.PMSInvoice;
 import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.database.pms.entities.PropertyAccount;
 import org.pms.silverocean.database.pms.entities.Unit;
@@ -37,6 +38,8 @@ import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.lease.wrappers.LeaseIdTenantSignDateDTO;
 import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
+import org.pms.silverocean.service.invites.InviteType;
+import org.pms.silverocean.service.leasedocument.LeaseDocumentStatus;
 import org.pms.silverocean.service.param.ParamDao;
 import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
@@ -52,6 +55,7 @@ import org.pms.silverocean.service.property.wrappers.PropertyUnitTypeCatalogDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyViewDTO;
 import org.pms.silverocean.service.property.wrappers.TypeCatalogOption;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import org.pms.silverocean.service.property.wrappers.UnitLifecycleDTO;
 import org.pms.silverocean.service.property.wrappers.UnitTypeCatalogDTO;
 import org.pms.silverocean.service.property.wrappers.UnitTenantProjection;
 import org.pms.silverocean.service.property.wrappers.UtilitiesDTO;
@@ -1217,7 +1221,124 @@ public class PropertyService {
         Boolean ownerSigned = leaseIdTenantSignDateDTO != null && leaseIdTenantSignDateDTO.ownerSignedDate() != null;
         return new UnitDTO(unit, garageService.getPresignedUrl(thumbNailPath), utilities, images,
                 new MeasurementUnitsDTO(measurementUnits.getId(), i18NService.getLocalizedMessage(measurementUnits.getName())),
-                leaseId, tenantSigned, ownerSigned);
+                leaseId, tenantSigned, ownerSigned, unitLifecycle(unit));
+    }
+
+    /** Locks the inventory row so two simultaneous invitation requests cannot both pass the lifecycle check. */
+    public void lockUnitForInvitation(long unitId) {
+        unitDao.lockUnitForInvitation(unitId);
+    }
+
+    private UnitLifecycleDTO unitLifecycle(DbUnitDTO unit) {
+        return switch (PMSLeaseMode.valueOf(unit.leaseMode())) {
+            case RENT -> rentalLifecycle(unit);
+            case SERVICE_CHARGE -> homeownerLifecycle(unit);
+            case SALE -> saleLifecycle(unit);
+        };
+    }
+
+    private UnitLifecycleDTO rentalLifecycle(DbUnitDTO unit) {
+        if (Boolean.TRUE.equals(unit.occupied())) {
+            boolean paymentDue = invoiceRepo.existsOutstandingForUnit(unit.unitId(), "RENTAL");
+            return paymentDue
+                    ? lifecycle("RENT_PAYMENT_DUE", "Occupied · payment due",
+                    "The lease is fully signed; rent or deposit payment is outstanding.", true, null, null)
+                    : lifecycle("OCCUPIED", "Occupied · payments current",
+                    "The lease is fully signed and there is no outstanding rental invoice.", true, null, null);
+        }
+        Optional<LeaseIdTenantSignDateDTO> lease = unitDao.getCurrentLeaseStatus(unit.unitId());
+        if (lease.isPresent()) {
+            LeaseIdTenantSignDateDTO current = lease.get();
+            if (current.tenantSignedDate() != null && current.ownerSignedDate() != null) {
+                return lifecycle("LEASE_SIGNED", "Lease signed", "Both parties have signed; occupancy is being finalised.", true, null, current.id());
+            }
+            if (current.tenantSignedDate() != null) {
+                return lifecycle("LEASE_AWAITING_LANDLORD", "Awaiting landlord signature", "The tenant has signed the lease.", true, null, current.id());
+            }
+            if (current.ownerSignedDate() != null) {
+                return lifecycle("LEASE_AWAITING_TENANT", "Awaiting tenant signature", "The landlord has signed the lease.", true, null, current.id());
+            }
+            return lifecycle("TENANT_ONBOARDING", "Tenant onboarding", "The tenant is completing the lease journey.", true, null, current.id());
+        }
+        if (unitDao.hasActiveTenantJourney(unit.unitId())) {
+            return lifecycle("TENANT_ONBOARDING", "Tenant onboarding", "The invited tenant has started onboarding.", true, null, null);
+        }
+        var invite = unitDao.getActiveInvite(unit.unitId(), InviteType.TENANT);
+        return invite.map(value -> lifecycle("TENANT_INVITED", "Tenant invited",
+                        "An invitation is active. Cancel it before inviting another tenant.", true, value.getId(), null))
+                .orElseGet(() -> lifecycle("AVAILABLE_RENTAL", "Available for rent",
+                        "No tenant journey is active.", false, null, null));
+    }
+
+    private UnitLifecycleDTO homeownerLifecycle(DbUnitDTO unit) {
+        var ownership = propertyOwnershipRepo.findFirstByUnitIdAndActiveTrue(unit.unitId());
+        if (ownership.isPresent()) {
+            var agreement = propertyOwnershipRepo.findCurrentEstateAgreement(unit.unitId(),
+                    org.springframework.data.domain.PageRequest.of(0, 1)).stream().findFirst();
+            if (agreement.isEmpty()) {
+                return lifecycle("HOMEOWNER_ONBOARDING", "Homeowner onboarding",
+                        "The homeowner is linked and the estate agreement is being prepared.", true, null, ownership.get().getId());
+            }
+            var document = agreement.get();
+            if (document.getStatus() == LeaseDocumentStatus.SIGNED
+                    || document.getIssuerSignedAt() != null && document.getRecipientSignedAt() != null) {
+                boolean paymentDue = invoiceRepo.existsOutstandingForUnit(unit.unitId(), "SERVICE_CHARGE");
+                return paymentDue
+                        ? lifecycle("ESTATE_PAYMENT_DUE", "Onboarded · payment due",
+                        "The estate agreement is signed; a service-charge payment is outstanding.", true, null, ownership.get().getId())
+                        : lifecycle("HOMEOWNER_ONBOARDED", "Onboarded · payments current",
+                        "The estate agreement is fully signed and no service charge is outstanding.", true, null, ownership.get().getId());
+            }
+            if (document.getRecipientSignedAt() != null) {
+                return lifecycle("ESTATE_AGREEMENT_AWAITING_MANAGER", "Awaiting estate manager signature",
+                        "The homeowner has signed the estate agreement.", true, null, ownership.get().getId());
+            }
+            return lifecycle("ESTATE_AGREEMENT_AWAITING_HOMEOWNER", "Awaiting homeowner signature",
+                    "The homeowner can review and sign the estate agreement.", true, null, ownership.get().getId());
+        }
+        var invite = unitDao.getActiveInvite(unit.unitId(), InviteType.HOMEOWNER);
+        return invite.map(value -> lifecycle("HOMEOWNER_INVITED", "Homeowner invited",
+                        "An invitation is active. Cancel it before inviting another homeowner.", true, value.getId(), null))
+                .orElseGet(() -> lifecycle("AVAILABLE_HOMEOWNER", "Ready for homeowner",
+                        "No homeowner journey is active.", false, null, null));
+    }
+
+    private UnitLifecycleDTO saleLifecycle(DbUnitDTO unit) {
+        var sale = saleTransactionRepo.findFirstByUnitIdAndActiveTrueAndStatusNotOrderByCreatedOnDesc(
+                unit.unitId(), SaleStatus.CANCELLED);
+        if (sale.isEmpty()) {
+            return lifecycle("AVAILABLE_SALE", "Available for sale", "No buyer journey is active.", false, null, null);
+        }
+        var current = sale.get();
+        Long inviteId = unitDao.getActiveInvite(current.getId(), InviteType.BUYER)
+                .map(org.pms.silverocean.database.pms.entities.Invite::getId).orElse(null);
+        if (current.getEscrowInvoiceId() != null) {
+            var invoice = invoiceRepo.findById(current.getEscrowInvoiceId()).filter(PMSInvoice::isActive);
+            if (invoice.isPresent() && !invoice.get().isPaid()) {
+                return lifecycle("BUYER_PAYMENT_DUE", "Buyer payment due",
+                        "The sale invoice is awaiting payment.", true, inviteId, current.getId());
+            }
+        }
+        return switch (current.getStatus()) {
+            case LEAD -> inviteId != null
+                    ? lifecycle("BUYER_INVITED", "Buyer invited", "An invitation is awaiting the buyer.", true, inviteId, current.getId())
+                    : lifecycle("BUYER_ENQUIRY", "Buyer enquiry", "A buyer journey has started.", true, null, current.getId());
+            case VIEWING -> lifecycle("BUYER_VIEWING", "Buyer viewing", "The buyer is reviewing the unit.", true, inviteId, current.getId());
+            case OFFERED -> current.getBuyerUserId() == null
+                    ? lifecycle("BUYER_INVITED", "Buyer invited", "An invitation and Letter of Offer are awaiting the buyer.", true, inviteId, current.getId())
+                    : lifecycle("OFFER_AWAITING_BUYER", "Letter of Offer pending", "The buyer can review and sign the Letter of Offer.", true, inviteId, current.getId());
+            case RESERVED -> lifecycle("OFFER_ACCEPTED", "Offer accepted", "The property is reserved for the buyer.", true, inviteId, current.getId());
+            case DUE_DILIGENCE -> lifecycle("DUE_DILIGENCE", "Due diligence", "The sale checks and evidence are in progress.", true, inviteId, current.getId());
+            case AGREEMENT -> lifecycle("SALE_AGREEMENT", "Sale agreement", "The sale agreement is being completed.", true, inviteId, current.getId());
+            case COMPLETION -> lifecycle("SALE_COMPLETION", "Completion in progress", "Transfer and handover are in progress.", true, inviteId, current.getId());
+            case COMPLETED -> lifecycle("SOLD", "Sold", "The sale and handover are complete.", true, null, current.getId());
+            case CANCELLED -> lifecycle("AVAILABLE_SALE", "Available for sale", "No buyer journey is active.", false, null, null);
+        };
+    }
+
+    private UnitLifecycleDTO lifecycle(String code, String label, String description,
+                                       boolean invitationBlocked, Long activeInviteId, Long journeyId) {
+        return new UnitLifecycleDTO(code, label, description, invitationBlocked, activeInviteId, journeyId);
     }
 
     private LeaseIdTenantSignDateDTO loadUnitLeaseIdDependingOnStatus(DbUnitDTO unit) {

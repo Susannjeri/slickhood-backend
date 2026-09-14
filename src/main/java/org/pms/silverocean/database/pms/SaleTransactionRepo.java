@@ -42,6 +42,7 @@ public interface SaleTransactionRepo extends JpaRepository<SaleTransaction, Long
     @Query("SELECT s FROM SaleTransaction s WHERE s.id=:id AND s.active")
     Optional<SaleTransaction> findByIdForUpdate(long id);
     boolean existsByUnitIdAndActiveTrueAndStatusNot(long unitId, SaleStatus status);
+    Optional<SaleTransaction> findFirstByUnitIdAndActiveTrueAndStatusNotOrderByCreatedOnDesc(long unitId, SaleStatus status);
     @Query("SELECT s FROM SaleTransaction s WHERE s.active AND s.buyerUserId=:userId ORDER BY s.createdOn DESC")
     Page<SaleTransaction> findPageByBuyer(long userId, Pageable pageable);
     @Query("SELECT DISTINCT s FROM SaleTransaction s JOIN Property p ON p.id=s.propertyId WHERE s.active AND " +

@@ -87,7 +87,8 @@ public class InviteController {
     }
 
     @PatchMapping("/update")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).UPDATE_INVITE)")
+    @PreAuthorize("hasAnyAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).UPDATE_INVITE, " +
+            "T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_ESTATE)")
     public ResponseEntity<ResponseDTO> updateInviteLink(@RequestParam long id, @RequestParam boolean active)  {
         inviteService.updateInvite(id, active);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.INVITE_UPDATED_SUCCESSFULLY.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVITE_UPDATED_SUCCESSFULLY)));

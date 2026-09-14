@@ -20,6 +20,9 @@ import java.util.List;
 
 public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpecificationExecutor<PMSInvoice> {
     boolean existsByUnitIdAndActiveTrueAndPaidFalse(long unitId);
+    @Query("SELECT COUNT(i)>0 FROM PMSInvoice i WHERE i.unitId=:unitId AND i.active AND i.paid=false " +
+            "AND i.pendingAmount>0 AND i.billingType=:billingType")
+    boolean existsOutstandingForUnit(long unitId, String billingType);
     @Query("SELECT i FROM PMSInvoice i WHERE i.active=true AND i.paid=false AND i.pendingAmount>0 " +
             "AND i.lateFeeSourceInvoiceId IS NULL AND i.billingType='RENTAL' AND i.dueDate<:today AND i.id>:afterId ORDER BY i.id")
     List<PMSInvoice> findRentalReminderCandidates(@Param("today") java.time.LocalDate today,

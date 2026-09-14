@@ -59,7 +59,11 @@ public class InviteDao {
     }
 
     public Page<Invite> listInvitesByUnitAndCreatedBy(Pageable pageable, long createdBy, long unitId) {
-        return inviteRepo.findByUnitAndCreatorAndType(pageable, createdBy, unitId, InviteType.TENANT.name());
+        return inviteRepo.findOccupantInvitesByUnitAndCreator(pageable, createdBy, unitId);
+    }
+
+    public void deactivateInvitesForEntity(long entityId, InviteType type) {
+        inviteRepo.deactivateInviteByUnitId(entityId, type.name());
     }
 
     public Optional<Invite> getInviteByInviteIdAndCreatedBy(long inviteId, long createdBy) {

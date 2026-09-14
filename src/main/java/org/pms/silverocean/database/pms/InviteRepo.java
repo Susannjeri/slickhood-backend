@@ -47,6 +47,14 @@ public interface InviteRepo extends JpaRepository<Invite, Long> {
     @Query("SELECT i FROM Invite i WHERE i.createdBy=:createdBy AND i.active AND i.type=:inviteType AND i.entityId=:unitId")
     Page<Invite> findByUnitAndCreatorAndType(Pageable pageable, long createdBy, long unitId, String inviteType);
 
+    @Query("SELECT i FROM Invite i WHERE i.createdBy=:createdBy AND i.active " +
+            "AND i.type IN ('TENANT','HOMEOWNER') AND i.entityId=:unitId ORDER BY i.createdOn DESC")
+    Page<Invite> findOccupantInvitesByUnitAndCreator(Pageable pageable, long createdBy, long unitId);
+
+    @Query("SELECT i FROM Invite i WHERE i.entityId=:unitId AND i.type=:inviteType AND i.active " +
+            "AND i.expiryDate>:now ORDER BY i.createdOn DESC")
+    List<Invite> findActiveByUnitAndType(long unitId, String inviteType, LocalDateTime now, Pageable pageable);
+
     @Query("SELECT u FROM Invite i JOIN Unit u ON i.entityId=u.id WHERE i.token=:token AND i.type=:inviteType AND u.active AND i.active")
     Optional<Unit> findUnitFromToken(String token, String inviteType);
 

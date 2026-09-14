@@ -2,6 +2,7 @@ package org.pms.silverocean.service.invites;
 
 import org.junit.jupiter.api.Test;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
+import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.RoleRepo;
 import org.pms.silverocean.database.pms.LeaseDocumentTemplateRepo;
 import org.pms.silverocean.database.pms.entities.Invite;
@@ -19,6 +20,7 @@ import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.property.PropertyService;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import org.pms.silverocean.service.property.wrappers.UnitLifecycleDTO;
 import org.pms.silverocean.service.leasedocument.DocumentTemplateIntegrity;
 import org.pms.silverocean.service.leasedocument.LeaseDocumentType;
 import java.time.LocalDate;
@@ -115,6 +117,20 @@ class TenantInvitationTest {
         unit(PMSLeaseMode.RENT,true);
         assertThrows(PMSCustomException.class,()->service.createAndSendEmailInvite(InviteType.TENANT,77L,"tenant@example.test"));
         verifyNoInteractions(invites,notifications);
+    }
+
+    @Test void activeRentalJourneyMustBeCancelledBeforeAnotherInvitation() {
+        unit(PMSLeaseMode.RENT,false);
+        when(unit.lifecycle()).thenReturn(new UnitLifecycleDTO(
+                "TENANT_INVITED", "Tenant invited", "An invitation is active.", true, 88L, null));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () ->
+                service.createAndSendEmailInvite(InviteType.TENANT, 77L, "other@example.test",
+                        LocalDate.now().plusDays(2), LocalDate.now().plusYears(1)));
+
+        assertEquals(ResponseCode.INVITE_ALREADY_EXISTS, error.getResponseCode());
+        verify(properties).lockUnitForInvitation(77L);
+        verifyNoInteractions(invites, notifications);
     }
 
     @Test void verifiedExistingTenantCanDiscoverPendingInvitationsWithoutTheEmailLink() {

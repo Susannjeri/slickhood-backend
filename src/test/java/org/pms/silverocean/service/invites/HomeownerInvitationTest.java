@@ -24,6 +24,7 @@ import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.property.PropertyService;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import org.pms.silverocean.service.property.wrappers.UnitLifecycleDTO;
 import org.pms.silverocean.service.teamaccess.TeamAccessService;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -118,6 +119,38 @@ class HomeownerInvitationTest {
 
         assertEquals(ResponseCode.HOMEOWNER_AGREEMENT_DATE_INVALID, error.getResponseCode());
         verifyNoInteractions(invites, notifications);
+    }
+
+    @Test void activeHomeownerJourneyMustBeCancelledBeforeAnotherInvitation() {
+        setupUnit(PMSLeaseMode.SERVICE_CHARGE);
+        when(unit.lifecycle()).thenReturn(new UnitLifecycleDTO(
+                "HOMEOWNER_INVITED", "Homeowner invited", "An invitation is active.", true, 88L, null));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () ->
+                service.createAndSendEmailInvite(InviteType.HOMEOWNER, 77L,
+                        "other@example.test", LocalDate.now(), null));
+
+        assertEquals(ResponseCode.INVITE_ALREADY_EXISTS, error.getResponseCode());
+        verify(properties).lockUnitForInvitation(77L);
+        verifyNoInteractions(invites, notifications);
+    }
+
+    @Test void authorizedEstateManagerCanCancelAColleaguesActiveHomeownerInvitation() {
+        setupUnit(PMSLeaseMode.SERVICE_CHARGE);
+        Invite invite = new Invite();
+        invite.setId(88L);
+        invite.setCreatedBy(7L);
+        invite.setEntityId(77L);
+        invite.setType(InviteType.HOMEOWNER.name());
+        invite.setActive(true);
+        when(invites.getInviteByInviteIdAndCreatedBy(88L, 9L)).thenReturn(Optional.empty());
+        when(invites.getActiveInviteById(88L)).thenReturn(Optional.of(invite));
+
+        service.updateInvite(88L, false);
+
+        assertFalse(invite.isActive());
+        verify(access).require(11L, Permission.MANAGE_ESTATE);
+        verify(invites).updateInvite(invite);
     }
 
     @Test void consumedHomeownerInvitationRemainsUsableOnlyForItsAuthenticatedRecipient() {
