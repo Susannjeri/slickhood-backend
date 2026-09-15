@@ -25,6 +25,8 @@ public final class TeamAccessModels {
     public record RoleDefinitionView(long id, String code, String displayName, String description,
                                      TeamBusinessArea businessArea, TeamMembershipRole permissionTemplate,
                                      boolean active) {}
+    public record RoleTemplateView(TeamMembershipRole permissionTemplate, String displayName,
+                                   List<TeamBusinessArea> businessAreas) {}
     public record InvitationView(long id, String email, TeamMembershipRole role, String roleName,
                                  TeamScopeType scopeType, List<Long> resourceIds, TeamMembershipStatus status,
                                  LocalDateTime expiresAt, int resendCount) {}

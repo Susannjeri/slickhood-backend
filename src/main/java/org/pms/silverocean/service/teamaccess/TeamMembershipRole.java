@@ -11,8 +11,8 @@ public enum TeamMembershipRole {
     PROPERTY_ACCOUNTANT("Property accountant", 50, PMSRole.PROPERTY_ACCOUNTANT, Set.of(TeamBusinessArea.LANDLORD, TeamBusinessArea.ESTATE_MANAGEMENT, TeamBusinessArea.PROPERTY_SALE_MANAGEMENT)),
     LEASING_OFFICER("Leasing officer", 40, PMSRole.LEASING_OFFICER, Set.of(TeamBusinessArea.LANDLORD)),
     ESTATE_OPERATIONS_MANAGER("Estate operations manager", 60, PMSRole.ESTATE_OPERATIONS_MANAGER, Set.of(TeamBusinessArea.ESTATE_MANAGEMENT)),
-    SECURITY_SUPERVISOR("Security supervisor", 40, PMSRole.SECURITY_SUPERVISOR, Set.of(TeamBusinessArea.ESTATE_MANAGEMENT)),
-    GUARD("Guard", 20, PMSRole.GUARD, Set.of(TeamBusinessArea.ESTATE_MANAGEMENT)),
+    SECURITY_SUPERVISOR("Security supervisor", 40, PMSRole.SECURITY_SUPERVISOR, Set.of(TeamBusinessArea.LANDLORD, TeamBusinessArea.ESTATE_MANAGEMENT, TeamBusinessArea.PROPERTY_SALE_MANAGEMENT)),
+    GUARD("Guard", 20, PMSRole.GUARD, Set.of(TeamBusinessArea.LANDLORD, TeamBusinessArea.ESTATE_MANAGEMENT, TeamBusinessArea.PROPERTY_SALE_MANAGEMENT)),
     SALES_COORDINATOR("Sales coordinator", 60, PMSRole.SALES_COORDINATOR, Set.of(TeamBusinessArea.PROPERTY_SALE_MANAGEMENT)),
     LISTING_AGENT("Listing agent", 40, PMSRole.LISTING_AGENT, Set.of(TeamBusinessArea.PROPERTY_SALE_MANAGEMENT)),
     VIEWER("Viewer", 10, PMSRole.WORKSPACE_VIEWER, Set.of(TeamBusinessArea.LANDLORD, TeamBusinessArea.ESTATE_MANAGEMENT, TeamBusinessArea.PROPERTY_SALE_MANAGEMENT));

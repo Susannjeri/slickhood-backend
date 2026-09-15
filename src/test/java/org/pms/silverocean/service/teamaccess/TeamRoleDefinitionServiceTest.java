@@ -1,6 +1,8 @@
 package org.pms.silverocean.service.teamaccess;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -25,22 +27,26 @@ class TeamRoleDefinitionServiceTest {
     @Mock AuditLogService audit;
     @InjectMocks TeamRoleDefinitionService service;
 
-    @Test void superadminCanCreateParameterizedGuardTypeForEstateOnly() {
+    @ParameterizedTest @EnumSource(TeamBusinessArea.class)
+    void superadminCanCreateSharedSecurityTypesInEveryBusinessArea(TeamBusinessArea area) {
         when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
         when(definitions.findByCodeIgnoreCase("DAY_GUARD")).thenReturn(Optional.empty());
         when(users.getUserId()).thenReturn(1L);
         when(definitions.save(any())).thenAnswer(invocation -> { TeamRoleDefinition value = invocation.getArgument(0); value.setId(77L); return value; });
-        var result = service.create(new TeamAccessModels.RoleDefinitionRequest(
-                "DAY_GUARD", "Day shift guard", "Day shift access", TeamBusinessArea.ESTATE_MANAGEMENT, TeamMembershipRole.GUARD));
-        assertThat(result.id()).isEqualTo(77L);
-        assertThat(result.permissionTemplate()).isEqualTo(TeamMembershipRole.GUARD);
-        verify(audit).createAuditLog(any(TeamRoleDefinition.class), eq("team_role_definition_create"));
+        for (var role : new TeamMembershipRole[]{TeamMembershipRole.GUARD, TeamMembershipRole.SECURITY_SUPERVISOR}) {
+            var result = service.create(new TeamAccessModels.RoleDefinitionRequest(
+                    "DAY_GUARD", role.displayName(), "Day shift access", area, role));
+            assertThat(result.id()).isEqualTo(77L);
+            assertThat(result.permissionTemplate()).isEqualTo(role);
+            assertThat(result.businessArea()).isEqualTo(area);
+        }
+        verify(audit, times(2)).createAuditLog(any(TeamRoleDefinition.class), eq("team_role_definition_create"));
     }
 
-    @Test void guardTemplateCannotBeExpandedIntoLandlordBusinessArea() {
+    @Test void specialistTemplateCannotBeExpandedIntoAnotherBusinessArea() {
         when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
         PMSCustomException exception = assertThrows(PMSCustomException.class, () -> service.create(
-                new TeamAccessModels.RoleDefinitionRequest("LAND_GUARD", "Guard", null, TeamBusinessArea.LANDLORD, TeamMembershipRole.GUARD)));
+                new TeamAccessModels.RoleDefinitionRequest("LAND_AGENT", "Agent", null, TeamBusinessArea.LANDLORD, TeamMembershipRole.LISTING_AGENT)));
         assertThat(exception.getResponseCode()).isEqualTo(ResponseCode.INVALID_ROLE);
         verify(definitions, never()).save(any());
     }
@@ -65,5 +71,32 @@ class TeamRoleDefinitionServiceTest {
     @Test void everyCustomerTeamTemplateMapsToAnEmployeeRole() {
         assertThat(TeamMembershipRole.values())
                 .allSatisfy(role -> assertThat(role.platformRole().isCustomerEmployeeRole()).isTrue());
+    }
+
+    @Test void catalogueMatchesTheEnforcedMatrixAndKeepsSpecialistsRestricted() {
+        when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
+        assertThat(service.templates()).hasSize(TeamMembershipRole.values().length).allSatisfy(template -> {
+            for (var area : TeamBusinessArea.values()) {
+                assertThat(template.businessAreas().contains(area)).isEqualTo(template.permissionTemplate().allowedFor(area));
+            }
+        });
+        for (var role : new TeamMembershipRole[]{TeamMembershipRole.GUARD, TeamMembershipRole.SECURITY_SUPERVISOR,
+                TeamMembershipRole.WORKSPACE_ADMIN, TeamMembershipRole.PROPERTY_ACCOUNTANT, TeamMembershipRole.VIEWER}) {
+            assertThat(service.templates().stream().filter(template -> template.permissionTemplate() == role).findFirst().orElseThrow().businessAreas())
+                    .containsExactly(TeamBusinessArea.values());
+        }
+        assertThat(TeamMembershipRole.GUARD.platformRole()).isEqualTo(PMSRole.GUARD);
+        assertThat(TeamMembershipRole.GUARD.privilegeLevel()).isEqualTo(20);
+        assertThat(TeamMembershipRole.SECURITY_SUPERVISOR.platformRole()).isEqualTo(PMSRole.SECURITY_SUPERVISOR);
+        assertThat(TeamMembershipRole.SECURITY_SUPERVISOR.privilegeLevel()).isEqualTo(40);
+        assertThat(TeamMembershipRole.LEASING_OFFICER.allowedFor(TeamBusinessArea.PROPERTY_SALE_MANAGEMENT)).isFalse();
+        assertThat(TeamMembershipRole.ESTATE_OPERATIONS_MANAGER.allowedFor(TeamBusinessArea.LANDLORD)).isFalse();
+        verifyNoInteractions(definitions, audit);
+    }
+
+    @Test void customerCannotReadPlatformTemplateAdministration() {
+        when(users.getActiveRole()).thenReturn(PMSRole.WORKSPACE_ADMIN);
+        assertThat(assertThrows(PMSCustomException.class, service::templates).getResponseCode()).isEqualTo(ResponseCode.FORBIDDEN_ACCESS);
+        verifyNoInteractions(definitions, audit);
     }
 }

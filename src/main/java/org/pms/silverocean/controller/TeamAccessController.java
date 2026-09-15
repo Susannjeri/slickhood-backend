@@ -29,6 +29,7 @@ public class TeamAccessController {
     @DeleteMapping("/members/{id}") public ResponseEntity<ResponseDTO> revoke(@PathVariable long id) { return ok(service.revokeMember(id)); }
 
     @GetMapping("/role-definitions") public ResponseEntity<ResponseDTO> roleDefinitions() { return ok(roleDefinitions.list()); }
+    @GetMapping("/role-templates") public ResponseEntity<ResponseDTO> roleTemplates() { return ok(roleDefinitions.templates()); }
     @PostMapping("/role-definitions") public ResponseEntity<ResponseDTO> createRole(@Valid @RequestBody TeamAccessModels.RoleDefinitionRequest request) { return ok(roleDefinitions.create(request)); }
     @PutMapping("/role-definitions/{id}") public ResponseEntity<ResponseDTO> updateRole(@PathVariable long id,@Valid @RequestBody TeamAccessModels.RoleDefinitionRequest request) { return ok(roleDefinitions.update(id,request)); }
     @PatchMapping("/role-definitions/{id}/status") public ResponseEntity<ResponseDTO> roleStatus(@PathVariable long id,@RequestParam boolean active) { return ok(roleDefinitions.setActive(id,active)); }

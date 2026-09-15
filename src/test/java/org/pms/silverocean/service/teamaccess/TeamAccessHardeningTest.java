@@ -8,6 +8,7 @@ import org.pms.silverocean.database.pms.entities.CustomerWorkspace;
 import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.database.pms.entities.WorkspaceMembership;
+import org.pms.silverocean.database.pms.entities.TeamRoleDefinition;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.I18NService;
@@ -35,6 +36,7 @@ class TeamAccessHardeningTest {
     private PropertyManagerRepo propertyManagers;
     private UserDao users;
     private WorkspaceSelectionService workspaceSelection;
+    private TeamRoleDefinitionRepo definitions;
     private TeamAccessService service;
 
     @BeforeEach
@@ -46,7 +48,8 @@ class TeamAccessHardeningTest {
         propertyManagers = mock(PropertyManagerRepo.class);
         users = mock(UserDao.class);
         workspaceSelection = mock(WorkspaceSelectionService.class);
-        service = new TeamAccessService(workspaces, invitations, memberships, mock(TeamRoleDefinitionRepo.class),
+        definitions = mock(TeamRoleDefinitionRepo.class);
+        service = new TeamAccessService(workspaces, invitations, memberships, definitions,
                 properties, propertyManagers, mock(UserSubscriptionRepo.class), mock(SubscriptionPlanRepo.class),
                 mock(PlanQuotaRepo.class), mock(RoleRepo.class), mock(UserRoleRepo.class), users,
                 mock(ConfigService.class), mock(NotificationService.class), mock(I18NService.class),
@@ -94,6 +97,50 @@ class TeamAccessHardeningTest {
 
         assertThat(query).isNotNull();
         assertThat(query.value()).contains("pm.active");
+    }
+
+    @Test
+    void sharedGuardTemplateDoesNotAllowUsingAnotherBusinessAreasDefinition() {
+        var workspace = rentalOwnerWorkspace();
+        TeamRoleDefinition definition = new TeamRoleDefinition();
+        definition.setBusinessArea(TeamBusinessArea.ESTATE_MANAGEMENT);
+        definition.setPermissionTemplate(TeamMembershipRole.GUARD);
+        when(definitions.findByIdAndActiveTrue(12L)).thenReturn(Optional.of(definition));
+        var exception = assertThrows(PMSCustomException.class, () -> service.invite(new TeamAccessModels.InviteRequest(
+                "guard@example.com", 12L, TeamScopeType.SELECTED_RESOURCES, List.of(101L))));
+        assertThat(exception.getResponseCode()).isEqualTo(ResponseCode.INVALID_ROLE);
+        verify(invitations, never()).save(any());
+        verifyNoInteractions(properties, propertyManagers);
+        assertThat(workspace.getBusinessArea()).isEqualTo(TeamBusinessArea.LANDLORD);
+    }
+
+    @Test
+    void sharedGuardInvitationStillRejectsPropertiesOutsideTheOwnersWorkspace() {
+        rentalOwnerWorkspace();
+        TeamRoleDefinition definition = new TeamRoleDefinition();
+        definition.setBusinessArea(TeamBusinessArea.LANDLORD);
+        definition.setPermissionTemplate(TeamMembershipRole.GUARD);
+        when(definitions.findByIdAndActiveTrue(12L)).thenReturn(Optional.of(definition));
+        when(memberships.findByWorkspaceIdAndActiveTrueOrderByCreatedOnDesc(8L)).thenReturn(List.of());
+        Property unrelated = new Property();
+        unrelated.setId(101L); unrelated.setActive(true); unrelated.setCreatedBy(999L);
+        when(properties.findAllById(List.of(101L))).thenReturn(List.of(unrelated));
+        var exception = assertThrows(PMSCustomException.class, () -> service.invite(new TeamAccessModels.InviteRequest(
+                "guard@example.com", 12L, TeamScopeType.SELECTED_RESOURCES, List.of(101L))));
+        assertThat(exception.getResponseCode()).isEqualTo(ResponseCode.PROPERTY_FORBIDDEN_ACCESS);
+        verify(invitations, never()).save(any());
+        verifyNoInteractions(propertyManagers);
+    }
+
+    private CustomerWorkspace rentalOwnerWorkspace() {
+        Users owner = new Users(); owner.setId(42L); owner.setEmail("owner@example.com");
+        CustomerWorkspace workspace = new CustomerWorkspace(); workspace.setId(8L);
+        workspace.setOwnerUserId(42L); workspace.setBusinessArea(TeamBusinessArea.LANDLORD); workspace.setActive(true);
+        when(users.getUserObject()).thenReturn(owner);
+        when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
+        when(workspaces.findByOwnerUserIdAndBusinessAreaAndActiveTrue(42L, TeamBusinessArea.LANDLORD)).thenReturn(Optional.of(workspace));
+        when(workspaces.findLockedByIdAndActiveTrue(8L)).thenReturn(Optional.of(workspace));
+        return workspace;
     }
 
     @Test

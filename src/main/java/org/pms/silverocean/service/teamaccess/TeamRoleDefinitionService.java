@@ -23,6 +23,14 @@ public class TeamRoleDefinitionService {
         return definitions.findAllByOrderByBusinessAreaAscDisplayNameAsc().stream().map(this::view).toList();
     }
 
+    public List<TeamAccessModels.RoleTemplateView> templates() {
+        requireSuperadmin();
+        return Arrays.stream(TeamMembershipRole.values())
+                .map(role -> new TeamAccessModels.RoleTemplateView(role, role.displayName(),
+                        Arrays.stream(TeamBusinessArea.values()).filter(role::allowedFor).toList()))
+                .toList();
+    }
+
     @Transactional
     public TeamAccessModels.RoleDefinitionView create(TeamAccessModels.RoleDefinitionRequest request) {
         requireSuperadmin();
