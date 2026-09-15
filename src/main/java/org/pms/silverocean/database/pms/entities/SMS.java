@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 
 @Table(name = "pms_sms", indexes = {
         @Index(name = "idx_sms_notificationId", columnList = "notificationId"),
-        @Index(name = "idx_sms_receipt_due", columnList = "channel,nextReceiptCheckAt,active")
+        @Index(name = "idx_sms_receipt_due_v87", columnList = "channel,next_receipt_check_at,active")
 })
 @Entity
 @Getter
@@ -31,6 +31,8 @@ public class SMS extends BaseActiveEntity {
     private String callBackIP;
     private LocalDateTime updatedOn;
     private String channel;
+    @jakarta.persistence.Column(name = "receipt_check_attempts")
     private int receiptCheckAttempts;
+    @jakarta.persistence.Column(name = "next_receipt_check_at")
     private LocalDateTime nextReceiptCheckAt;
 }

@@ -7,6 +7,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 
 import java.sql.DriverManager;
+import org.hibernate.boot.MetadataSources;
+import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
+import org.pms.silverocean.database.pms.entities.Notification;
+import org.pms.silverocean.database.pms.entities.SMS;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -78,6 +82,24 @@ class ProductionBaselineMigrationMySqlIT {
         MigrationInfo current = flyway.info().current();
         assertEquals(EXPECTED_VERSION, current.getVersion().getVersion());
         assertFalse(flyway.info().pending().length > 0, "all candidate migrations must be applied");
+
+        if (MigrationVersion.fromVersion(EXPECTED_VERSION).compareTo(MigrationVersion.fromVersion("87")) >= 0) {
+            var registry = new StandardServiceRegistryBuilder()
+                    .applySetting("hibernate.connection.url", URL)
+                    .applySetting("hibernate.connection.username", USERNAME)
+                    .applySetting("hibernate.connection.password", PASSWORD)
+                    .applySetting("hibernate.hbm2ddl.auto", "validate")
+                    .applySetting("hibernate.physical_naming_strategy",
+                            "org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy")
+                    .build();
+            try (var factory = new MetadataSources(registry).addAnnotatedClass(Notification.class)
+                    .addAnnotatedClass(SMS.class).buildMetadata().buildSessionFactory()) {
+                // Validate the migrated schema, not Hibernate-generated replacement tables.
+                assertFalse(factory.isClosed());
+            } finally {
+                StandardServiceRegistryBuilder.destroy(registry);
+            }
+        }
 
         try (var connection = DriverManager.getConnection(URL, USERNAME, PASSWORD);
              var statement = connection.createStatement()) {
