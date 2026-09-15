@@ -27,33 +27,20 @@ public class SMSService {
     }
 
     @Async
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public void receiveATCallback(String ip, String id, ATSMSStatus ATsmsStatus, String phoneNumber, ATSMSNetworkCode ATsmsNetworkCode,
                                   ATSMSFailureReason ATsmsFailureReason) {
         log.info("Received AT Callback ip:({}) id:({}) status:({}) phone number:({}) network:({}) failureReason({})",
-                ip, id, ATsmsStatus, StringUtils.isNotBlank(phoneNumber) ? phoneNumber.substring(phoneNumber.length() - 4) : "", ATsmsNetworkCode, ATsmsFailureReason);
+                ip, id, ATsmsStatus, StringUtils.right(StringUtils.defaultString(phoneNumber), 4), ATsmsNetworkCode, ATsmsFailureReason);
+        if (StringUtils.isBlank(id) || ATsmsStatus == null || ATsmsNetworkCode == null) return;
 
-        smsDao.findByThirdPartyId(id)
-                .ifPresent(smsEntity -> {
-                    smsEntity.setCallBackIP(ip);
-                    smsEntity.setStatus(ATsmsStatus.name());
-                    smsEntity.setDescription(ATsmsStatus.getDescription());
-                    smsEntity.setNetwork(ATsmsNetworkCode.name());
-                    smsEntity.setUpdatedOn(LocalDateTime.now());
-                    if (ATsmsFailureReason != null) {
-                        smsEntity.setDescription(ATsmsFailureReason.name());
-                    }
-                    smsDao.saveSMS(smsEntity);
-                    updateNotification(smsEntity.getNotificationId(), ATSMSStatus.Success.equals(ATsmsStatus));
-                });
+        String description=ATSMSStatus.Success.equals(ATsmsStatus)||ATsmsFailureReason==null?ATsmsStatus.getDescription():ATsmsFailureReason.name();
+        smsDao.recordProviderReceipt("Africastalking",id,ATsmsStatus.name(),description,ATsmsNetworkCode.name(),ip)
+                .ifPresent(notificationDao::confirmDelivered);
     }
 
     private void updateNotification(long notificationId, boolean delivered) {
-        notificationDao.findById(notificationId)
-                .ifPresent(notification -> {
-                    notification.setUpdatedOn(LocalDateTime.now());
-                    notification.setDelivered(notification.isDelivered() || delivered);
-                    notificationDao.save(notification);
-                });
+        if (delivered) notificationDao.confirmDelivered(notificationId);
     }
 
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")

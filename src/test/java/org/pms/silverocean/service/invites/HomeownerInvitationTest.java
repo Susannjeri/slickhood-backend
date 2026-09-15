@@ -83,9 +83,7 @@ class HomeownerInvitationTest {
         assertEquals(77L,saved.get().getEntityId());
         assertEquals(LocalDate.now(),saved.get().getLeaseStartDate());
         assertEquals(41L,saved.get().getAgreementTemplateId());
-        var notification = org.mockito.ArgumentCaptor.forClass(NotificationDTO.class);
-        verify(notifications).queueNotification(notification.capture());
-        assertEquals("resident@example.test",notification.getValue().recipient());
+        verify(notifications).queueEmailAndInApp(eq("resident@example.test"),any(),contains("Accept your invitation:"),eq("INVITE_RECEIVED"),contains("homeowner invitation"));
         verify(properties,never()).getUnitByIDAndLoggedInUser(anyLong());
     }
     @Test void aRentalCannotReceiveAHomeownerInvitation() {

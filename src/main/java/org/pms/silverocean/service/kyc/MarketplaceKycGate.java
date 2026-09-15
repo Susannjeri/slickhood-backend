@@ -26,15 +26,56 @@ public class MarketplaceKycGate {
     private final KycMatrixReleaseRepo releases;
     private final KycMatrixRequirementRepo requirements;
     private final KycDocumentRepo documents;
+    private final org.pms.silverocean.database.pms.SokoRiderCredentialRepo riderCredentials;
+    private final org.pms.silverocean.database.pms.ProviderDocumentRepo providerDocuments;
 
     public void require(long userId,String scopeType,String scopeKey,ProfileType profileType){
+        List<String> missing=missingRequirements(userId,scopeType,scopeKey,profileType);
+        if(!missing.isEmpty())throw new PMSCustomException(ResponseCode.KYC_MISSING_DOCUMENTS,"Complete these KYC requirements before continuing: "+String.join(", ",missing)+".");
+    }
+
+    public List<String> missingRequirements(long userId,String scopeType,String scopeKey,ProfileType profileType){
         var live=releases.findFirstByStatusAndActiveTrueOrderByVersionNoDesc("PUBLISHED").orElse(null);
-        if(live==null)return;
+        if(live==null)return List.of();
         List<KycMatrixRequirement> applicable=requirements.findAllByReleaseIdAndActiveTrueAndScopeTypeAndScopeKeyOrderByRequirementLabel(
                 live.getId(),scopeType.trim().toUpperCase(Locale.ROOT),scopeKey.trim().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_-]","_"));
-        List<KycDocument> evidence=documents.findByUserIdAndActiveTrueAndStatusOrderByCreatedOnDesc(userId,DocumentStatus.VERIFIED.name());
-        List<String> missing=applicable.stream().filter(row->profileMatches(row,profileType)).filter(row->required(row,profileType,evidence)).filter(row->!satisfied(row,evidence)).map(KycMatrixRequirement::getRequirementLabel).toList();
-        if(!missing.isEmpty())throw new PMSCustomException(ResponseCode.KYC_MISSING_DOCUMENTS,"Complete these KYC requirements before continuing: "+String.join(", ",missing)+".");
+        List<KycDocument> evidence=new java.util.ArrayList<>(currentVerifiedDocuments(userId));
+        if("SERVICE_CATEGORY".equalsIgnoreCase(scopeType)||("PROVIDER_TYPE".equalsIgnoreCase(scopeType)&&"SERVICE_PROVIDER".equalsIgnoreCase(scopeKey))){
+            Long categoryId="SERVICE_CATEGORY".equalsIgnoreCase(scopeType)?Long.valueOf(scopeKey):null;
+            providerDocuments.findVerifiedEvidence(userId,categoryId).forEach(provider->{
+                KycDocument d=new KycDocument();d.setDocumentType(provider.getDocumentType());d.setExpiresAt(provider.getExpiryDate());d.setCreatedOn(provider.getCreatedOn());evidence.add(d);
+                String canonical=java.util.Map.of("BUSINESS_REGISTRATION","BUSINESS_REGISTRATION_CERTIFICATE","TAX_CERTIFICATE","KRA_PIN_CERTIFICATE","GOOD_CONDUCT","GOOD_CONDUCT_CERTIFICATE").get(provider.getDocumentType());
+                if(canonical!=null){KycDocument mapped=new KycDocument();mapped.setDocumentType(canonical);mapped.setExpiresAt(provider.getExpiryDate());mapped.setCreatedOn(provider.getCreatedOn());evidence.add(mapped);}
+            });
+            List<KycDocument> aliases=new java.util.ArrayList<>();
+            evidence.forEach(d->{String alias=java.util.Map.of("BUSINESS_REGISTRATION_CERTIFICATE","BUSINESS_REGISTRATION","KRA_PIN_CERTIFICATE","TAX_CERTIFICATE","GOOD_CONDUCT_CERTIFICATE","GOOD_CONDUCT").get(d.getDocumentType());if(alias!=null){KycDocument mapped=new KycDocument();mapped.setDocumentType(alias);mapped.setExpiresAt(d.getExpiresAt());mapped.setReverificationDueAt(d.getReverificationDueAt());mapped.setCreatedOn(d.getCreatedOn());mapped.setReviewedAt(d.getReviewedAt());aliases.add(mapped);}});
+            if(evidence.stream().anyMatch(d->"NATIONAL_ID_FRONT".equals(d.getDocumentType()))&&evidence.stream().anyMatch(d->"NATIONAL_ID_BACK".equals(d.getDocumentType()))){evidence.stream().filter(d->"NATIONAL_ID_FRONT".equals(d.getDocumentType())).findFirst().ifPresent(d->{KycDocument mapped=new KycDocument();mapped.setDocumentType("NATIONAL_ID");mapped.setCreatedOn(d.getCreatedOn());mapped.setReviewedAt(d.getReviewedAt());mapped.setExpiresAt(d.getExpiresAt());mapped.setReverificationDueAt(d.getReverificationDueAt());aliases.add(mapped);});}
+            evidence.addAll(aliases);
+        }
+        if("PROVIDER_TYPE".equalsIgnoreCase(scopeType)&&"DELIVERY_RIDER".equalsIgnoreCase(scopeKey)){
+            riderCredentials.findAllByUserIdAndStatusAndActiveTrue(userId,"VERIFIED").forEach(credential->{
+                KycDocument d=new KycDocument();d.setDocumentType(credential.getDocumentType());d.setExpiresAt(credential.getExpiresAt());d.setReviewedAt(credential.getReviewedAt());d.setCreatedOn(credential.getCreatedOn());evidence.add(d);
+            });
+            evidence.removeIf(d->d.getExpiresAt()!=null&&!d.getExpiresAt().isAfter(ZonedDateTime.now(ZoneId.of("UTC"))));
+        }
+        return applicable.stream().filter(row->profileMatches(row,profileType)).filter(row->required(row,profileType,evidence)).filter(row->!satisfied(row,evidence)).map(KycMatrixRequirement::getRequirementLabel).toList();
+    }
+
+    public List<KycDocument> currentVerifiedDocuments(long userId){
+        ZonedDateTime now=ZonedDateTime.now(ZoneId.of("UTC"));
+        return documents.findByUserIdAndActiveTrueAndStatusOrderByCreatedOnDesc(userId,DocumentStatus.VERIFIED.name()).stream()
+                .filter(d->d.getExpiresAt()==null||d.getExpiresAt().isAfter(now))
+                .filter(d->d.getReverificationDueAt()==null||d.getReverificationDueAt().isAfter(now)).toList();
+    }
+
+    public List<String> outstandingDocumentTypes(long userId,String scopeType,String scopeKey,ProfileType profileType){
+        List<String> missing=missingRequirements(userId,scopeType,scopeKey,profileType);
+        if(missing.isEmpty())return List.of();
+        var live=releases.findFirstByStatusAndActiveTrueOrderByVersionNoDesc("PUBLISHED").orElse(null);
+        if(live==null)return List.of();
+        return requirements.findAllByReleaseIdAndActiveTrueAndScopeTypeAndScopeKeyOrderByRequirementLabel(live.getId(),scopeType,scopeKey).stream()
+                .filter(row->profileMatches(row,profileType)&&missing.contains(row.getRequirementLabel()))
+                .flatMap(row->Arrays.stream(row.getAcceptedDocumentTypes().split(","))).map(String::trim).distinct().toList();
     }
 
     private boolean profileMatches(KycMatrixRequirement row,ProfileType profileType){return "BOTH".equals(row.getProfileScope())||profileType.name().equals(row.getProfileScope());}

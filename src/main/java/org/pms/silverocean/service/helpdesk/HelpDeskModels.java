@@ -50,5 +50,11 @@ public final class HelpDeskModels {
                               String keywords, String audienceRoles, boolean published) {
         public ArticleView(HelpArticle a) { this(a.getId(), a.getSlug(), a.getTitle(), a.getCategory(), a.getBody(), a.getKeywords(), a.getAudienceRoles(), a.isPublished()); }
     }
-    public record AiAnswer(String text, String responseId, String model, boolean escalated) {}
+    public record AiAnswer(String text, String responseId, String model, boolean escalated, List<Long> articleIds) {
+        public AiAnswer { articleIds = List.copyOf(articleIds); }
+        public AiAnswer(String text, String responseId, String model, boolean escalated) {
+            this(text, responseId, model, escalated, java.util.regex.Pattern.compile("\\[Article (\\d+)\\]")
+                    .matcher(text).results().map(m -> Long.parseLong(m.group(1))).distinct().toList());
+        }
+    }
 }

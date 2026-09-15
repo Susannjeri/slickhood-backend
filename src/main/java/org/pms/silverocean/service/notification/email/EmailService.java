@@ -141,11 +141,6 @@ public class EmailService extends AbstractNotificationRetryService {
     }
 
     private void updateNotification(long notificationId) {
-        notificationDao.findById(notificationId)
-                .ifPresent(notification -> {
-                    notification.setUpdatedOn(LocalDateTime.now());
-                    notification.setDelivered(true);
-                    notificationDao.save(notification);
-                });
+        notificationDao.confirmDelivered(notificationId);
     }
 }

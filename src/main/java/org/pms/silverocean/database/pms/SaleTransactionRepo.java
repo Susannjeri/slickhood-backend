@@ -84,4 +84,8 @@ public interface SaleTransactionRepo extends JpaRepository<SaleTransaction, Long
             "(:privileged=true OR s.salesAgentUserId=:userId OR s.buyerUserId=:userId OR p.createdBy=:userId " +
             "OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=s.propertyId AND pm.userId=:userId AND pm.active)) ORDER BY s.createdOn DESC")
     List<SaleTransaction> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end, Pageable pageable);
+
+    @Query(FinancialReportQueries.SALES)
+    List<SaleTransaction> findForScopedReport(long userId, boolean privileged, boolean restricted, List<Long> propertyIds,
+            Long assignmentId, String roleName, ZonedDateTime start, ZonedDateTime end, Pageable pageable);
 }

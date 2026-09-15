@@ -54,6 +54,7 @@ public class ServiceBookingService {
     private final ProviderProfileDao profileDao;
     private final UserDao userDao;
     private final NotificationService notificationService;
+    private final org.pms.silverocean.service.notification.BusinessNotificationService businessAlerts;
     private final I18NService i18NService;
     private final AccountDao accountDao;
     private final InvoiceDao invoiceDao;
@@ -92,6 +93,7 @@ public class ServiceBookingService {
         booking.setActive(true);
         booking.setCreatedBy(userId);
         bookingDao.save(booking, Permission.CREATE_SP_BOOKING);
+        notifyProgress(booking);
         return toDTO(booking, service);
     }
 
@@ -138,6 +140,7 @@ public class ServiceBookingService {
         booking.setStatus(BookingStatus.IN_PROGRESS.name());
         booking.setStartedAt(ZonedDateTime.now(ZoneId.of("UTC")));
         bookingDao.save(booking, Permission.COMPLETE_SP_BOOKING);
+        notifyProgress(booking);
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -200,11 +203,13 @@ public class ServiceBookingService {
                 booking.setProviderReference(providerReference);
                 booking.setStatus(BookingStatus.PAID.name());
                 bookingDao.save(booking, "SYSTEM_SP_BOOKING_PAYMENT_CONFIRMED");
+                notifyProgress(booking);
             } else if (BookingStatus.CANCELLED.name().equals(booking.getStatus()) && !"PAID".equals(booking.getPaymentStatus())) {
                 booking.setPaymentStatus("PAID");
                 booking.setProviderReference(providerReference);
                 booking.setRefundStatus("REQUESTED");
                 bookingDao.save(booking, "SYSTEM_SP_LATE_PAYMENT_REFUND_REQUESTED");
+                notifyProgress(booking);
             }
         });
     }
@@ -240,6 +245,7 @@ public class ServiceBookingService {
             booking.setRefundStatus(request.status().name());
             booking.setRefundedAmount(request.amount());
             booking.setRefundReference(reference);
+            if(request.status()==MarketplaceFinanceRequest.FinanceStatus.CONFIRMED&&request.amount().compareTo(booking.getQuotedAmount())==0){booking.setPaymentStatus("REFUNDED");if(!BookingStatus.COMPLETED.name().equals(booking.getStatus()))booking.setStatus(BookingStatus.CANCELLED.name());}
         } else {
             BigDecimal refunded = booking.getRefundedAmount() == null ? BigDecimal.ZERO : booking.getRefundedAmount();
             BigDecimal maximumSettlement = booking.getQuotedAmount().subtract(refunded);
@@ -251,6 +257,7 @@ public class ServiceBookingService {
             booking.setSettlementReference(reference);
         }
         bookingDao.save(booking, "SP_BOOKING_FINANCE_" + request.type().name() + "_" + request.status().name());
+        notifyFinanceRecord(booking, refund);
         return toDTO(booking);
     }
 
@@ -322,18 +329,36 @@ public class ServiceBookingService {
     }
 
     private void sendBookingNotification(ServiceBooking booking, NotificationType type) {
-        try {
-            userDao.findById(booking.getCreatedBy()).ifPresent(user -> {
-                String message = String.format(
-                        i18NService.getLocalizedMessage(type.getBody()),
-                        booking.getServiceId(),
-                        booking.getScheduledAt() != null ? booking.getScheduledAt().toString() : "",
-                        booking.getCancellationReason() != null ? HtmlUtils.htmlEscape(booking.getCancellationReason()) : ""
-                );
-                notificationService.sendNotification(new NotificationDTO(message, user.getEmail(), type));
-            });
-        } catch (Exception e) {
-            log.warn("Failed to send booking notification for booking {}", booking.getId(), e);
-        }
+        userDao.findById(booking.getCreatedBy()).ifPresent(user -> {
+            String message=String.format(i18NService.getLocalizedMessage(type.getBody()),booking.getServiceId(),
+                    booking.getScheduledAt()!=null?booking.getScheduledAt().toString():"",
+                    booking.getCancellationReason()!=null?HtmlUtils.htmlEscape(booking.getCancellationReason()):"");
+            notificationService.queueEmailAndInAppOnce(bookingEventKey(booking),user.getEmail(),type,message,
+                    "SERVICE_BOOKING_STATUS",bookingMessage(booking),"/dashboard/services");
+        });
+        notifyProvider(booking);
+    }
+    private String bookingEventKey(ServiceBooking booking){
+        return "service-booking:"+booking.getId()+":"+booking.getStatus()+":"+booking.getPaymentStatus()+":"+booking.getRefundStatus();
+    }
+    private void notifyFinanceRecord(ServiceBooking booking,boolean refund){
+        String key="service-finance:"+booking.getId()+":"+(refund?"refund":"settlement")+":"+(refund?booking.getRefundStatus():booking.getSettlementStatus())+":"+(refund?booking.getRefundedAmount():booking.getSettledAmount());
+        String message=refund?"The refund record for service booking #"+booking.getId()+" was updated.":"The receiving-payment record for service booking #"+booking.getId()+" was updated.";
+        if(refund)businessAlerts.publish(booking.getCreatedBy(),key,"SERVICE_BOOKING_STATUS",message,"/dashboard/services");
+        serviceDao.findById(booking.getServiceId()).flatMap(service->profileDao.findById(service.getProfileId())).filter(ProviderProfile::isActive)
+                .filter(profile->!refund||!java.util.Objects.equals(profile.getUserId(),booking.getCreatedBy()))
+                .ifPresent(profile->businessAlerts.publish(profile.getUserId(),key,"SERVICE_BOOKING_STATUS",message,"/dashboard/services"));
+    }
+    private String bookingMessage(ServiceBooking booking){
+        return "Service booking "+booking.getId()+": "+booking.getStatus().replace('_',' ').toLowerCase(java.util.Locale.ROOT)+".";
+    }
+    private void notifyProgress(ServiceBooking booking){
+        businessAlerts.publish(booking.getCreatedBy(),bookingEventKey(booking),"SERVICE_BOOKING_STATUS",bookingMessage(booking),"/dashboard/services");
+        notifyProvider(booking);
+    }
+    private void notifyProvider(ServiceBooking booking){
+        serviceDao.findById(booking.getServiceId()).flatMap(service->profileDao.findById(service.getProfileId()))
+                .filter(ProviderProfile::isActive).filter(profile->!java.util.Objects.equals(profile.getUserId(),booking.getCreatedBy()))
+                .ifPresent(profile->businessAlerts.publish(profile.getUserId(),bookingEventKey(booking),"SERVICE_BOOKING_STATUS",bookingMessage(booking),"/dashboard/services"));
     }
 }

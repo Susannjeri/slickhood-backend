@@ -101,6 +101,40 @@ class RefereeServiceTest {
         assertEquals("Jane Doe", dto.name());
     }
 
+    @Test void duplicatePhoneFormatsCannotCreateAnotherReferee() {
+        when(userDao.getUserId()).thenReturn(1L);
+        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L,1L)));
+        when(refereeDao.activeReferees(10L)).thenReturn(java.util.List.of(makeReferee(2L,10L,"PENDING")));
+        assertThrows(PMSCustomException.class,()->service.addReferee(new AddRefereeRequest("Duplicate","0700 000 001")));
+        verify(profileDao).lockActiveProfile(10L);
+        verify(refereeDao,org.mockito.Mockito.never()).save(any(),anyString());
+    }
+
+    @Test void ownEmailCannotBeUsedAsAReferee() {
+        when(userDao.getUserId()).thenReturn(1L);
+        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L,1L)));
+        var actor=new org.pms.silverocean.database.pms.entities.Users();actor.setEmail("owner@example.test");
+        when(userDao.getUserObject()).thenReturn(actor);
+        assertThrows(PMSCustomException.class,()->service.addReferee(new AddRefereeRequest("Myself"," OWNER@example.test ")));
+        verify(refereeDao,org.mockito.Mockito.never()).save(any(),anyString());
+    }
+
+    @Test void malformedContactIsRejectedBeforeSaving() {
+        when(userDao.getUserId()).thenReturn(1L);
+        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L,1L)));
+        assertThrows(PMSCustomException.class,()->service.addReferee(new AddRefereeRequest("Jane","not-a-contact")));
+        verify(refereeDao,org.mockito.Mockito.never()).save(any(),anyString());
+    }
+
+    @Test void inactiveAndUncorrectedRejectedRefereesCannotBeConfirmed() {
+        var inactive=makeReferee(20L,10L,"PENDING");inactive.setActive(false);
+        when(refereeDao.findById(20L)).thenReturn(Optional.of(inactive));
+        assertThrows(PMSCustomException.class,()->service.verifyReferee(20L,RefereeStatus.CONFIRMED));
+        inactive.setActive(true);inactive.setVerificationStatus("REJECTED");
+        assertThrows(PMSCustomException.class,()->service.verifyReferee(20L,RefereeStatus.CONFIRMED));
+        verify(refereeDao,org.mockito.Mockito.never()).save(any(),anyString());
+    }
+
     // --- editReferee ---
 
     @Test
@@ -166,10 +200,10 @@ class RefereeServiceTest {
     // --- removeReferee ---
 
     @Test
-    void removeReferee_throwsSP_REFEREE_CANNOT_EDIT_whenStatusIsNotPending() {
+    void removeReferee_cannotRemoveAnApprovedReferee() {
         when(userDao.getUserId()).thenReturn(1L);
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
-        Referee r = makeReferee(3L, 10L, RefereeStatus.REJECTED.name());
+        Referee r = makeReferee(3L, 10L, RefereeStatus.CONFIRMED.name());
         when(refereeDao.findByIdAndProfileId(3L, 10L)).thenReturn(Optional.of(r));
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,

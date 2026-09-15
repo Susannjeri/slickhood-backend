@@ -26,6 +26,9 @@ public class SokoOrder extends BaseCreatorEntity implements Auditable {
     private String status;
     private String paymentStatus;
     private String invoiceRef;
+    /** Receiving destination frozen at checkout; later shop edits must not reroute an existing order. */
+    private Long paymentAccountId;
+    private String paymentChannel;
     private String deliveryMethod;
     private String deliveryAddress;
     private String customerPhone;

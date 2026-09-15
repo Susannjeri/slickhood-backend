@@ -45,6 +45,8 @@ class WealthJourneyRegressionTest {
   verify(valuationRepo).save(argThat(v->v.getAssetId()==1L&&v.getAmount().compareTo(BigDecimal.TEN)==0&&"OPENING_VALUE".equals(v.getSource())));
  }
  @Test void historicalValuationDoesNotOverwriteLatest(){var a=asset();owned(a);when(valuationRepo.save(any())).thenAnswer(call->call.getArgument(0));service.addValuation(1,new WealthRequests.ValuationRequest(BigDecimal.TEN,LocalDate.now().minusYears(1),"STATEMENT",null));assertThat(a.getCurrentValue()).isEqualByComparingTo("100000");verify(assetRepo,never()).save(any());verify(valuationRepo).save(any());}
+ @Test void anAssetEditCannotReplaceANewerValuationWithAnOlderOne(){owned(asset());var r=new WealthRequests.AssetRequest(null,"CASH","Savings",null,null,"KES",BigDecimal.TEN,null,BigDecimal.TEN,LocalDate.now().minusDays(1),"ACTIVE",null,null,null,null,"MANUAL");assertThatThrownBy(()->service.updateAsset(1,r)).isInstanceOf(PMSCustomException.class);verify(assetRepo,never()).save(any());verifyNoInteractions(valuationRepo);}
+ @Test void historicalTrustCategoryIsReusedByTheAdvisor(){when(vaultRepo.existsByOwnerUserIdAndCategoryAndActiveTrue(eq(7L),anyString())).thenAnswer(call->"TRUST".equals(call.getArgument(1)));var result=service.dashboard(1,BigDecimal.ZERO,BigDecimal.ZERO,BigDecimal.ZERO);assertThat(result.advisor().hasTrust()).isTrue();assertThat(result.advisor().nextBestActions()).noneMatch(a->a.startsWith("Add trust documents"));}
  @Test void currentValuationUpdatesAndMarksManualOverride(){var a=asset();owned(a);service.addValuation(1,new WealthRequests.ValuationRequest(BigDecimal.TEN,LocalDate.now(),"STATEMENT",null));assertThat(a.getCurrentValue()).isEqualByComparingTo("10");assertThat(a.getQuoteStatus()).isEqualTo("MANUAL_OVERRIDE");}
  @Test void currencyCannotReinterpretExistingHistory(){owned(asset());assertThatThrownBy(()->service.updateAsset(1,request("USD"))).isInstanceOf(PMSCustomException.class);verify(assetRepo,never()).save(any());}
  @Test void otherOwnersCannotReadLedger(){when(assetRepo.findByIdAndOwnerUserIdAndActiveTrue(1L,7L)).thenReturn(Optional.empty());assertThatThrownBy(()->service.ledger(1)).isInstanceOf(PMSCustomException.class);verifyNoInteractions(valuationRepo,cashFlowRepo,liabilityRepo,vaultRepo);}
@@ -58,6 +60,20 @@ class WealthJourneyRegressionTest {
   when(invoiceRepo.findAllByPropertyIdInAndActiveTrueAndPaidFalse(List.of(9L))).thenReturn(List.of(overdue,future,sale,cleared,noDate));
   var result=service.dashboard(5,BigDecimal.ZERO,BigDecimal.ZERO,BigDecimal.ZERO);
   assertThat(result.summary().annualDebtService()).isEqualByComparingTo("12000");assertThat(result.summary().cashFlow()).isEqualByComparingTo("-12000");assertThat(result.summary().arrears()).isEqualByComparingTo("50");assertThat(result.insights()).anyMatch(i->i.code().equals("NEGATIVE_CASH_FLOW"));
+ }
+ @Test void goalDetailsRetainOriginalCurrencyWithoutConvertingDashboardProgress(){
+  var goal=new WealthGoal();goal.setId(8L);goal.setOwnerUserId(7L);goal.setActive(true);goal.setGoalType("NET_WORTH");goal.setName("Savings target");goal.setTargetAmount(new BigDecimal("100"));goal.setCurrency("USD");goal.setTargetDate(LocalDate.now().plusYears(1));goal.setStatus("ACTIVE");
+  when(goalRepo.findByIdAndOwnerUserIdAndActiveTrue(8L,7L)).thenReturn(Optional.of(goal));
+  var details=service.goalDetails(8L);assertThat(details.targetAmount()).isEqualByComparingTo("100");assertThat(details.currency()).isEqualTo("USD");verifyNoInteractions(currencyConversionService);
+  when(goalRepo.save(any())).thenAnswer(call->call.getArgument(0));
+  service.updateGoal(8L,new WealthRequests.GoalRequest("NET_WORTH","Updated target",new BigDecimal("150"),"USD",goal.getTargetDate()));
+  verify(goalRepo).save(argThat(g->g.getOwnerUserId()==7L&&g.getTargetAmount().compareTo(new BigDecimal("150"))==0&&"USD".equals(g.getCurrency())));
+ }
+ @Test void otherOwnersCannotReadOrEditGoals(){
+  when(goalRepo.findByIdAndOwnerUserIdAndActiveTrue(8L,7L)).thenReturn(Optional.empty());
+  assertThatThrownBy(()->service.goalDetails(8L)).isInstanceOf(PMSCustomException.class);
+  assertThatThrownBy(()->service.updateGoal(8L,new WealthRequests.GoalRequest("NET_WORTH","Other owner's goal",BigDecimal.TEN,"KES",LocalDate.now().plusYears(1)))).isInstanceOf(PMSCustomException.class);
+  verify(goalRepo,never()).save(any());
  }
  private PMSInvoice invoice(String type,LocalDate due,double balance){var i=new PMSInvoice();i.setPropertyId(9L);i.setBillingType(type);i.setCurrency("KES");i.setDueDate(due);i.setPendingAmount(balance);i.setAmount(10000);return i;}
  @Test void scannerUnavailableDoesNotStoreOrMislabelTheDocument(){var file=new MockMultipartFile("file","statement.pdf","application/pdf","%PDF-safe-fixture".getBytes());when(malwareScanner.scan(any())).thenReturn(VaultMalwareScanner.Result.UNAVAILABLE);assertThatThrownBy(()->service.upload((Long)null,"PENSION_STATEMENT",null,null,null,file)).isInstanceOf(PMSCustomException.class);verifyNoInteractions(garageService,vaultRepo);}

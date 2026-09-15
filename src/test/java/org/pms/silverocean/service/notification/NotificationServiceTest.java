@@ -24,6 +24,21 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 class NotificationServiceTest {
+    @Test void replayCreatesOnlyOneRecordPerChannelAndOneEmailDispatch(){
+        EncryptionService encryption=mock(EncryptionService.class);NotificationDao dao=mock(NotificationDao.class);
+        UserDao users=mock(UserDao.class);ApplicationEventPublisher events=mock(ApplicationEventPublisher.class);
+        Users user=new Users();user.setActive(true);when(users.findByEmail("buyer@example.test")).thenReturn(java.util.Optional.of(user));
+        Set<String> keys=new java.util.HashSet<>();
+        when(dao.hasDeliveryKey(any())).thenAnswer(i->keys.contains(i.getArgument(0)));
+        when(dao.save(any())).thenAnswer(i->{Notification n=i.getArgument(0);assertThat(keys.add(n.getDeliveryKey())).isTrue();n.setId((long)keys.size());return n.getId();});
+        when(encryption.encrypt(any())).thenReturn(new byte[]{1});
+        var service=new NotificationService(encryption,dao,users,Map.of(),events);
+        for(int i=0;i<2;i++)service.queueEmailAndInAppOnce("order:7:paid"," Buyer@Example.test ",NotificationType.BUSINESS_ALERT_EMAIL,"Order paid","SOKO_ORDER_STATUS","Order paid","/dashboard/soko");
+        var stored=ArgumentCaptor.forClass(Notification.class);verify(dao,times(2)).save(stored.capture());verify(events,times(1)).publishEvent(any(NotificationService.NotificationQueued.class));
+        assertThat(stored.getAllValues()).extracting(Notification::getChannel).containsExactly("EMAIL","IN_APP");
+        assertThat(stored.getAllValues().get(0).getBusinessEventKey()).isEqualTo(stored.getAllValues().get(1).getBusinessEventKey());
+        assertThat(stored.getAllValues().get(0).getDeliveryKey()).isNotEqualTo(stored.getAllValues().get(1).getDeliveryKey());
+    }
     @Test
     void inAppNotificationIsStoredForExistingActiveUserWithoutExternalDelivery() {
         EncryptionService encryption = mock(EncryptionService.class);

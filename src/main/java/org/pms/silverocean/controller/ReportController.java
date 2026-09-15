@@ -60,7 +60,9 @@ public class ReportController {
     }
 
     private ResponseEntity<ResponseDTO> ok(Object data) {
-        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store, max-age=0")
+                .header(HttpHeaders.PRAGMA, "no-cache")
+                .body(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
                 i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), data));
     }
 }

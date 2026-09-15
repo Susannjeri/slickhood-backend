@@ -128,10 +128,9 @@ class HelpDeskServiceTest {
         c.setPriority("HIGH"); c.setWaitingSince(java.time.LocalDateTime.now().minusHours(2));
         c.setSlaDueAt(c.getWaitingSince().plusHours(1));
         var due = c.getSlaDueAt();
-        when(ai.moderate(anyString())).thenReturn(new OpenAiHelpDeskClient.ModerationResult(true, false));
         assertEquals("ESCALATED", service.send(5L, new HelpDeskModels.SendMessage("Here are more details")).status());
         assertEquals(due, c.getSlaDueAt()); assertEquals("HIGH", c.getPriority());
-        verify(ai, never()).answer(anyString(), anyString(), anyString());
+        verifyNoInteractions(ai);
         verifyNoInteractions(articles);
     }
 
@@ -214,5 +213,74 @@ class HelpDeskServiceTest {
         when(ai.answer(anyString(), anyString(), anyString())).thenReturn(new HelpDeskModels.AiAnswer("Open Business Areas. [Article 6]", "test-response", "test-model", false));
         assertEquals("OPEN", service.send(5L, new HelpDeskModels.SendMessage("Which workspace should I select?")).status());
         assertTrue(version.get() >= 2); assertEquals(version.get(), c.getVersion());
+    }
+
+    @Test void unsupportedCitationIsNotShownToCustomer() {
+        ownedCase("OPEN"); guidance();
+        when(ai.answer(anyString(), anyString(), anyString())).thenReturn(new HelpDeskModels.AiAnswer("Invented procedure. [Article 999]", "r", "m", false));
+        assertEquals("ESCALATED", service.send(5L, new HelpDeskModels.SendMessage("Workspace guidance")).status());
+        var saved = ArgumentCaptor.forClass(HelpMessage.class); verify(messages, times(2)).save(saved.capture());
+        assertFalse(saved.getAllValues().getLast().getContent().contains("Invented"));
+        assertNull(saved.getAllValues().getLast().getSourceArticleIds());
+    }
+    @Test void uncitedAnswerIsNotShownToCustomer() {
+        ownedCase("OPEN"); guidance();
+        when(ai.answer(anyString(), anyString(), anyString())).thenReturn(new HelpDeskModels.AiAnswer("Trust me", "r", "m", false));
+        assertEquals("ESCALATED", service.send(5L, new HelpDeskModels.SendMessage("Workspace guidance")).status());
+    }
+    @Test void withdrawnArticleCannotSupportAnInFlightResponse() {
+        ownedCase("OPEN"); var article = guidance();
+        when(articles.findByPublishedTrueAndActiveTrueOrderByCategoryAscTitleAsc()).thenReturn(List.of(article), List.of());
+        when(ai.answer(anyString(), anyString(), anyString())).thenReturn(new HelpDeskModels.AiAnswer("Open Business Areas. [Article 6]", "r", "m", false));
+        assertEquals("ESCALATED", service.send(5L, new HelpDeskModels.SendMessage("Workspace guidance")).status());
+    }
+    @Test void transcriptDoesNotReusePreviousBotClaimsOrInternalNotes() {
+        ownedCase("OPEN"); guidance();
+        HelpMessage oldBot = new HelpMessage(); oldBot.setSenderType("AI"); oldBot.setContent("Unsupported previous claim");
+        HelpMessage note = new HelpMessage(); note.setSenderType("AGENT"); note.setInternalNote(true); note.setContent("Private investigation");
+        HelpMessage user = new HelpMessage(); user.setSenderType("USER"); user.setContent("My workspace question");
+        oldBot.setId(1L); note.setId(2L); user.setId(3L);
+        when(messages.findByConversationIdAndActiveTrueOrderByCreatedOnDesc(eq(5L), any())).thenReturn(List.of(oldBot,note,user));
+        when(ai.answer(anyString(), anyString(), anyString())).thenReturn(new HelpDeskModels.AiAnswer("Open Business Areas. [Article 6]", "r", "m", false));
+        service.send(5L, new HelpDeskModels.SendMessage("Workspace guidance"));
+        var prompt = ArgumentCaptor.forClass(String.class); verify(ai).answer(anyString(), prompt.capture(), anyString());
+        assertFalse(prompt.getValue().contains("Unsupported previous claim")); assertFalse(prompt.getValue().contains("Private investigation"));
+        assertTrue(prompt.getValue().contains("My workspace question"));
+    }
+    @Test void aiOutageDoesNotDumpFullArticleAsAnAnswer() {
+        ownedCase("OPEN"); guidance();
+        when(ai.answer(anyString(), anyString(), anyString())).thenThrow(new IllegalStateException("Provider unavailable"));
+        service.send(5L, new HelpDeskModels.SendMessage("Workspace guidance"));
+        var saved = ArgumentCaptor.forClass(HelpMessage.class); verify(messages, times(2)).save(saved.capture());
+        assertFalse(saved.getAllValues().getLast().getContent().contains("Open Business Areas"));
+        assertTrue(saved.getAllValues().getLast().getContent().contains("waiting for human support"));
+    }
+    @Test void knowledgeIsReloadedAfterExternalPublicationChanges() {
+        var article = new org.pms.silverocean.database.pms.entities.HelpArticle(); article.setId(1L);
+        when(articles.findByPublishedTrueAndActiveTrueOrderByCategoryAscTitleAsc()).thenReturn(List.of(article),List.of());
+        assertEquals(1, service.guestArticles().size()); assertTrue(service.guestArticles().isEmpty());
+    }
+    @Test void changedActiveRoleDoesNotReusePriorRoleGuidance() {
+        ownedCase("OPEN"); when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
+        service.send(5L, new HelpDeskModels.SendMessage("More workspace details"));
+        verifyNoInteractions(ai, articles);
+        verify(messages).save(argThat(m -> "USER".equals(m.getSenderType()) && m.getContent().equals("More workspace details")));
+    }
+    @Test void moderationOutageRetainsQuestionForHumanSupport() {
+        ownedCase("OPEN");
+        when(ai.moderate(anyString())).thenReturn(new OpenAiHelpDeskClient.ModerationResult(false, false));
+        assertEquals("ESCALATED", service.send(5L, new HelpDeskModels.SendMessage("My receipt is missing", "retry-safe-key")).status());
+        var saved = ArgumentCaptor.forClass(HelpMessage.class); verify(messages, times(2)).save(saved.capture());
+        assertEquals("My receipt is missing", saved.getAllValues().getFirst().getContent());
+        assertEquals("retry-safe-key", saved.getAllValues().getFirst().getIdempotencyKey());
+        assertNull(saved.getAllValues().getLast().getIdempotencyKey());
+        verify(ai, never()).answer(anyString(),anyString(),anyString());
+    }
+    private org.pms.silverocean.database.pms.entities.HelpArticle guidance() {
+        var article = new org.pms.silverocean.database.pms.entities.HelpArticle(); article.setId(6L);
+        article.setTitle("Workspace guidance"); article.setBody("Open Business Areas to select a workspace.");
+        when(articles.findByPublishedTrueAndActiveTrueOrderByCategoryAscTitleAsc()).thenReturn(List.of(article));
+        when(ai.moderate(anyString())).thenReturn(new OpenAiHelpDeskClient.ModerationResult(true, false));
+        return article;
     }
 }

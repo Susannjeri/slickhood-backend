@@ -7,6 +7,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.notification.common.NotificationChannel;
 import org.pms.silverocean.service.notification.common.NotificationDao;
 import org.pms.silverocean.service.notification.common.NotificationType;
+import org.pms.silverocean.service.notification.common.NotificationVisibility;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -46,7 +47,7 @@ public class NotificationService {
      */
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public boolean queueInAppNotificationForExistingUser(String recipient, String type, String message) {
-        if (recipient == null || recipient.isBlank() || type == null || type.isBlank()
+        if (recipient == null || recipient.isBlank() || !NotificationVisibility.personal(type)
                 || message == null || message.isBlank()) {
             return false;
         }
@@ -81,8 +82,33 @@ public class NotificationService {
     public void queueEmailAndInApp(String recipient, NotificationType emailType,
                                    String emailMessage, String inAppType, String inAppMessage) {
         if (recipient == null || recipient.isBlank()) return;
-        queueNotification(new NotificationDTO(emailMessage, recipient, emailType));
-        queueInAppNotificationForExistingUser(recipient, inAppType, inAppMessage);
+        queueEmailAndInAppOnce(java.util.UUID.randomUUID().toString(),recipient,emailType,emailMessage,inAppType,inAppMessage,null);
+    }
+
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
+    public void queueEmailAndInAppOnce(String key,String recipient,NotificationType emailType,
+                                       String emailMessage,String inAppType,String inAppMessage,String actionPath) {
+        if(recipient==null||recipient.isBlank())return;
+        if(key==null||key.isBlank()||emailType==null||emailMessage==null||emailMessage.isBlank()||inAppMessage==null||inAppMessage.isBlank()||!NotificationVisibility.personal(emailType.name())||!NotificationVisibility.personal(inAppType))
+            throw new IllegalArgumentException("Verification challenges cannot be mirrored as business alerts");
+        if(actionPath!=null&&!BusinessNotificationService.safePath(actionPath))throw new IllegalArgumentException("Unsafe notification action");
+        String normalized=recipient.trim().toLowerCase(Locale.ROOT),eventKey=digest(key+":"+normalized);
+        String emailKey=digest(eventKey+":EMAIL"),appKey=digest(eventKey+":IN_APP");
+        if(!notificationDao.hasDeliveryKey(emailKey)){
+            NotificationDTO dto=new NotificationDTO(emailMessage,normalized,emailType);
+            long id=createNotification(normalized,emailMessage,emailType,eventKey,emailKey,actionPath);
+            events.publishEvent(new NotificationQueued(id,dto));
+        }
+        if(!notificationDao.hasDeliveryKey(appKey)&&userDao.findByEmail(normalized).filter(Users::isActive).isPresent()){
+            Notification n=new Notification();n.setType(inAppType);n.setRecipient(normalized);n.setMessage(encryptionService.encrypt(inAppMessage));
+            n.setChannel("IN_APP");n.setDelivered(true);n.setRetry(false);n.setActive(true);n.setUpdatedOn(LocalDateTime.now());
+            n.setBusinessEventKey(eventKey);n.setDeliveryKey(appKey);n.setActionPath(actionPath);notificationDao.save(n);
+        }
+    }
+
+    public static String digest(String value) {
+        try{return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));}
+        catch(java.security.NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}
     }
 
     @Async
@@ -102,6 +128,10 @@ public class NotificationService {
     }
 
     private long createNotification(String recipient, String message, NotificationType notificationType) {
+        return createNotification(recipient,message,notificationType,null,null,null);
+    }
+
+    private long createNotification(String recipient,String message,NotificationType notificationType,String eventKey,String deliveryKey,String actionPath) {
         Notification notification = new Notification();
         notification.setType(notificationType.name());
         notification.setRecipient(recipient);
@@ -111,6 +141,9 @@ public class NotificationService {
         notification.setRetries(0);
         notification.setUpdatedOn(LocalDateTime.now());
         notification.setActive(true);
+        notification.setBusinessEventKey(eventKey);
+        notification.setDeliveryKey(deliveryKey);
+        notification.setActionPath(actionPath);
 
 
         notificationDao.save(notification);

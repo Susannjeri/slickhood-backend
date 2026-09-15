@@ -61,4 +61,10 @@ public interface ProviderServiceRepo extends JpaRepository<ProviderService, Long
 
     @Query("SELECT s FROM ProviderService s WHERE s.id = :id AND s.profileId = :profileId AND s.active = true")
     Optional<ProviderService> findByIdAndProfileId(long id, long profileId);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from ProviderService s where s.id=:id and s.active=true")
+    Optional<ProviderService> findByIdForUpdate(long id);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from ProviderService s where s.id=:id and s.profileId=:profileId and s.active=true")
+    Optional<ProviderService> findOwnedForUpdate(long id,long profileId);
 }

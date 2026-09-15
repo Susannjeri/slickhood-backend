@@ -40,6 +40,10 @@ public class ProviderProfileDao {
         return repo.findById(id);
     }
 
+    public void lockActiveProfile(long id) {
+        repo.lockActiveProfile(id).orElseThrow(() -> new org.pms.silverocean.service.PMSCustomException(org.pms.silverocean.common.ResponseCode.SP_PROFILE_NOT_FOUND));
+    }
+
     public List<ProviderProfile> findAllById(Iterable<Long> ids) { return repo.findAllById(ids); }
 
     public Page<ProviderProfile> findAll(Pageable pageable) {

@@ -1,6 +1,7 @@
 package org.pms.silverocean.service.helpdesk;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -62,25 +63,54 @@ public class OpenAiHelpDeskClient {
         body.put("instructions", instructions);
         body.put("input", List.of(Map.of("role", "user", "content",
                 List.of(Map.of("type", "input_text", "text", prompt)))));
-        body.put("max_output_tokens", 700);
+        body.put("max_output_tokens", 2000);
         body.put("safety_identifier", safetyIdentifier);
-        body.put("prompt_cache_key", "slickhood-help-v2");
+        body.put("prompt_cache_key", "slickhood-help-v3");
+        body.put("text", Map.of("format", Map.of("type", "json_schema", "name", "slickhood_help_answer", "strict", true,
+                "schema", Map.of("type", "object", "additionalProperties", false,
+                        "required", List.of("answer", "needs_human_support", "article_ids"),
+                        "properties", Map.of("answer", Map.of("type", "string"),
+                                "needs_human_support", Map.of("type", "boolean"),
+                                "article_ids", Map.of("type", "array", "items", Map.of("type", "integer")))))));
         JsonNode result = client.post().uri("/responses").contentType(MediaType.APPLICATION_JSON)
                 .header("Authorization", "Bearer " + apiKey)
                 .body(body)
                 .retrieve().body(JsonNode.class);
-        if (result == null) throw new IllegalStateException("Empty AI response");
+        if (result == null || !"completed".equals(result.path("status").asText()) || !result.path("output").isArray())
+            throw new IllegalStateException("AI response was not completed");
         StringBuilder text = new StringBuilder();
         for (JsonNode output : result.path("output")) {
+            if (!"message".equals(output.path("type").asText())) continue;
+            if (!"completed".equals(output.path("status").asText()) || !"assistant".equals(output.path("role").asText()))
+                throw new IllegalStateException("Incomplete AI message");
             for (JsonNode content : output.path("content")) {
+                if ("refusal".equals(content.path("type").asText())) throw new IllegalStateException("AI refused the request");
                 if ("output_text".equals(content.path("type").asText())) text.append(content.path("text").asText());
             }
         }
         if (text.isEmpty()) throw new IllegalStateException("AI response contained no text");
-        String answer = text.toString().trim();
-        boolean escalated = answer.startsWith("NEEDS_HUMAN_SUPPORT:");
-        if (escalated) answer = answer.substring(answer.indexOf(':') + 1).trim();
-        return new HelpDeskModels.AiAnswer(answer, result.path("id").asText(null), result.path("model").asText(model), escalated);
+        try {
+            JsonNode parsed = new ObjectMapper().readTree(text.toString());
+            if (!parsed.isObject() || parsed.size() != 3 || !parsed.path("answer").isTextual()
+                    || !parsed.path("needs_human_support").isBoolean() || !parsed.path("article_ids").isArray())
+                throw new IllegalStateException("Invalid AI answer format");
+            String answer = parsed.path("answer").asText().trim();
+            if (answer.isBlank() || answer.length() > 4000 || parsed.path("article_ids").size() > 4)
+                throw new IllegalStateException("Invalid AI answer bounds");
+            java.util.LinkedHashSet<Long> ids = new java.util.LinkedHashSet<>();
+            for (JsonNode id : parsed.path("article_ids")) {
+                if (!id.isIntegralNumber() || !id.canConvertToLong() || id.asLong() <= 0)
+                    throw new IllegalStateException("Invalid AI citation");
+                ids.add(id.asLong());
+            }
+            boolean escalated = parsed.path("needs_human_support").asBoolean();
+            if (!escalated && ids.isEmpty()) throw new IllegalStateException("AI answer has no evidence");
+            String citations = ids.stream().map(id -> "[Article " + id + "]").collect(java.util.stream.Collectors.joining(" "));
+            return new HelpDeskModels.AiAnswer(answer + (citations.isBlank() ? "" : "\n\n" + citations),
+                    result.path("id").asText(null), result.path("model").asText(model), escalated, List.copyOf(ids));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Invalid AI answer JSON");
+        }
     }
 
     public record ModerationResult(boolean available, boolean flagged) {}

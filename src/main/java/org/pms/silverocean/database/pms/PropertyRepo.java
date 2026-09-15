@@ -13,6 +13,10 @@ import java.util.Optional;
 import java.util.List;
 
 public interface PropertyRepo extends JpaRepository<Property, Long>,  JpaSpecificationExecutor<Property> {
+    @Query("SELECT p.id FROM Property p WHERE p.createdBy=:ownerId AND " +
+            "(:assignmentId IS NULL OR (p.active AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id " +
+            "AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:assignmentId AND pm.active)))")
+    List<Long> findFinancialReportPropertyIds(long ownerId, long userId, String roleName, Long assignmentId);
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM Property p WHERE p.id=:id")
     Optional<Property> findAndLockById(@org.springframework.data.repository.query.Param("id") long id);

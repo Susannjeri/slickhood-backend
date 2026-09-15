@@ -37,6 +37,9 @@ public final class WealthModels {
             BigDecimal income,BigDecimal expenses,BigDecimal cashFlow) {}
     public record GoalProgress(long goalId,String name,String goalType,BigDecimal targetAmount,
             BigDecimal currentAmount,BigDecimal progressPercent,LocalDate targetDate,String status) {}
+    public record GoalView(long id,String goalType,String name,BigDecimal targetAmount,String currency,LocalDate targetDate,String status) {
+        public GoalView(WealthGoal goal){this(goal.getId(),goal.getGoalType(),goal.getName(),goal.getTargetAmount(),goal.getCurrency(),goal.getTargetDate(),goal.getStatus());}
+    }
     /** Public vault metadata. Storage keys are deliberately never part of the API model. */
     public record VaultDocumentMetadata(long id,Long assetId,String category,String displayName,
             String contentType,long fileSize,String checksumSha256,LocalDate documentDate,

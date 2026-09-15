@@ -7,6 +7,9 @@ import org.springframework.data.jpa.repository.Query;
 import java.util.Optional;
 
 public interface ProviderProfileRepo extends JpaRepository<ProviderProfile, Long> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM ProviderProfile p WHERE p.id=:id AND p.active=true")
+    Optional<ProviderProfile> lockActiveProfile(long id);
     @Query("SELECT p FROM ProviderProfile p WHERE p.userId = :userId AND p.active = true AND p.status=:status")
     Optional<ProviderProfile> findByUserIdAndStatus(long userId, String status);
 

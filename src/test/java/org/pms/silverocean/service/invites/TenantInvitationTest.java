@@ -74,9 +74,7 @@ class TenantInvitationTest {
         assertEquals(start,saved.get().getLeaseStartDate());
         assertEquals(end,saved.get().getLeaseEndDate());
         assertEquals(21L,saved.get().getAgreementTemplateId());
-        var notification = org.mockito.ArgumentCaptor.forClass(NotificationDTO.class);
-        verify(notifications).queueNotification(notification.capture());
-        assertEquals("tenant@example.test",notification.getValue().recipient());
+        verify(notifications).queueEmailAndInApp(eq("tenant@example.test"),any(),contains("Open your unit invitation:"),eq("INVITE_RECEIVED"),contains("https://app.slickhood.test/invite"));
     }
 
     @Test void existingTenantAlsoReceivesAnActionableInAppInvitation() {
@@ -93,8 +91,8 @@ class TenantInvitationTest {
 
         service.createAndSendEmailInvite(InviteType.TENANT,77L,"tenant@example.test",start,start.plusYears(1));
 
-        verify(notifications).queueInAppNotificationForExistingUser(
-                eq("tenant@example.test"), eq("INVITE_RECEIVED"),
+        verify(notifications).queueEmailAndInApp(
+                eq("tenant@example.test"), any(), anyString(), eq("INVITE_RECEIVED"),
                 contains("https://app.slickhood.test/invite"));
     }
 

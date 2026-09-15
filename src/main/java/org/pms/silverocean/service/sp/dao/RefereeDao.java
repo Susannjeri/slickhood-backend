@@ -38,6 +38,8 @@ public class RefereeDao {
         return repo.findById(id);
     }
 
+    public java.util.List<Referee> activeReferees(long profileId) { return repo.findAllByProfileIdAndActiveTrue(profileId); }
+
     public int countByProfileId(long profileId) {
         return repo.countByProfileId(profileId);
     }

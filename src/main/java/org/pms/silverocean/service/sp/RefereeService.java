@@ -30,10 +30,12 @@ public class RefereeService {
         long userId = userDao.getUserId();
         var profile = profileDao.findByUserIdAndActive(userId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        profileDao.lockActiveProfile(profile.getId());
+        String contact = validateContact(profile.getId(), null, request);
         Referee referee = new Referee();
         referee.setProfileId(profile.getId());
-        referee.setName(request.name());
-        referee.setContact(request.contact());
+        referee.setName(request.name().trim());
+        referee.setContact(contact);
         referee.setVerificationStatus(RefereeStatus.PENDING.name());
         referee.setActive(true);
         referee.setCreatedBy(userId);
@@ -55,11 +57,14 @@ public class RefereeService {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
         Referee referee = refereeDao.findByIdAndProfileId(refereeId, profile.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_REFEREE_NOT_FOUND));
-        if (!RefereeStatus.PENDING.name().equals(referee.getVerificationStatus())) {
+        if (!java.util.Set.of(RefereeStatus.PENDING.name(),RefereeStatus.REJECTED.name()).contains(referee.getVerificationStatus())) {
             throw new PMSCustomException(ResponseCode.SP_REFEREE_CANNOT_EDIT);
         }
-        referee.setName(request.name());
-        referee.setContact(request.contact());
+        profileDao.lockActiveProfile(profile.getId());
+        String contact = validateContact(profile.getId(), refereeId, request);
+        referee.setName(request.name().trim());
+        referee.setContact(contact);
+        referee.setVerificationStatus(RefereeStatus.PENDING.name());
         refereeDao.save(referee, Permission.EDIT_SP_REFEREE);
         return new RefereeDTO(referee);
     }
@@ -71,7 +76,7 @@ public class RefereeService {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
         Referee referee = refereeDao.findByIdAndProfileId(refereeId, profile.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_REFEREE_NOT_FOUND));
-        if (!RefereeStatus.PENDING.name().equals(referee.getVerificationStatus())) {
+        if (!java.util.Set.of(RefereeStatus.PENDING.name(),RefereeStatus.REJECTED.name()).contains(referee.getVerificationStatus())) {
             throw new PMSCustomException(ResponseCode.SP_REFEREE_CANNOT_EDIT);
         }
         referee.setActive(false);
@@ -86,7 +91,33 @@ public class RefereeService {
     public void verifyReferee(long refereeId, RefereeStatus status) {
         Referee referee = refereeDao.findById(refereeId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_REFEREE_NOT_FOUND));
+        if (!referee.isActive()) throw new PMSCustomException(ResponseCode.SP_REFEREE_NOT_FOUND);
+        if (status == null || status == RefereeStatus.PENDING || RefereeStatus.REJECTED.name().equals(referee.getVerificationStatus()))
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA, "Choose Contacted, Confirmed or Rejected for an active pending referee. Rejected details must be corrected first.");
+        if (status.name().equals(referee.getVerificationStatus())) return;
         referee.setVerificationStatus(status.name());
         refereeDao.save(referee, Permission.VERIFY_SP_REFEREE);
+    }
+
+    private String validateContact(long profileId, Long editingId, AddRefereeRequest request) {
+        if (request == null || request.name() == null || request.name().isBlank() || request.name().trim().length() > 150)
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA, "Enter the referee's name, up to 150 characters.");
+        String contact = normalizeContact(request.contact());
+        if (contact == null) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA, "Enter a valid referee email address or international phone number.");
+        var actor = userDao.getUserObject();
+        if (actor != null && (contact.equals(normalizeContact(actor.getEmail())) || contact.equals(normalizeContact(actor.getPhoneNumber()))))
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA, "Choose another person as your referee. You cannot use your own email or phone number.");
+        if (refereeDao.activeReferees(profileId).stream().anyMatch(existing -> !java.util.Objects.equals(existing.getId(), editingId) && contact.equals(normalizeContact(existing.getContact()))))
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA, "This referee contact is already on your profile. Edit the existing referee instead.");
+        return contact;
+    }
+
+    private String normalizeContact(String raw) {
+        if (raw == null || raw.isBlank() || raw.length() > 200) return null;
+        String value = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        if (value.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) return value;
+        String digits = value.replaceAll("[\\s()+-]", "");
+        if (digits.matches("0[17][0-9]{8}")) digits = "254" + digits.substring(1);
+        return digits.matches("[1-9][0-9]{7,14}") ? "+" + digits : null;
     }
 }

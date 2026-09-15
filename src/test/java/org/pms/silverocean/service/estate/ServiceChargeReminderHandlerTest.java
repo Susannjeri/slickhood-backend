@@ -53,9 +53,9 @@ class ServiceChargeReminderHandlerTest {
         handler().handle(event(ServiceChargeReminderEvent.Phase.OVERDUE));
 
         ArgumentCaptor<String> sent = ArgumentCaptor.forClass(String.class);
-        verify(notifications).queueEmailAndInApp(eq("owner@example.com"),
+        verify(notifications).queueEmailAndInAppOnce(anyString(),eq("owner@example.com"),
                 eq(NotificationType.SERVICE_CHARGE_OVERDUE_EMAIL),sent.capture(),
-                eq("SERVICE_CHARGE_OVERDUE"),anyString());
+                eq("SERVICE_CHARGE_OVERDUE"),anyString(),eq("/dashboard/invoices"));
         assertThat(sent.getValue()).contains("2500.00 KES", "A-101", "INV-9");
     }
 
@@ -78,9 +78,9 @@ class ServiceChargeReminderHandlerTest {
 
         handler().handle(event(ServiceChargeReminderEvent.Phase.OVERDUE));
 
-        verify(notifications).queueEmailAndInApp(eq("estate@example.com"),
+        verify(notifications).queueEmailAndInAppOnce(anyString(),eq("estate@example.com"),
                 eq(NotificationType.RECEIVABLE_OVERDUE_EMAIL), anyString(),
-                eq("SERVICE_CHARGE_RECEIVABLE_OVERDUE"), contains("must not be ended automatically"));
+                eq("SERVICE_CHARGE_RECEIVABLE_OVERDUE"), contains("must not be ended automatically"),eq("/dashboard/invoices"));
     }
 
     @Test
@@ -90,7 +90,7 @@ class ServiceChargeReminderHandlerTest {
 
         handler().handle(event(ServiceChargeReminderEvent.Phase.PRE_DUE));
 
-        verify(notifications, never()).queueEmailAndInApp(anyString(), any(), anyString(), anyString(), anyString());
+        verify(notifications, never()).queueEmailAndInAppOnce(anyString(),anyString(), any(), anyString(), anyString(), anyString(),anyString());
     }
 
     @Test void deferredDueDateSuppressesOldOverdueNotice() throws Exception {
@@ -98,7 +98,7 @@ class ServiceChargeReminderHandlerTest {
         when(charges.findById(5L)).thenReturn(Optional.of(charge));
         when(invoices.getInvoiceById(9L)).thenReturn(Optional.of(invoice(false)));
         handler().handle(event(ServiceChargeReminderEvent.Phase.OVERDUE));
-        verify(notifications,never()).queueEmailAndInApp(anyString(), any(), anyString(), anyString(), anyString());
+        verify(notifications,never()).queueEmailAndInAppOnce(anyString(),anyString(), any(), anyString(), anyString(), anyString(),anyString());
     }
 
     @Test void zeroBalanceSuppressesReminderEvenWhenLegacyPaidFlagIsFalse() throws Exception {
@@ -106,7 +106,7 @@ class ServiceChargeReminderHandlerTest {
         when(charges.findById(5L)).thenReturn(Optional.of(charge()));
         when(invoices.getInvoiceById(9L)).thenReturn(Optional.of(invoice));
         handler().handle(event(ServiceChargeReminderEvent.Phase.OVERDUE));
-        verify(notifications,never()).queueEmailAndInApp(anyString(), any(), anyString(), anyString(), anyString());
+        verify(notifications,never()).queueEmailAndInAppOnce(anyString(),anyString(), any(), anyString(), anyString(), anyString(),anyString());
     }
 
     private ServiceChargeReminderHandler handler() {

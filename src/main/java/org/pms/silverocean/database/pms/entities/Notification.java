@@ -17,6 +17,8 @@ import java.time.LocalDateTime;
         @Index(name = "idx_notification_recipient", columnList = "recipient"),
         @Index(name = "idx_notification_channel", columnList = "channel"),
         @Index(name = "idx_notification_delivered", columnList = "delivered"),
+        @Index(name = "idx_notification_business_event", columnList = "businessEventKey,recipient,channel"),
+        @Index(name = "uk_notification_delivery_key", columnList = "deliveryKey", unique = true),
 })
 @Entity
 @Getter
@@ -36,4 +38,10 @@ public class Notification extends BaseActiveEntity {
     private int retries;
     private LocalDateTime updatedOn;
     private LocalDateTime viewedOn;
+    @Column(length = 64)
+    private String businessEventKey;
+    @Column(length = 64)
+    private String deliveryKey;
+    @Column(length = 500)
+    private String actionPath;
 }

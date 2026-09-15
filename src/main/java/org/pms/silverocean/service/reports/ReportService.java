@@ -45,6 +45,7 @@ public class ReportService {
     private final NotificationRepo notifications;
     private final GateDeviceRepo gateDevices;
     private final MaintenanceWorkOrderRepo maintenanceOrders;
+    private final FinancialReportScopeService financialScope;
 
     private static final List<ReportModels.Definition> DEFINITIONS = List.of(
             definition("INVOICE_COLLECTIONS", "Invoice collections & arrears", "Billed, collected, outstanding and overdue invoices.", "FINANCE",
@@ -109,6 +110,7 @@ public class ReportService {
         };
     }
 
+    @Transactional(readOnly = true)
     public ReportModels.CsvExport csv(String code, LocalDate from, LocalDate to) {
         ReportModels.Data report = generate(code, from, to, EXPORT_ROWS);
         StringBuilder csv = new StringBuilder("\uFEFF");
@@ -120,7 +122,8 @@ public class ReportService {
     }
 
     private ReportModels.Data invoiceCollections(ReportModels.Definition definition, Range range, int rowLimit) {
-        List<PMSInvoice> fetched = invoices.findForReport(userId(), privileged(), range.start(), range.end(), page(rowLimit));
+        var scope = financialScope.resolve();
+        List<PMSInvoice> fetched = invoices.findForScopedReport(userId(), privileged(), scope.restricted(), scope.propertyIds(), range.start(), range.end(), page(rowLimit));
         boolean truncated = isTruncated(fetched, rowLimit);
         List<PMSInvoice> data = cap(fetched, rowLimit);
         long overdue = data.stream().filter(i -> !i.isPaid() && i.getDueDate() != null && i.getDueDate().isBefore(LocalDate.now(PMSUtils.getZoneId()))).count();
@@ -135,7 +138,8 @@ public class ReportService {
     }
 
     private ReportModels.Data paymentReconciliation(ReportModels.Definition definition, Range range, int rowLimit) {
-        List<PMSPayment> fetched = payments.findForReport(userId(), privileged(), range.start(), range.end(), page(rowLimit));
+        var scope = financialScope.resolve();
+        List<PMSPayment> fetched = payments.findForScopedReport(userId(), privileged(), scope.restricted(), scope.propertyIds(), range.start(), range.end(), page(rowLimit));
         boolean truncated = isTruncated(fetched, rowLimit);
         List<PMSPayment> data = cap(fetched, rowLimit);
         long successful = data.stream().filter(this::successful).count();
@@ -147,7 +151,8 @@ public class ReportService {
     }
 
     private ReportModels.Data accountStatement(ReportModels.Definition definition, Range range, int rowLimit) {
-        List<FinancialLedgerLine> fetched = ledgerLines.findForStatement(userId(), privileged(), range.start(), range.end(), page(rowLimit));
+        var scope = financialScope.resolve();
+        List<FinancialLedgerLine> fetched = ledgerLines.findForScopedStatement(userId(), privileged(), scope.restricted(), scope.propertyIds(), scope.assignmentId(), scope.roleName(), range.start(), range.end(), page(rowLimit));
         boolean truncated = isTruncated(fetched, rowLimit);
         List<FinancialLedgerLine> data = cap(fetched, rowLimit);
         List<Map<String, Object>> rows = data.stream().map(l -> row(
@@ -203,7 +208,8 @@ public class ReportService {
     }
 
     private ReportModels.Data salesPipeline(ReportModels.Definition definition, Range range, int rowLimit) {
-        List<SaleTransaction> fetched = sales.findForReport(userId(), privileged(), range.start(), range.end(), page(rowLimit));
+        var scope = financialScope.resolve();
+        List<SaleTransaction> fetched = sales.findForScopedReport(userId(), privileged(), scope.restricted(), scope.propertyIds(), scope.assignmentId(), scope.roleName(), range.start(), range.end(), page(rowLimit));
         boolean truncated = isTruncated(fetched, rowLimit);
         List<SaleTransaction> data = cap(fetched, rowLimit);
         List<Map<String, Object>> rows = data.stream().map(s -> row(
@@ -214,7 +220,8 @@ public class ReportService {
     }
 
     private ReportModels.Data estateCharges(ReportModels.Definition definition, Range range, int rowLimit) {
-        List<EstateServiceCharge> fetched = estateCharges.findForReport(userId(), privileged(), range.start(), range.end(), page(rowLimit));
+        var scope = financialScope.resolve();
+        List<EstateServiceCharge> fetched = estateCharges.findForScopedReport(userId(), privileged(), scope.restricted(), scope.propertyIds(), scope.assignmentId(), scope.roleName(), range.start(), range.end(), page(rowLimit));
         boolean truncated = isTruncated(fetched, rowLimit);
         List<EstateServiceCharge> data = cap(fetched, rowLimit);
         Set<Long> invoiceIds = data.stream().map(EstateServiceCharge::getInvoiceId).collect(java.util.stream.Collectors.toSet());
@@ -293,7 +300,7 @@ public class ReportService {
 
     private ReportModels.Data data(ReportModels.Definition definition, Range range, Map<String, Object> metrics,
                                    List<Map<String, Object>> rows, boolean truncated, int rowLimit) {
-        List<String> columns = rows.isEmpty() ? List.of() : List.copyOf(rows.getFirst().keySet());
+        List<String> columns = rows.isEmpty() ? ReportColumns.forCode(definition.code()) : List.copyOf(rows.getFirst().keySet());
         return new ReportModels.Data(definition, range.from(), range.to(), ZonedDateTime.now(PMSUtils.getZoneId()), metrics, columns, rows, truncated, rowLimit);
     }
 
@@ -306,6 +313,7 @@ public class ReportService {
         LocalDate from = requestedFrom == null ? ("FORWARD".equals(definition.dateMode()) ? today : to.minusDays(29)) : requestedFrom;
         if (from.isAfter(to) || ChronoUnit.DAYS.between(from, to) > MAX_RANGE_DAYS) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         if ("HISTORICAL".equals(definition.dateMode()) && to.isAfter(today)) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        if ("FORWARD".equals(definition.dateMode()) && to.isAfter(today.plusDays(MAX_RANGE_DAYS))) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         return new Range(from, to, from.atStartOfDay(PMSUtils.getZoneId()), to.plusDays(1).atStartOfDay(PMSUtils.getZoneId()));
     }
 

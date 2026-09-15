@@ -62,6 +62,7 @@ class ProviderServiceServiceTest {
     private NotificationService notificationService;
     @Mock
     private I18NService i18NService;
+    @Mock private org.pms.silverocean.service.kyc.MarketplaceKycGate marketplaceKycGate;
 
     private ProviderServiceService service;
 
@@ -69,7 +70,12 @@ class ProviderServiceServiceTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         service = new ProviderServiceService(serviceDao, profileDao, categoryDao, documentDao,
-                refereeDao, riskScoreService, riskScoreDao, userDao, notificationService, i18NService);
+                refereeDao, riskScoreService, riskScoreDao, userDao, notificationService, i18NService,marketplaceKycGate);
+        ProviderProfile approvedProfile=makeProfile(10L,1L);
+        approvedProfile.setActive(true);
+        when(profileDao.findById(10L)).thenReturn(Optional.of(approvedProfile));
+        var user=new org.pms.silverocean.database.pms.entities.Users();user.setId(1L);
+        when(userDao.findById(1L)).thenReturn(Optional.of(user));
     }
 
     private ProviderProfile makeProfile(long id, long userId) {
@@ -181,7 +187,7 @@ class ProviderServiceServiceTest {
     void editService_throwsSP_SERVICE_NOT_FOUND_whenServiceNotFound() {
         when(userDao.getUserId()).thenReturn(1L);
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
-        when(serviceDao.findByIdAndProfileId(5L, 10L)).thenReturn(Optional.empty());
+        when(serviceDao.findOwnedForUpdate(5L, 10L)).thenReturn(Optional.empty());
 
         AddServiceRequest request = new AddServiceRequest(1L, BigDecimal.TEN, "KES", PricingUnit.PER_DAY);
 
@@ -195,7 +201,7 @@ class ProviderServiceServiceTest {
         when(userDao.getUserId()).thenReturn(1L);
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
         ProviderService s = makeService(5L, 10L, ProviderServiceStatus.LISTED.name());
-        when(serviceDao.findByIdAndProfileId(5L, 10L)).thenReturn(Optional.of(s));
+        when(serviceDao.findOwnedForUpdate(5L, 10L)).thenReturn(Optional.of(s));
 
         AddServiceRequest request = new AddServiceRequest(1L, BigDecimal.TEN, "KES", PricingUnit.PER_DAY);
 
@@ -210,7 +216,7 @@ class ProviderServiceServiceTest {
         ProviderProfile profile = makeProfile(10L, 1L);
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(profile));
         ProviderService s = makeService(5L, 10L, ProviderServiceStatus.DRAFT.name());
-        when(serviceDao.findByIdAndProfileId(5L, 10L)).thenReturn(Optional.of(s));
+        when(serviceDao.findOwnedForUpdate(5L, 10L)).thenReturn(Optional.of(s));
         when(categoryDao.findById(3L)).thenReturn(Optional.of(makeCategory(3L, "Gardening")));
         doNothing().when(serviceDao).save(any(ProviderService.class), anyString());
         when(profileDao.findById(10L)).thenReturn(Optional.of(profile));
@@ -236,7 +242,7 @@ class ProviderServiceServiceTest {
     void submitForReview_throwsSP_SERVICE_NOT_FOUND_whenServiceNotFound() {
         when(userDao.getUserId()).thenReturn(1L);
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
-        when(serviceDao.findByIdAndProfileId(7L, 10L)).thenReturn(Optional.empty());
+        when(serviceDao.findOwnedForUpdate(7L, 10L)).thenReturn(Optional.empty());
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,
                 () -> service.submitForReview(7L));
@@ -248,7 +254,7 @@ class ProviderServiceServiceTest {
         when(userDao.getUserId()).thenReturn(1L);
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
         ProviderService s = makeService(7L, 10L, ProviderServiceStatus.SUBMITTED.name());
-        when(serviceDao.findByIdAndProfileId(7L, 10L)).thenReturn(Optional.of(s));
+        when(serviceDao.findOwnedForUpdate(7L, 10L)).thenReturn(Optional.of(s));
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,
                 () -> service.submitForReview(7L));
@@ -260,7 +266,7 @@ class ProviderServiceServiceTest {
         when(userDao.getUserId()).thenReturn(1L);
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
         ProviderService s = makeService(7L, 10L, ProviderServiceStatus.DRAFT.name());
-        when(serviceDao.findByIdAndProfileId(7L, 10L)).thenReturn(Optional.of(s));
+        when(serviceDao.findOwnedForUpdate(7L, 10L)).thenReturn(Optional.of(s));
         // categoryId is 0 (default) → categoryDao returns empty → validateReadiness skips
         doNothing().when(serviceDao).save(any(ProviderService.class), anyString());
         when(categoryDao.findById(anyLong())).thenReturn(Optional.of(makeCategory(2L, "Plumbing")));
@@ -278,7 +284,7 @@ class ProviderServiceServiceTest {
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
         ProviderService s = makeService(7L, 10L, ProviderServiceStatus.DRAFT.name());
         s.setCategoryId(2L);
-        when(serviceDao.findByIdAndProfileId(7L, 10L)).thenReturn(Optional.of(s));
+        when(serviceDao.findOwnedForUpdate(7L, 10L)).thenReturn(Optional.of(s));
         ServiceCategory category = makeCategory(2L, "Plumbing");
         category.setRequiredDocumentTypes(Set.of(DocumentType.NATIONAL_ID, DocumentType.GOOD_CONDUCT));
         when(categoryDao.findById(2L)).thenReturn(Optional.of(category));
@@ -295,7 +301,7 @@ class ProviderServiceServiceTest {
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
         ProviderService s = makeService(7L, 10L, ProviderServiceStatus.DRAFT.name());
         s.setCategoryId(2L);
-        when(serviceDao.findByIdAndProfileId(7L, 10L)).thenReturn(Optional.of(s));
+        when(serviceDao.findOwnedForUpdate(7L, 10L)).thenReturn(Optional.of(s));
         ServiceCategory category = makeCategory(2L, "Plumbing");
         category.setRequiredNumberOfReferees(2);
         when(categoryDao.findById(2L)).thenReturn(Optional.of(category));
@@ -310,7 +316,7 @@ class ProviderServiceServiceTest {
 
     @Test
     void approveService_throwsSP_SERVICE_NOT_FOUND_whenNotFound() {
-        when(serviceDao.findById(8L)).thenReturn(Optional.empty());
+        when(serviceDao.findByIdForUpdate(8L)).thenReturn(Optional.empty());
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,
                 () -> service.approveService(8L, "Looks good"));
@@ -320,7 +326,7 @@ class ProviderServiceServiceTest {
     @Test
     void approveService_throwsSP_SERVICE_CANNOT_APPROVE_whenStatusIsDraft() {
         ProviderService s = makeService(8L, 10L, ProviderServiceStatus.DRAFT.name());
-        when(serviceDao.findById(8L)).thenReturn(Optional.of(s));
+        when(serviceDao.findByIdForUpdate(8L)).thenReturn(Optional.of(s));
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,
                 () -> service.approveService(8L, "notes"));
@@ -330,10 +336,9 @@ class ProviderServiceServiceTest {
     @Test
     void approveService_setsStatusLISTED_andCallsSetVerified_onSuccess() {
         ProviderService s = makeService(8L, 10L, ProviderServiceStatus.SUBMITTED.name());
-        when(serviceDao.findById(8L)).thenReturn(Optional.of(s));
+        when(serviceDao.findByIdForUpdate(8L)).thenReturn(Optional.of(s));
         doNothing().when(serviceDao).save(any(ProviderService.class), anyString());
         doNothing().when(riskScoreService).setVerified(8L);
-        when(profileDao.findById(anyLong())).thenReturn(Optional.empty());
         when(i18NService.getLocalizedMessage(anyString())).thenReturn("Your service %s was approved. %s");
 
         when(categoryDao.findById(anyLong())).thenReturn(Optional.of(makeCategory(2L, "Plumbing")));
@@ -349,7 +354,7 @@ class ProviderServiceServiceTest {
     void approveService_throwsSP_SERVICE_MISSING_REQUIRED_DOCUMENTS_whenDocumentNotVerified() {
         ProviderService s = makeService(8L, 10L, ProviderServiceStatus.SUBMITTED.name());
         s.setCategoryId(3L);
-        when(serviceDao.findById(8L)).thenReturn(Optional.of(s));
+        when(serviceDao.findByIdForUpdate(8L)).thenReturn(Optional.of(s));
         ServiceCategory category = makeCategory(3L, "Electrical");
         category.setRequiredDocumentTypes(Set.of(DocumentType.PROFESSIONAL_CERTIFICATE));
         when(categoryDao.findById(3L)).thenReturn(Optional.of(category));
@@ -364,7 +369,7 @@ class ProviderServiceServiceTest {
     void approveService_throwsSP_SERVICE_INSUFFICIENT_VERIFIED_REFEREES_whenRefereesInsufficient() {
         ProviderService s = makeService(8L, 10L, ProviderServiceStatus.SUBMITTED.name());
         s.setCategoryId(3L);
-        when(serviceDao.findById(8L)).thenReturn(Optional.of(s));
+        when(serviceDao.findByIdForUpdate(8L)).thenReturn(Optional.of(s));
         ServiceCategory category = makeCategory(3L, "Electrical");
         category.setRequiredNumberOfReferees(3);
         when(categoryDao.findById(3L)).thenReturn(Optional.of(category));
@@ -377,9 +382,18 @@ class ProviderServiceServiceTest {
 
     // --- rejectService ---
 
+    @Test void approvalCannotBypassKycWhenProviderProfileIsMissing(){
+        ProviderService s=makeService(8L,10L,ProviderServiceStatus.SUBMITTED.name());
+        when(serviceDao.findByIdForUpdate(8L)).thenReturn(Optional.of(s));
+        when(categoryDao.findById(anyLong())).thenReturn(Optional.of(makeCategory(2L,"Cleaning")));
+        when(profileDao.findById(10L)).thenReturn(Optional.empty());
+        var ex=assertThrows(PMSCustomException.class,()->service.approveService(8L,"Reviewed"));
+        assertEquals(ResponseCode.SP_PROFILE_NOT_FOUND,ex.getResponseCode());
+    }
+
     @Test
     void rejectService_throwsSP_SERVICE_NOT_FOUND_whenNotFound() {
-        when(serviceDao.findById(9L)).thenReturn(Optional.empty());
+        when(serviceDao.findByIdForUpdate(9L)).thenReturn(Optional.empty());
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,
                 () -> service.rejectService(9L, "does not meet standards"));
@@ -387,9 +401,9 @@ class ProviderServiceServiceTest {
     }
 
     @Test
-    void rejectService_setsStatusREMOVED_onSuccess() {
+    void rejectService_returnsEditableDraft_onSuccess() {
         ProviderService s = makeService(9L, 10L, ProviderServiceStatus.SUBMITTED.name());
-        when(serviceDao.findById(9L)).thenReturn(Optional.of(s));
+        when(serviceDao.findByIdForUpdate(9L)).thenReturn(Optional.of(s));
         doNothing().when(serviceDao).save(any(ProviderService.class), anyString());
         when(profileDao.findById(anyLong())).thenReturn(Optional.empty());
         when(i18NService.getLocalizedMessage(anyString())).thenReturn("Service %s rejected. %s");
@@ -398,14 +412,14 @@ class ProviderServiceServiceTest {
 
         ArgumentCaptor<ProviderService> captor = ArgumentCaptor.forClass(ProviderService.class);
         verify(serviceDao).save(captor.capture(), anyString());
-        assertEquals(ProviderServiceStatus.REMOVED.name(), captor.getValue().getStatus());
+        assertEquals(ProviderServiceStatus.DRAFT.name(), captor.getValue().getStatus());
     }
 
     // --- suspendService ---
 
     @Test
     void suspendService_throwsSP_SERVICE_NOT_FOUND_whenNotFound() {
-        when(serviceDao.findById(11L)).thenReturn(Optional.empty());
+        when(serviceDao.findByIdForUpdate(11L)).thenReturn(Optional.empty());
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,
                 () -> service.suspendService(11L, "Violation"));
@@ -415,7 +429,7 @@ class ProviderServiceServiceTest {
     @Test
     void suspendService_setsStatusSUSPENDED_onSuccess() {
         ProviderService s = makeService(11L, 10L, ProviderServiceStatus.LISTED.name());
-        when(serviceDao.findById(11L)).thenReturn(Optional.of(s));
+        when(serviceDao.findByIdForUpdate(11L)).thenReturn(Optional.of(s));
         doNothing().when(serviceDao).save(any(ProviderService.class), anyString());
         when(profileDao.findById(anyLong())).thenReturn(Optional.empty());
         when(i18NService.getLocalizedMessage(anyString())).thenReturn("Service %s suspended. %s");
@@ -433,7 +447,7 @@ class ProviderServiceServiceTest {
     void removeService_throwsSP_SERVICE_NOT_FOUND_whenNotFound() {
         when(userDao.getUserId()).thenReturn(1L);
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
-        when(serviceDao.findByIdAndProfileId(12L, 10L)).thenReturn(Optional.empty());
+        when(serviceDao.findOwnedForUpdate(12L, 10L)).thenReturn(Optional.empty());
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,
                 () -> service.removeService(12L));
@@ -446,7 +460,7 @@ class ProviderServiceServiceTest {
         when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
         ProviderService s = makeService(12L, 10L, ProviderServiceStatus.LISTED.name());
         s.setActive(true);
-        when(serviceDao.findByIdAndProfileId(12L, 10L)).thenReturn(Optional.of(s));
+        when(serviceDao.findOwnedForUpdate(12L, 10L)).thenReturn(Optional.of(s));
         doNothing().when(serviceDao).save(any(ProviderService.class), anyString());
 
         service.removeService(12L);

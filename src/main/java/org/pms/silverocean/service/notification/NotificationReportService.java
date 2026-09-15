@@ -4,6 +4,7 @@ import org.pms.silverocean.database.pms.entities.SMS;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.notification.common.NotificationDao;
+import org.pms.silverocean.service.notification.common.NotificationVisibility;
 import org.pms.silverocean.service.notification.sms.africastalking.wrappers.ATSMSDTO;
 import org.pms.silverocean.service.notification.sms.SMSDao;
 import org.springframework.data.domain.Page;
@@ -24,13 +25,15 @@ public class NotificationReportService {
     private final SMSDao smsDao;
     private final UserDao userDao;
     private final EncryptionService encryptionService;
+    private final NotificationActionResolver actions;
 
     public NotificationReportService(NotificationDao notificationDao, SMSDao smsDao, UserDao userDao,
-                                     EncryptionService encryptionService) {
+                                     EncryptionService encryptionService,NotificationActionResolver actions) {
         this.notificationDao = notificationDao;
         this.smsDao = smsDao;
         this.userDao = userDao;
         this.encryptionService = encryptionService;
+        this.actions=actions;
     }
 
     public Page<NotificationProjection> getNotifications(Pageable pageable, String filter) {
@@ -54,11 +57,7 @@ public class NotificationReportService {
         }
         Set<String> recipients = recipients(user);
         return notificationDao.getNotificationsForRecipients(pageable, recipients).map(notification -> {
-            DecryptDTO decrypted = encryptionService.decrypt(notification.getMessage());
-            return new MyNotificationDTO(notification.getId(), notification.getChannel(), notification.getType(),
-                    decrypted == null ? "" : decrypted.decryptedValue(), notification.isDelivered(),
-                    notification.getViewedOn() != null,
-                    notification.getCreatedOn(), notification.getUpdatedOn());
+            return personalDto(notification,user,notification.getViewedOn()!=null);
         });
     }
 
@@ -72,22 +71,33 @@ public class NotificationReportService {
         if (user == null) throw new AccessDeniedException("Authenticated user is required");
         Set<String> recipients = recipients(user);
         var notification = notificationDao.findById(id)
-                .filter(item -> item.isActive() && recipients.contains(item.getRecipient()))
+                .filter(item -> item.isActive() && recipients.contains(item.getRecipient()) && NotificationVisibility.personal(item.getType()))
                 .orElseThrow(() -> new AccessDeniedException("Notification is outside the authenticated user's scope"));
-        if (notification.getViewedOn() == null) {
-            notification.setViewedOn(LocalDateTime.now());
-            notification = notificationDao.saveEntity(notification);
+        if (!notificationDao.markRecipientRead(id, recipients)) throw new AccessDeniedException("Notification is no longer available");
+        return personalDto(notification,user,true);
+    }
+
+    private MyNotificationDTO personalDto(org.pms.silverocean.database.pms.entities.Notification notification,Users user,boolean read){
+        String message=personalMessage(notification);
+        var action=actions.resolve(notification,message,user);
+        return new MyNotificationDTO(notification.getId(),notification.getChannel(),notification.getType(),message,notification.isDelivered(),read,notification.getCreatedOn(),notification.getUpdatedOn(),action==null?null:action.path(),action==null?null:action.status());
+    }
+
+    private String personalMessage(org.pms.silverocean.database.pms.entities.Notification notification) {
+        if (!NotificationVisibility.personal(notification.getType())) return "This message is available only in its secure verification workflow.";
+        try {
+            DecryptDTO decrypted = encryptionService.decrypt(notification.getMessage());
+            return decrypted == null ? "Message unavailable. Contact support if you need help." : decrypted.decryptedValue();
+        } catch (RuntimeException unreadable) {
+            org.slf4j.LoggerFactory.getLogger(getClass()).warn("Notification {} could not be decoded ({})", notification.getId(), unreadable.getClass().getSimpleName());
+            return "Message unavailable. Contact support if you need help.";
         }
-        DecryptDTO decrypted = encryptionService.decrypt(notification.getMessage());
-        return new MyNotificationDTO(notification.getId(), notification.getChannel(), notification.getType(),
-                decrypted == null ? "" : decrypted.decryptedValue(), notification.isDelivered(), true,
-                notification.getCreatedOn(), notification.getUpdatedOn());
     }
 
     private Set<String> recipients(Users user) {
         Set<String> recipients = new LinkedHashSet<>();
         addRecipientVariants(recipients, user.getEmail());
-        addRecipientVariants(recipients, user.getPhoneNumber());
+        if(user.isPhoneVerified())addRecipientVariants(recipients, user.getPhoneNumber());
         return recipients;
     }
 

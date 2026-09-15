@@ -57,6 +57,23 @@ class ProviderProfileServiceTest {
         assertEquals(ResponseCode.SP_PROFILE_ALREADY_EXISTS, ex.getResponseCode());
     }
 
+    @Test void editProfilePreservesConsentAndReceivingAccount(){
+        when(userDao.getUserId()).thenReturn(1L);
+        ProviderProfile profile=new ProviderProfile();profile.setId(5L);profile.setUserId(1L);profile.setActive(true);profile.setStatus("ACTIVE");profile.setPaymentAccountId(33L);
+        var originalConsent=java.time.ZonedDateTime.now().minusDays(10);profile.setConsentTimestamp(originalConsent);
+        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(profile));
+        var result=service.editMyProfile(new SetupProfileRequest("Updated name",true,-1.2,36.8));
+        assertEquals("Updated name",result.businessName());assertEquals(33L,result.paymentAccountId());assertEquals(originalConsent,result.consentTimestamp());
+        org.mockito.Mockito.verify(profileDao,org.mockito.Mockito.never()).existsByUserId(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test void editingBlacklistedProfileCannotReactivateIt(){
+        when(userDao.getUserId()).thenReturn(1L);ProviderProfile profile=new ProviderProfile();profile.setStatus("BLACKLISTED");
+        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(profile));
+        assertThrows(PMSCustomException.class,()->service.editMyProfile(new SetupProfileRequest("Name",true,-1.2,36.8)));
+        org.mockito.Mockito.verify(profileDao,org.mockito.Mockito.never()).save(any(),anyString());
+    }
+
     @Test
     void setupProfile_throwsSP_PROFILE_CONSENT_REQUIRED_whenConsentIsNull() {
         when(userDao.getUserId()).thenReturn(1L);

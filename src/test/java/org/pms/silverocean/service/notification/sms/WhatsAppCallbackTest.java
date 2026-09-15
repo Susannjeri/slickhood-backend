@@ -19,11 +19,10 @@ class WhatsAppCallbackTest {
         SMS first = message(1), second = message(2);
         when(messages.lockWhatsAppMessage("a")).thenReturn(Optional.of(first));
         when(messages.lockWhatsAppMessage("b")).thenReturn(Optional.of(second));
-        Notification one = new Notification(), two = new Notification();
-        when(notifications.findById(1)).thenReturn(Optional.of(one));
-        when(notifications.findById(2)).thenReturn(Optional.of(two));
         service.receiveWhatsAppCallback(payload(status("a", "delivered"), status("b", "read")), "127.0.0.1");
-        assertTrue(one.isDelivered()); assertTrue(two.isDelivered());
+        verify(notifications).confirmDelivered(1);
+        verify(notifications).confirmDelivered(2);
+        verify(notifications,never()).save(any());
         assertEquals("read", second.getStatus());
         verify(messages, times(2)).saveSMS(any());
     }

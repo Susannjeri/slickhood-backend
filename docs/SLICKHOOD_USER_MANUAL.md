@@ -1,8 +1,10 @@
 # SlickHood user manual
 
-Version 2026-09-07.1 · 7 September 2026
+Version 2026-09-15.1 · 15 September 2026
 
 Draft knowledge for the audited release candidate; publish after deployment and review. This describes the existing application and pending audited corrections, not a replacement system or proof of deployment. Each chapter is also a Help Desk knowledge draft. Super Admin reviews and publishes it after verifying the deployed functionality. Import never overwrites existing articles.
+
+This edition revises chapters 01, 26, 29 and 30 for workspace selection, notifications and financial-report isolation. The latest corrections are locally verified, not yet deployed. Other chapters are retained from the 7 September edition and must still be checked against the deployed release before publication.
 
 ## How to use this manual
 
@@ -50,13 +52,15 @@ Purpose: use one SlickHood account while keeping each business activity separate
 1. Open https://app.slickhood.com. Register if you are new, or sign in with your existing account. Follow an invitation when you are joining a particular home, tenancy, purchase or staff workspace.
 2. Complete verification and the required onboarding steps shown on screen. Do not create another account simply because a role or property is missing.
 3. Open Business Areas and choose the activity you intend to use. Check the active role displayed in the sidebar and profile header before creating or changing anything.
-4. A Landlord works with rental inventory; Estate Management uses estate/service-charge inventory; Property Sale Management uses sale inventory. Selecting a different role is not permission to reclassify a property.
-5. Select the appropriate workspace if you belong to several organisations. Staff access is limited by their assignment and resource scope.
+4. A property may contain rental, sale and homeowner units. Use the intended workflow for the selected unit. Choosing a different role does not change a unit's use or give you additional rights.
+5. Select the appropriate workspace if you belong to several organisations. Staff with the same role in several workspaces must choose one before opening workspace financial reports. Access is limited to that workspace and the properties assigned to that membership; assignments in another workspace are not combined.
 6. Check the package for that business area. A package or add-on for one activity does not automatically enable another activity. Quotas, seats, features and current payment state can affect available actions.
 
 Success looks like: the expected role, business area and workspace are visible and the sidebar contains the functions allowed for that context.
 
 If a function is missing: confirm role and workspace, then package and staff assignment. Ask the owner or support to investigate with the page path and business area, not your password. Do not change account data to bypass a restriction.
+
+For a workspace-selection error, choose one of your available workspaces and try again. If none is available, ask the workspace owner to check your active membership, role and assigned properties. Do not register again or change permissions to bypass the message.
 
 ## 02 · Registration, invitations and verification codes
 
@@ -498,19 +502,26 @@ Documents:
 4. Preserve executed versions. A replacement, draft or uploaded proof does not itself change an agreement's legal/approval status.
 
 Notifications:
-1. Open Notifications and review the related record, not just the subject line.
-2. Distinguish queued, sent and delivered states where shown. Check your email address/phone and spam filtering if expected messages are absent.
-3. Verify late-payment and termination-related notices against the lease and authorised process. A reminder is not automatically a legally effective termination.
-4. WhatsApp availability must not be assumed; the integration remains subject to secure configuration and rollout.
+1. Use the notification bell in your signed-in profile or open Notifications. Its badge shows unread alerts, not the number of email copies. A matching email and in-app alert for the same event count once.
+2. Open the related record to check its current status. An accepted, cancelled or expired invitation must not be treated as a usable new invitation. Ask the sender for a current invitation if required.
+3. Reading or marking an alert as read does not accept an invitation, sign an agreement, confirm delivery or pay an invoice.
+4. If the unread count cannot load, retry or refresh; an unavailable count is not proof that there are no unread alerts. Check the intended account and profile when an expected alert is missing.
+5. Email/SMS queued, provider accepted and delivered are different states. Check your email spelling, phone and spam filtering; a saved alert does not prove mailbox or phone delivery.
+6. OTPs and buyer delivery/recovery codes are not shown in the ordinary notification inbox. Use the designated verification or buyer-only delivery-code workflow. Give a delivery code to the assigned rider only after receiving and checking the order; never send it to support in a chat.
+7. Check late-payment, late-fee and termination alerts against the invoice, agreement and authorised process. A reminder is not automatically a legally effective termination notice.
+8. WhatsApp availability must not be assumed. No automatic sharing of buyer phone numbers or delivery addresses with WhatsApp or map applications is implied.
 
 Reports and dashboards:
-1. Check active role/workspace, then choose the relevant report and its date mode: historical activity, a snapshot, or forward-looking expiry.
-2. Generate deliberately and review refresh time, warnings and partial failures. Missing data is not a confirmed zero balance.
-3. Screen and export limits can truncate results; read the warning before relying on totals or an export.
-4. Keep different currencies separate and protect downloaded CSVs.
-5. Use the underlying invoices, documents and records to investigate discrepancies.
+1. Open Reports after checking your active profile and workspace. If you are staff in several workspaces, select the intended one first; do not assume your assignments across organisations are combined.
+2. Choose the report and its date mode: historical activity, a current snapshot, or forward-looking expiry. Set the dates and generate the report.
+3. Invoice collections, payment reconciliation, account statements, property sales and estate-charge reports are restricted to the current authorised context. Staff see only eligible records in the selected workspace and assigned properties. Personal tenant/buyer/homeowner reports use their own-party criteria; owners retain eligible financial history for their owned properties, including archived properties.
+4. Membership alone does not grant access to somebody else's invoices or payments. An empty report can mean there are no eligible records in this context, not that the whole organisation has no outstanding balance. Ask the owner to check your existing assignment and permissions; do not bypass an access restriction.
+5. Switching account, profile or workspace clears the previous report. Generate again in the new context. Changing the selection does not change the underlying invoice, payment or property.
+6. Screen reports show at most 500 rows; CSV exports show at most 5,000. Read truncation warnings: totals reflect included rows and must not be treated as complete when the report is truncated. An export is not a way to access another workspace.
+7. The screen and CSV apply the same financial access restrictions. Keep currencies separate, protect downloaded CSVs and use the underlying invoices, documents and records to investigate discrepancies.
+8. A failed request or unavailable dashboard total is not a confirmed zero balance. Use Retry report where offered. For a workspace-selection error, select an available workspace; for inactive membership or access denial, ask the owner or support to investigate rather than repeatedly exporting.
 
-Report a problem with its page, record reference, selected dates and time. Never include passwords, keys or full identity/payment data.
+Report a problem with its page, active profile, selected workspace, non-sensitive record reference, dates, visible message and approximate time. Never include passwords, keys, OTPs, delivery codes or full identity/payment data.
 
 ## 27 · Help Desk: ask a question and reach a person
 
@@ -553,11 +564,13 @@ Audience: Superadmin.
 4. In the subscription catalogue, search the correct business area and billing period. Preserve historical plans/invoices; retire obsolete offers rather than deleting payment history. Custom/sales-managed is not free. The catalogue is not a complete subscriber exception-management workbench.
 5. In recipient-account maintenance, verify owner, purpose and provider attachment. Do not use the platform's subscription account as every landlord/estate/merchant's destination.
 6. Review Services/Soko moderation, insurance operations and affiliate decisions using their own authorised workspaces. A moderation or finance decision is not an external payment.
-7. Review notification failures, Help Desk queue/SLA state and operational reports.
+7. Review notification failures, Help Desk queue/SLA state and operational reports using the existing authorised controls. The personal bell counts unread alerts; the administrator delivery monitor is a separate permission-protected function. Security and delivery codes must not be copied into ordinary alerts or support replies.
 8. Use Global Config only with the necessary permission. Sensitive values are replacement-only; do not expose existing secrets or store them in browser notes.
 9. Check audit evidence and escalate inconsistent records rather than manually fabricating successful actions.
 
 Before releasing new functionality, verify the actual provider, document and role-isolation journeys on designated test records. A green dashboard or passing mocked test does not certify live settlement, message delivery, legal templates or physical gate safety.
+
+Financial-report boundary: platform invoice, payment and account-statement reports cover SlickHood subscription billing, not a global customer-finance ledger. Sale and estate-charge financial reports do not provide global access to customer finances. Investigate a customer discrepancy through the responsible biller and the existing authorised workflow. For staff, check the selected active membership, role and assigned properties; do not add broad role permissions merely to remove an error.
 
 ## 30 · Super Admin: publish and maintain the manual knowledge
 
@@ -565,13 +578,13 @@ Audience: Superadmin.
 
 1. Open Help Desk → Knowledge using an account with article-management permission.
 2. Select Import user manual drafts. This adds only missing packaged chapters. It does not overwrite existing articles, delete history or publish content automatically.
-3. Read each draft against the current deployed screens and enabled integrations. The packaged manual describes the audited release candidate; publish a chapter only when its covered functionality is available.
+3. Read each draft against the current deployed screens and enabled integrations. Version 2026-09-15.1 revises workspace selection, notifications, financial reports and the related administration/publishing guidance. These latest corrections are locally verified but not evidence of deployment. Publish an updated chapter only after its covered functionality is deployed and checked.
 4. Check title, category, searchable keywords and audience. A blank audience makes the article available to all audiences, including registration guests.
 5. For restricted material, use exact role names supported by the backend, such as Landlord, Tenant, EstateManager, Homeowner, SalesAgent, Buyer, ServiceProvider, AssetPortfolioManager, Support or Superadmin. Do not use friendly sidebar labels as invented role codes.
 6. Keep administration and internal-support instructions restricted to the appropriate staff. Never put customer records or secrets in any article.
 7. Tick Publish for customers and AI grounding, then Save article. Test retrieval from an ordinary permitted role and from a role that must not see it.
 8. Search a representative customer question and verify the answer follows the published chapter and correctly hands off sensitive decisions.
-9. When a process changes, edit/review the article deliberately or unpublish it. Importing the same manual again intentionally retains existing content; it is not an overwrite/update tool.
+9. When a process changes, open and edit/review the existing article deliberately, or unpublish outdated guidance. Reimporting intentionally retains existing slugs, including inactive articles; it does not replace them with the revised packaged text. For this edition, review chapters 01, 26, 29 and 30, preserve their audience restrictions, and publish only after release verification.
 10. Keep a release/reviewer record outside the article body where your organisation records approvals.
 
 The AI consumes only published active articles visible to its conversation role. Knowledge content is reference data, never authority to bypass security, perform payments or approve accounts.
@@ -592,7 +605,7 @@ Report the page path, business area, non-sensitive record reference, approximate
 
 Repository-relative sources used for this edition; these are not customer links. Audit reports may describe pending rather than deployed functionality.
 
-- **manual-start:** frontend:src/config/sidebarConfig.ts; frontend:src/config/businessAreas.ts; backend:docs/THREE_JOURNEY_RELEASE_20260907.md
+- **manual-start:** frontend:src/config/sidebarConfig.ts; frontend:src/config/businessAreas.ts; backend:docs/THREE_JOURNEY_RELEASE_20260907.md; backend:src/main/java/org/pms/silverocean/service/reports/FinancialReportScopeService.java; backend:docs/financial-report-workspace-scope-2026-09-15.md
 - **manual-registration:** frontend:src/components/helpdesk/HelpChatBox.tsx; backend:docs/PROPERTY_SALES_END_TO_END_AUDIT_20260907.md; backend:docs/ESTATE_AGREEMENT_END_TO_END_AUDIT_20260907.md
 - **manual-sign-in:** frontend:e2e/helpdesk-chat.spec.ts; backend:docs/THREE_JOURNEY_RELEASE_20260907.md
 - **manual-kyc:** backend:src/main/java/org/pms/silverocean/service/kyc/KycService.java; backend:src/main/java/org/pms/silverocean/service/kyc/KycRequirementResolver.java
@@ -617,8 +630,8 @@ Repository-relative sources used for this edition; these are not customer links.
 - **manual-funds:** backend:docs/SUBSCRIPTIONS_FUNDS_TAX_ACCESS_AUDIT_20260907.md
 - **manual-tax:** backend:docs/SUBSCRIPTIONS_FUNDS_TAX_ACCESS_AUDIT_20260907.md; frontend:src/config/sidebarConfig.ts
 - **manual-visitors:** backend:docs/SUBSCRIPTIONS_FUNDS_TAX_ACCESS_AUDIT_20260907.md
-- **manual-documents-notifications:** backend:docs/NOTIFICATIONS_AUDIT_20260907.md; backend:docs/ADMIN_DASHBOARD_AUDIT_20260907.md; frontend:src/config/sidebarConfig.ts
+- **manual-documents-notifications:** backend:docs/NOTIFICATIONS_AUDIT_20260907.md; backend:docs/ADMIN_DASHBOARD_AUDIT_20260907.md; frontend:src/config/sidebarConfig.ts; backend:docs/notification-completion-2026-09-15.md; backend:docs/reports-audit-2026-09-15.md; backend:docs/financial-report-workspace-scope-2026-09-15.md
 - **manual-help-customer:** backend:src/main/java/org/pms/silverocean/service/helpdesk/HelpDeskService.java; frontend:src/app/(dashboard)/dashboard/helpdesk/page.tsx; frontend:src/components/helpdesk/HelpChatBox.tsx
 - **manual-support-operations:** backend:src/main/java/org/pms/silverocean/service/helpdesk/HelpDeskService.java; frontend:src/app/(dashboard)/dashboard/helpdesk/page.tsx
-- **manual-admin:** backend:docs/ADMIN_DASHBOARD_AUDIT_20260907.md; frontend:src/components/dashboard/AdminFunctions.tsx
-- **manual-knowledge-publishing:** backend:src/main/java/org/pms/silverocean/service/helpdesk/HelpDeskService.java; frontend:src/app/(dashboard)/dashboard/helpdesk/page.tsx
+- **manual-admin:** backend:docs/ADMIN_DASHBOARD_AUDIT_20260907.md; frontend:src/components/dashboard/AdminFunctions.tsx; backend:docs/notification-completion-2026-09-15.md; backend:docs/financial-report-workspace-scope-2026-09-15.md
+- **manual-knowledge-publishing:** backend:src/main/java/org/pms/silverocean/service/helpdesk/HelpDeskService.java; frontend:src/app/(dashboard)/dashboard/helpdesk/page.tsx; backend:docs/financial-report-workspace-scope-2026-09-15.md

@@ -61,6 +61,20 @@ public class ProviderProfileService {
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
+    public ProviderProfileDTO editMyProfile(SetupProfileRequest request) {
+        long userId=userDao.getUserId();
+        ProviderProfile profile=profileDao.findByUserIdAndActive(userId)
+                .orElseThrow(()->new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        if(!ProviderProfileStatus.ACTIVE.name().equals(profile.getStatus()))throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);
+        if(request.businessName()==null||request.businessName().isBlank()||request.businessName().length()>255
+                ||request.latitude()==null||request.longitude()==null||!Double.isFinite(request.latitude())||!Double.isFinite(request.longitude())
+                ||Math.abs(request.latitude())>90||Math.abs(request.longitude())>180)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        profile.setBusinessName(request.businessName().trim());profile.setLatitude(request.latitude());profile.setLongitude(request.longitude());
+        // Editing contact/location details must not recreate consent, identity or payment records.
+        profileDao.save(profile,Permission.SETUP_SP_PROFILE);return new ProviderProfileDTO(profile);
+    }
+
+    @Transactional(transactionManager = "pmsDBTransactionManager")
     public ProviderProfileDTO setPaymentAccount(PaymentAccountRequest request) {
         long userId = userDao.getUserId();
         ProviderProfile profile = profileDao.findByUserIdAndActive(userId)

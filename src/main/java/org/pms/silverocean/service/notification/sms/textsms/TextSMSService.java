@@ -36,14 +36,14 @@ public class TextSMSService implements SmsProvider {
     private final RestTemplateService restTemplateService;
     private final ConfigService configService;
 
-    private final PMSThreadPoolExecutorService DLR_EXECUTOR;
 
-    public TextSMSService(ConfigService configService, SMSDao smsDao, NotificationDao notificationDao, RestTemplateService restTemplateService, ThreadPoolBeans threadPoolBeans) {
+
+    public TextSMSService(ConfigService configService, SMSDao smsDao, NotificationDao notificationDao, RestTemplateService restTemplateService) {
         this.smsDao = smsDao;
         this.notificationDao = notificationDao;
         this.restTemplateService = restTemplateService;
         this.configService = configService;
-        DLR_EXECUTOR = threadPoolBeans.ioExecutorService(TEXTSMS + "-DLR");
+
     }
 
     public int executeSend(NotificationDTO notificationDTO, long notificationId) {
@@ -69,7 +69,9 @@ public class TextSMSService implements SmsProvider {
             sms.setCost(cost);
             sms.setCurrency("KES");
 
-            scheduleDeliveryReportCallback(new TextSMSDlrRequest(getPartnerId(), getApiKey(), responseItem.thirdPartyMessageId(), 1));
+            // Persist the next check with the accepted provider ID. A restart must
+            // resume receipt polling, not resend the SMS or retain keys in a timer.
+            if(StringUtils.isNotBlank(responseItem.thirdPartyMessageId()))sms.setNextReceiptCheckAt(LocalDateTime.now().plusMinutes(5));
         }
         smsDao.saveSMS(sms);
         return statusCode;
@@ -93,60 +95,17 @@ public class TextSMSService implements SmsProvider {
         return TEXTSMS.equalsIgnoreCase(normalizedInput);
     }
 
-    private void scheduleDeliveryReportCallback(TextSMSDlrRequest request) {
-        if (request.retryCount() > 3) {
-            log.error("Max Retry Count fetching DLR for ID {}: Count {}",  request.messageId(), request.messageId());
-            updateFinalDLRStatus(request.messageId(), "0", "Max Retries fetching DLR", "0");
-            return;
-        }
-
-        DLR_EXECUTOR.schedule(() -> sendDLRRequest(request), 5L * request.retryCount(), TimeUnit.MINUTES)
-                .whenComplete((response, throwable) -> {
-                    if (throwable != null) {
-                        Throwable actualError = throwable.getCause() != null ? throwable.getCause() : throwable;
-                        log.error("Error fetching DLR for ID {} ({})", request.messageId(), actualError.getClass().getSimpleName());
-                        scheduleDeliveryReportCallback(new TextSMSDlrRequest(getPartnerId(), getApiKey(), request.messageId(), request.retryCount() + 1));
-                        return;
-                    }
-
-                    if (response != null) {
-                        log.info("DLR Response for {}: Status {}",  request.messageId(), response.deliveryStatus());
-                        // deliveryDescription: SentToNetwork, SenderName Blacklisted, DeliveredToTerminal
-                        if (SENT_TO_NETWORK_STATUS.equals(response.deliveryDescription())) {
-                            log.info("Status still pending for {}. Rescheduling...", request.messageId());
-                            scheduleDeliveryReportCallback(new TextSMSDlrRequest(getPartnerId(), getApiKey(), request.messageId(), request.retryCount() + 1));
-                        } else {
-                            log.info("Final status reached for {}. Stopping checks.", request.messageId());
-                            updateFinalDLRStatus(request.messageId(), Integer.toString(response.deliveryStatus()), response.deliveryDescription(), Integer.toString(response.deliveryNetworkId()));
-                        }
-                    }
-                });
-    }
-
-
-    private TextSMSDlrResponse sendDLRRequest(TextSMSDlrRequest request) {
-        return restTemplateService.sendPostRequest(configService.getConfigByName(PMSConfigs.TEXT_DLR_URL).get().stringValue(), request, null, TextSMSDlrResponse.class);
-    }
-
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public void updateFinalDLRStatus(String id, String status, String deliveryDescription, String network) {
-        smsDao.findByThirdPartyId(id)
-                .ifPresent(smsEntity -> {
-                    smsEntity.setStatus(status);
-                    smsEntity.setDescription(deliveryDescription);
-                    smsEntity.setNetwork(network);
-                    smsEntity.setUpdatedOn(LocalDateTime.now());
-                    smsDao.saveSMS(smsEntity);
-                    updateNotification(smsEntity.getNotificationId(), deliveryDescription);
-                });
+        if(id==null||id.isBlank()||status==null||deliveryDescription==null)return;
+        // The separate DAO transaction also covers calls from the scheduled DLR
+        // callback (self-invocation on this service cannot provide a transaction).
+        smsDao.recordProviderReceipt(TEXTSMS,id,status,deliveryDescription,network,null)
+                .ifPresent(notificationDao::confirmDelivered);
     }
 
     private void updateNotification(long notificationId, String deliveryDescription) {
-        notificationDao.findById(notificationId)
-                .ifPresent(notification -> {
-                    notification.setUpdatedOn(LocalDateTime.now());
-                    notification.setDelivered(DELIVERED_TO_TERMINAL_STATUS.equals(deliveryDescription));
-                    notificationDao.save(notification);
-                });
+        if (DELIVERED_TO_TERMINAL_STATUS.equals(deliveryDescription)) notificationDao.confirmDelivered(notificationId);
     }
 
     private String getPartnerId() {

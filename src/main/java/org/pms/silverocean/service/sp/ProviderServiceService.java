@@ -24,6 +24,7 @@ import org.pms.silverocean.service.sp.enums.ProviderServiceStatus;
 import org.pms.silverocean.service.sp.wrappers.AddServiceRequest;
 import org.pms.silverocean.service.sp.wrappers.AssignTierRequest;
 import org.pms.silverocean.service.sp.wrappers.ProviderServiceDTO;
+import org.pms.silverocean.service.kyc.MarketplaceKycGate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -46,6 +47,33 @@ public class ProviderServiceService {
     private final UserDao userDao;
     private final NotificationService notificationService;
     private final I18NService i18NService;
+    private final MarketplaceKycGate marketplaceKycGate;
+
+    public record Readiness(Set<String> uploadedDocumentTypes,Set<String> verifiedDocumentTypes,
+                            Set<String> outstandingDocumentTypes,int refereeCount,int verifiedRefereeCount,int requiredReferees) {}
+
+    public Readiness serviceReadiness(long serviceId){
+        var profile=profileDao.findByUserIdAndActive(userDao.getUserId()).orElseThrow(()->new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        var service=serviceDao.findByIdAndProfileId(serviceId,profile.getId()).orElseThrow(()->new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        var category=categoryDao.findById(service.getCategoryId()).orElseThrow(()->new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
+        Set<String> uploaded=presentDocumentTypes(service,false),verified=presentDocumentTypes(service,true),outstanding=new LinkedHashSet<>();
+        if(category.getRequiredDocumentTypes()!=null)category.getRequiredDocumentTypes().forEach(type->{if(!uploaded.contains(type.name()))outstanding.add(type.name());});
+        return new Readiness(uploaded,verified,outstanding,refereeDao.countByProfileId(profile.getId()),refereeDao.countVerifiedByProfileId(profile.getId()),category.getRequiredNumberOfReferees());
+    }
+
+    private Set<String> presentDocumentTypes(ProviderService service,boolean verified){
+        Set<String> own=verified?documentDao.findVerifiedDocumentTypesByServiceId(service.getId()):documentDao.findUploadedDocumentTypesByServiceId(service.getId());
+        Set<String> result=new LinkedHashSet<>(own==null?Set.of():own);
+        Set<String> reused=verified?documentDao.findReusableVerifiedDocumentTypes(service.getProfileId(),service.getCategoryId()):documentDao.findReusableUploadedDocumentTypes(service.getProfileId(),service.getCategoryId());
+        if(reused!=null)result.addAll(reused);
+        profileDao.findById(service.getProfileId()).ifPresent(profile->{
+            Set<String> common=marketplaceKycGate.currentVerifiedDocuments(profile.getUserId()).stream().map(d->d.getDocumentType()).collect(java.util.stream.Collectors.toSet());
+            if(common.contains("NATIONAL_ID_FRONT")&&common.contains("NATIONAL_ID_BACK"))result.add("NATIONAL_ID");
+            java.util.Map.of("PASSPORT","PASSPORT","BUSINESS_REGISTRATION_CERTIFICATE","BUSINESS_REGISTRATION","KRA_PIN_CERTIFICATE","TAX_CERTIFICATE","PROFESSIONAL_CERTIFICATE","PROFESSIONAL_CERTIFICATE","GOOD_CONDUCT_CERTIFICATE","GOOD_CONDUCT")
+                    .forEach((kyc,provider)->{if(common.contains(kyc))result.add(provider);});
+        });
+        return result;
+    }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ProviderServiceDTO addService(AddServiceRequest request) {
@@ -79,10 +107,10 @@ public class ProviderServiceService {
         var profile = profileDao.findByUserIdAndActive(userId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
 
-        ProviderService service = serviceDao.findByIdAndProfileId(serviceId, profile.getId())
+        ProviderService service = serviceDao.findOwnedForUpdate(serviceId, profile.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
 
-        if (!ProviderServiceStatus.DRAFT.name().equals(service.getStatus())) {
+        if (!ProviderServiceStatus.DRAFT.name().equals(service.getStatus())&&!ProviderServiceStatus.HIDDEN.name().equals(service.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_EDITABLE);
         }
 
@@ -94,6 +122,7 @@ public class ProviderServiceService {
         service.setAmount(request.amount());
         service.setCurrency(request.currency());
         service.setPricingUnit(request.pricingUnit());
+        service.setStatus(ProviderServiceStatus.DRAFT.name());
         serviceDao.save(service, Permission.EDIT_SP_SERVICE);
 
         return toDTO(service);
@@ -105,7 +134,7 @@ public class ProviderServiceService {
         var profile = profileDao.findByUserIdAndActive(userId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
 
-        ProviderService service = serviceDao.findByIdAndProfileId(serviceId, profile.getId())
+        ProviderService service = serviceDao.findOwnedForUpdate(serviceId, profile.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
 
         if (!ProviderServiceStatus.DRAFT.name().equals(service.getStatus())) {
@@ -131,7 +160,7 @@ public class ProviderServiceService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public void approveService(long serviceId, String adminNotes) {
-        ProviderService service = serviceDao.findById(serviceId)
+        ProviderService service = serviceDao.findByIdForUpdate(serviceId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
         if (!ProviderServiceStatus.SUBMITTED.name().equals(service.getStatus()) && !ProviderServiceStatus.UNDER_REVIEW.name().equals(service.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_CANNOT_APPROVE);
@@ -145,17 +174,19 @@ public class ProviderServiceService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public void rejectService(long serviceId, String adminNotes) {
-        ProviderService service = serviceDao.findById(serviceId)
+        ProviderService service = serviceDao.findByIdForUpdate(serviceId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
-        service.setStatus(ProviderServiceStatus.REMOVED.name());
+        if(!Set.of(ProviderServiceStatus.SUBMITTED.name(),ProviderServiceStatus.UNDER_REVIEW.name()).contains(service.getStatus())||org.apache.commons.lang3.StringUtils.isBlank(adminNotes))throw new PMSCustomException(ResponseCode.SP_SERVICE_CANNOT_APPROVE);
+        service.setStatus(ProviderServiceStatus.DRAFT.name());
         serviceDao.save(service, Permission.APPROVE_SP_SERVICE);
         sendServiceNotification(service, NotificationType.SP_SERVICE_REJECTED_EMAIL, adminNotes);
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public void suspendService(long serviceId, String reason) {
-        ProviderService service = serviceDao.findById(serviceId)
+        ProviderService service = serviceDao.findByIdForUpdate(serviceId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        if(!ProviderServiceStatus.LISTED.name().equals(service.getStatus())||org.apache.commons.lang3.StringUtils.isBlank(reason))throw new PMSCustomException(ResponseCode.SP_SERVICE_CANNOT_APPROVE);
         service.setStatus(ProviderServiceStatus.SUSPENDED.name());
         serviceDao.save(service, Permission.SUSPEND_SP_SERVICE);
         sendServiceNotification(service, NotificationType.SP_SERVICE_SUSPENDED_EMAIL, reason);
@@ -166,7 +197,7 @@ public class ProviderServiceService {
         long userId = userDao.getUserId();
         var profile = profileDao.findByUserIdAndActive(userId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
-        ProviderService service = serviceDao.findByIdAndProfileId(serviceId, profile.getId())
+        ProviderService service = serviceDao.findOwnedForUpdate(serviceId, profile.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
         service.setStatus(ProviderServiceStatus.REMOVED.name());
         service.setActive(false);
@@ -175,7 +206,7 @@ public class ProviderServiceService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public void assignTier(long serviceId, AssignTierRequest request) {
-        ProviderService service = serviceDao.findById(serviceId)
+        ProviderService service = serviceDao.findByIdForUpdate(serviceId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
         service.setTier(request.tier());
         serviceDao.save(service, Permission.ASSIGN_SP_TIER);
@@ -184,18 +215,17 @@ public class ProviderServiceService {
     private void validateReadiness(ProviderService service, boolean requireVerified) {
         ServiceCategory category = categoryDao.findById(service.getCategoryId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
+        if(requireVerified){
+            var profile=profileDao.findById(service.getProfileId()).filter(ProviderProfile::isActive).orElseThrow(()->new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+            var user=userDao.findById(profile.getUserId()).orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
+            var type=org.pms.silverocean.service.users.ProfileType.valueOf(user.getProfileType());
+            marketplaceKycGate.require(profile.getUserId(),"PROVIDER_TYPE","SERVICE_PROVIDER",type);
+            marketplaceKycGate.require(profile.getUserId(),"SERVICE_CATEGORY",String.valueOf(service.getCategoryId()),type);
+        }
 
         Set<DocumentType> required = category.getRequiredDocumentTypes();
         if (required != null && !required.isEmpty()) {
-            Set<String> presentTypes = requireVerified
-                    ? documentDao.findVerifiedDocumentTypesByServiceId(service.getId())
-                    : documentDao.findUploadedDocumentTypesByServiceId(service.getId());
-            presentTypes = new LinkedHashSet<>(presentTypes == null ? Set.of() : presentTypes);
-            Set<String> reusable = requireVerified
-                    ? documentDao.findReusableVerifiedDocumentTypes(service.getProfileId(), service.getCategoryId())
-                    : documentDao.findReusableUploadedDocumentTypes(service.getProfileId(), service.getCategoryId());
-            if (reusable != null) presentTypes.addAll(reusable);
-            Set<String> resolvedPresentTypes = presentTypes;
+            Set<String> resolvedPresentTypes = presentDocumentTypes(service,requireVerified);
             boolean allPresent = required.stream().allMatch(dt -> resolvedPresentTypes.contains(dt.name()));
             if (!allPresent) {
                 throw new PMSCustomException(ResponseCode.SP_SERVICE_MISSING_REQUIRED_DOCUMENTS);
@@ -210,6 +240,15 @@ public class ProviderServiceService {
                 throw new PMSCustomException(ResponseCode.SP_SERVICE_INSUFFICIENT_VERIFIED_REFEREES);
             }
         }
+    }
+
+    @Transactional(transactionManager="pmsDBTransactionManager")
+    public ProviderServiceDTO pauseOrResume(long serviceId,boolean pause){
+        var profile=profileDao.findByUserIdAndActive(userDao.getUserId()).orElseThrow(()->new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        var service=serviceDao.findOwnedForUpdate(serviceId,profile.getId()).orElseThrow(()->new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        if(!service.isActive()||!(pause?ProviderServiceStatus.LISTED:ProviderServiceStatus.HIDDEN).name().equals(service.getStatus()))throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_EDITABLE);
+        if(!pause)validateReadiness(service,true);
+        service.setStatus((pause?ProviderServiceStatus.HIDDEN:ProviderServiceStatus.LISTED).name());serviceDao.save(service,Permission.EDIT_SP_SERVICE);return toDTO(service);
     }
 
     private ProviderServiceDTO toDTO(ProviderService service) {
@@ -231,11 +270,11 @@ public class ProviderServiceService {
                             service.getCategoryName(),
                             extra != null ? extra : ""
                     );
-                    notificationService.sendNotification(new NotificationDTO(message, user.getEmail(), type));
+                    notificationService.queueEmailAndInApp(user.getEmail(),type,message,"SERVICE_LISTING_REVIEW","Your service listing review was updated. Open /dashboard/services to review its status and any next step.");
                 });
             });
         } catch (Exception e) {
-            log.warn("Failed to send service notification for service {}", service.getId(), e);
+            throw new IllegalStateException("Could not queue the service review update",e);
         }
     }
 }

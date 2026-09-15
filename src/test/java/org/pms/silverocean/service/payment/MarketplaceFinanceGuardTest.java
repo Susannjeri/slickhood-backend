@@ -11,6 +11,7 @@ class MarketplaceFinanceGuardTest {
     @Test void exactConfirmedReplayIsIdempotent(){
         assertTrue(MarketplaceFinanceGuard.validate(TOTAL,true,true,false,entry("CONFIRMED","100","REF"),entry("CONFIRMED","100.00","REF"),entry("NOT_REQUIRED","0",null)));
     }
+    @Test void completedRefundReplayRemainsIdempotentAfterPaymentIsNoLongerPaid(){assertTrue(MarketplaceFinanceGuard.validate(TOTAL,false,false,true,entry("CONFIRMED","100","REF"),entry("CONFIRMED","100.00","REF"),entry("NOT_REQUIRED","0",null)));}
     @Test void confirmedRecordCannotBeOverwritten(){
         assertThrows(PMSCustomException.class,()->MarketplaceFinanceGuard.validate(TOTAL,true,true,false,entry("FAILED","100","REF"),entry("CONFIRMED","100","REF"),entry("NOT_REQUIRED","0",null)));
     }

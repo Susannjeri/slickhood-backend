@@ -75,4 +75,8 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
             "AND ((:privileged=true AND i.subscriptionPlanCode IS NOT NULL) OR " +
             "(:privileged=false AND (i.billedUserId=:userId OR i.payToUserId=:userId))) ORDER BY i.createdOn DESC")
     List<PMSInvoice> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end, Pageable pageable);
+
+    @Query(FinancialReportQueries.INVOICES)
+    List<PMSInvoice> findForScopedReport(long userId, boolean privileged, boolean restricted, List<Long> propertyIds,
+                                       ZonedDateTime start, ZonedDateTime end, Pageable pageable);
 }

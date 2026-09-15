@@ -16,6 +16,7 @@ public interface SokoOrderRepo extends JpaRepository<SokoOrder, Long> {
     Page<SokoOrder> findAllByActiveTrue(Pageable pageable);
     long countByActiveTrue();
     long countByStatusAndActiveTrue(String status);
+    boolean existsByRiderIdAndStatusInAndActiveTrue(long riderId,List<String> statuses);
     List<SokoOrder> findAllByCustomerUserIdAndActiveTrueOrderByCreatedOnDesc(long customerUserId);
     Page<SokoOrder> findAllByCustomerUserIdAndActiveTrue(long customerUserId,Pageable pageable);
     List<SokoOrder> findAllByStoreIdInAndActiveTrueOrderByCreatedOnDesc(List<Long> storeIds);

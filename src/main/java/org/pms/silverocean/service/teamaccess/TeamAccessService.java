@@ -223,11 +223,8 @@ public class TeamAccessService {
         String body = String.format(
                 i18n.getLocalizedMessage(NotificationType.WORKSPACE_INVITE_EMAIL.getBody()),
                 workspace.getName(), role, link);
-        notifications.sendNotification(new NotificationDTO(
-                body, invitation.getRecipientEmail(), NotificationType.WORKSPACE_INVITE_EMAIL));
-        notifications.queueInAppNotificationForExistingUser(
-                invitation.getRecipientEmail(),
-                "WORKSPACE_INVITE_RECEIVED",
+        notifications.queueEmailAndInApp(
+                invitation.getRecipientEmail(), NotificationType.WORKSPACE_INVITE_EMAIL, body, "WORKSPACE_INVITE_RECEIVED",
                 "You have been invited to join " + workspace.getName() + " as " + role
                         + ". Review it securely: " + link);
     }

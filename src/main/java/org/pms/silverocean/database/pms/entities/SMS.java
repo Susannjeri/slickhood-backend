@@ -12,7 +12,8 @@ import org.pms.silverocean.database.pms.entities.base.BaseActiveEntity;
 import java.time.LocalDateTime;
 
 @Table(name = "pms_sms", indexes = {
-        @Index(name = "idx_sms_notificationId", columnList = "notificationId")
+        @Index(name = "idx_sms_notificationId", columnList = "notificationId"),
+        @Index(name = "idx_sms_receipt_due", columnList = "channel,nextReceiptCheckAt,active")
 })
 @Entity
 @Getter
@@ -30,4 +31,6 @@ public class SMS extends BaseActiveEntity {
     private String callBackIP;
     private LocalDateTime updatedOn;
     private String channel;
+    private int receiptCheckAttempts;
+    private LocalDateTime nextReceiptCheckAt;
 }

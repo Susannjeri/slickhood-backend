@@ -58,6 +58,7 @@ class ServiceBookingServiceTest {
     private UserDao userDao;
     @Mock
     private NotificationService notificationService;
+    @Mock private org.pms.silverocean.service.notification.BusinessNotificationService businessAlerts;
     @Mock
     private I18NService i18NService;
     @Mock
@@ -68,12 +69,24 @@ class ServiceBookingServiceTest {
     private UnitDao unitDao;
 
     private ServiceBookingService service;
+    @Test void financeAlertsKeepSettlementRecordsProviderOnly(){
+        ServiceBooking booking=new ServiceBooking();booking.setId(9L);booking.setServiceId(2L);booking.setCreatedBy(8L);booking.setRefundStatus("CONFIRMED");booking.setRefundedAmount(new BigDecimal("20"));booking.setSettlementStatus("CONFIRMED");booking.setSettledAmount(new BigDecimal("80"));
+        ProviderService listing=new ProviderService();listing.setProfileId(3L);ProviderProfile profile=new ProviderProfile();profile.setUserId(7L);profile.setActive(true);
+        when(serviceDao.findById(2L)).thenReturn(Optional.of(listing));when(profileDao.findById(3L)).thenReturn(Optional.of(profile));
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"notifyFinanceRecord",booking,true);
+        verify(businessAlerts).publish(8L,"service-finance:9:refund:CONFIRMED:20","SERVICE_BOOKING_STATUS","The refund record for service booking #9 was updated.","/dashboard/services");
+        verify(businessAlerts).publish(7L,"service-finance:9:refund:CONFIRMED:20","SERVICE_BOOKING_STATUS","The refund record for service booking #9 was updated.","/dashboard/services");
+        org.mockito.Mockito.clearInvocations(businessAlerts);
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"notifyFinanceRecord",booking,false);
+        verify(businessAlerts).publish(7L,"service-finance:9:settlement:CONFIRMED:80","SERVICE_BOOKING_STATUS","The receiving-payment record for service booking #9 was updated.","/dashboard/services");org.mockito.Mockito.verifyNoMoreInteractions(businessAlerts);
+        org.mockito.Mockito.verifyNoInteractions(bookingDao,accountDao,invoiceDao,notificationService);
+    }
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         service = new ServiceBookingService(bookingDao, serviceDao, profileDao, userDao,
-                notificationService, i18NService, accountDao, invoiceDao, unitDao);
+                notificationService, businessAlerts, i18NService, accountDao, invoiceDao, unitDao);
     }
 
     private ProviderService makeProviderService(long id, long profileId, String status, String categoryName) {
@@ -364,6 +377,16 @@ class ServiceBookingServiceTest {
         PMSCustomException ex = assertThrows(PMSCustomException.class, () -> service.updateFinance(42L, request));
 
         assertEquals(ResponseCode.INVALID_FIELD_DATA, ex.getResponseCode());
+    }
+
+    @Test void fullAuthorisedRefundPreventsUncompletedJobFromStartingAndRetryIsIdempotent(){
+        when(userDao.hasRole(PMSRole.FINANCE)).thenReturn(true);
+        var booking=makeBooking(42L,10L,BookingStatus.PAID.name());booking.setPaymentStatus("PAID");
+        when(bookingDao.findByIdForUpdate(42L)).thenReturn(Optional.of(booking));
+        var request=new MarketplaceFinanceRequest(MarketplaceFinanceRequest.FinanceType.REFUND,MarketplaceFinanceRequest.FinanceStatus.CONFIRMED,booking.getQuotedAmount(),"REFUND-42");
+        service.updateFinance(42L,request);assertEquals("REFUNDED",booking.getPaymentStatus());assertEquals("CANCELLED",booking.getStatus());
+        service.updateFinance(42L,request);
+        verify(bookingDao,org.mockito.Mockito.times(1)).save(org.mockito.ArgumentMatchers.eq(booking),anyString());
     }
 
     @Test void bookingRejectsBlacklistedProviderEvenIfServiceRemainsListed(){

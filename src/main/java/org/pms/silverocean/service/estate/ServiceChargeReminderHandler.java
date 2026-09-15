@@ -54,12 +54,12 @@ public class ServiceChargeReminderHandler implements DomainEventHandler {
         String body = String.format(i18n.getLocalizedMessage(type.getBody()), escape(homeowner.getFullName()), amount,
                 escape(invoice.getCurrency()), escape(unitRef), charge.getDueDate(), escape(invoice.getRef()));
         String phaseLabel = requested.phase() == ServiceChargeReminderEvent.Phase.OVERDUE ? "overdue" : "due soon";
-        notifications.queueEmailAndInApp(homeowner.getEmail(), type, body,
+        notifications.queueEmailAndInAppOnce("estate-reminder:"+event.getId(),homeowner.getEmail(), type, body,
                 requested.phase() == ServiceChargeReminderEvent.Phase.OVERDUE
                         ? "SERVICE_CHARGE_OVERDUE" : "SERVICE_CHARGE_DUE_SOON",
                 "Service charge invoice " + invoice.getRef() + " for unit " + unitRef + " is " + phaseLabel
                         + ". Balance: " + invoice.getCurrency() + " " + amount
-                        + ". Open /dashboard/invoices to review or pay it.");
+                        + ". Open /dashboard/invoices to review or pay it.","/dashboard/invoices");
         if (requested.phase() == ServiceChargeReminderEvent.Phase.OVERDUE
                 && invoice.getPayToUserId() > 0 && invoice.getPayToUserId() != invoice.getBilledUserId()) {
             users.findById(invoice.getPayToUserId()).filter(item -> item.isActive())
@@ -68,11 +68,11 @@ public class ServiceChargeReminderHandler implements DomainEventHandler {
                         NotificationType payeeType = NotificationType.RECEIVABLE_OVERDUE_EMAIL;
                         String payeeBody = String.format(i18n.getLocalizedMessage(payeeType.getBody()),
                                 escape(invoice.getRef()), amount, escape(invoice.getCurrency()), charge.getDueDate());
-                        notifications.queueEmailAndInApp(payee.getEmail(), payeeType, payeeBody,
+                        notifications.queueEmailAndInAppOnce("estate-reminder:"+event.getId(),payee.getEmail(), payeeType, payeeBody,
                                 "SERVICE_CHARGE_RECEIVABLE_OVERDUE",
                                 "Homeowner invoice " + invoice.getRef() + " for unit " + unitRef + " has "
                                         + invoice.getCurrency() + " " + amount + " outstanding since " + charge.getDueDate()
-                                        + ". Open /dashboard/invoices to review it. Ownership must not be ended automatically for arrears.");
+                                        + ". Open /dashboard/invoices to review it. Ownership must not be ended automatically for arrears.","/dashboard/invoices");
                     });
         }
     }

@@ -8,6 +8,10 @@ import java.time.ZonedDateTime;
 import java.util.List;
 
 public interface FinancialLedgerLineRepo extends JpaRepository<FinancialLedgerLine, Long> {
+    @Query(FinancialReportQueries.STATEMENT)
+    List<FinancialLedgerLine> findForScopedStatement(long userId, boolean privileged, boolean restricted,
+            List<Long> propertyIds, Long assignmentId, String roleName,
+            ZonedDateTime start, ZonedDateTime end, Pageable pageable);
     @Query("SELECT l FROM FinancialLedgerLine l WHERE l.createdOn>=:start AND l.createdOn<:end AND " +
             "(:privileged=true OR l.userId=:userId OR l.propertyId IN " +
             "(SELECT pm.propertyId FROM PropertyManager pm WHERE pm.userId=:userId AND pm.active)) " +

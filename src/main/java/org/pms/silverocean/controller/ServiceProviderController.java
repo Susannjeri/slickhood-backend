@@ -113,6 +113,13 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
                 i18NService.getLocalizedMessage(ResponseCode.SP_PROFILE_CREATED), profile));
     }
 
+    @GetMapping("/service/{serviceId}/readiness")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SP_SERVICE)")
+    public ResponseEntity<ResponseDTO> serviceReadiness(@PathVariable long serviceId){
+        return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.SP_SERVICE_LIST.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.SP_SERVICE_LIST),serviceService.serviceReadiness(serviceId)));
+    }
+
     @GetMapping("/profile")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SP_PROFILE)")
     public ResponseEntity<ResponseDTO> getMyProfile() {
@@ -127,6 +134,13 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
         var profile = profileService.setPaymentAccount(request);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_PROFILE_DETAILS.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_PROFILE_DETAILS), profile));
+    }
+
+    @PutMapping("/profile")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SETUP_SP_PROFILE)")
+    public ResponseEntity<ResponseDTO> editMyProfile(@RequestBody @Valid SetupProfileRequest request){
+        return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.SP_PROFILE_DETAILS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.SP_PROFILE_DETAILS),profileService.editMyProfile(request)));
     }
 
     @GetMapping("/category/list")
@@ -153,6 +167,14 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_SERVICE_ADDED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_SERVICE_ADDED), service));
     }
+
+    @PutMapping("/service/{serviceId}/pause")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_SP_SERVICE)")
+    public ResponseEntity<ResponseDTO> pauseService(@PathVariable long serviceId){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.SP_SERVICE_UPDATED.getCode(),"Service paused.",serviceService.pauseOrResume(serviceId,true)));}
+
+    @PutMapping("/service/{serviceId}/resume")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_SP_SERVICE)")
+    public ResponseEntity<ResponseDTO> resumeService(@PathVariable long serviceId){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.SP_SERVICE_UPDATED.getCode(),"Service resumed.",serviceService.pauseOrResume(serviceId,false)));}
 
     @PutMapping("/service/{serviceId}")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_SP_SERVICE)")

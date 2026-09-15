@@ -49,6 +49,17 @@ public class NotificationDao {
     public long countUnreadForRecipients(Collection<String> recipients) {
         return recipients.isEmpty() ? 0 : notificationRepo.countUnreadForRecipients(recipients);
     }
+    public boolean hasDeliveryKey(String key) { return notificationRepo.existsByDeliveryKey(key); }
+
+    @Transactional
+    public boolean markRecipientRead(long id, Collection<String> recipients) {
+        return !recipients.isEmpty() && notificationRepo.markRecipientRead(id, recipients, LocalDateTime.now()) == 1;
+    }
+
+    @Transactional
+    public void confirmDelivered(long id) {
+        notificationRepo.confirmDelivered(id, LocalDateTime.now());
+    }
 
     public List<Long> findRetryCandidates(String channel, LocalDateTime eligibleBefore, int maxRetries, int batchSize) {
         return notificationRepo.findRetryCandidates(channel, eligibleBefore, maxRetries, PageRequest.of(0, batchSize));

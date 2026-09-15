@@ -198,11 +198,11 @@ class RentalPaymentReconciliationJourneyTest {
         assertEquals(2, journals.size(), "the duplicate callback must not create another journal");
         assertEquals(4, ledgerLines.size(), "the duplicate callback must not create another ledger posting");
 
-        when(invoiceRepo.findForReport(eq(LANDLORD_ID), eq(false), any(), any(), any(Pageable.class)))
+        when(invoiceRepo.findForScopedReport(eq(LANDLORD_ID), eq(false), eq(false), eq(List.of(-1L)), any(), any(), any(Pageable.class)))
                 .thenReturn(List.of(invoice));
-        when(paymentRepo.findForReport(eq(LANDLORD_ID), eq(false), any(), any(), any(Pageable.class)))
+        when(paymentRepo.findForScopedReport(eq(LANDLORD_ID), eq(false), eq(false), eq(List.of(-1L)), any(), any(), any(Pageable.class)))
                 .thenReturn(List.of(storedPayment.get()));
-        when(lineRepo.findForStatement(eq(LANDLORD_ID), eq(false), any(), any(), any(Pageable.class)))
+        when(lineRepo.findForScopedStatement(eq(LANDLORD_ID), eq(false), eq(false), eq(List.of(-1L)), isNull(), eq(""), any(), any(), any(Pageable.class)))
                 .thenReturn(ledgerLines);
         activeUser.set(LANDLORD_ID);
         ReportService reports = reports(users, invoiceRepo, paymentRepo, lineRepo);
@@ -295,7 +295,13 @@ class RentalPaymentReconciliationJourneyTest {
                 mock(SaleTransactionRepo.class), mock(EstateServiceChargeRepo.class), mock(ServiceBookingRepo.class),
                 mock(SokoOrderRepo.class), ledgerLines, mock(LeaseRepo.class), mock(UserSubscriptionRepo.class),
                 mock(AffiliateCommissionRepo.class), mock(KycCaseRepo.class), mock(NotificationRepo.class),
-                mock(GateDeviceRepo.class), mock(MaintenanceWorkOrderRepo.class));
+                mock(GateDeviceRepo.class), mock(MaintenanceWorkOrderRepo.class), financialScope());
+    }
+
+    private static org.pms.silverocean.service.reports.FinancialReportScopeService financialScope() {
+        var scope = mock(org.pms.silverocean.service.reports.FinancialReportScopeService.class);
+        when(scope.resolve()).thenReturn(org.pms.silverocean.service.reports.FinancialReportScopeService.Scope.personal());
+        return scope;
     }
 
     private static void assertBalanced(List<FinancialLedgerLine> lines, String currency, BigDecimal expected) {

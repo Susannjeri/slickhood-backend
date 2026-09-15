@@ -54,8 +54,9 @@ jobs:
       - name: Create release checksum
         run: |
           install -m 0755 scripts/production-preflight.py target/production-preflight.py
+          install -m 0755 scripts/production-backup.py target/production-backup.py
           cd target
-          sha256sum -- *.jar production-preflight.py > release.sha256
+          sha256sum -- *.jar production-preflight.py production-backup.py > release.sha256
 
       - name: Copy JAR to EC2
         uses: appleboy/scp-action@v0.1.7
@@ -63,7 +64,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "target/*.jar,target/release.sha256,target/production-preflight.py"
+          source: "target/*.jar,target/release.sha256,target/production-preflight.py,target/production-backup.py"
           target: /tmp/slickhood-backend-release
           strip_components: 1
 
@@ -136,14 +137,17 @@ jobs:
             test -f "$candidate"
             # Validate the already-deployed compatibility baseline before the
             # candidate JAR has had a chance to apply its new migrations.
-            run_preflight 80
+            run_preflight 82
+            # Protected, host-local backups are required before applying V83-V86.
+            # Backup contents never leave the host or appear in workflow logs.
+            sudo python3 /tmp/slickhood-backend-release/production-backup.py
             sudo mkdir -p /home/silverocean/backups
             sudo cp "$live" "$rollback"
             sudo install -o silverocean -g silverocean -m 0644 "$candidate" "$live"
             installed=true
             sudo systemctl restart pms.service
             if wait_for_health; then
-              run_preflight 82
+              run_preflight 86
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
               installed=false
               exit 0

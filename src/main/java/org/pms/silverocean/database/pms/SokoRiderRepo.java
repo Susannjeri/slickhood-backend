@@ -18,6 +18,10 @@ public interface SokoRiderRepo extends JpaRepository<SokoRider,Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from SokoRider r where r.id=:id and r.storeId=:storeId and r.active=true")
     Optional<SokoRider> findForUpdate(long id,long storeId);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from SokoRider r where r.id=:id and r.active=true")
+    Optional<SokoRider> findByIdForUpdate(long id);
     Page<SokoRider> findAllByActiveTrue(Pageable pageable);
     List<SokoRider> findAllByUserIdAndActiveTrue(long userId);
+    List<SokoRider> findAllByEmailIgnoreCaseAndActiveTrue(String email);
 }

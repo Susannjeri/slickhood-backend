@@ -35,25 +35,25 @@ public class NotificationController {
     }
 
     @GetMapping("/list")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_NOTIFICATIONS)")
+    @PreAuthorize("hasRole('SUPER_ADMIN') and hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_NOTIFICATIONS)")
     public ResponseEntity<ResponseDTO> getNotifications(Pageable pageable, @RequestParam Optional<String> filter) {
         Page<NotificationProjection> notifications = notificationReportService.getNotifications(pageable, filter.orElse(""));
         ResponseDTO body = new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.NOTIFICATION_LIST), notifications.getContent());
         body.setSize(notifications.getSize());
         body.setTotalPages(notifications.getTotalPages());
         body.setTotalElements(notifications.getTotalElements());
-        return ResponseEntity.ok(body);
+        return privateResponse(body);
     }
 
     @GetMapping("/sms/list")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_NOTIFICATIONS)")
+    @PreAuthorize("hasRole('SUPER_ADMIN') and hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_NOTIFICATIONS)")
     public ResponseEntity<ResponseDTO> viewSMSLogs(Pageable pageable, @RequestParam Optional<Long> notificationId) {
         Page<ATSMSDTO> sentSMS = notificationReportService.getSentSMS(pageable, notificationId);
         ResponseDTO body = new ResponseDTO(true, ResponseCode.SMS_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.SMS_LIST), sentSMS.getContent());
         body.setSize(sentSMS.getSize());
         body.setTotalPages(sentSMS.getTotalPages());
         body.setTotalElements(sentSMS.getTotalElements());
-        return ResponseEntity.ok(body);
+        return privateResponse(body);
     }
 
     @GetMapping("/mine")
@@ -65,13 +65,13 @@ public class NotificationController {
         body.setSize(notifications.getSize());
         body.setTotalPages(notifications.getTotalPages());
         body.setTotalElements(notifications.getTotalElements());
-        return ResponseEntity.ok(body);
+        return privateResponse(body);
     }
 
     @GetMapping("/mine/unread-count")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ResponseDTO> getMyUnreadNotificationCount() {
-        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(),
+        return privateResponse(new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.NOTIFICATION_LIST),
                 Map.of("count", notificationReportService.getMyUnreadNotificationCount())));
     }
@@ -80,7 +80,11 @@ public class NotificationController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ResponseDTO> markMyNotificationRead(@PathVariable long id) {
         MyNotificationDTO notification = notificationReportService.markMyNotificationRead(id);
-        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(),
+        return privateResponse(new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.NOTIFICATION_LIST), notification));
+    }
+
+    private ResponseEntity<ResponseDTO> privateResponse(ResponseDTO body){
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore()).body(body);
     }
 }

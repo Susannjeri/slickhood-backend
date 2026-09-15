@@ -59,4 +59,8 @@ public interface PMSPaymentRepo extends JpaRepository<PMSPayment, Long>, JpaSpec
             "((:privileged=true AND i.subscriptionPlanCode IS NOT NULL) OR " +
             "(:privileged=false AND (i.billedUserId=:userId OR i.payToUserId=:userId))) ORDER BY p.createdOn DESC")
     List<PMSPayment> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end, Pageable pageable);
+
+    @Query(FinancialReportQueries.PAYMENTS)
+    List<PMSPayment> findForScopedReport(long userId, boolean privileged, boolean restricted, List<Long> propertyIds,
+                                       ZonedDateTime start, ZonedDateTime end, Pageable pageable);
 }

@@ -9,13 +9,14 @@ import org.springframework.data.jpa.repository.Query;
 import java.util.Optional;
 
 public interface RefereeRepo extends JpaRepository<Referee, Long> {
+    java.util.List<Referee> findAllByProfileIdAndActiveTrue(long profileId);
     @Query("SELECT r FROM Referee r WHERE r.profileId = :profileId AND r.active = true ORDER BY r.createdOn DESC")
     Page<Referee> findByProfileId(long profileId, Pageable pageable);
 
     @Query("SELECT r FROM Referee r WHERE r.id = :id AND r.profileId = :profileId AND r.active = true")
     Optional<Referee> findByIdAndProfileId(long id, long profileId);
 
-    @Query("SELECT COUNT(r) FROM Referee r WHERE r.profileId = :profileId AND r.active = true")
+    @Query("SELECT COUNT(r) FROM Referee r WHERE r.profileId = :profileId AND r.active = true AND r.verificationStatus <> 'REJECTED'")
     int countByProfileId(long profileId);
 
     @Query("SELECT COUNT(r) FROM Referee r WHERE r.profileId = :profileId AND r.verificationStatus = 'CONFIRMED' AND r.active = true")

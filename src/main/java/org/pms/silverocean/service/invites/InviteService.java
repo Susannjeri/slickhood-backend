@@ -336,16 +336,16 @@ public class InviteService {
         if (notificationDTO == null) {
             throw new PMSCustomException(ResponseCode.EXPIRED_INVITE_LINK);
         }
-        notificationService.queueNotification(notificationDTO);
         if (channel == NotificationChannel.EMAIL) {
             String inviteLink = formatInviteLink(
                     configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(),
                     invite.getToken());
-            notificationService.queueInAppNotificationForExistingUser(
-                    boundRecipient,
-                    "INVITE_RECEIVED",
+            notificationService.queueEmailAndInApp(
+                    boundRecipient, notificationDTO.notificationType(), notificationDTO.formattedMessage(), "INVITE_RECEIVED",
                     "You have a new " + inviteDisplayName(inviteType)
                             + " invitation. Review it securely: " + inviteLink);
+        } else {
+            notificationService.queueNotification(notificationDTO);
         }
     }
 

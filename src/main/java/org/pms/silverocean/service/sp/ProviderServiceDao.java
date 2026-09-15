@@ -59,6 +59,8 @@ public class ProviderServiceDao {
     public Optional<ProviderService> findById(long id) {
         return repo.findById(id);
     }
+    public Optional<ProviderService> findByIdForUpdate(long id){return repo.findByIdForUpdate(id);}
+    public Optional<ProviderService> findOwnedForUpdate(long id,long profileId){return repo.findOwnedForUpdate(id,profileId);}
 
     public List<ProviderService> findAllById(Iterable<Long> ids) { return repo.findAllById(ids); }
 

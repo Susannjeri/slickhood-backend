@@ -13,15 +13,15 @@ public final class MarketplaceFinanceGuard {
     /** Returns true for an exact replay of a confirmed record. */
     public static boolean validate(BigDecimal total, boolean paid, boolean completed, boolean refund,
                                    Entry requested, Entry existing, Entry other) {
-        if (!paid || total == null || requested.amount() == null || requested.amount().signum() <= 0
-                || (!refund && !completed)) throw invalid();
-        if (!refund && ("REQUESTED".equals(other.status()) || "PROCESSING".equals(other.status()))) throw invalid();
+        if (total == null || requested.amount() == null || requested.amount().signum() <= 0) throw invalid();
         if ("CONFIRMED".equals(existing.status())) {
             if ("CONFIRMED".equals(requested.status()) && existing.amount() != null
                     && existing.amount().compareTo(requested.amount()) == 0
                     && Objects.equals(existing.reference(), requested.reference())) return true;
             throw invalid();
         }
+        if(!paid||(!refund&&!completed))throw invalid();
+        if (!refund && ("REQUESTED".equals(other.status()) || "PROCESSING".equals(other.status()))) throw invalid();
         if ("CONFIRMED".equals(requested.status())
                 && (requested.reference() == null || requested.reference().isBlank())) throw invalid();
         BigDecimal committed = "CONFIRMED".equals(other.status()) && other.amount() != null
