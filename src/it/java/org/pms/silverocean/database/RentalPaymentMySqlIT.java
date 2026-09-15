@@ -128,8 +128,6 @@ class RentalPaymentMySqlIT {
     void helpConversationPersistsBothMessagesAcrossDetachedRepositoryTransactions() {
         var ai = mock(org.pms.silverocean.service.helpdesk.OpenAiHelpDeskClient.class);
         when(ai.moderate(anyString())).thenReturn(new org.pms.silverocean.service.helpdesk.OpenAiHelpDeskClient.ModerationResult(true, false));
-        when(ai.answer(anyString(), anyString(), anyString())).thenReturn(
-                new org.pms.silverocean.service.helpdesk.HelpDeskModels.AiAnswer("Choose Business Areas.", "synthetic", "synthetic", false));
         var service = new org.pms.silverocean.service.helpdesk.HelpDeskService(helpConversations, helpMessages, helpArticles,
                 mock(org.pms.silverocean.service.auth.dao.UserDao.class), ai,
                 mock(org.pms.silverocean.service.helpdesk.HelpDeskRateLimiter.class), mock(NotificationService.class));
@@ -140,12 +138,18 @@ class RentalPaymentMySqlIT {
         var article = new HelpArticle(); article.setSlug("integration-help-" + java.util.UUID.randomUUID());
         article.setTitle("Workspace selection"); article.setBody("Select your workspace in Business Areas.");
         article.setCategory("General"); article.setPublished(true); article.setActive(true); helpArticles.save(article);
+        when(ai.answer(anyString(), anyString(), anyString())).thenReturn(
+                new org.pms.silverocean.service.helpdesk.HelpDeskModels.AiAnswer(
+                        "Choose Business Areas.", "synthetic", "synthetic", false, List.of(article.getId())));
         var guest = service.startGuest(new org.pms.silverocean.service.helpdesk.HelpDeskModels.GuestStart("Workspace help", "GENERAL", "/register"));
         var answer = service.sendGuest(guest.conversation().ticketNumber(), guest.accessToken(),
                 new org.pms.silverocean.service.helpdesk.HelpDeskModels.SendMessage("How do I choose a workspace?", "synthetic-message"));
         assertEquals("OPEN", answer.status());
         assertEquals(List.of("USER", "AI"), answer.messages().stream().map(org.pms.silverocean.service.helpdesk.HelpDeskModels.MessageView::senderType).toList());
         assertTrue(helpConversations.findById(answer.id()).orElseThrow().getVersion() >= 2);
+        var storedAnswer = helpMessages.findByConversationIdAndActiveTrueOrderByCreatedOnAsc(answer.id()).stream()
+                .filter(message -> "AI".equals(message.getSenderType())).findFirst().orElseThrow();
+        assertEquals(String.valueOf(article.getId()), storedAnswer.getSourceArticleIds());
         var repeated = service.sendGuest(guest.conversation().ticketNumber(), guest.accessToken(),
                 new org.pms.silverocean.service.helpdesk.HelpDeskModels.SendMessage("How do I choose a workspace?", "synthetic-message"));
         assertEquals(2, repeated.messages().size());
