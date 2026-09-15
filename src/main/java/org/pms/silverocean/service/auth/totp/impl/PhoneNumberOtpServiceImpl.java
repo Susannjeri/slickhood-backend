@@ -43,8 +43,12 @@ public class PhoneNumberOtpServiceImpl extends EmailOtpServiceImpl {
         if (StringUtils.isBlank(phoneNumber)) {
             throw new PMSCustomException(ResponseCode.PHONENUMBER_IS_MISSING);
         }
-        String secret = PMSUtils.generateRandomOTP();
+        var controlledCode = controlledTestCode(username);
+        String secret = controlledCode.orElseGet(PMSUtils::generateRandomOTP);
         encryptionService.saveOTP(username, secret, OtpType.SMS, phoneNumber);
+        if (controlledCode.isPresent()) {
+            return "Use the assigned test OTP";
+        }
         String formattedMessage = String.format(i18NService.getLocalizedMessage(NotificationType.OTP_SMS.getBody()), secret,
                 ZonedDateTime.now().plusSeconds(otpValiditySeconds()));
         notificationService.sendNotification(new NotificationDTO(formattedMessage, phoneNumber, NotificationType.OTP_SMS));

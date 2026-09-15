@@ -12,6 +12,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -53,5 +54,18 @@ class EmailOtpServiceImplTest {
 
         verify(encryption).saveOTP(any(), any(), any(), any());
         verify(notifications).sendNotification(any());
+    }
+
+    @Test
+    void exactSyntheticAccountUsesConfiguredCodeWithoutSendingExternally() {
+        service.setControlledTestOtpPolicy(new ControlledTestOtpPolicy(true,
+                "mr.bean@qa.slickhood.test=482731"));
+
+        assertEquals("Use the assigned test OTP",
+                service.generateOTPCode("mr.bean@qa.slickhood.test"));
+
+        verify(encryption).saveOTP(eq("mr.bean@qa.slickhood.test"), eq("482731"),
+                eq(OtpType.EMAIL), eq("mr.bean@qa.slickhood.test"));
+        verify(notifications, never()).sendNotification(any());
     }
 }

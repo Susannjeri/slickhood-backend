@@ -15,9 +15,11 @@ import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.ZonedDateTime;
+import java.util.Optional;
 
 import static org.pms.silverocean.service.auth.totp.impl.EmailOtpServiceImpl.NAME;
 
@@ -34,6 +36,8 @@ public class EmailOtpServiceImpl implements TotpService {
 
     private final I18NService i18NService;
 
+    private ControlledTestOtpPolicy controlledTestOtpPolicy;
+
     @Value("${security.otp.resend-cooldown-seconds:60}")
     private int resendCooldownSeconds;
 
@@ -49,6 +53,11 @@ public class EmailOtpServiceImpl implements TotpService {
         this.i18NService = i18NService;
     }
 
+    @Autowired
+    void setControlledTestOtpPolicy(ControlledTestOtpPolicy controlledTestOtpPolicy) {
+        this.controlledTestOtpPolicy = controlledTestOtpPolicy;
+    }
+
     @Override
     public String generateOTPCode(String username) {
         if (!PMSUtils.isValidEmail(username)) {
@@ -61,8 +70,14 @@ public class EmailOtpServiceImpl implements TotpService {
                 resendCooldownSeconds)) {
             return "Use the most recently issued OTP";
         }
-        String secret = PMSUtils.generateRandomOTP();
+        Optional<String> controlledCode = controlledTestCode(username);
+        String secret = controlledCode.orElseGet(PMSUtils::generateRandomOTP);
         encryptionService.saveOTP(username, secret, OtpType.EMAIL, username);
+        if (controlledCode.isPresent()) {
+            // Synthetic QA identities have no real mailbox. Keep the response
+            // generic and preserve the ordinary encrypted, expiring OTP record.
+            return "Use the assigned test OTP";
+        }
         String formattedMessage = String.format(i18NService.getLocalizedMessage(NotificationType.EMAIL_OTP.getBody()), secret,
                 ZonedDateTime.now().plusSeconds(otpValiditySeconds()));
 
@@ -87,5 +102,9 @@ public class EmailOtpServiceImpl implements TotpService {
 
     int otpValiditySeconds() {
         return configService.getConfigByName(PMSConfigs.OTP_VALIDITY_SECONDS).get().intValue();
+    }
+
+    protected Optional<String> controlledTestCode(String username) {
+        return controlledTestOtpPolicy == null ? Optional.empty() : controlledTestOtpPolicy.codeFor(username);
     }
 }
