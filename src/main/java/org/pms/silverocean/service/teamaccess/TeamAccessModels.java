@@ -13,7 +13,8 @@ public final class TeamAccessModels {
                                 @Size(max=500) List<@Positive Long> resourceIds) {}
     public record ScopeUpdate(@NotNull TeamScopeType scopeType,
                               @Size(max=500) List<@Positive Long> resourceIds) {}
-    public record RoleOption(long id, String code, String name, TeamMembershipRole permissionTemplate) {}
+    public record RoleOption(long id, String code, String name, String description,
+                             TeamMembershipRole permissionTemplate) {}
 
     public record RoleDefinitionRequest(@NotBlank @Pattern(regexp="[A-Z0-9_]{3,80}") String code,
                                         @NotBlank @Size(max=120) String displayName,
@@ -31,6 +32,7 @@ public final class TeamAccessModels {
                              String roleName, TeamScopeType scopeType, List<Long> resourceIds,
                              TeamMembershipStatus status, LocalDateTime acceptedAt, LocalDateTime activatedAt) {}
     public record WorkspaceView(long id, String name, TeamBusinessArea businessArea, boolean owner,
+                                boolean canGrantEntireWorkspace,
                                 long seatLimit, long seatsUsed, List<RoleOption> roles,
                                 List<IdNameDescDTO> resources, List<InvitationView> invitations,
                                 List<MemberView> members) {}
