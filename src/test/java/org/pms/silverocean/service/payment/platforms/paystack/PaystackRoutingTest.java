@@ -164,6 +164,15 @@ class PaystackRoutingTest {
         verifyNoInteractions(http);
     }
 
+    @Test void currencyNotEnabledForThisPaystackAccountIsRejectedBeforeCreatingPayment() {
+        invoice.setCurrency("EUR"); invoice.setSubscriptionPlanCode("BRONZE");
+        PaymentRequestException error = assertThrows(PaymentRequestException.class,
+                () -> platform.processPayment(invoice, null, 71L));
+        assertEquals(org.pms.silverocean.common.ResponseCode.PAYMENT_CURRENCY_UNSUPPORTED,
+                error.getResponseCode());
+        verifyNoInteractions(payments, http);
+    }
+
     @Test void failedProviderVerificationUnlocksCheckoutWithoutMarkingTheInvoicePaid() {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);

@@ -11,6 +11,7 @@ import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.eventlogger.EventService;
 import org.pms.silverocean.service.param.ParamService;
 import org.pms.silverocean.service.payment.PaymentDao;
+import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.payment.UpdatePaymentService;
 import org.pms.silverocean.service.payment.platforms.pesalink.wrappers.IPNCallbackDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
@@ -23,6 +24,7 @@ import java.time.LocalDateTime;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -86,6 +88,16 @@ class PesaLinkServiceTest {
         assertFalse(invoice.isPaid());
         assertFalse(invoice.isTransactionInProgress());
         verify(updatePaymentService, times(2)).updateInvoice(invoice);
+    }
+
+    @Test
+    void nonKesInvoiceIsRejectedBeforeBankInstructionsAreIssued() {
+        PesaLinkService service = new PesaLinkService(updatePaymentService, configService,
+                i18NService, eventService, paymentDao, paramService);
+        PMSInvoice invoice = new PMSInvoice(); invoice.setCurrency("EUR");
+        PaymentRequestException error = assertThrows(PaymentRequestException.class,
+                () -> service.processPayment(invoice, null, 8L));
+        assertEquals(ResponseCode.PAYMENT_CURRENCY_UNSUPPORTED, error.getResponseCode());
     }
 
     @Test

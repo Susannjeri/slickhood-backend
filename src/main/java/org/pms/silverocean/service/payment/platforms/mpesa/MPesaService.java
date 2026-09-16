@@ -109,6 +109,8 @@ public class MPesaService extends PaymentPlatform {
 
     @Override
     public PaymentResponse initPayment(PMSInvoice pmsInvoice, String msisdn, long accountId) throws PaymentRequestException {
+        if (!"KES".equalsIgnoreCase(StringUtils.defaultIfBlank(pmsInvoice.getCurrency(), "KES")))
+            throw new PaymentRequestException(ResponseCode.PAYMENT_CURRENCY_UNSUPPORTED);
         if (StringUtils.isBlank(msisdn)) {
             log.info("MSISDN is blank {}", msisdn);
             throw new PaymentRequestException(ResponseCode.PHONENUMBER_NOT_CONFIGURED_ERROR);

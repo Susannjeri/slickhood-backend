@@ -19,6 +19,7 @@ import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.eventlogger.EventService;
 import org.pms.silverocean.service.param.ParamService;
 import org.pms.silverocean.service.payment.PaymentDao;
+import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.payment.UpdatePaymentService;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.AuthenticationResponse;
 import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.MPesaPaymentDTO;
@@ -41,6 +42,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -65,6 +67,16 @@ class MPesaServiceDestinationSecurityTest {
     void setUp() {
         service = new MPesaService(restTemplateService, configService, paramService, eventService,
                 userDao, paymentDao, accountDao, updatePaymentService, new ObjectMapper());
+    }
+
+    @Test
+    void nonKesInvoiceIsRejectedBeforeStkInitialization() {
+        PMSInvoice invoice = invoice(); invoice.setCurrency("EUR");
+        assertThatThrownBy(() -> service.initPayment(invoice, "+254722788650", 91L))
+                .isInstanceOf(PaymentRequestException.class)
+                .extracting("responseCode")
+                .isEqualTo(org.pms.silverocean.common.ResponseCode.PAYMENT_CURRENCY_UNSUPPORTED);
+        verify(paymentDao, never()).savePMSPayment(any());
     }
 
     @Test

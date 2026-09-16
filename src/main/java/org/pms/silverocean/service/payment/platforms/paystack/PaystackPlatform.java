@@ -37,6 +37,9 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.pms.silverocean.service.payment.money.MonetaryPolicy;
 
 @Service("Paystack")
@@ -63,7 +66,9 @@ public class PaystackPlatform extends PaymentPlatform {
     @Value("${payment.paystack.callback-url:http://localhost:3000/payment/callback}")
     private String callbackUrl;
     @Value("${payment.paystack.currency:KES}")
-    private String defaultCurrency;
+    private String defaultCurrency = "KES";
+    @Value("${payment.paystack.supported-currencies:KES,USD,NGN,GHS,ZAR}")
+    private String supportedCurrencies = "KES,USD,NGN,GHS,ZAR";
     @Value("${payment.paystack.channels:card,mobile_money}")
     private String configuredChannels;
     @Value("${payment.paystack.fee-bearer:subaccount}")
@@ -86,6 +91,9 @@ public class PaystackPlatform extends PaymentPlatform {
 
     @Override
     protected PaymentResponse initPayment(PMSInvoice invoice, long accountId) throws PaymentRequestException {
+        String invoiceCurrency = MonetaryPolicy.currency(StringUtils.defaultIfBlank(invoice.getCurrency(), defaultCurrency));
+        if (!paystackCurrencies().contains(invoiceCurrency))
+            throw new PaymentRequestException(ResponseCode.PAYMENT_CURRENCY_UNSUPPORTED);
         Users customer = userDao.findById(userDao.getUserId()).orElseThrow();
         var account = accountDao.getAccountById(accountId);
         boolean subscription = StringUtils.isNotBlank(invoice.getSubscriptionPlanCode());
@@ -108,7 +116,7 @@ public class PaystackPlatform extends PaymentPlatform {
         try {
             PaystackInitializeRequest request = new PaystackInitializeRequest(
                     customer.getEmail(), MonetaryPolicy.toMinorUnits(invoice.moneyPendingAmount(), invoice.getCurrency()),
-                    MonetaryPolicy.currency(StringUtils.defaultIfBlank(invoice.getCurrency(), defaultCurrency)),
+                    invoiceCurrency,
                     String.valueOf(payment.getId()), callbackUrl, channels(), subaccountCode, subscription ? null : feeBearer);
             PaystackInitializeResponse response = restTemplateService.sendPostRequest(
                     apiUrl + INITIALIZE_PATH, request, authHeaders(), PaystackInitializeResponse.class);
@@ -132,6 +140,12 @@ public class PaystackPlatform extends PaymentPlatform {
             paymentDao.savePMSPayment(payment);
             throw e;
         }
+    }
+
+    private Set<String> paystackCurrencies() {
+        return Arrays.stream(StringUtils.defaultString(supportedCurrencies).split(","))
+                .map(value -> value.trim().toUpperCase(Locale.ROOT)).filter(value -> !value.isBlank())
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     @Override

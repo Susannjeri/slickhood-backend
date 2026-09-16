@@ -2,22 +2,25 @@ package org.pms.silverocean.service.payment.money;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Currency;
 import java.util.Locale;
-import java.util.Set;
 
 /** One monetary boundary for all SlickHood transactional values. */
 public final class MonetaryPolicy {
     public static final int SCALE = 2;
     public static final RoundingMode ROUNDING = RoundingMode.HALF_UP;
-    public static final Set<String> TRANSACTIONAL_CURRENCIES = Set.of("KES", "USD");
-
     private MonetaryPolicy() {}
 
     public static String currency(String value) {
         if (value == null) throw new IllegalArgumentException("Currency is required");
         String normalized = value.trim().toUpperCase(Locale.ROOT);
-        if (!TRANSACTIONAL_CURRENCIES.contains(normalized))
-            throw new IllegalArgumentException("Transactional currency must be KES or USD");
+        try {
+            Currency iso = Currency.getInstance(normalized);
+            if (iso.getDefaultFractionDigits() != SCALE)
+                throw new IllegalArgumentException("Currency is not compatible with the current two-decimal ledger");
+        } catch (IllegalArgumentException invalid) {
+            throw new IllegalArgumentException("A supported ISO 4217 currency code is required", invalid);
+        }
         return normalized;
     }
 

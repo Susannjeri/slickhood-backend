@@ -11,10 +11,14 @@ import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MonetaryPolicyTest {
-    @Test void supportsOnlyApprovedTransactionalCurrencies() {
+    @Test void supportsTwoDecimalIsoTransactionalCurrencies() {
         assertEquals("KES", MonetaryPolicy.currency(" kes "));
         assertEquals("USD", MonetaryPolicy.currency("usd"));
-        assertThrows(IllegalArgumentException.class, () -> MonetaryPolicy.currency("EUR"));
+        assertEquals("EUR", MonetaryPolicy.currency("eur"));
+        assertEquals("GBP", MonetaryPolicy.currency("gbp"));
+        assertEquals("ZAR", MonetaryPolicy.currency("zar"));
+        assertThrows(IllegalArgumentException.class, () -> MonetaryPolicy.currency("ZZZ"));
+        assertThrows(IllegalArgumentException.class, () -> MonetaryPolicy.currency("JPY"));
     }
 
     @Test void appliesOneDocumentedRoundingRule() {

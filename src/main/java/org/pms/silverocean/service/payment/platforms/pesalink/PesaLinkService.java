@@ -73,6 +73,8 @@ public class PesaLinkService extends PaymentPlatform {
 
     @Override
     protected PaymentResponse initPayment(PMSInvoice pmsInvoice, long accountId) throws PaymentRequestException {
+        if (!"KES".equalsIgnoreCase(StringUtils.hasText(pmsInvoice.getCurrency()) ? pmsInvoice.getCurrency() : "KES"))
+            throw new PaymentRequestException(ResponseCode.PAYMENT_CURRENCY_UNSUPPORTED);
         String bankAccount = paramService.getParamByAccountIdAndType(accountId,
                 PaymentChannel.PESA_LINK.findProperty(PaymentPropertyKeys.BANK_ACCOUNT), pmsInvoice.getPropertyId());
         String bankCode = paramService.getParamByAccountIdAndType(accountId,
