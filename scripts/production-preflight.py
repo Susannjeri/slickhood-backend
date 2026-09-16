@@ -157,7 +157,8 @@ def request_status(url: str, *, method: str = "GET", headers: dict[str, str] | N
         return error.code, error.read(1_048_576), dict(error.headers.items())
 
 
-def check_readiness(preflight: Preflight, readiness_url: str, expected_scope: set[str]) -> None:
+def check_readiness(preflight: Preflight, readiness_url: str, expected_scope: set[str],
+                    expected_whatsapp_status: str | None = None) -> None:
     try:
         status, body, _ = request_status(readiness_url)
         payload = json.loads(body)
@@ -165,7 +166,10 @@ def check_readiness(preflight: Preflight, readiness_url: str, expected_scope: se
         details = component.get("details", {})
         missing = details.get("missingOrUnsafeConfiguration", [])
         scope = {item.strip() for item in details.get("scope", "").split(",") if item.strip()}
-        if status == 200 and payload.get("status") == "UP" and not missing and expected_scope <= scope:
+        whatsapp_status = details.get("whatsappStatus")
+        whatsapp_matches = expected_whatsapp_status is None or whatsapp_status == expected_whatsapp_status
+        if (status == 200 and payload.get("status") == "UP" and not missing
+                and expected_scope <= scope and whatsapp_matches):
             preflight.pass_("backend production readiness")
         else:
             preflight.fail("backend production readiness", "endpoint is not UP, complete or safely configured")
@@ -497,6 +501,7 @@ def main() -> int:
     parser.add_argument("--expected-flyway-version", type=int, default=71)
     parser.add_argument("--expected-bucket", required=True)
     parser.add_argument("--expected-region", required=True)
+    parser.add_argument("--expected-whatsapp-status", choices=("enabled", "on-hold"))
     args = parser.parse_args()
 
     preflight = Preflight()
@@ -513,8 +518,10 @@ def main() -> int:
     check_clamav(preflight)
     expected_scope = {"wealth", "insurance", "affiliate", "services", "soko", "helpdesk"}
     if args.expected_flyway_version >= 95:
-        expected_scope.update({"notifications", "whatsapp"})
-    check_readiness(preflight, args.readiness_url, expected_scope)
+        expected_scope.add("notifications")
+        if args.expected_whatsapp_status == "enabled":
+            expected_scope.add("whatsapp")
+    check_readiness(preflight, args.readiness_url, expected_scope, args.expected_whatsapp_status)
     check_cors(preflight, args.public_origin.rstrip("/"))
     check_database(preflight, config, args.expected_flyway_version)
 

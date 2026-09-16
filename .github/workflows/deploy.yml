@@ -169,12 +169,18 @@ jobs:
             }
             run_preflight() {
               required_version="$1"
+              whatsapp_status="${2:-}"
+              whatsapp_args=""
+              if [ -n "$whatsapp_status" ]; then
+                whatsapp_args="--expected-whatsapp-status $whatsapp_status"
+              fi
               sudo python3 "$preflight" \
                 --readiness-url "$health_url" \
                 --public-origin "$public_origin" \
                 --expected-flyway-version "$required_version" \
                 --expected-bucket "$expected_bucket" \
-                --expected-region "$expected_region"
+                --expected-region "$expected_region" \
+                $whatsapp_args
             }
             trap cleanup EXIT
             cd /tmp/slickhood-backend-release
@@ -215,7 +221,7 @@ jobs:
             installed=true
             sudo systemctl restart pms.service
             if wait_for_health; then
-              run_preflight 95
+              run_preflight 95 on-hold
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
               installed=false
               exit 0
