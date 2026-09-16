@@ -34,6 +34,10 @@ public class ServiceCategoryDao {
         return repo.findById(id);
     }
 
+    public Page<ServiceCategory> listForAdmin(Boolean active, Pageable pageable) {
+        return active == null ? repo.findAll(pageable) : repo.findByActive(active, pageable);
+    }
+
     public Optional<ServiceCategory> findByNameAndActive(String name, boolean active) {
         return repo.findByNameAndActive(name, active);
     }

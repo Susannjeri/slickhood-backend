@@ -94,6 +94,29 @@ public class ServiceProviderAdminController extends OutputStreamErrorHandler {
                 page.getContent(), page.getTotalPages(), page.getTotalElements(), page.getSize()));
     }
 
+    @GetMapping("/service/{serviceId}")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).APPROVE_SP_SERVICE)")
+    public ResponseEntity<ResponseDTO> reviewDetails(@PathVariable long serviceId) {
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), serviceService.adminReview(serviceId)));
+    }
+
+    @GetMapping("/category/list")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SP_CATEGORIES)")
+    public ResponseEntity<ResponseDTO> listAdminCategories(@RequestParam(required = false) Boolean active, Pageable pageable) {
+        var page = categoryService.listAdminCategories(active, pageable);
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),
+                page.getContent(), page.getTotalPages(), page.getTotalElements(), page.getSize()));
+    }
+
+    @PutMapping("/category/{categoryId}/reactivate")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SP_CATEGORIES)")
+    public ResponseEntity<ResponseDTO> reactivateCategory(@PathVariable long categoryId) {
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), categoryService.reactivateCategory(categoryId)));
+    }
+
     @PutMapping("/service/{serviceId}/approve")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).APPROVE_SP_SERVICE)")
     public ResponseEntity<ResponseDTO> approveService(@PathVariable long serviceId,

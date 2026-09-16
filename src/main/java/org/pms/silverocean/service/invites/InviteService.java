@@ -185,9 +185,9 @@ public class InviteService {
                         }
                         if (unitDTO.templateId() == null) throw new PMSCustomException(ResponseCode.MISSING_LEASE_TEMPLATE);
                         validateTenantLeaseDates(leaseStartDate, leaseEndDate);
-                        LeaseDocumentType documentType = unitDTO.propertyType() != null
-                                && (unitDTO.propertyType().getCategory() == PMSPropertyCategory.COMMERCIAL
-                                || unitDTO.propertyType().getCategory() == PMSPropertyCategory.INDUSTRIAL)
+                        LeaseDocumentType documentType = unitDTO.propertyCategory() != null
+                                && (unitDTO.propertyCategory() == PMSPropertyCategory.COMMERCIAL
+                                || unitDTO.propertyCategory() == PMSPropertyCategory.INDUSTRIAL)
                                 ? LeaseDocumentType.COMMERCIAL_LEASE_AGREEMENT
                                 : LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT;
                         var agreementTemplate = documentTemplates

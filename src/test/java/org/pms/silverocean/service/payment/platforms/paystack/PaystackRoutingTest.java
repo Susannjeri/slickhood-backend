@@ -23,6 +23,37 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PaystackRoutingTest {
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"pending","ongoing","processing","queued"})
+    void pendingBrowserVerificationMustAllowLaterSuccessfulCallback(String state) {
+        invoice.setSubscriptionPlanCode("BRONZE");
+        platform.processPayment(invoice, null, 71L);
+        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByID(601L)).thenReturn(Optional.of(payment));
+        when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
+        doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
+                new PaystackPlatform.PaystackTransaction(123L, state, "601", 10000L, "KES", "Awaiting completion", "test")))
+                .when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
+
+        var pending = platform.confirmBrowserReturn("601", "127.0.0.1");
+        assertFalse(pending.paid());
+        assertTrue(payment.isInProgress(), "Nonterminal provider status must retain callback eligibility");
+        assertTrue(invoice.isTransactionInProgress(), "Do not unlock a duplicate checkout while provider is pending");
+        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), anyDouble());
+        verify(updater, never()).setInvoiceTransactionStatusByBillRefNumber("INV-TEST", false);
+
+        doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
+                new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test")))
+                .when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
+        doAnswer(call -> { invoice.setPaid(true); return null; }).when(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(100.0));
+        platform.handleCallBack(new PaystackCallbackDTO("{\"event\":\"charge.success\",\"data\":{\"reference\":\"601\"}}", "127.0.0.1"));
+        assertTrue(invoice.isPaid());
+        assertFalse(payment.isInProgress());
+        assertTrue(payment.isCompletedSuccessfully());
+        verify(updater, times(1)).setInvoiceToPaid(eq(invoice), eq("123"), eq(100.0));
+        platform.handleCallBack(new PaystackCallbackDTO("{\"event\":\"charge.success\",\"data\":{\"reference\":\"601\"}}", "127.0.0.1"));
+        verify(updater, times(1)).setInvoiceToPaid(eq(invoice), eq("123"), eq(100.0));
+    }
     final UserDao users = mock(UserDao.class);
     final PaymentDao payments = mock(PaymentDao.class);
     final AccountDao accounts = mock(AccountDao.class);

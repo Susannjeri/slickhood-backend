@@ -26,6 +26,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ServiceCategoryServiceTest {
+    @Test void refereeBoundsAreValidatedAtTheApiBoundary(){try(var factory=jakarta.validation.Validation.buildDefaultValidatorFactory()){var validator=factory.getValidator();assertEquals(0,validator.validate(new CreateCategoryRequest("General",null,Set.of(),0)).size());org.junit.jupiter.api.Assertions.assertFalse(validator.validate(new CreateCategoryRequest("General",null,Set.of(),-1)).isEmpty());org.junit.jupiter.api.Assertions.assertFalse(validator.validate(new CreateCategoryRequest("General",null,Set.of(),101)).isEmpty());}}
+    @Test void categoryAuditIsValidJsonAndIncludesRequirements() throws Exception {var category=new ServiceCategory();category.setName("Quoted \"category\"");category.setDescription("Line\nTwo");category.setRequiredNumberOfReferees(2);category.setRequiredDocumentTypes(Set.of(DocumentType.GOOD_CONDUCT));category.setActive(false);var json=new com.fasterxml.jackson.databind.ObjectMapper().readTree(category.toAuditJSON());assertEquals(2,json.get("requiredNumberOfReferees").asInt());assertEquals("GOOD_CONDUCT",json.get("requiredDocumentTypes").get(0).asText());org.junit.jupiter.api.Assertions.assertFalse(json.get("active").asBoolean());}
+    @Test void retiredCategoryCanBeReactivatedWithoutRemovingRequirements(){var category=new ServiceCategory();category.setId(8L);category.setActive(false);category.setRequiredNumberOfReferees(2);when(categoryDao.findById(8L)).thenReturn(java.util.Optional.of(category));var dto=service.reactivateCategory(8L);org.junit.jupiter.api.Assertions.assertTrue(dto.active());assertEquals(2,dto.requiredNumberOfReferees());verify(categoryDao).save(category,org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_SP_CATEGORIES);}
 
     @Mock
     private ServiceCategoryDao categoryDao;

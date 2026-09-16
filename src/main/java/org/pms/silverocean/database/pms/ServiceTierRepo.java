@@ -9,4 +9,5 @@ import org.springframework.data.jpa.repository.Query;
 public interface ServiceTierRepo extends JpaRepository<ServiceTier, Long> {
     @Query("SELECT t FROM ServiceTier t WHERE t.active = true ORDER BY t.name")
     Page<ServiceTier> findAllActive(Pageable pageable);
+    java.util.Optional<ServiceTier> findByNameIgnoreCaseAndActiveTrue(String name);
 }

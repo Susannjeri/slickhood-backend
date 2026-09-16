@@ -14,7 +14,7 @@ class UnitControllerSecurityTest {
                 UnitController.class.getMethod("getUnitTypeCatalog")
                         .getAnnotation(PreAuthorize.class).value());
         assertEquals("hasRole('SUPER_ADMIN')",
-                UnitController.class.getMethod("updateUnitTypeCatalog", PMSPropertyType.class, java.util.Set.class)
+                UnitController.class.getMethod("updateUnitTypeCatalog", String.class, java.util.Set.class,String.class)
                         .getAnnotation(PreAuthorize.class).value());
     }
 }

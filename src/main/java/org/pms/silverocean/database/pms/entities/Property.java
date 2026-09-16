@@ -32,6 +32,9 @@ import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 public class Property extends BaseCreatorEntity implements Auditable {
     private String name;
     private String type;
+    @Enumerated(EnumType.STRING) @Column(length=32) private org.pms.silverocean.service.property.PMSPropertyCategory typeCategory;
+    public org.pms.silverocean.service.property.PMSPropertyCategory getTypeCategoryResolved(){if(typeCategory!=null)return typeCategory;try{return org.pms.silverocean.service.property.PMSPropertyType.valueOf(type).getCategory();}catch(IllegalArgumentException error){throw new IllegalStateException("Unconfigured property type category");}}
+
     @Column(length = 32, nullable = false)
     @Enumerated(EnumType.STRING)
     @Builder.Default
@@ -48,7 +51,8 @@ public class Property extends BaseCreatorEntity implements Auditable {
 
     public Property(PropertyDTO dto) {
         this.name = dto.name().trim();
-        this.type = dto.type().name();
+        this.type = dto.type();
+        this.typeCategory = dto.category();
         this.managementMode = dto.managementMode() == null
                 ? PMSPropertyManagementMode.RENTAL
                 : dto.managementMode();
@@ -59,7 +63,8 @@ public class Property extends BaseCreatorEntity implements Auditable {
 
     public void updateFromDto(PropertyDTO dto) {
         this.name = dto.name().trim();
-        this.type = dto.type().name();
+        this.type = dto.type();
+        this.typeCategory = dto.category();
         if (dto.managementMode() != null) {
             this.managementMode = dto.managementMode();
         }

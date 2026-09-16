@@ -38,11 +38,14 @@ public class ServiceCategory extends BaseCreatorEntity implements Auditable {
 
     @Override
     public String toAuditJSON() {
-        return "{" +
-                "\"id\":" + getId() + "," +
-                "\"name\":\"" + name + "\"," +
-                "\"description\":\"" + description + "\"" +
-                "\"requiredNumberOfReferees\":\"" + requiredNumberOfReferees + "\"" +
-                "}";
+        var json = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        json.put("id", getId());
+        json.put("name", name);
+        json.put("description", description);
+        json.put("requiredNumberOfReferees", requiredNumberOfReferees);
+        json.put("active", isActive());
+        var documents = json.putArray("requiredDocumentTypes");
+        if (requiredDocumentTypes != null) requiredDocumentTypes.stream().map(Enum::name).sorted().forEach(documents::add);
+        return json.toString();
     }
 }

@@ -33,7 +33,8 @@ public final class AffiliateModels {
     }
     public record Dashboard(Profile profile,long totalReferrals,long conversions,BigDecimal conversionRatePercent,
             BigDecimal availableBalance,BigDecimal pendingEarnings,BigDecimal lifetimeEarnings,BigDecimal pendingPayouts,
-            List<Referral> referrals,List<Commission> commissions,List<Payout> payouts,boolean historyLimited) {}
+            List<Referral> referrals,List<Commission> commissions,List<Payout> payouts,boolean historyLimited,RewardTerms rewardTerms) {}
+    public record RewardTerms(int eligiblePaymentCount,int holdDays) {}
     public record PayoutAccount(@NotNull Long paymentAccountId) {}
     public record PayoutDecision(@NotBlank String status,@Size(max=100) String paymentReference,@Size(max=1000) String notes) {}
 }

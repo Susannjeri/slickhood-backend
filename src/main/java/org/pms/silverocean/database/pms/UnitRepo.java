@@ -37,7 +37,7 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
 
     Optional<Unit> findByRefAndPropertyId(String ref, long propertyId);
 
-    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.id=:id AND u.createdBy=:createdBy AND u.active")
+    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type, p.typeCategory) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.id=:id AND u.createdBy=:createdBy AND u.active")
     Optional<DbUnitDTO> findDTOByIdAndCreatedByAndActiveTrue(Long id, long createdBy);
 
     Optional<Unit> findByIdAndCreatedByAndActiveTrue(Long id, long createdBy);
@@ -45,7 +45,7 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
     @Query("SELECT u FROM Unit u JOIN Invite li ON u.id=li.entityId WHERE li.type=:inviteType AND li.token=:token AND li.active AND li.expiryDate >= CURRENT_TIMESTAMP AND u.active")
     Optional<Unit> findByTokenAndActiveTrue(String token, String inviteType);
 
-    @Query("SELECT  new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id JOIN Invite li ON u.id=li.entityId WHERE li.type=:inviteType AND li.token=:token AND li.active AND li.expiryDate >= CURRENT_TIMESTAMP AND u.active")
+    @Query("SELECT  new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type, p.typeCategory) FROM Unit u JOIN Property p ON u.propertyId=p.id JOIN Invite li ON u.id=li.entityId WHERE li.type=:inviteType AND li.token=:token AND li.active AND li.expiryDate >= CURRENT_TIMESTAMP AND u.active")
     Optional<DbUnitDTO> findUnitDtoByTokenAndActiveTrue(String token, String inviteType);
 
     @Modifying
@@ -67,29 +67,29 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
             "AND po.homeownerUserId=:userId AND po.active))")
     Optional<Unit> findAdvertisableByUser(Long id, long userId);
 
-    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND " +
+    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type, p.typeCategory) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND " +
             "(p.createdBy=:userId " +
             " OR EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.active)" +
             " OR EXISTS (SELECT 1 FROM UnitTenant ut WHERE ut.unitId=u.id AND ut.userId=:userId AND ut.active)" +
             " OR EXISTS (SELECT 1 FROM PropertyOwnership po WHERE po.propertyId=p.id AND (po.unitId IS NULL OR po.unitId=u.id) AND po.homeownerUserId=:userId AND po.active))")
     Optional<DbUnitDTO> findByIdAndStaffOrOwnerOrTenant(Long id, long userId);
 
-    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM UnitTenant ut WHERE ut.unitId=u.id AND ut.userId=:userId AND ut.active)")
+    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type, p.typeCategory) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM UnitTenant ut WHERE ut.unitId=u.id AND ut.userId=:userId AND ut.active)")
     Optional<DbUnitDTO> findDTOByIdAndTenant(Long id, long userId);
 
-    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.active)")
+    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type, p.typeCategory) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.active)")
     Optional<DbUnitDTO> findDTOByIdAndManagerRole(Long id, long userId, String roleName);
 
-    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:inviteId AND pm.active)")
+    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type, p.typeCategory) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:inviteId AND pm.active)")
     Optional<DbUnitDTO> findDTOByIdAndManagerRoleAndInviteId(Long id, long userId, String roleName, long inviteId);
 
     @Query("SELECT u FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyManager pm WHERE pm.propertyId=p.id AND pm.userId=:userId AND pm.roleName=:roleName AND pm.inviteId=:inviteId AND pm.active)")
     Optional<Unit> findEntityByIdAndManagerRoleAndInviteId(Long id, long userId, String roleName, long inviteId);
 
-    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyOwnership o WHERE o.unitId=u.id AND o.homeownerUserId=:userId AND o.active)")
+    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type, p.typeCategory) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM PropertyOwnership o WHERE o.unitId=u.id AND o.homeownerUserId=:userId AND o.active)")
     Optional<DbUnitDTO> findDTOByIdAndHomeowner(Long id, long userId);
 
-    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM SaleTransaction s WHERE s.unitId=u.id AND s.buyerUserId=:userId AND s.active)")
+    @Query("SELECT new org.pms.silverocean.service.property.wrappers.DbUnitDTO(u, p.type, p.typeCategory) FROM Unit u JOIN Property p ON u.propertyId=p.id WHERE u.active AND p.active AND u.id=:id AND EXISTS (SELECT 1 FROM SaleTransaction s WHERE s.unitId=u.id AND s.buyerUserId=:userId AND s.active)")
     Optional<DbUnitDTO> findDTOByIdAndBuyer(Long id, long userId);
 
     Integer countAllByPropertyIdAndActiveTrue(Long propertyId);

@@ -33,11 +33,14 @@ class AffiliateServiceTest {
     @Mock UserDao users;
     @Mock InvoiceDao invoices;
     @Mock AccountDao accounts;
+    @Mock AffiliateQueryRepo queries;
+    @Mock org.pms.silverocean.service.audit.AuditLogService audit;
+    @Mock org.pms.silverocean.service.notification.BusinessNotificationService alerts;
     AffiliateService service;
 
     @BeforeEach
     void setup() {
-        service = new AffiliateService(profiles, referrals, commissions, payouts, users, invoices, accounts);
+        service = new AffiliateService(profiles, referrals, commissions, payouts, users, invoices, accounts, queries, audit, alerts);
         ReflectionTestUtils.setField(service, "defaultRate", BigDecimal.TEN);
         ReflectionTestUtils.setField(service, "eligiblePaymentCount", 3);
         ReflectionTestUtils.setField(service, "defaultMinimumPayout", BigDecimal.valueOf(1000));
@@ -142,6 +145,40 @@ class AffiliateServiceTest {
         assertEquals("Chargeback confirmed", commission.getReversalReason());
         assertNotNull(commission.getReversedAt());
         verify(commissions).save(commission);
+    }
+
+    @Test void publishedPolicyControlsFutureEligibilityAndHoldingWithoutReplacingAffiliateRate() {
+        var policies=mock(AffiliatePolicyService.class);service.setPolicies(policies);
+        when(policies.current()).thenReturn(new AffiliatePolicyService.Policy(new BigDecimal("25"),4,new BigDecimal("2000"),7,1));
+        var invoice=paidSubscription();var referral=referral();var profile=profile();
+        when(invoices.getInvoiceById(10L)).thenReturn(Optional.of(invoice));
+        when(referrals.findForCommissionByReferredUserId(8L)).thenReturn(Optional.of(referral));
+        when(profiles.findByUserIdAndActiveTrue(4L)).thenReturn(Optional.of(profile));
+        when(commissions.findAllByReferredUserIdAndActiveTrueOrderByEarnedAtAsc(8L)).thenReturn(List.of(new AffiliateCommission(),new AffiliateCommission(),new AffiliateCommission()));
+        service.recordPaidConversion(10L,"POLICY-FIXTURE");
+        verify(commissions).save(argThat(c->c.getEligibleSequence()==4&&c.getCommissionRate().compareTo(BigDecimal.TEN)==0&&c.getAvailableAt().equals(c.getEarnedAt().plusDays(7))));
+    }
+
+    @Test
+    void suspendedAndBlacklistedAffiliatesCannotEarnOrRequestPayment() {
+        PMSInvoice invoice = paidSubscription();
+        AffiliateReferral referral = referral();
+        AffiliateProfile profile = profile();
+        profile.setStatus("SUSPENDED");
+        when(invoices.getInvoiceById(10L)).thenReturn(Optional.of(invoice));
+        when(referrals.findForCommissionByReferredUserId(8L)).thenReturn(Optional.of(referral));
+        when(profiles.findByUserIdAndActiveTrue(4L)).thenReturn(Optional.of(profile));
+
+        service.recordPaidConversion(10L, "PAY-SUSPENDED");
+
+        verify(commissions, never()).save(any());
+        when(users.hasRole(PMSRole.AFFILIATE)).thenReturn(true);
+        when(users.getUserId()).thenReturn(4L);
+        when(profiles.findForUpdateByUserId(4L)).thenReturn(Optional.of(profile));
+        assertThrows(RuntimeException.class, service::requestPayout);
+        profile.setStatus("BLACKLISTED");
+        assertThrows(RuntimeException.class, service::requestPayout);
+        verifyNoInteractions(accounts);
     }
 
     private static PMSInvoice paidSubscription() {

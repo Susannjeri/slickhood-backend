@@ -51,13 +51,13 @@ public class PropertyController extends BasePropertyController {
     @PostMapping("/create")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CREATE_PROPERTY)")
     public ResponseEntity<ResponseDTO> createProperty(@RequestParam("name") String name,
-                                                      @RequestParam("type") PMSPropertyType type,
+                                                      @RequestParam("type") String type,
                                                       @RequestParam(value = "managementMode", defaultValue = "RENTAL") PMSPropertyManagementMode managementMode,
                                                       @RequestParam("address") String address,
                                                       @RequestParam("mapLocation") String mapLocation,
                                                       @RequestParam("currency") String currency,
                                                       @RequestParam("image") MultipartFile image) {
-        PropertyDTO propertyDTO = new PropertyDTO(name, type, type.getCategory(), managementMode, address, mapLocation, currency, null, null, null);
+        PropertyDTO propertyDTO = new PropertyDTO(name, type, null, managementMode, address, mapLocation, currency, null, null, null);
         Optional<ResponseDTO> violations = validate(propertyDTO);
         if (violations.isPresent()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(violations.get());
@@ -103,13 +103,13 @@ public class PropertyController extends BasePropertyController {
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_PROPERTY)")
     public ResponseEntity<ResponseDTO> updateProperty(@RequestParam long propertyId,
                                                       @RequestParam("name") String name,
-                                                      @RequestParam("type") PMSPropertyType type,
+                                                      @RequestParam("type") String type,
                                                       @RequestParam(value = "managementMode", required = false) Optional<PMSPropertyManagementMode> managementMode,
                                                       @RequestParam("address") String address,
                                                       @RequestParam("mapLocation") String mapLocation,
                                                       @RequestParam("currency") String currency,
                                                       @RequestParam("image") Optional<MultipartFile> image) {
-        PropertyDTO propertyDTO = new PropertyDTO(name, type, type.getCategory(), managementMode.orElse(null), address, mapLocation, currency, propertyId, null, null);
+        PropertyDTO propertyDTO = new PropertyDTO(name, type, null, managementMode.orElse(null), address, mapLocation, currency, propertyId, null, null);
         Optional<ResponseDTO> violations = validate(propertyDTO);
         if (violations.isPresent()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(violations.get());

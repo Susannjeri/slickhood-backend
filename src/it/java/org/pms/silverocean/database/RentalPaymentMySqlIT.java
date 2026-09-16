@@ -175,6 +175,50 @@ class RentalPaymentMySqlIT {
     @Autowired DomainEventOutboxRepo notificationOutbox;
     @Autowired PropertyListingRepo propertyListings;
     @Autowired CommunityFundRepo communityFunds;
+    @Autowired AffiliateQueryRepo affiliateQueries;
+    @Autowired AffiliateProfileRepo affiliateProfiles;
+    @Autowired AffiliateCommissionRepo affiliateCommissions;
+    @Autowired AffiliatePayoutRepo affiliatePayouts;
+    @Autowired AffiliateReferralRepo affiliateReferrals;
+    @Autowired ServiceTierRepo serviceTiers;
+    @Autowired CustomPropertyTypeRepo customPropertyTypes;
+    @Autowired AffiliatePolicyRepo affiliatePolicies;
+
+    @Test void customPropertyTypePersistsAndResolvesUnitViewsWithoutEnumErrors() {
+        var type=new CustomPropertyType();type.setCode("CUSTOM_CO_LIVING");type.setName("Co-living");type.setCategory(org.pms.silverocean.service.property.PMSPropertyCategory.COMMERCIAL);type.setActive(true);type.setUnitTypes(new java.util.HashSet<>(java.util.Set.of(org.pms.silverocean.service.property.PMSUnitTypes.STUDIO)));customPropertyTypes.saveAndFlush(type);
+        var property=Property.builder().name("Co-living block").type(type.getCode()).typeCategory(type.getCategory()).currency("KES").build();property.setActive(true);property.setCreatedBy(501L);properties.saveAndFlush(property);
+        var unit=new Unit();unit.setPropertyId(property.getId());unit.setRef("CUSTOM-01");unit.setUnitType("STUDIO");unit.setLeaseMode("RENT");unit.setCurrency("KES");unit.setPrice(1000.0);unit.setSize(50.0);unit.setMeasurementUnits(1);unit.setActive(true);unit.setCreatedBy(501L);units.saveAndFlush(unit);
+        var view=units.findDTOByIdAndCreatedByAndActiveTrue(unit.getId(),501L).orElseThrow();assertEquals(type.getCode(),view.propertyType());assertEquals(type.getCategory(),view.propertyCategory());assertEquals(java.util.Set.of(org.pms.silverocean.service.property.PMSUnitTypes.STUDIO),customPropertyTypes.findByCode(type.getCode()).orElseThrow().getUnitTypes());
+        type.setActive(false);customPropertyTypes.saveAndFlush(type);assertEquals(type.getCode(),units.findDTOByIdAndCreatedByAndActiveTrue(unit.getId(),501L).orElseThrow().propertyType());assertEquals(type.getCode(),new org.pms.silverocean.service.property.wrappers.PropertyViewDTO(property,null).type());
+    }
+
+    @Test void affiliatePolicyPersistsWithOptimisticVersionWithoutChangingExistingProfiles() {
+        assertTrue(affiliatePolicies.findByPolicyKey("GLOBAL").isEmpty());var policy=new AffiliatePolicy();policy.setActive(true);policy.setCommissionRate(new java.math.BigDecimal("12.50"));policy.setEligiblePaymentCount(4);policy.setMinimumPayout(new java.math.BigDecimal("2000.00"));policy.setHoldDays(7);affiliatePolicies.saveAndFlush(policy);long firstVersion=policy.getVersion();policy.setHoldDays(10);affiliatePolicies.saveAndFlush(policy);assertTrue(policy.getVersion()>firstVersion);assertEquals(new java.math.BigDecimal("12.50"),affiliatePolicies.findByPolicyKey("GLOBAL").orElseThrow().getCommissionRate());
+    }
+    @Test void affiliateDirectoryAndHistoryKeepCurrencyAndIdentityBoundaries(){
+        var owner=user("Affiliate Fixture","affiliate-fixture@example.test","+254700000029");
+        var profile=new AffiliateProfile();profile.setUserId(owner.getId());profile.setReferralCode("SH-FIXTURE123456789");profile.setStatus("ACTIVE");profile.setCurrency("KES");profile.setActive(true);affiliateProfiles.saveAndFlush(profile);
+        var first=new AffiliateCommission();first.setAffiliateUserId(owner.getId());first.setInvoiceId(90001L);first.setCurrency("KES");first.setCommissionAmount(java.math.BigDecimal.valueOf(1000));first.setStatus("EARNED");first.setActive(true);affiliateCommissions.saveAndFlush(first);
+        var second=new AffiliateCommission();second.setAffiliateUserId(owner.getId());second.setInvoiceId(90002L);second.setCurrency("USD");second.setCommissionAmount(java.math.BigDecimal.valueOf(10));second.setStatus("PENDING");second.setActive(true);affiliateCommissions.saveAndFlush(second);
+        var payout=new AffiliatePayout();payout.setAffiliateUserId(owner.getId());payout.setCurrency("USD");payout.setAmount(java.math.BigDecimal.valueOf(7));payout.setPayoutNumber("AFP-FIXTURE-01");payout.setStatus("REQUESTED");payout.setActive(true);affiliatePayouts.saveAndFlush(payout);
+        assertEquals(1,affiliateQueries.directory("%affiliate-fixture%",null,PageRequest.of(0,20)).getTotalElements());
+        assertEquals(0,affiliateQueries.directory(null,"INACTIVE",PageRequest.of(0,20)).getTotalElements());
+        assertEquals(2,affiliateQueries.balances(owner.getId()).size());
+        assertEquals(0,affiliateQueries.lifetime(owner.getId(),"KES").compareTo(java.math.BigDecimal.valueOf(1000)));
+        assertEquals(0,affiliateQueries.pendingPayouts(owner.getId(),"KES").signum());
+        assertEquals(0,affiliateQueries.pendingPayouts(owner.getId(),"USD").compareTo(java.math.BigDecimal.valueOf(7)));
+        assertEquals(2,affiliateQueries.commissions(owner.getId(),PageRequest.of(0,1)).getTotalElements());
+        assertTrue(affiliateQueries.commissions(owner.getId()+100,PageRequest.of(0,20)).isEmpty());
+        assertTrue(affiliateQueries.referrals(owner.getId(),PageRequest.of(0,20)).isEmpty());
+        assertEquals(1,affiliateQueries.payouts(owner.getId(),PageRequest.of(0,20)).getTotalElements());
+        assertEquals(1,affiliateQueries.payoutQueue("%fixture%","REQUESTED",PageRequest.of(0,20)).getTotalElements());
+    }
+    @Test void serviceTierLookupRequiresAnActiveConfiguredTier(){
+        var tier=new ServiceTier();tier.setName("Fixture Gold");tier.setActive(true);serviceTiers.saveAndFlush(tier);
+        assertTrue(serviceTiers.findByNameIgnoreCaseAndActiveTrue("fixture gold").isPresent());
+        tier.setActive(false);serviceTiers.saveAndFlush(tier);
+        assertTrue(serviceTiers.findByNameIgnoreCaseAndActiveTrue("Fixture Gold").isEmpty());
+    }
     @Test void adminMetricsKeepRepeatedInvoiceAmountsAndHandleEmptyUsers() {
         assertEquals(0.0, users.getActiveUserPercentage());
         var active = user("Active", "admin-metrics-active@example.test", "+254700000010");

@@ -11,7 +11,7 @@ public record PropertyViewDTO(Long id,
                               ZonedDateTime createdOn,
                               LocalDateTime lastModifiedDate,
                               String name,
-                              PMSPropertyType type,
+                              String type,
                               PMSPropertyManagementMode managementMode,
                               String address,
                               String mapLocation,
@@ -21,7 +21,7 @@ public record PropertyViewDTO(Long id,
                               boolean hasUnits) {
     public PropertyViewDTO(Property property, String thumbNail) {
         this(property.getId(), property.getCreatedOn(), property.getLastModifiedDate(), property.getName(),
-                PMSPropertyType.valueOf(property.getType().toUpperCase()), property.getManagementMode(), property.getAddress(), property.getMapLocation(),
+                property.getType(), property.getManagementMode(), property.getAddress(), property.getMapLocation(),
                 property.getCurrency(), property.getRef(), thumbNail, property.isHasUnits());
     }
 }

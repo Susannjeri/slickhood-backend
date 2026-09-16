@@ -19,6 +19,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class UnitTypeDaoTest {
+    @Test void staleCatalogueSnapshotCannotOverwriteAnotherAdministratorsChanges(){var repository=mock(UnitTypeMappingRepo.class);var audit=mock(AuditLogService.class);when(repository.findAllForUpdateByPropertyType(PMSPropertyType.APARTMENT_BLOCK)).thenReturn(new ArrayList<>(List.of(mapping(PMSUnitTypes.STUDIO,true),mapping(PMSUnitTypes.ONE_BEDROOM,true))));assertThrows(PMSCustomException.class,()->new UnitTypeDao(repository,audit).replaceMappings(PMSPropertyType.APARTMENT_BLOCK,Set.of(PMSUnitTypes.STUDIO),Set.of(PMSUnitTypes.STUDIO)));org.mockito.Mockito.verify(repository,org.mockito.Mockito.never()).saveAll(anyList());org.mockito.Mockito.verifyNoInteractions(audit);}
     @Test
     void replaceMappingsActivatesSelectionsAndDeactivatesRemovedTypes() {
         UnitTypeMappingRepo repository = mock(UnitTypeMappingRepo.class);

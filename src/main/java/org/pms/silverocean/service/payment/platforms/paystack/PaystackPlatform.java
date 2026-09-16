@@ -206,14 +206,25 @@ public class PaystackPlatform extends PaymentPlatform {
                 apiUrl + VERIFY_PATH + payment.getId(), authHeaders(), PaystackVerifyResponse.class);
         eventService.saveEvent(response, payment.getId());
         PaystackTransaction data = response == null ? null : response.data();
-        boolean valid = response != null && response.status() && data != null
-                && SUCCESS.equals(data.status())
+        boolean matchingTransaction = response != null && response.status() && data != null
                 && String.valueOf(payment.getId()).equals(data.reference())
                 && StringUtils.equals(secretKey.startsWith("sk_test_") ? "test" : "live", data.domain())
                 && toSubunit(payment.getAmount()) == data.amount();
 
         PMSInvoice invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference()).orElse(null);
-        valid = valid && invoice != null && StringUtils.equalsIgnoreCase(invoice.getCurrency(), data.currency());
+        matchingTransaction = matchingTransaction && invoice != null && StringUtils.equalsIgnoreCase(invoice.getCurrency(), data.currency());
+
+        // Browser returns can precede final provider completion (for example mobile-money OTP).
+        // Keep the attempt and invoice locked so a later signed callback can reconcile it,
+        // and the customer is not encouraged to create a second charge.
+        if (matchingTransaction && data.status() != null && java.util.Set.of("pending", "ongoing", "processing", "queued").contains(data.status())) {
+            payment.setSourceIp(sourceIp);
+            payment.setStatus(data.status());
+            payment.setStatusDesc("Awaiting verified Paystack completion");
+            paymentDao.savePMSPayment(payment);
+            return;
+        }
+        boolean valid = matchingTransaction && SUCCESS.equals(data.status());
 
         payment.setSourceIp(sourceIp);
         payment.setInProgress(false);

@@ -187,16 +187,19 @@ public class PropertyService {
     }
 
     public ResponseDTO getSupportedPropertyTypes(String filter) {
-        List<TypeCatalogOption> propertyTypes = PMSPropertyType.search(filter, i18NService).stream()
+        List<TypeCatalogOption> propertyTypes = new java.util.ArrayList<>(PMSPropertyType.search(filter, i18NService).stream()
                 .map(this::propertyTypeOption)
                 .sorted(java.util.Comparator.comparingInt(TypeCatalogOption::displayOrder))
-                .toList();
+                .toList());
+        unitTypeDao.customTypes().stream().filter(t->t.isActive()&&(filter==null||t.getName().toLowerCase(java.util.Locale.ROOT).contains(filter.toLowerCase(java.util.Locale.ROOT))||t.getCode().contains(filter.toUpperCase(java.util.Locale.ROOT)))).map(this::customTypeOption).forEach(propertyTypes::add);
         return new ResponseDTO(true, ResponseCode.PROPERTY_TYPES.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.PROPERTY_TYPES), propertyTypes);
     }
 
-    public ResponseDTO getUnitTypes(PMSPropertyType propertyType) {
-        List<TypeCatalogOption> unitTypes = unitTypeDao.getByPropertyType(propertyType).stream()
+    public ResponseDTO getUnitTypes(PMSPropertyType propertyType) {return unitTypeResponse(unitTypeDao.getByPropertyType(propertyType));}
+    public ResponseDTO getUnitTypes(String propertyType) {return unitTypeResponse(unitTypeDao.getByPropertyType(propertyType));}
+    private ResponseDTO unitTypeResponse(Set<PMSUnitTypes> enabled) {
+        List<TypeCatalogOption> unitTypes = enabled.stream()
                 .map(this::unitTypeOption)
                 .sorted(java.util.Comparator.comparingInt(TypeCatalogOption::displayOrder))
                 .toList();
@@ -210,13 +213,14 @@ public class PropertyService {
                 .sorted(java.util.Comparator.comparingInt(TypeCatalogOption::displayOrder))
                 .toList();
         var configuredCatalog = unitTypeDao.getConfiguredCatalog();
-        List<PropertyUnitTypeCatalogDTO> properties = EnumSet.allOf(PMSPropertyType.class).stream()
+        List<PropertyUnitTypeCatalogDTO> properties = new java.util.ArrayList<>(EnumSet.allOf(PMSPropertyType.class).stream()
                 .map(propertyType -> new PropertyUnitTypeCatalogDTO(
                         propertyTypeOption(propertyType),
                         configuredCatalog.getOrDefault(propertyType, Set.of()).stream()
                                 .map(Enum::name).collect(Collectors.toSet())))
                 .sorted(java.util.Comparator.comparingInt(item -> item.propertyType().displayOrder()))
-                .toList();
+                .toList());
+        unitTypeDao.customTypes().stream().filter(t->t.isActive()).map(t->new PropertyUnitTypeCatalogDTO(customTypeOption(t),t.getUnitTypes().stream().map(Enum::name).collect(Collectors.toSet()))).forEach(properties::add);
         return new ResponseDTO(true, ResponseCode.UNIT_TYPES.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.UNIT_TYPES),
                 new UnitTypeCatalogDTO(properties, allUnitTypes));
@@ -227,7 +231,13 @@ public class PropertyService {
         unitTypeDao.replaceMappings(propertyType, unitTypes);
         return getUnitTypes(propertyType);
     }
+    @Transactional
+    public ResponseDTO updateUnitTypeCatalog(PMSPropertyType propertyType,Set<PMSUnitTypes> unitTypes,Set<PMSUnitTypes> expectedTypes){unitTypeDao.replaceMappings(propertyType,unitTypes,expectedTypes);return getUnitTypes(propertyType);}
 
+    @Transactional public ResponseDTO updateUnitTypeCatalog(String code,Set<PMSUnitTypes> types,Set<PMSUnitTypes> expected){unitTypeDao.replaceMappings(code,types,expected);return getUnitTypes(code);}
+    private TypeCatalogOption customTypeOption(org.pms.silverocean.database.pms.entities.CustomPropertyType t){return new TypeCatalogOption(t.getCode(),t.getName(),t.getDescription(),t.getCategory().name(),10000,false);}
+    private PropertyDTO validatedType(PropertyDTO dto){var category=unitTypeDao.requireType(dto.type());return new PropertyDTO(dto.name(),dto.type(),category,dto.managementMode(),dto.address(),dto.mapLocation(),dto.currency(),dto.id(),dto.thumbNail(),dto.userRoleInProperty());}
+    private boolean allowedPropertyUnit(Property property,PMSUnitTypes type){try{return unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()),type);}catch(IllegalArgumentException error){return unitTypeDao.isAllowedCode(property.getType(),type);}}
     private TypeCatalogOption propertyTypeOption(PMSPropertyType type) {
         int commonIndex = COMMON_PROPERTY_TYPES.indexOf(type);
         int categoryOrder = type.getCategory().ordinal();
@@ -291,6 +301,7 @@ public class PropertyService {
             return imageValidationError.get();
         }
 
+        propertyDTO = validatedType(propertyDTO);
         Property property = new Property(propertyDTO);
         property.setActive(true);
         property.setCreatedBy(user.getId());
@@ -507,12 +518,6 @@ public class PropertyService {
             }
         }
         Property property = targetProperty.get();
-        if (!unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()), unitDTO.unitType())
-                || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
-            return new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
-                    i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA));
-        }
-
         //get unit from db
         Optional<Unit> unitFromDb = findUnitForOwnerOrSelectedStaff(unitId);
         if (unitFromDb.isEmpty()) {
@@ -522,6 +527,12 @@ public class PropertyService {
         Unit unit = unitFromDb.get();
         if (unit.getPropertyId() != unitDTO.propertyId()) {
             throw new PMSCustomException(ResponseCode.UNIT_PROPERTY_CHANGE_BLOCKED);
+        }
+        if ((!Objects.equals(unit.getUnitType(), unitDTO.unitType().name())
+                && !allowedPropertyUnit(property, unitDTO.unitType()))
+                || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
+            return new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA));
         }
         boolean modeChanged = !Objects.equals(unit.getLeaseMode(), unitDTO.leaseMode().name());
         if (modeChanged) {
@@ -665,6 +676,8 @@ public class PropertyService {
             if (propertyDTO.managementMode() != null) {
                 subscriptionEntitlements.requireUnitMode(defaultUnitMode(propertyDTO.managementMode()));
             }
+            if(!property.getType().equals(propertyDTO.type()))propertyDTO=validatedType(propertyDTO);
+            else propertyDTO=new PropertyDTO(propertyDTO.name(),propertyDTO.type(),property.getTypeCategoryResolved(),propertyDTO.managementMode(),propertyDTO.address(),propertyDTO.mapLocation(),propertyDTO.currency(),propertyDTO.id(),propertyDTO.thumbNail(),propertyDTO.userRoleInProperty());
             property.updateFromDto(propertyDTO);
             if (image != null && image.getSize() > 0) {
                 Optional<ResponseDTO> imageValidationError = validateImage(image);
@@ -689,7 +702,7 @@ public class PropertyService {
         }
         Property property = propertyOptional.get();
         subscriptionEntitlements.requireUnitMode(unitDTO.leaseMode());
-        if (!unitTypeDao.isAllowed(PMSPropertyType.valueOf(property.getType()), unitDTO.unitType())
+        if (!allowedPropertyUnit(property, unitDTO.unitType())
                 || unitDTO.utilities().stream().anyMatch(utility -> unitDao.getUtilities(utility.id()).isEmpty())) {
             return Pair.of(new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.INVALID_FIELD_DATA)), null);

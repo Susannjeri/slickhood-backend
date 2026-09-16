@@ -82,6 +82,7 @@ public class ProviderServiceService {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
 
         ServiceCategory category = categoryDao.findById(request.categoryId())
+                .filter(ServiceCategory::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
 
         ProviderService service = new ProviderService();
@@ -115,6 +116,7 @@ public class ProviderServiceService {
         }
 
         ServiceCategory category = categoryDao.findById(request.categoryId())
+                .filter(ServiceCategory::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
 
         service.setCategoryId(category.getId());
@@ -143,6 +145,9 @@ public class ProviderServiceService {
 
         validateReadiness(service, false);
 
+        categoryDao.findById(service.getCategoryId()).filter(ServiceCategory::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
+
         service.setStatus(ProviderServiceStatus.SUBMITTED.name());
         serviceDao.save(service, Permission.EDIT_SP_SERVICE);
     }
@@ -156,6 +161,28 @@ public class ProviderServiceService {
 
     public Page<ProviderServiceDTO> listPendingAdminReview(Pageable pageable) {
         return serviceDao.findPendingAdminReviewEnriched(pageable);
+    }
+
+    public record AdminReview(ProviderServiceDTO service, Readiness readiness, java.util.List<String> outstandingMatrixRequirements) {}
+
+    public AdminReview adminReview(long serviceId) {
+        ProviderService service = serviceDao.findById(serviceId).filter(ProviderService::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        var category = categoryDao.findById(service.getCategoryId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
+        Set<String> uploaded = presentDocumentTypes(service, false), verified = presentDocumentTypes(service, true);
+        Set<String> outstanding = new LinkedHashSet<>();
+        if (category.getRequiredDocumentTypes() != null) category.getRequiredDocumentTypes().forEach(type -> {
+            if (!verified.contains(type.name())) outstanding.add(type.name());
+        });
+        var profile=profileDao.findById(service.getProfileId()).filter(ProviderProfile::isActive).orElseThrow(()->new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        var user=userDao.findById(profile.getUserId()).orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
+        var type=org.pms.silverocean.service.users.ProfileType.valueOf(user.getProfileType());
+        var missingMatrix=new java.util.LinkedHashSet<String>(marketplaceKycGate.missingRequirements(profile.getUserId(),"PROVIDER_TYPE","SERVICE_PROVIDER",type));
+        missingMatrix.addAll(marketplaceKycGate.missingRequirements(profile.getUserId(),"SERVICE_CATEGORY",String.valueOf(service.getCategoryId()),type));
+        return new AdminReview(toDTO(service), new Readiness(uploaded, verified, outstanding,
+                refereeDao.countByProfileId(service.getProfileId()), refereeDao.countVerifiedByProfileId(service.getProfileId()),
+                category.getRequiredNumberOfReferees()),java.util.List.copyOf(missingMatrix));
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -208,7 +235,7 @@ public class ProviderServiceService {
     public void assignTier(long serviceId, AssignTierRequest request) {
         ProviderService service = serviceDao.findByIdForUpdate(serviceId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
-        service.setTier(request.tier());
+        service.setTier(serviceDao.requireActiveTier(request.tier()));
         serviceDao.save(service, Permission.ASSIGN_SP_TIER);
     }
 

@@ -25,6 +25,14 @@ import java.util.concurrent.ExecutionException;
 public class UnitTypeDao {
     private final UnitTypeMappingRepo unitTypeMappingRepo;
     private final AuditLogService auditLogService;
+    private CustomPropertyTypeService custom;
+    @org.springframework.beans.factory.annotation.Autowired public void setCustomPropertyTypes(CustomPropertyTypeService custom){this.custom=custom;}
+    public java.util.List<org.pms.silverocean.database.pms.entities.CustomPropertyType> customTypes(){return custom==null?java.util.List.of():custom.all();}
+    public PMSPropertyCategory requireType(String code){try{return PMSPropertyType.valueOf(code).getCategory();}catch(IllegalArgumentException error){var t=custom.get(code);if(!t.isActive())throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);return t.getCategory();}}
+    public Set<PMSUnitTypes> getByPropertyType(String code){try{return getByPropertyType(PMSPropertyType.valueOf(code));}catch(IllegalArgumentException error){var t=custom.get(code);return t.isActive()?Set.copyOf(t.getUnitTypes()):Set.of();}}
+    public boolean isAllowedCode(String code,PMSUnitTypes type){return getByPropertyType(code).contains(type);}
+    public void replaceMappings(String code,Set<PMSUnitTypes> types,Set<PMSUnitTypes> expected){try{replaceMappings(PMSPropertyType.valueOf(code),types,expected);}catch(IllegalArgumentException error){custom.mappings(code,types,expected);}}
+
     private Set<UnitTypeToPropertyTypeMapping> unitMapping;
     private Set<String> existingMappingKeys;
 
@@ -73,10 +81,17 @@ public class UnitTypeDao {
 
     @Transactional
     public void replaceMappings(PMSPropertyType propertyType, Set<PMSUnitTypes> enabledTypes) {
+        replaceMappings(propertyType,enabledTypes,null);
+    }
+
+    @Transactional
+    public void replaceMappings(PMSPropertyType propertyType, Set<PMSUnitTypes> enabledTypes, Set<PMSUnitTypes> expectedTypes) {
         if (enabledTypes == null || enabledTypes.isEmpty()) {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         }
         List<UnitTypeToPropertyTypeMapping> existing = unitTypeMappingRepo.findAllForUpdateByPropertyType(propertyType);
+        var currentTypes=existing.stream().filter(UnitTypeToPropertyTypeMapping::isActive).map(UnitTypeToPropertyTypeMapping::getUnitType).collect(java.util.stream.Collectors.toSet());
+        if(expectedTypes!=null&&!currentTypes.equals(expectedTypes))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
         Set<PMSUnitTypes> existingTypes = new HashSet<>();
         for (UnitTypeToPropertyTypeMapping mapping : existing) {
             existingTypes.add(mapping.getUnitType());

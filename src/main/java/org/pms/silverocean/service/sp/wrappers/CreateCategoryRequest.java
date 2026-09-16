@@ -1,13 +1,16 @@
 package org.pms.silverocean.service.sp.wrappers;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
 import org.pms.silverocean.service.sp.enums.DocumentType;
 
 import java.util.Set;
 
 public record CreateCategoryRequest(
-    @NotBlank String name,
-    String description,
+    @NotBlank @Size(max=160) String name,
+    @Size(max=1000) String description,
     Set<DocumentType> requiredDocumentTypes,
-    int requiredNumberOfReferees
+    @Min(0) @Max(100) int requiredNumberOfReferees
 ) {}

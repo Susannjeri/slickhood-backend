@@ -43,6 +43,46 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class SokoServiceTest {
+    @Test void fullConfirmedManualRefundStopsFulfillmentAndInvalidatesBuyerCodesWithoutResellingStock() {
+        SokoOrder order=refundableOrder();
+        when(users.hasRole(PMSRole.FINANCE)).thenReturn(true);
+        when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);
+        when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+        when(stores.findById(2L)).thenReturn(Optional.of(store));
+        var request=new SokoRequests.FinanceUpdate(SokoRequests.FinanceType.REFUND,SokoRequests.FinanceStatus.CONFIRMED,new BigDecimal("100"),"RF-TEST-1");
+        service.finance(9L,request);
+        assertEquals("REFUNDED",order.getPaymentStatus());assertEquals("REFUNDED",order.getStatus());
+        assertNull(order.getEncryptedDeliveryCode());assertNull(order.getDeliveryCode());assertNull(order.getDeliveryRecoveryOtp());
+        assertNull(order.getDeliveryRecoveryOtpExpiresAt());assertNull(order.getDeliveryCodeExpiresAt());
+        service.finance(9L,request);
+        verify(orders,times(1)).save(order);
+        verifyNoInteractions(products,variations,riders,invoices);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"REFUND","REVERSAL","CHARGEBACK"})
+    void confirmedFinanceOperationInvalidatesCodesButDoesNotAutomaticallyResellOrReassign(String type) {
+        SokoOrder order=refundableOrder();
+        when(orders.findByInvoiceRefAndActiveTrue("INV-TEST")).thenReturn(Optional.of(order));
+        service.completeFinanceOperation("INV-TEST",type,new BigDecimal("100"),"RF-TEST-2");
+        assertNull(order.getEncryptedDeliveryCode());assertNull(order.getDeliveryCode());assertNull(order.getDeliveryRecoveryOtp());
+        assertNull(order.getDeliveryCodeExpiresAt());assertNull(order.getDeliveryRecoveryOtpExpiresAt());
+        assertEquals("REFUND".equals(type)?"REFUNDED":"PAYMENT_REVERSED",order.getStatus());
+        assertEquals(5L,order.getRiderId());assertFalse(order.isStockReleased());
+        verifyNoInteractions(products,variations,invoices);
+        // Existing status notifications may look up the assigned rider; no
+        // rider availability/custody mutation is allowed by financial finality.
+        verify(riders,never()).save(any());
+    }
+
+    private SokoOrder refundableOrder() {
+        SokoOrder o=new SokoOrder();o.setId(9L);o.setStoreId(2L);o.setCustomerUserId(8L);o.setOrderNumber("SOKO-TEST");
+        o.setStatus("DISPATCHED");o.setPaymentStatus("PAID");o.setRefundStatus("REQUESTED");o.setSettlementStatus("PENDING");o.setTotal(new BigDecimal("100"));o.setCurrency("KES");
+        o.setDeliveryMethod("DELIVERY");o.setDeliveryCode("123456");o.setEncryptedDeliveryCode(new byte[]{1});o.setDeliveryRecoveryOtp(new byte[]{2});
+        o.setDeliveryCodeExpiresAt(ZonedDateTime.now().plusHours(1));o.setDeliveryRecoveryOtpExpiresAt(ZonedDateTime.now().plusMinutes(10));o.setRiderId(5L);
+        return o;
+    }
     @Mock SokoStoreRepo stores; @Mock SokoProductRepo products; @Mock SokoOrderRepo orders;
     @Mock SokoOrderItemRepo items; @Mock InvoiceDao invoices; @Mock AccountDao accounts;
     @Mock SokoProductVariationRepo variations; @Mock SokoRiderRepo riders; @Mock UserDao users; @Mock VisitorService visitors;

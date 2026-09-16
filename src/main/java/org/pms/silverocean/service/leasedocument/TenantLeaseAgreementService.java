@@ -116,7 +116,7 @@ public class TenantLeaseAgreementService {
 
     private LeaseDocumentType agreementType(Property property) {
         try {
-            PMSPropertyCategory category = PMSPropertyType.valueOf(property.getType()).getCategory();
+            PMSPropertyCategory category = property.getTypeCategoryResolved();
             return category == PMSPropertyCategory.COMMERCIAL || category == PMSPropertyCategory.INDUSTRIAL
                     ? LeaseDocumentType.COMMERCIAL_LEASE_AGREEMENT
                     : LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT;

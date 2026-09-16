@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 
 @Entity @Table(name="pms_affiliate_profile",indexes={@Index(name="idx_affiliate_user",columnList="userId",unique=true),@Index(name="idx_affiliate_code",columnList="referralCode",unique=true)})
 @Getter @Setter @NoArgsConstructor
-public class AffiliateProfile extends BaseCreatorEntity {
+public class AffiliateProfile extends BaseCreatorEntity implements Auditable {
     private long userId;
     private String referralCode;
     private String status;
@@ -19,4 +19,9 @@ public class AffiliateProfile extends BaseCreatorEntity {
     private BigDecimal minimumPayout;
     private String currency;
     private Long payoutAccountId;
+    @Override public String toAuditJSON() {
+        var node=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        node.put("id",getId());node.put("userId",userId);node.put("status",status);node.put("commissionRate",commissionRate);
+        node.put("minimumPayout",minimumPayout);node.put("currency",currency);return node.toString();
+    }
 }

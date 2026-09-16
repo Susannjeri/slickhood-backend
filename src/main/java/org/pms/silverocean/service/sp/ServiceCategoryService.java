@@ -70,6 +70,19 @@ public class ServiceCategoryService {
         return categoryDao.findAllActive(pageable).map(ServiceCategoryDTO::new);
     }
 
+    public Page<ServiceCategoryDTO> listAdminCategories(Boolean active, Pageable pageable) {
+        return categoryDao.listForAdmin(active, pageable).map(ServiceCategoryDTO::new);
+    }
+
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public ServiceCategoryDTO reactivateCategory(long categoryId) {
+        var category = categoryDao.findById(categoryId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
+        category.setActive(true);
+        categoryDao.save(category, Permission.MANAGE_SP_CATEGORIES);
+        return new ServiceCategoryDTO(category);
+    }
+
     public Set<EnumWrapper> listRequiredDocumentType() {
         return EnumSet.allOf(DocumentType.class).stream()
                 .map(documentType -> new EnumWrapper(documentType.name(), i18NService.getLocalizedMessage(documentType.getLabel()), null))

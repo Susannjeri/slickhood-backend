@@ -55,7 +55,7 @@ public class UnitController extends BasePropertyController {
     }
 
     @GetMapping("/type")
-    public ResponseEntity<ResponseDTO> getUnitType(@RequestParam PMSPropertyType propertyType) {
+    public ResponseEntity<ResponseDTO> getUnitType(@RequestParam String propertyType) {
         return ResponseEntity.ok(propertyService.getUnitTypes(propertyType));
     }
 
@@ -68,9 +68,12 @@ public class UnitController extends BasePropertyController {
     @PutMapping("/type/catalog/{propertyType}")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<ResponseDTO> updateUnitTypeCatalog(
-            @PathVariable PMSPropertyType propertyType,
-            @RequestBody Set<PMSUnitTypes> unitTypes) {
-        return ResponseEntity.ok(propertyService.updateUnitTypeCatalog(propertyType, unitTypes));
+            @PathVariable String propertyType,
+            @RequestBody Set<PMSUnitTypes> unitTypes,
+            @org.springframework.web.bind.annotation.RequestHeader(value="X-Catalog-Baseline",required=false) String baseline) {
+        Set<PMSUnitTypes> expected=null;
+        if(baseline!=null){if(baseline.length()>16000)throw new org.pms.silverocean.service.PMSCustomException(ResponseCode.INVALID_FIELD_DATA);try{expected=java.util.Arrays.stream(baseline.split(",")).filter(value->!value.isBlank()).map(PMSUnitTypes::valueOf).collect(java.util.stream.Collectors.toSet());}catch(IllegalArgumentException error){throw new org.pms.silverocean.service.PMSCustomException(ResponseCode.INVALID_FIELD_DATA);}}
+        return ResponseEntity.ok(propertyService.updateUnitTypeCatalog(propertyType, unitTypes,expected));
     }
 
 

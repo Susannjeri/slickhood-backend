@@ -17,10 +17,12 @@ import java.math.BigDecimal;
 public class ProviderServiceDao {
     private final ProviderServiceRepo repo;
     private final AuditLogService auditLogService;
+    private final org.pms.silverocean.database.pms.ServiceTierRepo tiers;
 
-    public ProviderServiceDao(ProviderServiceRepo repo, AuditLogService auditLogService) {
+    public ProviderServiceDao(ProviderServiceRepo repo, AuditLogService auditLogService, org.pms.silverocean.database.pms.ServiceTierRepo tiers) {
         this.repo = repo;
         this.auditLogService = auditLogService;
+        this.tiers = tiers;
     }
 
     public void save(ProviderService service, String auditAction) {
@@ -58,6 +60,11 @@ public class ProviderServiceDao {
 
     public Optional<ProviderService> findById(long id) {
         return repo.findById(id);
+    }
+
+    public String requireActiveTier(String name) {
+        return tiers.findByNameIgnoreCaseAndActiveTrue(name.trim()).map(org.pms.silverocean.database.pms.entities.ServiceTier::getName)
+                .orElseThrow(() -> new org.pms.silverocean.service.PMSCustomException(org.pms.silverocean.common.ResponseCode.INVALID_FIELD_DATA));
     }
     public Optional<ProviderService> findByIdForUpdate(long id){return repo.findByIdForUpdate(id);}
     public Optional<ProviderService> findOwnedForUpdate(long id,long profileId){return repo.findOwnedForUpdate(id,profileId);}

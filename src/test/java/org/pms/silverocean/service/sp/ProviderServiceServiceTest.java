@@ -99,6 +99,7 @@ class ProviderServiceServiceTest {
         ServiceCategory c = new ServiceCategory();
         c.setId(id);
         c.setName(name);
+        c.setActive(true);
         return c;
     }
 
@@ -112,6 +113,26 @@ class ProviderServiceServiceTest {
     }
 
     // --- addService ---
+    @Test void retiredCategoryCannotAcceptNewService(){
+        when(userDao.getUserId()).thenReturn(1L);
+        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L,1L)));
+        var category=makeCategory(2L,"Retired");category.setActive(false);
+        when(categoryDao.findById(2L)).thenReturn(Optional.of(category));
+        var ex=assertThrows(PMSCustomException.class,()->service.addService(new AddServiceRequest(2L,BigDecimal.TEN,"KES",PricingUnit.PER_JOB)));
+        assertEquals(ResponseCode.SP_CATEGORY_NOT_FOUND,ex.getResponseCode());
+        org.mockito.Mockito.verify(serviceDao,org.mockito.Mockito.never()).save(any(),anyString());
+    }
+    @Test void adminReviewUsesVerifiedEvidenceAndConfirmedReferees(){
+        var current=makeService(7L,10L,ProviderServiceStatus.SUBMITTED.name());current.setCategoryId(2L);current.setActive(true);
+        var category=makeCategory(2L,"Cleaning");category.setRequiredDocumentTypes(Set.of(DocumentType.GOOD_CONDUCT,DocumentType.NATIONAL_ID));category.setRequiredNumberOfReferees(2);
+        when(serviceDao.findById(7L)).thenReturn(Optional.of(current));when(categoryDao.findById(2L)).thenReturn(Optional.of(category));
+        when(documentDao.findUploadedDocumentTypesByServiceId(7L)).thenReturn(Set.of("GOOD_CONDUCT"));
+        when(documentDao.findReusableVerifiedDocumentTypes(10L,2L)).thenReturn(Set.of("NATIONAL_ID"));
+        when(refereeDao.countByProfileId(10L)).thenReturn(2);when(refereeDao.countVerifiedByProfileId(10L)).thenReturn(1);
+        var review=service.adminReview(7L);
+        assertEquals(Set.of("GOOD_CONDUCT"),review.readiness().outstandingDocumentTypes());
+        assertEquals(1,review.readiness().verifiedRefereeCount());assertEquals(2,review.readiness().requiredReferees());
+    }
 
     @Test
     void addService_throwsSP_PROFILE_NOT_FOUND_whenNoProfile() {

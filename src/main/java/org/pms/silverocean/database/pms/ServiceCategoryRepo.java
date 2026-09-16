@@ -13,4 +13,5 @@ public interface ServiceCategoryRepo extends JpaRepository<ServiceCategory, Long
     Page<ServiceCategory> findAllActive(Pageable pageable);
 
     Optional<ServiceCategory> findByNameAndActive(String name, boolean active);
+    Page<ServiceCategory> findByActive(boolean active, Pageable pageable);
 }
