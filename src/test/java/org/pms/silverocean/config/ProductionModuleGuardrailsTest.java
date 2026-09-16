@@ -24,8 +24,23 @@ class ProductionModuleGuardrailsTest {
                 "affiliate.commission-rate (must be explicit)", "helpdesk.ai.enabled=true",
                 "helpdesk.ai.api-key / OPENAI_API_KEY", "one verified Paystack or M-Pesa callback secret",
                 "kyc.ocr.provider=aws-textract", "garage.s3.require-https=true",
-                "garage.bootstrap.enabled=false", "whatsapp.enabled=true",
-                "whatsapp.app-secret (protected value required)");
+                "garage.bootstrap.enabled=false");
+        assertThat(assessment.missingOrUnsafeConfiguration())
+                .noneMatch(value -> value.startsWith("whatsapp."));
+    }
+
+    @Test
+    void validatesWhatsAppOnlyWhenTheChannelIsEnabled() {
+        var disabled = completeEnvironment().withProperty("whatsapp.enabled", "false")
+                .withProperty("whatsapp.api-url", "")
+                .withProperty("whatsapp.access-token", "")
+                .withProperty("whatsapp.app-secret", "")
+                .withProperty("whatsapp.verify-token", "");
+        assertThat(new ProductionModuleGuardrails(disabled).assess().ready()).isTrue();
+
+        var enabled = completeEnvironment().withProperty("whatsapp.access-token", "");
+        assertThat(new ProductionModuleGuardrails(enabled).assess().missingOrUnsafeConfiguration())
+                .contains("whatsapp.access-token (protected value required)");
     }
 
     @Test

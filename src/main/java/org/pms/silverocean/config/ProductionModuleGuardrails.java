@@ -109,18 +109,19 @@ public class ProductionModuleGuardrails {
             requireHttps(failures, "payment.paystack.callback-url");
         }
 
-        requireTrue(failures, "whatsapp.enabled");
-        requireWhatsAppEndpoint(failures, "whatsapp.api-url");
-        requireNumeric(failures, "whatsapp.business-account-id");
-        requireNumeric(failures, "whatsapp.phone-number-id");
-        requireSecret(failures, "whatsapp.access-token");
-        requireSecret(failures, "whatsapp.app-secret");
-        requireSecret(failures, "whatsapp.verify-token");
-        for (String category : List.of("billing", "property", "marketplace_delivery", "security", "marketing")) {
-            String prefix = "whatsapp.templates." + category + ".";
-            requireTrue(failures, prefix + "approved");
-            require(failures, prefix + "name");
-            require(failures, prefix + "language");
+        if (Boolean.parseBoolean(value("whatsapp.enabled", "false"))) {
+            requireWhatsAppEndpoint(failures, "whatsapp.api-url");
+            requireNumeric(failures, "whatsapp.business-account-id");
+            requireNumeric(failures, "whatsapp.phone-number-id");
+            requireSecret(failures, "whatsapp.access-token");
+            requireSecret(failures, "whatsapp.app-secret");
+            requireSecret(failures, "whatsapp.verify-token");
+            for (String category : List.of("billing", "property", "marketplace_delivery", "security", "marketing")) {
+                String prefix = "whatsapp.templates." + category + ".";
+                requireTrue(failures, prefix + "approved");
+                require(failures, prefix + "name");
+                require(failures, prefix + "language");
+            }
         }
 
         return new Assessment(failures.isEmpty(), List.copyOf(failures));
