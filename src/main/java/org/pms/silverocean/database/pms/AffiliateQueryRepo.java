@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Collection;
 
 /** Bounded administrative and owner-only history queries. Controllers/services enforce access. */
 public interface AffiliateQueryRepo extends Repository<AffiliateProfile, Long> {
@@ -14,6 +15,14 @@ public interface AffiliateQueryRepo extends Repository<AffiliateProfile, Long> {
             "AND (:status IS NULL OR p.status=:status) AND (:query IS NULL OR LOWER(u.fullName) LIKE :query " +
             "OR LOWER(u.email) LIKE :query OR LOWER(p.referralCode) LIKE :query)")
     Page<AffiliateProfile> directory(String query, String status, Pageable pageable);
+
+    interface ReferralCount {
+        Long getAffiliateUserId(); long getReferrals(); long getConversions();
+    }
+    @Query("SELECT r.affiliateUserId AS affiliateUserId, COUNT(r.id) AS referrals, " +
+            "SUM(CASE WHEN r.status='CONVERTED' THEN 1 ELSE 0 END) AS conversions " +
+            "FROM AffiliateReferral r WHERE r.active=true AND r.affiliateUserId IN :userIds GROUP BY r.affiliateUserId")
+    List<ReferralCount> referralCounts(Collection<Long> userIds);
 
     interface CurrencyBalance {
         String getCurrency(); BigDecimal getPending(); BigDecimal getEarned(); BigDecimal getClawback(); BigDecimal getLifetime();

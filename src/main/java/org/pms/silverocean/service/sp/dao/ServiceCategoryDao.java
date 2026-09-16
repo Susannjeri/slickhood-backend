@@ -22,7 +22,7 @@ public class ServiceCategoryDao {
 
     public void save(ServiceCategory category, String auditAction) {
         category.setLastModifiedDate(LocalDateTime.now());
-        repo.save(category);
+        repo.saveAndFlush(category);
         auditLogService.createAuditLog(category, auditAction);
     }
 

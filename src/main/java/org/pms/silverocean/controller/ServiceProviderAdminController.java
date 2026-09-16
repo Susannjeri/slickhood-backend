@@ -112,9 +112,9 @@ public class ServiceProviderAdminController extends OutputStreamErrorHandler {
 
     @PutMapping("/category/{categoryId}/reactivate")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SP_CATEGORIES)")
-    public ResponseEntity<ResponseDTO> reactivateCategory(@PathVariable long categoryId) {
+    public ResponseEntity<ResponseDTO> reactivateCategory(@PathVariable long categoryId, @RequestParam long version) {
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
-                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), categoryService.reactivateCategory(categoryId)));
+                i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), categoryService.reactivateCategory(categoryId, version)));
     }
 
     @PutMapping("/service/{serviceId}/approve")
@@ -243,7 +243,7 @@ public class ServiceProviderAdminController extends OutputStreamErrorHandler {
     @PutMapping("/category/{categoryId}")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SP_CATEGORIES)")
     public ResponseEntity<ResponseDTO> updateCategory(@PathVariable long categoryId,
-                                                      @RequestBody @Valid CreateCategoryRequest request) {
+                                                      @RequestBody @Valid org.pms.silverocean.service.sp.wrappers.UpdateCategoryRequest request) {
         var category = categoryService.updateCategory(categoryId, request);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS), category));
@@ -251,8 +251,8 @@ public class ServiceProviderAdminController extends OutputStreamErrorHandler {
 
     @DeleteMapping("/category/{categoryId}")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SP_CATEGORIES)")
-    public ResponseEntity<ResponseDTO> deactivateCategory(@PathVariable long categoryId) {
-        categoryService.deactivateCategory(categoryId);
+    public ResponseEntity<ResponseDTO> deactivateCategory(@PathVariable long categoryId, @RequestParam long version) {
+        categoryService.deactivateCategory(categoryId, version);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.GENERAL_SUCCESS.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS)));
     }

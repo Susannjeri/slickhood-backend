@@ -11,7 +11,6 @@ public class DefaultFreePlanCodeResolver {
 
     private final String landlordStarter;
     private final String serviceProviderStandard;
-    private final String affiliateStandard;
     private final String assetManagerBasic;
     private final String estateStarter;
     private final String salesStarter;
@@ -19,14 +18,12 @@ public class DefaultFreePlanCodeResolver {
     public DefaultFreePlanCodeResolver(
             @Value("${subscription.tier.landlord.starter:LANDLORD_BRONZE}") String landlordStarter,
             @Value("${subscription.tier.serviceprovider.standard:SERVICES_FREE}") String serviceProviderStandard,
-            @Value("${subscription.tier.affiliate.standard:AFFILIATE_FREE}") String affiliateStandard,
             @Value("${subscription.tier.assetmanager.basic:WEALTH_BRONZE}") String assetManagerBasic,
             @Value("${subscription.tier.estate.starter:ESTATE_BRONZE}") String estateStarter,
             @Value("${subscription.tier.sales.starter:SALE_BRONZE}") String salesStarter
     ) {
         this.landlordStarter = landlordStarter;
         this.serviceProviderStandard = serviceProviderStandard;
-        this.affiliateStandard = affiliateStandard;
         this.assetManagerBasic = assetManagerBasic;
         this.estateStarter = estateStarter;
         this.salesStarter = salesStarter;
@@ -36,7 +33,7 @@ public class DefaultFreePlanCodeResolver {
         String raw = switch (role) {
             case LANDLORD -> landlordStarter;
             case SERVICE_PROVIDER -> serviceProviderStandard;
-            case AFFILIATE -> affiliateStandard;
+            case AFFILIATE -> null;
             case ASSET_PORTFOLIO_MANAGER -> assetManagerBasic;
             case ESTATE_MANAGER -> estateStarter;
             case SALES_AGENT -> salesStarter;
@@ -50,7 +47,7 @@ public class DefaultFreePlanCodeResolver {
      */
     public boolean isProvisioningRole(PMSRole role) {
         return switch (role) {
-            case LANDLORD, ESTATE_MANAGER, SALES_AGENT, SERVICE_PROVIDER, AFFILIATE, ASSET_PORTFOLIO_MANAGER -> true;
+            case LANDLORD, ESTATE_MANAGER, SALES_AGENT, SERVICE_PROVIDER, ASSET_PORTFOLIO_MANAGER -> true;
             default -> false;
         };
     }

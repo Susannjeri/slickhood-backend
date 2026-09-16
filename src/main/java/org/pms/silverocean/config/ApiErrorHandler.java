@@ -10,6 +10,7 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -218,6 +219,15 @@ public class ApiErrorHandler extends ResponseEntityExceptionHandler {
         return buildResponseEntity(new ResponseDTO(false, ResponseCode.DATA_INTEGRITY_VIOLATION.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.DATA_INTEGRITY_VIOLATION, "Data integrity violation."),
                 Set.of("Database error")), CONFLICT);
+    }
+
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    protected ResponseEntity<Object> handleOptimisticLockingFailure(ObjectOptimisticLockingFailureException ex,
+                                                                      WebRequest request) {
+        log.warn("Rejected stale update for {}", ex.getPersistentClassName());
+        return buildResponseEntity(new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
+                "This record changed after you opened it. Refresh and review the latest version before saving again.",
+                Set.of("Stale record version")), CONFLICT);
     }
 
     @ExceptionHandler(MissingRequestHeaderException.class)

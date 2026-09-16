@@ -162,4 +162,37 @@ class PaystackRoutingTest {
                 () -> platform.confirmBrowserReturn("601", "127.0.0.1"));
         verifyNoInteractions(http);
     }
+
+    @Test void failedProviderVerificationUnlocksCheckoutWithoutMarkingTheInvoicePaid() {
+        invoice.setSubscriptionPlanCode("BRONZE");
+        platform.processPayment(invoice, null, 71L);
+        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
+        when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
+        doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
+                new PaystackPlatform.PaystackTransaction(123L, "failed", "601", 10000L, "KES", "Declined", "test")))
+                .when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
+
+        var result = platform.confirmBrowserReturn("601", "127.0.0.1");
+
+        assertFalse(result.paid());
+        assertEquals("verification_failed", payment.getStatus());
+        assertFalse(payment.isInProgress());
+        verify(updater).setInvoiceTransactionStatusByBillRefNumber("INV-TEST", false);
+        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), anyDouble());
+    }
+
+    @Test void reversalOrRefundEventsRequireTheAuthorisedManualFinanceWorkflow() {
+        invoice.setSubscriptionPlanCode("BRONZE");
+        platform.processPayment(invoice, null, 71L);
+        when(payments.findPaymentByID(601L)).thenReturn(Optional.of(payment));
+
+        var response = platform.handleCallBack(new PaystackCallbackDTO(
+                "{\"event\":\"refund.processed\",\"data\":{\"reference\":\"601\",\"status\":\"processed\"}}",
+                "127.0.0.1"));
+
+        assertNotNull(response);
+        assertTrue(payment.isInProgress(), "Provider refund notices must not silently mutate the finance ledger");
+        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), anyDouble());
+        verify(updater, never()).setInvoiceTransactionStatusByBillRefNumber(anyString(), anyBoolean());
+    }
 }

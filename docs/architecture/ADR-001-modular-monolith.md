@@ -16,6 +16,17 @@ SlickHood will remain one deployable Spring Boot backend while business capabili
 6. External callbacks and background jobs carry a correlation ID and expose safe retry behaviour.
 7. No module imports another module's internal implementation package.
 
+The CI rule in `scripts/check-module-boundaries.py` enforces the currently
+machine-checkable boundaries: controllers cannot import persistence code,
+services cannot depend on controllers, and payment can use only subscription
+public contracts. Add a rule before introducing another cross-module dependency.
+
+Operational boundaries are observable through Actuator's authenticated metrics
+endpoint. Standard JVM/GC and datasource-pool meters are complemented by
+`slickhood.outbox.*` and `slickhood.payment.callback.*` meters. Provider names
+and outcomes are low-cardinality tags; customer, payment and invoice identifiers
+must never be metric tags.
+
 ## Financial boundary
 
 Payment settlement owns marking an invoice paid and emits `invoice.paid.v1`. Subscription consumes that event and owns plan activation. The payment module does not invoke subscription implementation classes. `pms_subscription_payment_completion.invoice_id` and the outbox dedupe key independently prevent duplicate activation.

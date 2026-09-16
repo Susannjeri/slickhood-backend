@@ -13,6 +13,7 @@ import org.pms.silverocean.service.sp.enums.DocumentType;
 import org.pms.silverocean.service.sp.enums.PricingUnit;
 import org.pms.silverocean.service.sp.wrappers.CreateCategoryRequest;
 import org.pms.silverocean.service.sp.wrappers.ServiceCategoryDTO;
+import org.pms.silverocean.service.sp.wrappers.UpdateCategoryRequest;
 import org.pms.silverocean.service.wrappers.EnumWrapper;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -46,9 +47,10 @@ public class ServiceCategoryService {
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
-    public ServiceCategoryDTO updateCategory(long categoryId, CreateCategoryRequest request) {
+    public ServiceCategoryDTO updateCategory(long categoryId, UpdateCategoryRequest request) {
         ServiceCategory category = categoryDao.findById(categoryId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
+        requireVersion(category, request.version());
         category.setName(request.name());
         category.setDescription(request.description());
         category.setRequiredDocumentTypes(request.requiredDocumentTypes());
@@ -58,10 +60,11 @@ public class ServiceCategoryService {
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
-    public void deactivateCategory(long categoryId) {
+    public void deactivateCategory(long categoryId, long version) {
         ServiceCategory category = categoryDao.findById(categoryId)
                 .filter(ServiceCategory::isActive)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
+        requireVersion(category, version);
         category.setActive(false);
         categoryDao.save(category, Permission.MANAGE_SP_CATEGORIES);
     }
@@ -75,9 +78,10 @@ public class ServiceCategoryService {
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
-    public ServiceCategoryDTO reactivateCategory(long categoryId) {
+    public ServiceCategoryDTO reactivateCategory(long categoryId, long version) {
         var category = categoryDao.findById(categoryId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
+        requireVersion(category, version);
         category.setActive(true);
         categoryDao.save(category, Permission.MANAGE_SP_CATEGORIES);
         return new ServiceCategoryDTO(category);
@@ -93,5 +97,9 @@ public class ServiceCategoryService {
         return EnumSet.allOf(PricingUnit.class).stream()
                 .map(pricingUnit -> new EnumWrapper(pricingUnit.name(), i18NService.getLocalizedMessage(pricingUnit.getLabel()), null))
                 .collect(Collectors.toSet());
+    }
+
+    private void requireVersion(ServiceCategory category, long version) {
+        if (category.getVersion() != version) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
     }
 }

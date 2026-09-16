@@ -122,6 +122,14 @@ class SubscriptionPlanServiceTest {
     }
 
     @Test
+    void affiliateCannotBeCreatedAsASubscriptionPlan() {
+        assertThrows(PMSCustomException.class, () -> service.createPlan(new SubscriptionPlanRequestDTO(
+                "AFFILIATE_NEW", "Affiliate", PlanCategory.AFFILIATE, PMSRole.AFFILIATE,
+                BillingCycle.MONTHLY, BigDecimal.ZERO, "KES", List.of(), List.of())));
+        verify(planRepo, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void unlimitedQuotaIsValidButLowerNegativeValuesAreNot() {
         try (var factory = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
             var validator = factory.getValidator();

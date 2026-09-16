@@ -10,6 +10,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -36,6 +37,9 @@ public class ServiceCategory extends BaseCreatorEntity implements Auditable {
 
     private int requiredNumberOfReferees = 0;
 
+    @Version
+    private long version;
+
     @Override
     public String toAuditJSON() {
         var json = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
@@ -44,6 +48,7 @@ public class ServiceCategory extends BaseCreatorEntity implements Auditable {
         json.put("description", description);
         json.put("requiredNumberOfReferees", requiredNumberOfReferees);
         json.put("active", isActive());
+        json.put("version", version);
         var documents = json.putArray("requiredDocumentTypes");
         if (requiredDocumentTypes != null) requiredDocumentTypes.stream().map(Enum::name).sorted().forEach(documents::add);
         return json.toString();

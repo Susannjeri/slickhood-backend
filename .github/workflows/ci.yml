@@ -23,6 +23,8 @@ jobs:
           java-version: "21"
           distribution: temurin
           cache: maven
+      - name: Enforce modular-monolith boundaries
+        run: python3 scripts/check-module-boundaries.py
       - name: Reject destructive or duplicate Flyway migrations
         shell: bash
         run: |

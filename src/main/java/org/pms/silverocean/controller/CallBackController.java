@@ -13,6 +13,7 @@ import org.pms.silverocean.service.notification.sms.africastalking.wrappers.ATSM
 import org.pms.silverocean.service.notification.sms.africastalking.wrappers.ATSMSStatus;
 import org.pms.silverocean.service.notification.sms.whatsapp.wrappers.callback.WAWebHook;
 import org.pms.silverocean.service.payment.PaymentCallBackResponse;
+import org.pms.silverocean.service.payment.PaymentCallbackMetrics;
 import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.pms.silverocean.service.payment.WebhookSignatureVerifier;
 import org.pms.silverocean.service.payment.platforms.flutterwave.wrappers.FWCallbackDTO;
@@ -30,6 +31,7 @@ import org.pms.silverocean.service.payment.platforms.paystack.PaystackCallbackDT
 import org.pms.silverocean.service.payment.platforms.pesawise.PesawiseCallbackDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,6 +53,7 @@ import java.util.stream.Collectors;
 public class CallBackController {
     private final PaymentPlatformFactory paymentPlatformFactory;
     private final SMSService smsService;
+    private final PaymentCallbackMetrics callbackMetrics;
     private final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private final Gson gson = new GsonBuilder()
             .registerTypeAdapter(LocalDateTime.class, (JsonDeserializer<LocalDateTime>)
@@ -67,9 +70,18 @@ public class CallBackController {
     @Value("${payment.paystack.secret-key:}")
     private String paystackSecretKey;
 
-    public CallBackController(PaymentPlatformFactory paymentPlatformFactory, SMSService smsService) {
+    @Autowired
+    public CallBackController(PaymentPlatformFactory paymentPlatformFactory, SMSService smsService,
+                              PaymentCallbackMetrics callbackMetrics) {
         this.paymentPlatformFactory = paymentPlatformFactory;
         this.smsService = smsService;
+        this.callbackMetrics = callbackMetrics;
+    }
+
+    /** Test-only compatibility constructor for focused controller tests. */
+    public CallBackController(PaymentPlatformFactory paymentPlatformFactory, SMSService smsService) {
+        this(paymentPlatformFactory, smsService,
+                new PaymentCallbackMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
     }
 
     @PostMapping("/stk")
@@ -77,10 +89,13 @@ public class CallBackController {
                                                                            @RequestParam String token,
                                                                            @RequestBody STKCallbackResponse stkCallbackResponse) {
         if (!isValidMpesaToken(token, request)) {
+            callbackMetrics.rejected("mpesa", "invalid_token");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        PaymentCallBackResponse paymentCallBackResponse = paymentPlatformFactory.getPlatform(PaymentChannel.MPESA)
-                .handleCallBack(new MpesaCallbackDTO(null, stkCallbackResponse, null, PMSUtils.getIPAddress(request), MpesaCallBackType.STK));
+        PaymentCallBackResponse paymentCallBackResponse = callbackMetrics.observe("mpesa", () ->
+                paymentPlatformFactory.getPlatform(PaymentChannel.MPESA)
+                        .handleCallBack(new MpesaCallbackDTO(null, stkCallbackResponse, null,
+                                PMSUtils.getIPAddress(request), MpesaCallBackType.STK)));
         return ResponseEntity.ok(paymentCallBackResponse);
     }
 
@@ -162,13 +177,15 @@ public class CallBackController {
             @RequestHeader(value = "verif-hash", required = false) String legacySignature,
             @RequestBody String rawBody) {
         if (!WebhookSignatureVerifier.isFlutterwaveSignatureValid(rawBody, signature, legacySignature, flutterwaveWebhookSecret)) {
+            callbackMetrics.rejected("flutterwave", "invalid_signature");
             log.warn("Rejected unauthenticated Flutterwave callback from {}", PMSUtils.getIPAddress(request));
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         FWWebhookDTO<?> body = gson.fromJson(rawBody, FWWebhookDTO.class);
         log.info("Received authenticated Flutterwave event {}", body.event());
-        PaymentCallBackResponse paymentCallBackResponse = paymentPlatformFactory.getPlatform(PaymentChannel.FLUTTER_WAVE)
-                .handleCallBack(new FWCallbackDTO<>(body,  PMSUtils.getIPAddress(request)));
+        PaymentCallBackResponse paymentCallBackResponse = callbackMetrics.observe("flutterwave", () ->
+                paymentPlatformFactory.getPlatform(PaymentChannel.FLUTTER_WAVE)
+                        .handleCallBack(new FWCallbackDTO<>(body, PMSUtils.getIPAddress(request))));
         return ResponseEntity.ok(paymentCallBackResponse);
     }
 
@@ -186,11 +203,13 @@ public class CallBackController {
             @RequestHeader("x-paystack-signature") String signature,
             @RequestBody String rawBody) {
         if (!WebhookSignatureVerifier.isPaystackSignatureValid(rawBody, signature, paystackSecretKey)) {
+            callbackMetrics.rejected("paystack", "invalid_signature");
             log.warn("Rejected unauthenticated Paystack callback from {}", PMSUtils.getIPAddress(request));
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        PaymentCallBackResponse response = paymentPlatformFactory.getPlatform(PaymentChannel.PAYSTACK)
-                .handleCallBack(new PaystackCallbackDTO(rawBody, PMSUtils.getIPAddress(request)));
+        PaymentCallBackResponse response = callbackMetrics.observe("paystack", () ->
+                paymentPlatformFactory.getPlatform(PaymentChannel.PAYSTACK)
+                        .handleCallBack(new PaystackCallbackDTO(rawBody, PMSUtils.getIPAddress(request))));
         return ResponseEntity.ok(response);
     }
 

@@ -160,8 +160,6 @@ public class LandlordPlanCatalogSeedService {
                 SubscriptionProduct.SERVICES, "SERVICE_MARKETPLACE");
         createFreeProduct("SOKO_FREE", "Soko", PlanCategory.SERVICE_PROVIDER, PMSRole.SERVICE_PROVIDER,
                 SubscriptionProduct.SOKO, "SOKO_MARKETPLACE");
-        createFreeProduct("AFFILIATE_FREE", "Affiliate", PlanCategory.AFFILIATE, PMSRole.AFFILIATE,
-                SubscriptionProduct.AFFILIATE, "AFFILIATE_PROGRAM");
     }
 
     private void createFreeProduct(String code, String name, PlanCategory category, PMSRole role,

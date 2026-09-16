@@ -1,4 +1,11 @@
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  metrics:
+    tags:
+      application: slickhood-backend
   endpoint:
     health:
       group:

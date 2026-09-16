@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -157,6 +158,86 @@ class AffiliateServiceTest {
         when(commissions.findAllByReferredUserIdAndActiveTrueOrderByEarnedAtAsc(8L)).thenReturn(List.of(new AffiliateCommission(),new AffiliateCommission(),new AffiliateCommission()));
         service.recordPaidConversion(10L,"POLICY-FIXTURE");
         verify(commissions).save(argThat(c->c.getEligibleSequence()==4&&c.getCommissionRate().compareTo(BigDecimal.TEN)==0&&c.getAvailableAt().equals(c.getEarnedAt().plusDays(7))));
+    }
+
+    @Test
+    void newAffiliateIsSubmittedForApprovalAndAdminIsNotified() {
+        Users admin = new Users();
+        admin.setId(99L);
+        when(users.hasRole(PMSRole.AFFILIATE)).thenReturn(true);
+        when(users.getUserId()).thenReturn(4L);
+        when(users.findActiveSuperAdminAccounts()).thenReturn(Set.of(admin));
+        when(profiles.save(any())).thenAnswer(invocation -> {
+            AffiliateProfile saved = invocation.getArgument(0);
+            saved.setId(18L);
+            return saved;
+        });
+
+        AffiliateProfile result = service.ensureProfile();
+
+        assertEquals("PENDING_APPROVAL", result.getStatus());
+        assertNotNull(result.getReferralCode());
+        verify(audit).createAuditLog(result, "AFFILIATE_APPLICATION_SUBMITTED");
+        verify(alerts).publish(99L, "affiliate-application:18", "AFFILIATE_APPLICATION",
+                "A new affiliate application is waiting for approval.",
+                "/dashboard/affiliate-management#affiliate-directory");
+    }
+
+    @Test
+    void pendingAffiliateCannotConfigurePayoutAccount() {
+        AffiliateProfile pending = profile();
+        pending.setStatus("PENDING_APPROVAL");
+        when(users.hasRole(PMSRole.AFFILIATE)).thenReturn(true);
+        when(users.getUserId()).thenReturn(4L);
+        when(profiles.findByUserIdAndActiveTrue(4L)).thenReturn(Optional.of(pending));
+
+        assertThrows(RuntimeException.class, () -> service.setPayoutAccount(12L));
+
+        verifyNoInteractions(accounts);
+    }
+
+    @Test
+    void payoutDecisionRejectsAStaleAdminSnapshot() {
+        AffiliatePayout payout = new AffiliatePayout();
+        payout.setId(44L);
+        payout.setAffiliateUserId(4L);
+        payout.setStatus("REQUESTED");
+        payout.setAmount(BigDecimal.valueOf(1600));
+        payout.setCurrency("KES");
+        payout.setVersion(3L);
+        when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);
+        when(payouts.findForUpdate(44L)).thenReturn(Optional.of(payout));
+
+        assertThrows(RuntimeException.class, () -> service.decidePayout(44L,
+                new AffiliateModels.PayoutDecision("PAID", "EXT-1", null,
+                        BigDecimal.valueOf(1600), "KES", 2L)));
+
+        verify(payouts, never()).save(any());
+        verify(commissions, never()).settleEarned(anyLong());
+    }
+
+    @Test
+    void paidPayoutStoresCanonicalUniqueExternalReference() {
+        AffiliatePayout payout = new AffiliatePayout();
+        payout.setId(44L);
+        payout.setAffiliateUserId(4L);
+        payout.setStatus("PROCESSING");
+        payout.setAmount(BigDecimal.valueOf(1600));
+        payout.setCurrency("KES");
+        payout.setVersion(3L);
+        when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);
+        when(users.getUserId()).thenReturn(99L);
+        when(payouts.findForUpdate(44L)).thenReturn(Optional.of(payout));
+        when(payouts.save(payout)).thenReturn(payout);
+
+        service.decidePayout(44L, new AffiliateModels.PayoutDecision("PAID", " ext-001 ", null,
+                BigDecimal.valueOf(1600), "KES", 3L));
+
+        assertEquals("ext-001", payout.getPaymentReference());
+        assertEquals("EXT-001", payout.getPaymentReferenceKey());
+        assertEquals(99L, payout.getProcessedByUserId());
+        verify(commissions).settleEarned(44L);
+        verify(commissions).settleClawbacks(44L);
     }
 
     @Test

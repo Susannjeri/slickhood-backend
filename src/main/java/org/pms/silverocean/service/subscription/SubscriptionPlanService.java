@@ -144,6 +144,10 @@ public class SubscriptionPlanService {
     @Transactional
     public void updatePlanStatus(String planCode, boolean active) {
         SubscriptionPlan subscriptionPlan = getByCodeOrThrow(planCode);
+        if (active && (subscriptionPlan.getPlanCategory() == PlanCategory.AFFILIATE
+                || subscriptionPlan.getRoleFamily() == org.pms.silverocean.service.auth.roles.enums.PMSRole.AFFILIATE)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
         if (active && java.util.Set.of("STARTER", "STANDARD", "STANDARD_AFFILIATE")
                 .contains(subscriptionPlan.getCode())) {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
@@ -306,6 +310,10 @@ public class SubscriptionPlanService {
     }
 
     private void validateIdentity(SubscriptionPlanRequestDTO request) {
+        if (request.planCategory() == PlanCategory.AFFILIATE
+                || request.roleFamily() == org.pms.silverocean.service.auth.roles.enums.PMSRole.AFFILIATE) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+        }
         var expectedRole = switch (request.planCategory()) {
             case LANDLORD -> org.pms.silverocean.service.auth.roles.enums.PMSRole.LANDLORD;
             case ESTATE_MANAGEMENT -> org.pms.silverocean.service.auth.roles.enums.PMSRole.ESTATE_MANAGER;

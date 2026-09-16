@@ -12,8 +12,10 @@ public final class AffiliateModels {
     private AffiliateModels() {}
     public record PublicReferral(boolean valid) {}
     public record Profile(String referralCode,String status,BigDecimal commissionRate,
-            BigDecimal minimumPayout,String currency,Long payoutAccountId) {
-        public Profile(AffiliateProfile p){this(p.getReferralCode(),p.getStatus(),p.getCommissionRate(),p.getMinimumPayout(),p.getCurrency(),p.getPayoutAccountId());}
+            BigDecimal minimumPayout,String currency,Long payoutAccountId,ZonedDateTime appliedAt,
+            ZonedDateTime reviewedAt,Long reviewedByUserId,String reviewNotes) {
+        public Profile(AffiliateProfile p){this(p.getReferralCode(),p.getStatus(),p.getCommissionRate(),p.getMinimumPayout(),p.getCurrency(),p.getPayoutAccountId(),
+                p.getCreatedOn(),p.getReviewedAt(),p.getReviewedByUserId(),p.getReviewNotes());}
     }
     public record Referral(long id,String status,String campaign,ZonedDateTime registeredAt,ZonedDateTime convertedAt) {
         public Referral(AffiliateReferral r){this(r.getId(),r.getStatus(),r.getCampaign(),r.getRegisteredAt(),r.getConvertedAt());}
@@ -26,15 +28,18 @@ public final class AffiliateModels {
             ZonedDateTime requestedAt,ZonedDateTime processedAt,String paymentReference,String notes) {
         public Payout(AffiliatePayout p){this(p.getId(),p.getPayoutNumber(),p.getAmount(),p.getCurrency(),p.getStatus(),p.getRequestedAt(),p.getProcessedAt(),p.getPaymentReference(),p.getNotes());}
     }
-    public record AdminPayout(long id,String payoutNumber,long affiliateUserId,BigDecimal amount,String currency,
+    public record AdminPayout(long id,String payoutNumber,long affiliateUserId,Long paymentAccountId,BigDecimal amount,String currency,
             String status,ZonedDateTime requestedAt,ZonedDateTime processedAt,String paymentReference,String notes,
-            String payoutAccountName,String payoutChannel) {
-        public AdminPayout(AffiliatePayout p){this(p.getId(),p.getPayoutNumber(),p.getAffiliateUserId(),p.getAmount(),p.getCurrency(),p.getStatus(),p.getRequestedAt(),p.getProcessedAt(),p.getPaymentReference(),p.getNotes(),p.getPayoutAccountName(),p.getPayoutChannel());}
+            String payoutAccountName,String payoutChannel,long version) {
+        public AdminPayout(AffiliatePayout p){this(p.getId(),p.getPayoutNumber(),p.getAffiliateUserId(),p.getPaymentAccountId(),p.getAmount(),p.getCurrency(),p.getStatus(),p.getRequestedAt(),p.getProcessedAt(),p.getPaymentReference(),p.getNotes(),p.getPayoutAccountName(),p.getPayoutChannel(),p.getVersion());}
     }
     public record Dashboard(Profile profile,long totalReferrals,long conversions,BigDecimal conversionRatePercent,
             BigDecimal availableBalance,BigDecimal pendingEarnings,BigDecimal lifetimeEarnings,BigDecimal pendingPayouts,
             List<Referral> referrals,List<Commission> commissions,List<Payout> payouts,boolean historyLimited,RewardTerms rewardTerms) {}
     public record RewardTerms(int eligiblePaymentCount,int holdDays) {}
     public record PayoutAccount(@NotNull Long paymentAccountId) {}
-    public record PayoutDecision(@NotBlank String status,@Size(max=100) String paymentReference,@Size(max=1000) String notes) {}
+    public record PayoutDecision(@NotBlank String status,@Size(max=100) String paymentReference,@Size(max=1000) String notes,
+                                 @NotNull @jakarta.validation.constraints.DecimalMin(value="0",inclusive=false) BigDecimal expectedAmount,
+                                 @NotBlank @jakarta.validation.constraints.Pattern(regexp="[A-Z]{3}") String expectedCurrency,
+                                 @NotNull Long expectedVersion) {}
 }
