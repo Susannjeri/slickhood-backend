@@ -8,6 +8,8 @@ import org.pms.silverocean.service.notification.common.NotificationChannel;
 import org.pms.silverocean.service.notification.common.NotificationDao;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.notification.common.NotificationVisibility;
+import org.pms.silverocean.service.notification.preferences.NotificationCategory;
+import org.pms.silverocean.service.notification.preferences.NotificationPreferenceService;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,7 @@ public class NotificationService {
     private final UserDao userDao;
     private final Map<String, NotificationSender> senders;
     private final ApplicationEventPublisher events;
+    private final NotificationPreferenceService notificationPreferenceService;
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public void sendNotification(NotificationDTO notificationDTO) {
         queueNotification(notificationDTO);
@@ -93,18 +96,43 @@ public class NotificationService {
             throw new IllegalArgumentException("Verification challenges cannot be mirrored as business alerts");
         if(actionPath!=null&&!BusinessNotificationService.safePath(actionPath))throw new IllegalArgumentException("Unsafe notification action");
         String normalized=recipient.trim().toLowerCase(Locale.ROOT),eventKey=digest(key+":"+normalized);
-        String emailKey=digest(eventKey+":EMAIL"),appKey=digest(eventKey+":IN_APP");
-        if(!notificationDao.hasDeliveryKey(emailKey)){
+        String emailKey=digest(eventKey+":EMAIL"),smsKey=digest(eventKey+":SMS"),
+                whatsappKey=digest(eventKey+":WHATSAPP"),appKey=digest(eventKey+":IN_APP");
+        java.util.Optional<Users> account=userDao.findByEmail(normalized).filter(Users::isActive);
+        NotificationCategory category=NotificationCategory.fromEvent(inAppType+":"+emailType.name());
+        var plan=account.map(user->notificationPreferenceService.plan(user,category)).orElse(null);
+        if((plan==null||plan.email())&&!notificationDao.hasDeliveryKey(emailKey)){
             NotificationDTO dto=new NotificationDTO(emailMessage,normalized,emailType);
             long id=createNotification(normalized,emailMessage,emailType,eventKey,emailKey,actionPath);
             events.publishEvent(new NotificationQueued(id,dto));
         }
-        if(!notificationDao.hasDeliveryKey(appKey)&&userDao.findByEmail(normalized).filter(Users::isActive).isPresent()){
+        if(account.isPresent()&&plan!=null&&plan.sms()&&!notificationDao.hasDeliveryKey(smsKey)){
+            NotificationType smsType=smsType(category);
+            NotificationDTO dto=new NotificationDTO(inAppMessage,account.get().getPhoneNumber(),smsType);
+            long id=createNotification(account.get().getPhoneNumber(),inAppMessage,smsType,eventKey,smsKey,actionPath);
+            events.publishEvent(new NotificationQueued(id,dto));
+        }
+        if(account.isPresent()&&plan!=null&&plan.whatsapp()&&!notificationDao.hasDeliveryKey(whatsappKey)){
+            NotificationType whatsappType=whatsappType(category);
+            NotificationDTO dto=new NotificationDTO(inAppMessage,account.get().getPhoneNumber(),whatsappType);
+            long id=createNotification(account.get().getPhoneNumber(),inAppMessage,whatsappType,eventKey,whatsappKey,actionPath);
+            events.publishEvent(new NotificationQueued(id,dto));
+        }
+        if(!notificationDao.hasDeliveryKey(appKey)&&account.isPresent()){
             Notification n=new Notification();n.setType(inAppType);n.setRecipient(normalized);n.setMessage(encryptionService.encrypt(inAppMessage));
             n.setChannel("IN_APP");n.setDelivered(true);n.setRetry(false);n.setActive(true);n.setUpdatedOn(LocalDateTime.now());
             n.setBusinessEventKey(eventKey);n.setDeliveryKey(appKey);n.setActionPath(actionPath);notificationDao.save(n);
         }
     }
+
+    private static NotificationType smsType(NotificationCategory category){return switch(category){
+        case BILLING->NotificationType.BILLING_ALERT_SMS; case PROPERTY->NotificationType.PROPERTY_ALERT_SMS;
+        case MARKETPLACE_DELIVERY->NotificationType.MARKETPLACE_DELIVERY_ALERT_SMS;
+        case SECURITY->NotificationType.SECURITY_ALERT_SMS; case MARKETING->NotificationType.MARKETING_ALERT_SMS;};}
+    private static NotificationType whatsappType(NotificationCategory category){return switch(category){
+        case BILLING->NotificationType.BILLING_ALERT_WHATSAPP; case PROPERTY->NotificationType.PROPERTY_ALERT_WHATSAPP;
+        case MARKETPLACE_DELIVERY->NotificationType.MARKETPLACE_DELIVERY_ALERT_WHATSAPP;
+        case SECURITY->NotificationType.SECURITY_ALERT_WHATSAPP; case MARKETING->NotificationType.MARKETING_ALERT_WHATSAPP;};}
 
     public static String digest(String value) {
         try{return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));}

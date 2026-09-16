@@ -332,6 +332,7 @@ public class InviteService {
                 String formattedMessage = String.format(i18NService.getLocalizedMessage(inviteType.getInviteSMS().getBody()), formatInviteLink(configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(), invite.getToken()));
                 notificationDTO = new NotificationDTO(formattedMessage, boundRecipient, inviteType.getInviteSMS());
             }
+            case WHATSAPP -> throw new IllegalArgumentException("Invitations do not use an unapproved WhatsApp template");
         }
         if (notificationDTO == null) {
             throw new PMSCustomException(ResponseCode.EXPIRED_INVITE_LINK);

@@ -6,6 +6,8 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.notification.NotificationProjection;
 import org.pms.silverocean.service.notification.MyNotificationDTO;
 import org.pms.silverocean.service.notification.NotificationReportService;
+import org.pms.silverocean.service.notification.preferences.NotificationPreferenceModels;
+import org.pms.silverocean.service.notification.preferences.NotificationPreferenceService;
 import org.pms.silverocean.service.notification.sms.africastalking.wrappers.ATSMSDTO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -18,6 +20,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import jakarta.validation.Valid;
 
 import java.util.Optional;
 import java.util.Map;
@@ -27,11 +32,14 @@ import java.util.Map;
 public class NotificationController {
     private final NotificationReportService notificationReportService;
     private final I18NService i18NService;
+    private final NotificationPreferenceService notificationPreferenceService;
 
     @Autowired
-    public NotificationController(NotificationReportService notificationReportService, I18NService i18NService) {
+    public NotificationController(NotificationReportService notificationReportService, I18NService i18NService,
+                                  NotificationPreferenceService notificationPreferenceService) {
         this.notificationReportService = notificationReportService;
         this.i18NService = i18NService;
+        this.notificationPreferenceService = notificationPreferenceService;
     }
 
     @GetMapping("/list")
@@ -82,6 +90,23 @@ public class NotificationController {
         MyNotificationDTO notification = notificationReportService.markMyNotificationRead(id);
         return privateResponse(new ResponseDTO(true, ResponseCode.NOTIFICATION_LIST.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.NOTIFICATION_LIST), notification));
+    }
+
+    @GetMapping("/preferences")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ResponseDTO> getPreferences() {
+        return privateResponse(new ResponseDTO(true, ResponseCode.NOTIFICATION_PREFERENCES.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.NOTIFICATION_PREFERENCES),
+                notificationPreferenceService.current()));
+    }
+
+    @PutMapping("/preferences")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ResponseDTO> updatePreferences(
+            @Valid @RequestBody NotificationPreferenceModels.Update update) {
+        return privateResponse(new ResponseDTO(true, ResponseCode.NOTIFICATION_PREFERENCES.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.NOTIFICATION_PREFERENCES),
+                notificationPreferenceService.update(update)));
     }
 
     private ResponseEntity<ResponseDTO> privateResponse(ResponseDTO body){

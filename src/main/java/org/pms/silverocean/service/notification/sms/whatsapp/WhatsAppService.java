@@ -8,7 +8,6 @@ import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.sms.SMSDao;
-import org.pms.silverocean.service.notification.sms.SmsProvider;
 import org.pms.silverocean.service.notification.sms.whatsapp.wrappers.WAMessage;
 import org.pms.silverocean.service.notification.sms.whatsapp.wrappers.WhatsAppResponse;
 import org.pms.silverocean.service.notification.sms.whatsapp.wrappers.request.Component;
@@ -16,6 +15,7 @@ import org.pms.silverocean.service.notification.sms.whatsapp.wrappers.request.La
 import org.pms.silverocean.service.notification.sms.whatsapp.wrappers.request.Parameter;
 import org.pms.silverocean.service.notification.sms.whatsapp.wrappers.request.Template;
 import org.pms.silverocean.service.notification.sms.whatsapp.wrappers.request.WhatsAppRequest;
+import org.pms.silverocean.service.notification.whatsapp.WhatsAppTemplateRegistry.ApprovedTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -23,7 +23,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 @Service @Slf4j
-public class WhatsAppService implements SmsProvider {
+public class WhatsAppService {
 
     private static final String WHATS_APP = "WHATS_APP";
     private final RestTemplateService restTemplateService;
@@ -42,6 +42,12 @@ public class WhatsAppService implements SmsProvider {
 
 
     public void sendUtilityMessage(String recipientPhone, String userName, String text, long notificationId) {
+        sendTemplateMessage(recipientPhone, userName, text, notificationId,
+                new ApprovedTemplate(utilityTemplate, templateLanguage, "name", "data"));
+    }
+
+    public void sendTemplateMessage(String recipientPhone, String userName, String text, long notificationId,
+                                    ApprovedTemplate approvedTemplate) {
         SMS sms = new SMS();
         sms.setNotificationId(notificationId);
         sms.setActive(true);
@@ -68,12 +74,12 @@ public class WhatsAppService implements SmsProvider {
 
 
         var params = List.of(
-                new Parameter("text", "name", userName),
-                new Parameter("text", "data", text)
+                new Parameter("text", approvedTemplate.nameParameter(), userName),
+                new Parameter("text", approvedTemplate.messageParameter(), text)
         );
 
         var components = List.of(new Component("body", params));
-        var template = new Template(utilityTemplate, new Language(templateLanguage), components);
+        var template = new Template(approvedTemplate.name(), new Language(approvedTemplate.language()), components);
         var request = new WhatsAppRequest("whatsapp", recipient, "template", template);
 
         HttpHeaders headers = new HttpHeaders();
@@ -93,7 +99,6 @@ public class WhatsAppService implements SmsProvider {
         smsDao.saveSMS(sms);
     }
 
-    @Override
     public int executeSend(NotificationDTO dto, long notificationId) throws Exception {
         if (dto.notificationType() == org.pms.silverocean.service.notification.common.NotificationType.OTP_SMS) {
             throw new IllegalStateException("OTP delivery requires its own approved authentication template; keep the SMS provider enabled");
@@ -102,12 +107,10 @@ public class WhatsAppService implements SmsProvider {
         return 0;
     }
 
-    @Override
     public boolean isRetryable(int statusCode) {
         return false;
     }
 
-    @Override
     public boolean supports(String providerName) {
         if (StringUtils.isBlank(providerName)) return false;
         return WHATS_APP.equalsIgnoreCase(providerName);

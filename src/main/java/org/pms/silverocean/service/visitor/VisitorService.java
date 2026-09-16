@@ -284,6 +284,7 @@ public class VisitorService {
         return switch (channel) {
             case SMS -> recipient.getPhoneNumber();
             case EMAIL -> recipient.getEmail();
+            case WHATSAPP -> throw new IllegalArgumentException("Visitor alerts do not use WhatsApp templates");
         };
     }
 

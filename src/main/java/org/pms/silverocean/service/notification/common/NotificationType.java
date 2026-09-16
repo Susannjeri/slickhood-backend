@@ -84,6 +84,16 @@ public enum NotificationType {
     HELPDESK_AGENT_REPLY_EMAIL("email.helpdesk.agent.reply.subject", "email.helpdesk.agent.reply.body", true, NotificationChannel.EMAIL),
     HELPDESK_SLA_BREACH_EMAIL("email.helpdesk.sla.breach.subject", "email.helpdesk.sla.breach.body", true, NotificationChannel.EMAIL),
     PROPERTY_LISTING_INQUIRY_EMAIL("email.property.listing.inquiry.subject", "email.property.listing.inquiry.body", true, NotificationChannel.EMAIL),
+    BILLING_ALERT_SMS("sms.business.alert", true, NotificationChannel.SMS),
+    PROPERTY_ALERT_SMS("sms.business.alert", true, NotificationChannel.SMS),
+    MARKETPLACE_DELIVERY_ALERT_SMS("sms.business.alert", true, NotificationChannel.SMS),
+    SECURITY_ALERT_SMS("sms.business.alert", true, NotificationChannel.SMS),
+    MARKETING_ALERT_SMS("sms.business.alert", false, NotificationChannel.SMS),
+    BILLING_ALERT_WHATSAPP("whatsapp.business.alert", true, NotificationChannel.WHATSAPP),
+    PROPERTY_ALERT_WHATSAPP("whatsapp.business.alert", true, NotificationChannel.WHATSAPP),
+    MARKETPLACE_DELIVERY_ALERT_WHATSAPP("whatsapp.business.alert", true, NotificationChannel.WHATSAPP),
+    SECURITY_ALERT_WHATSAPP("whatsapp.business.alert", true, NotificationChannel.WHATSAPP),
+    MARKETING_ALERT_WHATSAPP("whatsapp.business.alert", false, NotificationChannel.WHATSAPP),
     ;
 
 

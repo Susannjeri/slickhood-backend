@@ -29,6 +29,7 @@ public enum VisitorNotificationEvent {
         return switch (channel) {
             case SMS -> smsType;
             case EMAIL -> emailType;
+            case WHATSAPP -> throw new IllegalArgumentException("Visitor alerts do not use WhatsApp templates");
         };
     }
 }

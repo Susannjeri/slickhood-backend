@@ -143,6 +143,8 @@ public class SilverOceanUserService {
                 String formattedMessage = String.format(i18NService.getLocalizedMessage(NotificationType.OTP_SMS.getBody()), otp);
                 notificationService.sendNotification(new NotificationDTO(formattedMessage, localisedPhoneNumber, NotificationType.OTP_SMS));
             }
+            case WHATSAPP -> throw new IllegalArgumentException(
+                    "OTP remains available through SMS or email until a Meta authentication template is approved");
         }
     }
 

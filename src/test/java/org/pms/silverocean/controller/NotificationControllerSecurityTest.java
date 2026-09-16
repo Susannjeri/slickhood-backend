@@ -2,6 +2,7 @@ package org.pms.silverocean.controller;
 import org.junit.jupiter.api.*;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.notification.NotificationReportService;
+import org.pms.silverocean.service.notification.preferences.NotificationPreferenceService;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.springframework.context.annotation.*;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -18,7 +19,8 @@ class NotificationControllerSecurityTest {
     @Configuration @EnableMethodSecurity static class SecurityConfig {
         @Bean NotificationReportService reports(){return mock(NotificationReportService.class);}
         @Bean I18NService i18n(){return mock(I18NService.class);}
-        @Bean NotificationController controller(NotificationReportService reports,I18NService i18n){return new NotificationController(reports,i18n);}
+        @Bean NotificationPreferenceService preferences(){return mock(NotificationPreferenceService.class);}
+        @Bean NotificationController controller(NotificationReportService reports,I18NService i18n,NotificationPreferenceService preferences){return new NotificationController(reports,i18n,preferences);}
     }
     AnnotationConfigApplicationContext context;
     @BeforeEach void open(){context=new AnnotationConfigApplicationContext(SecurityConfig.class);}
