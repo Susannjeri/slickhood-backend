@@ -15,6 +15,7 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
+import org.pms.silverocean.service.auth.roles.SuperadminRoleIsolationPolicy;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.springframework.data.jpa.repository.Lock;
@@ -53,7 +54,8 @@ class TeamAccessHardeningTest {
                 properties, propertyManagers, mock(UserSubscriptionRepo.class), mock(SubscriptionPlanRepo.class),
                 mock(PlanQuotaRepo.class), mock(RoleRepo.class), mock(UserRoleRepo.class), users,
                 mock(ConfigService.class), mock(NotificationService.class), mock(I18NService.class),
-                mock(AuditLogService.class), new ObjectMapper(), workspaceSelection);
+                mock(AuditLogService.class), new ObjectMapper(), workspaceSelection,
+                mock(SuperadminRoleIsolationPolicy.class));
     }
 
     @Test

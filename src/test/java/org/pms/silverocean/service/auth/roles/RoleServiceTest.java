@@ -100,6 +100,9 @@ class RoleServiceTest {
     @Mock
     private BuyerOfferDocumentService buyerOfferDocumentService;
 
+    @Mock
+    private SuperadminRoleIsolationPolicy superadminIsolation;
+
     @InjectMocks
     private RoleService roleService;
 
@@ -109,6 +112,8 @@ class RoleServiceTest {
 
     @BeforeEach
     void setUp() {
+        org.mockito.Mockito.lenient().when(superadminIsolation.effectiveRoles(any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         testUser = new Users();
         testUser.setId(1L);
         testUser.setEmail("test@example.com");
@@ -523,6 +528,7 @@ class RoleServiceTest {
         assertEquals(true, ((java.util.Map<?, ?>) response.getData().getFirst()).get("kycRequired"));
         verify(userRoleRepo).save(any(UserRole.class));
         verify(kycService).reopenForNewRoleRequirements();
+        verify(superadminIsolation).assertCanAssume(testUser.getId(), PMSRole.LANDLORD);
     }
 
     @Test
@@ -631,6 +637,22 @@ class RoleServiceTest {
 
         assertEquals(ResponseCode.INVALID_OR_EXPIRED_TOKEN, exception.getResponseCode());
         verify(userRoleRepo, never()).save(any());
+    }
+
+    @Test
+    void selfAssignRole_superadminAccountCannotAddLandlord() {
+        testUser.setAccountStatus(AccountStatus.ACTIVE.name());
+        when(userDao.getUserObject()).thenReturn(testUser);
+        when(roleRepo.findByIdAndActive(testRole.getId())).thenReturn(Optional.of(testRole));
+        org.mockito.Mockito.doThrow(new PMSCustomException(ResponseCode.SUPERADMIN_ROLE_ISOLATED))
+                .when(superadminIsolation).assertCanAssume(testUser.getId(), PMSRole.LANDLORD);
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class,
+                () -> roleService.selfAssignRole(testRole.getId()));
+
+        assertEquals(ResponseCode.SUPERADMIN_ROLE_ISOLATED, exception.getResponseCode());
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+        verify(kycService, never()).reopenForNewRoleRequirements();
     }
 
     @Test

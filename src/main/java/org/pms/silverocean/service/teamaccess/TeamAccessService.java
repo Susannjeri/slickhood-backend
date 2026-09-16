@@ -11,6 +11,7 @@ import org.pms.silverocean.service.*;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
+import org.pms.silverocean.service.auth.roles.SuperadminRoleIsolationPolicy;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.kyc.AccountStatus;
@@ -51,6 +52,7 @@ public class TeamAccessService {
     private final AuditLogService audit;
     private final ObjectMapper mapper;
     private final WorkspaceSelectionService workspaceSelection;
+    private final SuperadminRoleIsolationPolicy superadminIsolation;
 
     @Transactional
     public TeamAccessModels.WorkspaceView current() {
@@ -73,6 +75,8 @@ public class TeamAccessService {
         validateEmail(request.email());
         String email = normalizeEmail(request.email());
         if (email.equalsIgnoreCase(users.getUserObject().getEmail())) throw invalid();
+        users.findByEmail(email).ifPresent(existing ->
+                superadminIsolation.assertCanAssume(existing.getId(), role.platformRole()));
         if (memberships.findByWorkspaceIdAndActiveTrueOrderByCreatedOnDesc(access.workspace().getId()).stream().anyMatch(m -> m.getMemberEmail().equalsIgnoreCase(email) && m.getStatus()!=TeamMembershipStatus.REVOKED)
                 || invitations.existsByWorkspaceIdAndRecipientEmailIgnoreCaseAndStatusInAndActiveTrue(access.workspace().getId(), email, List.of(TeamMembershipStatus.PENDING))) {
             throw new PMSCustomException(ResponseCode.INVITE_ALREADY_EXISTS);
@@ -214,7 +218,7 @@ public class TeamAccessService {
     private void expire(WorkspaceInvitation i){if(i.getStatus()==TeamMembershipStatus.PENDING&&LocalDateTime.now().isAfter(i.getExpiresAt())){i.setStatus(TeamMembershipStatus.EXPIRED);invitations.save(i);audit.createAuditLog(i,"workspace_invite_expire");}}
     private WorkspaceInvitation ownedInvitation(AccessContext a,long id){return invitations.findByIdAndWorkspaceIdAndActiveTrue(id,a.workspace().getId()).orElseThrow(this::invalid);}
     private WorkspaceMembership ownedMember(AccessContext a,long id){return memberships.findByIdAndWorkspaceIdAndActiveTrue(id,a.workspace().getId()).orElseThrow(this::invalid);}
-    private void assignPlatformRole(long userId,PMSRole role){Role dbRole=roles.findByName(role.getName()).orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_ROLE));if(userRoles.findByUserIdAndRoleId(userId,dbRole.getId())==0){UserRole ur=new UserRole(userId,dbRole.getId());userRoles.save(ur);audit.createAuditLog(ur,"assign_workspace_role");}}
+    private void assignPlatformRole(long userId,PMSRole role){superadminIsolation.assertCanAssume(userId,role);Role dbRole=roles.findByName(role.getName()).orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_ROLE));if(userRoles.findByUserIdAndRoleId(userId,dbRole.getId())==0){UserRole ur=new UserRole(userId,dbRole.getId());userRoles.save(ur);audit.createAuditLog(ur,"assign_workspace_role");}}
     private void removePlatformRoleIfUnused(WorkspaceMembership member){if(memberships.existsByUserIdAndMembershipRoleAndStatusAndActiveTrue(member.getUserId(),member.getMembershipRole(),TeamMembershipStatus.ACTIVE))return;roles.findByName(member.getMembershipRole().platformRole().getName()).flatMap(role->userRoles.findFirstByUserIdAndRoleId(member.getUserId(),role.getId())).ifPresent(userRole->{userRoles.delete(userRole);audit.createAuditLog(userRole,"remove_workspace_role");});}
     private void send(WorkspaceInvitation invitation, CustomerWorkspace workspace, String rawToken) {
         String link = formatInviteLink(

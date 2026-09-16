@@ -60,8 +60,9 @@ public class RoleService {
     private final EstateService estateService;
     private final SaleTransactionRepo saleTransactionRepo;
     private final BuyerOfferDocumentService buyerOffers;
+    private final SuperadminRoleIsolationPolicy superadminIsolation;
 
-    public RoleService(UserRoleRepo userRoleRepo, PermissionRepo permissionRepo, RoleRepo roleRepo, PropertyManagerService propertyManagerService, UserDao userDao, RolePermissionRepo rolePermissionRepo, I18NService i18NService, AuditLogService auditLogService, InviteDao inviteDao, KycService kycService, TeamAccessService teamAccessService, EstateService estateService, SaleTransactionRepo saleTransactionRepo, BuyerOfferDocumentService buyerOffers) {
+    public RoleService(UserRoleRepo userRoleRepo, PermissionRepo permissionRepo, RoleRepo roleRepo, PropertyManagerService propertyManagerService, UserDao userDao, RolePermissionRepo rolePermissionRepo, I18NService i18NService, AuditLogService auditLogService, InviteDao inviteDao, KycService kycService, TeamAccessService teamAccessService, EstateService estateService, SaleTransactionRepo saleTransactionRepo, BuyerOfferDocumentService buyerOffers, SuperadminRoleIsolationPolicy superadminIsolation) {
         this.userRoleRepo = userRoleRepo;
         this.permissionRepo = permissionRepo;
         this.roleRepo = roleRepo;
@@ -76,6 +77,7 @@ public class RoleService {
         this.estateService = estateService;
         this.saleTransactionRepo = saleTransactionRepo;
         this.buyerOffers = buyerOffers;
+        this.superadminIsolation = superadminIsolation;
     }
 
     /**
@@ -108,7 +110,8 @@ public class RoleService {
     public ResponseDTO selfAssignRole(long roleId) {
         Users user = userDao.getUserObject();
         if (user == null) throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
-        checkIfRoleIsValidAndSelfAssignable(roleId);
+        Role requestedRole = checkIfRoleIsValidAndSelfAssignable(roleId);
+        superadminIsolation.assertCanAssume(user.getId(), PMSRole.roleFromSavedName(requestedRole.getName()));
         boolean alreadyAssigned = userRoleRepo.findByUserIdAndRoleId(user.getId(), roleId) > 0;
         if (!alreadyAssigned && !AccountStatus.ACTIVE.name().equals(user.getAccountStatus())) {
             throw new PMSCustomException(ResponseCode.KYC_ACCOUNT_RESTRICTED);
@@ -167,7 +170,7 @@ public class RoleService {
     }
 
     public Set<RoleWrapper> getPermissionsForUser(Long userId) {
-        return userRoleRepo.findByUserId(userId)
+        return superadminIsolation.effectiveRoles(userRoleRepo.findByUserId(userId))
                 .stream().map(role -> new RoleWrapper(role, permissionRepo.findByRoleId(role.getId()), resolvePropertiesForRole(userId, role))
                 ).collect(Collectors.toSet());
     }
@@ -206,13 +209,14 @@ public class RoleService {
         assignRoleFromInvite(invite, invite.getRoleId(), user);
     }
 
-    private void checkIfRoleIsValidAndSelfAssignable(Long roleId) {
+    private Role checkIfRoleIsValidAndSelfAssignable(Long roleId) {
         Optional<Role> roleByID = roleRepo.findByIdAndActive(roleId);
         if (roleByID.isEmpty() || !roleByID.get().isActive() || !roleByID.get().isSelfAssignable()
                 || PMSRole.roleFromSavedName(roleByID.get().getName()).isPlatformOwnerOnly()) {
             log.error("Role with id {} not found", roleId);
             throw new PMSCustomException(ResponseCode.INVALID_ROLE);
         }
+        return roleByID.get();
     }
 
     @Transactional
@@ -326,14 +330,15 @@ public class RoleService {
             log.warn("Blocked application-level assignment of platform-owner role {}", role.getId());
             return new ResponseDTO(false, ResponseCode.INVALID_ROLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.INVALID_ROLE));
         }
-        if (assignorEmail.equals(user.getEmail()) && !role.isSelfAssignable()) {
-            return new ResponseDTO(false, ResponseCode.ROLE_NOT_SELF_ASSIGNABLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_NOT_SELF_ASSIGNABLE));
-        }
         // The caller has already authenticated and loaded this account. A
         // second database lookup can fail independently and used to turn a
         // valid existing-user invitation into "Invalid user details".
         if (user == null || user.getId() == null || user.getEmail() == null) {
             throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+        }
+        superadminIsolation.assertCanAssume(user.getId(), PMSRole.roleFromSavedName(role.getName()));
+        if (assignorEmail.equals(user.getEmail()) && !role.isSelfAssignable()) {
+            return new ResponseDTO(false, ResponseCode.ROLE_NOT_SELF_ASSIGNABLE.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_NOT_SELF_ASSIGNABLE));
         }
         if (userRoleRepo.findByUserIdAndRoleId(user.getId(), role.getId()) > 0) {
             return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(), i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY));
