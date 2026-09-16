@@ -96,33 +96,48 @@ public class KycService {
                         currentConsentVersion, null, user.isPhoneVerified(), user.getPhoneNumber(), timestamp(user.getPhoneVerifiedAt()),
                         "NOT_CONFIGURED", ocrProvider.enabled(),
                         requirements(user), requirements(user).stream().filter(KycRequirement::required)
-                        .map(KycRequirement::code).collect(Collectors.toSet()), List.of()));
+                        .map(KycRequirement::code).collect(Collectors.toSet()), List.of(), null, null));
     }
 
     /**
      * Re-evaluates the approved evidence after a self-service role is added.
      * Existing documents remain available, but a role whose requirements are
-     * not yet covered reopens KYC and removes operational access until review.
+     * not yet covered reopens KYC for that role only. Existing approved roles
+     * and their operational access remain active while the extra KYC is pending.
      */
     @Transactional(transactionManager = "pmsDBTransactionManager")
-    public boolean reopenForNewRoleRequirements() {
+    public boolean reopenForNewRoleRequirements(long roleId) {
         Users user = currentUser();
-        KycCase kycCase = caseRepo.findByUserId(user.getId()).orElse(null);
-        boolean evidenceMissing = kycCase == null || !missingRequirements(kycCase, user).isEmpty();
-        if (!evidenceMissing) return false;
-
-        if (kycCase != null) {
-            kycCase.setStatus(KycStatus.IN_PROGRESS.name());
-            kycCase.setReviewNotes(null);
-            kycCase.setSubmittedAt(null);
-            kycCase.setReviewedAt(null);
-            kycCase.setReviewedBy(null);
-            caseRepo.save(kycCase);
+        Optional<KycCase> existingCase = caseRepo.findByUserId(user.getId());
+        KycCase kycCase = existingCase.orElseGet(KycCase::new);
+        boolean evidenceMissing = existingCase.isEmpty() || !missingRequirements(kycCase, user).isEmpty();
+        if (!evidenceMissing) {
+            if (Objects.equals(kycCase.getPendingRoleId(), roleId)) {
+                kycCase.setPendingRoleId(null);
+                caseRepo.save(kycCase);
+            }
+            return false;
         }
-        user.setVerified(false);
-        user.setAccountStatus(AccountStatus.PENDING_KYC.name());
-        userDao.save(user);
+
+        kycCase.setUserId(user.getId());
+        kycCase.setStatus(existingCase.isEmpty() ? KycStatus.NOT_STARTED.name() : KycStatus.IN_PROGRESS.name());
+        kycCase.setPendingRoleId(roleId);
+        kycCase.setReviewNotes(null);
+        kycCase.setSubmittedAt(null);
+        kycCase.setReviewedAt(null);
+        kycCase.setReviewedBy(null);
+        if (existingCase.isEmpty()) kycCase.setRegistryStatus("NOT_CONFIGURED");
+        kycCase.setActive(true);
+        caseRepo.save(kycCase);
         return true;
+    }
+
+    public Optional<Long> pendingRoleIdForUser(long userId) {
+        return caseRepo.findByUserId(userId).map(KycCase::getPendingRoleId);
+    }
+
+    public boolean isRolePending(long userId, long roleId) {
+        return pendingRoleIdForUser(userId).filter(candidate -> candidate == roleId).isPresent();
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -281,8 +296,10 @@ public class KycService {
         kycCase.setReviewedAt(null);
         kycCase.setReviewedBy(null);
         caseRepo.save(kycCase);
-        user.setAccountStatus(AccountStatus.KYC_UNDER_REVIEW.name());
-        userDao.save(user);
+        if (kycCase.getPendingRoleId() == null) {
+            user.setAccountStatus(AccountStatus.KYC_UNDER_REVIEW.name());
+            userDao.save(user);
+        }
         return view(kycCase, user);
     }
 
@@ -408,6 +425,7 @@ public class KycService {
             if (taxPin != null) subject.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
             subject.setVerified(true);
             subject.setAccountStatus(AccountStatus.ACTIVE.name());
+            kycCase.setPendingRoleId(null);
             currentDocuments.forEach(document -> {
                 if (!DocumentStatus.REJECTED.name().equals(document.getStatus())) {
                     document.setStatus(DocumentStatus.VERIFIED.name());
@@ -417,8 +435,10 @@ public class KycService {
                 documentRepo.save(document);
             });
         } else {
-            subject.setVerified(false);
-            subject.setAccountStatus(AccountStatus.KYC_REJECTED.name());
+            if (kycCase.getPendingRoleId() == null) {
+                subject.setVerified(false);
+                subject.setAccountStatus(AccountStatus.KYC_REJECTED.name());
+            }
             currentDocuments.forEach(document -> {
                 KycDocumentReviewRequest decision = documentDecisions.get(document.getId());
                 boolean approved = decision != null && decision.approved();
@@ -430,6 +450,7 @@ public class KycService {
             });
         }
         userDao.save(subject);
+        caseRepo.save(kycCase);
         return view(kycCase, subject);
     }
 
@@ -667,13 +688,17 @@ public class KycService {
         if (complete && userDao.isValidIDAndTaxPin(user.getId(), user.getCountry(), identificationNumber, taxPin)) {
             user.setIdentificationNumber(identificationNumber.toUpperCase(Locale.ROOT));
             if (taxPin != null) user.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
-            user.setVerified(false);
-            user.setAccountStatus(AccountStatus.KYC_UNDER_REVIEW.name());
+            if (kycCase.getPendingRoleId() == null) {
+                user.setVerified(false);
+                user.setAccountStatus(AccountStatus.KYC_UNDER_REVIEW.name());
+            }
             kycCase.setStatus(KycStatus.SUBMITTED.name());
             if (kycCase.getSubmittedAt() == null) kycCase.setSubmittedAt(ZonedDateTime.now());
         } else {
-            user.setVerified(false);
-            user.setAccountStatus(AccountStatus.PENDING_KYC.name());
+            if (kycCase.getPendingRoleId() == null) {
+                user.setVerified(false);
+                user.setAccountStatus(AccountStatus.PENDING_KYC.name());
+            }
             kycCase.setStatus(KycStatus.IN_PROGRESS.name());
             kycCase.setSubmittedAt(null);
         }
@@ -825,7 +850,16 @@ public class KycService {
         return new KycCaseView(kycCase.getId(), kycCase.getStatus(), user.getAccountStatus(),
                 currentConsentVersion, kycCase.getReviewNotes(), user.isPhoneVerified(), user.getPhoneNumber(),
                 timestamp(user.getPhoneVerifiedAt()), kycCase.getRegistryStatus(), ocrProvider.enabled(),
-                effectiveRequirements(user, uploadedTypes), missingRequirements(kycCase, user), docs);
+                effectiveRequirements(user, uploadedTypes), missingRequirements(kycCase, user), docs,
+                kycCase.getPendingRoleId(), pendingRoleName(kycCase));
+    }
+
+    private String pendingRoleName(KycCase kycCase) {
+        if (kycCase.getPendingRoleId() == null) return null;
+        return userRoleRepo.findByUserId(kycCase.getUserId()).stream()
+                .filter(role -> Objects.equals(role.getId(), kycCase.getPendingRoleId()))
+                .map(role -> role.getName())
+                .findFirst().orElse(null);
     }
 
     private String timestamp(ZonedDateTime value) { return value == null ? null : value.toString(); }

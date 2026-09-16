@@ -23,4 +23,7 @@ public class KycCase extends BaseActiveEntity {
     private ZonedDateTime reviewedAt;
     private Long reviewedBy;
     private String reviewNotes;
+    /** Role being added to an already-active account. It is withheld from
+     * effective permissions until the additional KYC is approved. */
+    private Long pendingRoleId;
 }

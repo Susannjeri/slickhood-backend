@@ -35,6 +35,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
+import java.util.Objects;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -113,6 +114,12 @@ public class RoleService {
         Role requestedRole = checkIfRoleIsValidAndSelfAssignable(roleId);
         superadminIsolation.assertCanAssume(user.getId(), PMSRole.roleFromSavedName(requestedRole.getName()));
         boolean alreadyAssigned = userRoleRepo.findByUserIdAndRoleId(user.getId(), roleId) > 0;
+        Optional<Long> pendingRoleId = kycService.pendingRoleIdForUser(user.getId());
+        if (!alreadyAssigned && pendingRoleId.filter(pending -> pending != roleId).isPresent()) {
+            // A single pending role keeps permission filtering deterministic and
+            // prevents a second assignment from accidentally exposing the first.
+            throw new PMSCustomException(ResponseCode.KYC_ACCOUNT_RESTRICTED);
+        }
         if (!alreadyAssigned && !AccountStatus.ACTIVE.name().equals(user.getAccountStatus())) {
             throw new PMSCustomException(ResponseCode.KYC_ACCOUNT_RESTRICTED);
         }
@@ -121,8 +128,9 @@ public class RoleService {
             auditLogService.createAuditLog(userRole, org.pms.silverocean.service.auth.roles.enums.Permission.ASSIGN_ROLE);
         }
         boolean kycRequired = alreadyAssigned
-                ? !AccountStatus.ACTIVE.name().equals(user.getAccountStatus())
-                : kycService.reopenForNewRoleRequirements();
+                ? kycService.isRolePending(user.getId(), roleId)
+                        || !AccountStatus.ACTIVE.name().equals(user.getAccountStatus())
+                : kycService.reopenForNewRoleRequirements(roleId);
         return new ResponseDTO(true, ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.ROLE_ASSIGNED_SUCCESSFULLY),
                 Map.of("roleId", roleId, "kycRequired", kycRequired));
@@ -170,7 +178,11 @@ public class RoleService {
     }
 
     public Set<RoleWrapper> getPermissionsForUser(Long userId) {
-        return superadminIsolation.effectiveRoles(userRoleRepo.findByUserId(userId))
+        Long pendingRoleId = kycService.pendingRoleIdForUser(userId).orElse(null);
+        Set<Role> approvedRoles = userRoleRepo.findByUserId(userId).stream()
+                .filter(role -> !Objects.equals(role.getId(), pendingRoleId))
+                .collect(Collectors.toSet());
+        return superadminIsolation.effectiveRoles(approvedRoles)
                 .stream().map(role -> new RoleWrapper(role, permissionRepo.findByRoleId(role.getId()), resolvePropertiesForRole(userId, role))
                 ).collect(Collectors.toSet());
     }

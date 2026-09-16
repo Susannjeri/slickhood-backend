@@ -93,6 +93,48 @@ class KycActivationLifecycleTest {
         verify(users).save(customer);
     }
 
+    @Test void additionalRoleKycKeepsApprovedAccountActiveAndMarksOnlyTheRolePending() {
+        Users customer = customer(12);
+        customer.setVerified(true);
+        customer.setAccountStatus(AccountStatus.ACTIVE.name());
+        KycCase kycCase = submittedCase(40, 12, KycStatus.APPROVED);
+        Role salesRole = new Role(PMSRole.SALES_AGENT.getName(), PMSRole.SALES_AGENT.getDescription(), true);
+        salesRole.setId(77L);
+        when(users.getUserObject()).thenReturn(customer);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(roles.findByUserId(12L)).thenReturn(Set.of(salesRole));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("SALES_AUTHORITY", "Sales authority", true,
+                        Set.of(KycDocumentType.APPOINTMENT_LETTER))));
+
+        boolean required = service.reopenForNewRoleRequirements(77L);
+
+        assertThat(required).isTrue();
+        assertThat(customer.getAccountStatus()).isEqualTo(AccountStatus.ACTIVE.name());
+        assertThat(customer.isVerified()).isTrue();
+        assertThat(kycCase.getPendingRoleId()).isEqualTo(77L);
+        assertThat(kycCase.getStatus()).isEqualTo(KycStatus.IN_PROGRESS.name());
+        verify(users, never()).save(customer);
+    }
+
+    @Test void submittingAdditionalRoleKycDoesNotLockExistingRoles() {
+        Users customer = customer(12);
+        customer.setVerified(true);
+        customer.setPhoneVerified(true);
+        customer.setAccountStatus(AccountStatus.ACTIVE.name());
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        kycCase.setPendingRoleId(77L);
+        when(users.getUserObject()).thenReturn(customer);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+
+        KycCaseView view = service.submit();
+
+        assertThat(view.status()).isEqualTo(KycStatus.SUBMITTED.name());
+        assertThat(view.accountStatus()).isEqualTo(AccountStatus.ACTIVE.name());
+        assertThat(customer.isVerified()).isTrue();
+        verify(users, never()).save(customer);
+    }
+
     @Test void approvalActivatesCustomer() {
         Users reviewer = customer(1); Users subject = customer(12);
         KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);

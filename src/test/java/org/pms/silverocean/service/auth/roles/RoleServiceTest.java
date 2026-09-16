@@ -38,6 +38,7 @@ import org.pms.silverocean.service.leasedocument.BuyerOfferDocumentService;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -520,14 +521,14 @@ class RoleServiceTest {
         when(userDao.getUserObject()).thenReturn(testUser);
         when(roleRepo.findByIdAndActive(testRole.getId())).thenReturn(Optional.of(testRole));
         when(userRoleRepo.findByUserIdAndRoleId(testUser.getId(), testRole.getId())).thenReturn(0);
-        when(kycService.reopenForNewRoleRequirements()).thenReturn(true);
+        when(kycService.reopenForNewRoleRequirements(testRole.getId())).thenReturn(true);
 
         ResponseDTO response = roleService.selfAssignRole(testRole.getId());
 
         assertTrue(response.isSuccess());
         assertEquals(true, ((java.util.Map<?, ?>) response.getData().getFirst()).get("kycRequired"));
         verify(userRoleRepo).save(any(UserRole.class));
-        verify(kycService).reopenForNewRoleRequirements();
+        verify(kycService).reopenForNewRoleRequirements(testRole.getId());
         verify(superadminIsolation).assertCanAssume(testUser.getId(), PMSRole.LANDLORD);
     }
 
@@ -543,7 +544,7 @@ class RoleServiceTest {
 
         assertEquals(ResponseCode.KYC_ACCOUNT_RESTRICTED, exception.getResponseCode());
         verify(userRoleRepo, never()).save(any(UserRole.class));
-        verify(kycService, never()).reopenForNewRoleRequirements();
+        verify(kycService, never()).reopenForNewRoleRequirements(anyLong());
     }
 
     @Test
@@ -558,7 +559,7 @@ class RoleServiceTest {
         assertTrue(response.isSuccess());
         assertEquals(true, ((java.util.Map<?, ?>) response.getData().getFirst()).get("kycRequired"));
         verify(userRoleRepo, never()).save(any(UserRole.class));
-        verify(kycService, never()).reopenForNewRoleRequirements();
+        verify(kycService, never()).reopenForNewRoleRequirements(anyLong());
     }
 
     @Test
@@ -574,6 +575,54 @@ class RoleServiceTest {
 
         verify(userRoleRepo).findBuyerProperty(testUser.getId());
         verify(userRoleRepo, never()).findStaffPropertyByUserIdAndRole(testUser.getId(), PMSRole.BUYER.name());
+    }
+
+    @Test
+    void pendingAdditionalRoleIsWithheldFromEffectivePermissions() {
+        Role pendingRole = new Role(PMSRole.SALES_AGENT.getName(), PMSRole.SALES_AGENT.getDescription(), true);
+        pendingRole.setId(77L);
+        pendingRole.setActive(true);
+        when(userRoleRepo.findByUserId(testUser.getId())).thenReturn(Set.of(testRole, pendingRole));
+        when(kycService.pendingRoleIdForUser(testUser.getId())).thenReturn(Optional.of(77L));
+        when(permissionRepo.findByRoleId(testRole.getId())).thenReturn(Set.of());
+        when(userRoleRepo.findLandlordsProperty(testUser.getId())).thenReturn(Set.of());
+
+        Set<org.pms.silverocean.service.auth.wrappers.RoleWrapper> effective =
+                roleService.getPermissionsForUser(testUser.getId());
+
+        assertEquals(1, effective.size());
+        assertEquals(testRole.getName(), effective.iterator().next().getRoleName());
+        verify(permissionRepo, never()).findByRoleId(77L);
+    }
+
+    @Test
+    void activeUserCanResumePendingAdditionalRoleWithoutDuplicateAssignment() {
+        testUser.setAccountStatus(AccountStatus.ACTIVE.name());
+        when(userDao.getUserObject()).thenReturn(testUser);
+        when(roleRepo.findByIdAndActive(testRole.getId())).thenReturn(Optional.of(testRole));
+        when(userRoleRepo.findByUserIdAndRoleId(testUser.getId(), testRole.getId())).thenReturn(1);
+        when(kycService.isRolePending(testUser.getId(), testRole.getId())).thenReturn(true);
+
+        ResponseDTO response = roleService.selfAssignRole(testRole.getId());
+
+        assertEquals(true, ((java.util.Map<?, ?>) response.getData().getFirst()).get("kycRequired"));
+        verify(userRoleRepo, never()).save(any(UserRole.class));
+        verify(kycService, never()).reopenForNewRoleRequirements(anyLong());
+    }
+
+    @Test
+    void secondAdditionalRoleCannotReplaceAnExistingPendingRole() {
+        testUser.setAccountStatus(AccountStatus.ACTIVE.name());
+        when(userDao.getUserObject()).thenReturn(testUser);
+        when(roleRepo.findByIdAndActive(testRole.getId())).thenReturn(Optional.of(testRole));
+        when(userRoleRepo.findByUserIdAndRoleId(testUser.getId(), testRole.getId())).thenReturn(0);
+        when(kycService.pendingRoleIdForUser(testUser.getId())).thenReturn(Optional.of(77L));
+
+        PMSCustomException exception = assertThrows(PMSCustomException.class,
+                () -> roleService.selfAssignRole(testRole.getId()));
+
+        assertEquals(ResponseCode.KYC_ACCOUNT_RESTRICTED, exception.getResponseCode());
+        verify(userRoleRepo, never()).save(any(UserRole.class));
     }
 
     @Test
@@ -652,7 +701,7 @@ class RoleServiceTest {
 
         assertEquals(ResponseCode.SUPERADMIN_ROLE_ISOLATED, exception.getResponseCode());
         verify(userRoleRepo, never()).save(any(UserRole.class));
-        verify(kycService, never()).reopenForNewRoleRequirements();
+        verify(kycService, never()).reopenForNewRoleRequirements(anyLong());
     }
 
     @Test
