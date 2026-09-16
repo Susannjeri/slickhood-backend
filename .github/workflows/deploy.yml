@@ -104,6 +104,41 @@ jobs:
               done
               return 1
             }
+            report_safe_failure_diagnostics() {
+              echo 'Candidate service state'
+              sudo systemctl show pms.service \
+                --property=ActiveState,SubState,Result,NRestarts,ExecMainCode,ExecMainStatus,DropInPaths
+              echo 'Candidate production readiness (configuration names only)'
+              readiness_file="$(mktemp)"
+              curl --silent --show-error --output "$readiness_file" "$health_url" || true
+              python3 - "$readiness_file" <<'PY'
+            import json
+            import sys
+
+            try:
+                with open(sys.argv[1], encoding="utf-8") as source:
+                    payload = json.load(source)
+                component = payload.get("components", {}).get("productionReadiness", {})
+                details = component.get("details", {})
+                print("overallStatus=" + str(payload.get("status", "UNKNOWN")))
+                print("productionReadinessStatus=" + str(component.get("status", "UNKNOWN")))
+                print("whatsappStatus=" + str(details.get("whatsappStatus", "unknown")))
+                missing = details.get("missingOrUnsafeConfiguration", [])
+                if isinstance(missing, list):
+                    print("missingOrUnsafeConfiguration=" + ",".join(str(item) for item in missing))
+                else:
+                    print("missingOrUnsafeConfiguration=unavailable")
+            except Exception:
+                print("productionReadinessResponse=unavailable")
+            PY
+              rm -f "$readiness_file"
+              echo 'Candidate Java exception classes (names only)'
+              sudo journalctl -u pms.service --since '10 minutes ago' --no-pager \
+                | grep -Eo '([A-Za-z_][A-Za-z0-9_$]*\.)+[A-Za-z_][A-Za-z0-9_$]*(Exception|Error)' \
+                | sort \
+                | uniq -c \
+                | tail -n 80 || true
+            }
             restore_previous_release() {
               if [ "$installed" = "true" ] && sudo test -f "$rollback"; then
                 sudo install -o silverocean -g silverocean -m 0644 "$rollback" "$live"
@@ -185,5 +220,5 @@ jobs:
               installed=false
               exit 0
             fi
-            sudo systemctl status pms.service --no-pager || true
+            report_safe_failure_diagnostics
             exit 1
