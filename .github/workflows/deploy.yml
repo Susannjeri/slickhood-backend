@@ -58,6 +58,17 @@ jobs:
           cd target
           sha256sum -- *.jar production-preflight.py production-backup.py > release.sha256
 
+      - name: Verify approved WhatsApp templates
+        env:
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$WHATSAPP_ACCESS_TOKEN"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+            -H "Authorization: Bearer $WHATSAPP_ACCESS_TOKEN" \
+            'https://graph.facebook.com/v22.0/2306816990066695/message_templates?fields=name,status&limit=100' \
+            | python3 -c 'import json,sys; rows=json.load(sys.stdin).get("data",[]); expected={"slickhood_billing_notification_v1","slickhood_property_notification_v1","slickhood_marketplace_notification_v1","slickhood_security_notification_v1","slickhood_marketing_notification_v1"}; approved={r.get("name") for r in rows if r.get("status")=="APPROVED"}; missing=sorted(expected-approved); assert not missing, "WhatsApp templates are not approved: "+", ".join(missing)'
+
       - name: Copy JAR to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -69,11 +80,16 @@ jobs:
           strip_components: 1
 
       - name: Install, verify and roll back on failure
+        env:
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+          WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
+          WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: WHATSAPP_ACCESS_TOKEN,WHATSAPP_APP_SECRET,WHATSAPP_VERIFY_TOKEN
           command_timeout: 10m
           script: |
             set -eu
@@ -86,6 +102,8 @@ jobs:
             public_origin=https://app.slickhood.com
             expected_bucket=slickhood-production-documents-603455138904-ca-central-1-an
             expected_region=ca-central-1
+            whatsapp_env=""
+            whatsapp_dropin=""
             test -n "$health_url"
             test -f "$preflight"
             case "$health_url" in
@@ -117,6 +135,8 @@ jobs:
             cleanup() {
               status=$?
               trap - EXIT
+              test -z "$whatsapp_env" || rm -f "$whatsapp_env"
+              test -z "$whatsapp_dropin" || rm -f "$whatsapp_dropin"
               if [ "$status" -ne 0 ]; then
                 restore_previous_release || status=1
               fi
@@ -137,20 +157,79 @@ jobs:
             test -f "$candidate"
             # Validate the already-deployed compatibility baseline before the
             # candidate JAR has had a chance to apply its new migrations.
-            run_preflight 89
+            run_preflight 91
             # Protected, host-local backups are required before applying the
-            # additive V90 affiliate-payout concurrency and V91 service-category
-            # concurrency migrations.
+            # additive V92 resumable-role KYC, V93 notification preferences,
+            # V94 decimal money shadows and V95 currency-preference migrations.
             # Backup contents never leave the host or appear in workflow logs.
             sudo python3 /tmp/slickhood-backend-release/production-backup.py
+            test -n "$WHATSAPP_ACCESS_TOKEN"
+            test -n "$WHATSAPP_APP_SECRET"
+            test -n "$WHATSAPP_VERIFY_TOKEN"
+            umask 077
+            whatsapp_env="$(mktemp)"
+            {
+              printf 'WHATSAPP_ENABLED=true\n'
+              printf 'WHATSAPP_API_URL=https://graph.facebook.com/v22.0/%%s/messages\n'
+              printf 'WHATSAPP_BUSINESS_ACCOUNT_ID=2306816990066695\n'
+              printf 'WHATSAPP_PHONE_NUMBER_ID=1220537841150602\n'
+              printf 'WHATSAPP_ACCESS_TOKEN=%s\n' "$WHATSAPP_ACCESS_TOKEN"
+              printf 'WHATSAPP_APP_SECRET=%s\n' "$WHATSAPP_APP_SECRET"
+              printf 'WHATSAPP_VERIFY_TOKEN=%s\n' "$WHATSAPP_VERIFY_TOKEN"
+              printf 'WHATSAPP_TEMPLATES_BILLING_APPROVED=true\n'
+              printf 'WHATSAPP_TEMPLATES_BILLING_NAME=slickhood_billing_notification_v1\n'
+              printf 'WHATSAPP_TEMPLATES_BILLING_LANGUAGE=en\n'
+              printf 'WHATSAPP_TEMPLATES_PROPERTY_APPROVED=true\n'
+              printf 'WHATSAPP_TEMPLATES_PROPERTY_NAME=slickhood_property_notification_v1\n'
+              printf 'WHATSAPP_TEMPLATES_PROPERTY_LANGUAGE=en\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_APPROVED=true\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_NAME=slickhood_marketplace_notification_v1\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_LANGUAGE=en\n'
+              printf 'WHATSAPP_TEMPLATES_SECURITY_APPROVED=true\n'
+              printf 'WHATSAPP_TEMPLATES_SECURITY_NAME=slickhood_security_notification_v1\n'
+              printf 'WHATSAPP_TEMPLATES_SECURITY_LANGUAGE=en\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETING_APPROVED=true\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETING_NAME=slickhood_marketing_notification_v1\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETING_LANGUAGE=en\n'
+            } >"$whatsapp_env"
+            sudo install -d -o root -g root -m 0700 /etc/slickhood/secrets
+            sudo install -o root -g root -m 0600 "$whatsapp_env" /etc/slickhood/secrets/whatsapp.env
+            rm -f "$whatsapp_env"
+            whatsapp_env=""
+            whatsapp_dropin="$(mktemp)"
+            printf '[Service]\nEnvironmentFile=/etc/slickhood/secrets/whatsapp.env\n' >"$whatsapp_dropin"
+            sudo install -d -o root -g root -m 0755 /etc/systemd/system/pms.service.d
+            sudo install -o root -g root -m 0644 "$whatsapp_dropin" /etc/systemd/system/pms.service.d/whatsapp.conf
+            rm -f "$whatsapp_dropin"
+            whatsapp_dropin=""
+            sudo systemctl daemon-reload
             sudo mkdir -p /home/silverocean/backups
             sudo cp "$live" "$rollback"
             sudo install -o silverocean -g silverocean -m 0644 "$candidate" "$live"
             installed=true
             sudo systemctl restart pms.service
             if wait_for_health; then
-              run_preflight 91
+              run_preflight 95
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
+              curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+                -X POST 'https://graph.facebook.com/v22.0/1326084126026246/subscriptions' \
+                --data-urlencode 'object=whatsapp_business_account' \
+                --data-urlencode 'callback_url=https://app.slickhood.com/api/callback/whatsapp' \
+                --data-urlencode "verify_token=$WHATSAPP_VERIFY_TOKEN" \
+                --data-urlencode 'fields=messages' \
+                --data-urlencode "access_token=1326084126026246|$WHATSAPP_APP_SECRET" \
+                | python3 -c 'import json,sys; assert json.load(sys.stdin).get("success") is True'
+              curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+                -X POST 'https://graph.facebook.com/v22.0/2306816990066695/subscribed_apps' \
+                -H "Authorization: Bearer $WHATSAPP_ACCESS_TOKEN" \
+                | python3 -c 'import json,sys; assert json.load(sys.stdin).get("success") is True'
+              challenge='slickhood-release-${{ github.run_id }}'
+              response="$(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --get \
+                'https://app.slickhood.com/api/callback/whatsapp' \
+                --data-urlencode 'hub.mode=subscribe' \
+                --data-urlencode "hub.verify_token=$WHATSAPP_VERIFY_TOKEN" \
+                --data-urlencode "hub.challenge=$challenge")"
+              test "$response" = "$challenge"
               installed=false
               exit 0
             fi

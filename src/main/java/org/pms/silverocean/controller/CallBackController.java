@@ -59,9 +59,9 @@ public class CallBackController {
             .registerTypeAdapter(LocalDateTime.class, (JsonDeserializer<LocalDateTime>)
                     (json, type, ctx) -> LocalDateTime.parse(json.getAsString(), formatter))
             .create();
-    @Value("${whatsapp.verifyToken}")
+    @Value("${whatsapp.verify-token:${whatsapp.verifyToken:}}")
     private  String whatsAppVerifyToken;
-    @Value("${whatsapp.appSecret:}")
+    @Value("${whatsapp.app-secret:${whatsapp.appSecret:}}")
     private String whatsAppAppSecret;
     @Value("${payment.flutterwave.webhook-secret:}")
     private String flutterwaveWebhookSecret;

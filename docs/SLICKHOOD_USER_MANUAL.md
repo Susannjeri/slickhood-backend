@@ -511,7 +511,10 @@ Notifications:
 5. Email/SMS queued, provider accepted and delivered are different states. Check your email spelling, phone and spam filtering; a saved alert does not prove mailbox or phone delivery.
 6. OTPs and buyer delivery/recovery codes are not shown in the ordinary notification inbox. Use the designated verification or buyer-only delivery-code workflow. Give a delivery code to the assigned rider only after receiving and checking the order; never send it to support in a chat.
 7. Check late-payment, late-fee and termination alerts against the invoice, agreement and authorised process. A reminder is not automatically a legally effective termination notice.
-8. WhatsApp availability must not be assumed. No automatic sharing of buyer phone numbers or delivery addresses with WhatsApp or map applications is implied.
+8. Open Profile/Settings → Notification preferences to choose Email, SMS and WhatsApp separately for billing, property, marketplace/delivery, security and marketing. Important in-app account alerts remain enabled.
+9. SMS and WhatsApp require a verified phone number. WhatsApp also requires explicit consent; granting or withdrawing consent and subsequent delivery receipts are retained for audit. A category can be enabled only when SlickHood has an approved Meta template for it.
+10. OTPs remain on the designated SMS/email verification path. Enabling WhatsApp does not move OTPs or buyer-only delivery codes into WhatsApp, and it does not automatically share a buyer's address, phone number or delivery code with a rider or merchant.
+11. SlickHood prevents a second channel copy of the same business event from being queued twice. Provider accepted, delivered, read and failed remain distinct states; use the delivery history or Help Desk when an expected message does not arrive.
 
 Reports and dashboards:
 1. Open Reports after checking your active profile and workspace. If you are staff in several workspaces, select the intended one first; do not assume your assignments across organisations are combined.

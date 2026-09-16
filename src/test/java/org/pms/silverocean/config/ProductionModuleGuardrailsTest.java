@@ -2,6 +2,10 @@ package org.pms.silverocean.config;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
+
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -20,7 +24,8 @@ class ProductionModuleGuardrailsTest {
                 "affiliate.commission-rate (must be explicit)", "helpdesk.ai.enabled=true",
                 "helpdesk.ai.api-key / OPENAI_API_KEY", "one verified Paystack or M-Pesa callback secret",
                 "kyc.ocr.provider=aws-textract", "garage.s3.require-https=true",
-                "garage.bootstrap.enabled=false");
+                "garage.bootstrap.enabled=false", "whatsapp.enabled=true",
+                "whatsapp.app-secret (protected value required)");
     }
 
     @Test
@@ -91,6 +96,17 @@ class ProductionModuleGuardrailsTest {
                 .hasMessageContaining("wealth.market.batch-size");
     }
 
+    @Test
+    void resolvesProtectedSystemEnvironmentNamesIncludingMarketplaceCategory() {
+        var environment = new StandardEnvironment();
+        environment.getPropertySources().addFirst(new SystemEnvironmentPropertySource("whatsapp-test", Map.of(
+                "WHATSAPP_API_URL", "https://graph.facebook.com/v22.0/%s/messages",
+                "WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_APPROVED", "true")));
+
+        assertThat(environment.getProperty("whatsapp.api-url")).isEqualTo("https://graph.facebook.com/v22.0/%s/messages");
+        assertThat(environment.getProperty("whatsapp.templates.marketplace_delivery.approved")).isEqualTo("true");
+    }
+
     private MockEnvironment completeEnvironment() {
         return new MockEnvironment()
                 .withProperty("garage.s3.access.key", "configured")
@@ -132,6 +148,28 @@ class ProductionModuleGuardrailsTest {
                 .withProperty("payment.paystack.secret-key", "configured")
                 .withProperty("payment.paystack.enabled", "true")
                 .withProperty("payment.paystack.api-url", "https://api.paystack.co")
-                .withProperty("payment.paystack.callback-url", "https://app.slickhood.com/payment/callback");
+                .withProperty("payment.paystack.callback-url", "https://app.slickhood.com/payment/callback")
+                .withProperty("whatsapp.enabled", "true")
+                .withProperty("whatsapp.api-url", "https://graph.facebook.com/v22.0/%s/messages")
+                .withProperty("whatsapp.business-account-id", "2306816990066695")
+                .withProperty("whatsapp.phone-number-id", "1220537841150602")
+                .withProperty("whatsapp.access-token", "configured")
+                .withProperty("whatsapp.app-secret", "configured")
+                .withProperty("whatsapp.verify-token", "configured")
+                .withProperty("whatsapp.templates.billing.approved", "true")
+                .withProperty("whatsapp.templates.billing.name", "slickhood_billing_notification_v1")
+                .withProperty("whatsapp.templates.billing.language", "en")
+                .withProperty("whatsapp.templates.property.approved", "true")
+                .withProperty("whatsapp.templates.property.name", "slickhood_property_notification_v1")
+                .withProperty("whatsapp.templates.property.language", "en")
+                .withProperty("whatsapp.templates.marketplace_delivery.approved", "true")
+                .withProperty("whatsapp.templates.marketplace_delivery.name", "slickhood_marketplace_notification_v1")
+                .withProperty("whatsapp.templates.marketplace_delivery.language", "en")
+                .withProperty("whatsapp.templates.security.approved", "true")
+                .withProperty("whatsapp.templates.security.name", "slickhood_security_notification_v1")
+                .withProperty("whatsapp.templates.security.language", "en")
+                .withProperty("whatsapp.templates.marketing.approved", "true")
+                .withProperty("whatsapp.templates.marketing.name", "slickhood_marketing_notification_v1")
+                .withProperty("whatsapp.templates.marketing.language", "en");
     }
 }

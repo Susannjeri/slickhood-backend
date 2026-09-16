@@ -12,7 +12,7 @@ import java.util.Locale;
 
 /**
  * Secret-safe release checks for the Wealth, Insurance, Affiliate, Services,
- * Soko and Help Desk production capabilities. The deployment endpoint exposes property names,
+ * Soko, Help Desk and WhatsApp production capabilities. The deployment endpoint exposes property names,
  * never configured values.
  */
 @Component
@@ -109,6 +109,20 @@ public class ProductionModuleGuardrails {
             requireHttps(failures, "payment.paystack.callback-url");
         }
 
+        requireTrue(failures, "whatsapp.enabled");
+        requireWhatsAppEndpoint(failures, "whatsapp.api-url");
+        requireNumeric(failures, "whatsapp.business-account-id");
+        requireNumeric(failures, "whatsapp.phone-number-id");
+        requireSecret(failures, "whatsapp.access-token");
+        requireSecret(failures, "whatsapp.app-secret");
+        requireSecret(failures, "whatsapp.verify-token");
+        for (String category : List.of("billing", "property", "marketplace_delivery", "security", "marketing")) {
+            String prefix = "whatsapp.templates." + category + ".";
+            requireTrue(failures, prefix + "approved");
+            require(failures, prefix + "name");
+            require(failures, prefix + "language");
+        }
+
         return new Assessment(failures.isEmpty(), List.copyOf(failures));
     }
 
@@ -118,6 +132,33 @@ public class ProductionModuleGuardrails {
 
     private void requireExplicit(List<String> failures, String key) {
         if (!environment.containsProperty(key) || !hasText(key)) failures.add(key + " (must be explicit)");
+    }
+
+    private void requireSecret(List<String> failures, String key) {
+        String configured = environment.getProperty(key);
+        if (configured == null || configured.isBlank() || "placeholder".equalsIgnoreCase(configured.trim())) {
+            failures.add(key + " (protected value required)");
+        }
+    }
+
+    private void requireNumeric(List<String> failures, String key) {
+        String configured = environment.getProperty(key, "").trim();
+        if (!configured.matches("[0-9]+")) failures.add(key + " (numeric value required)");
+    }
+
+    private void requireWhatsAppEndpoint(List<String> failures, String key) {
+        String configured = environment.getProperty(key, "").trim();
+        try {
+            URI uri = URI.create(configured.replace("%s", "1"));
+            boolean safe = "https".equalsIgnoreCase(uri.getScheme())
+                    && "graph.facebook.com".equalsIgnoreCase(uri.getHost())
+                    && uri.getUserInfo() == null && uri.getQuery() == null && uri.getFragment() == null
+                    && (uri.getPort() == -1 || uri.getPort() == 443)
+                    && configured.matches("https://graph\\.facebook\\.com/v[0-9]+\\.[0-9]+/%s/messages");
+            if (!safe) failures.add(key + " (Meta HTTPS messages endpoint required)");
+        } catch (RuntimeException ignored) {
+            failures.add(key + " (Meta HTTPS messages endpoint required)");
+        }
     }
 
     private void requireTrue(List<String> failures, String key) {

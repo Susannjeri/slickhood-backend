@@ -33,6 +33,12 @@ public class WhatsAppService {
     private String utilityTemplate = "general_message";
     @org.springframework.beans.factory.annotation.Value("${whatsapp.template-language:en}")
     private String templateLanguage = "en";
+    @org.springframework.beans.factory.annotation.Value("${whatsapp.api-url:}")
+    private String configuredApiUrl;
+    @org.springframework.beans.factory.annotation.Value("${whatsapp.phone-number-id:}")
+    private String configuredPhoneNumberId;
+    @org.springframework.beans.factory.annotation.Value("${whatsapp.access-token:}")
+    private String configuredAccessToken;
 
     public WhatsAppService(RestTemplateService restTemplateService, ConfigService configService, SMSDao smsDao) {
         this.restTemplateService = restTemplateService;
@@ -53,9 +59,12 @@ public class WhatsAppService {
         sms.setActive(true);
         sms.setChannel(WHATS_APP);
 
-        String apiUrl = configService.getConfigByName(PMSConfigs.WHATSAPP_URL).get().stringValue();
-        String phoneNumberId = configService.getConfigByName(PMSConfigs.WHATSAPP_BUSINESS_PHONENUMBER_ID).get().stringValue();
-        String accessToken = configService.getConfigByName(PMSConfigs.WHATSAPP_ACCESS_TOKEN).get().stringValue();
+        // Production secrets belong in the protected service environment. Keep the
+        // governed database settings as a compatibility fallback for existing
+        // installations, but never require an operator to copy a token into the UI.
+        String apiUrl = configuredOrFallback(configuredApiUrl, PMSConfigs.WHATSAPP_URL);
+        String phoneNumberId = configuredOrFallback(configuredPhoneNumberId, PMSConfigs.WHATSAPP_BUSINESS_PHONENUMBER_ID);
+        String accessToken = configuredOrFallback(configuredAccessToken, PMSConfigs.WHATSAPP_ACCESS_TOKEN);
 
         String url = String.format(apiUrl, phoneNumberId);
         java.net.URI endpoint = java.net.URI.create(url);
@@ -114,5 +123,11 @@ public class WhatsAppService {
     public boolean supports(String providerName) {
         if (StringUtils.isBlank(providerName)) return false;
         return WHATS_APP.equalsIgnoreCase(providerName);
+    }
+
+    private String configuredOrFallback(String configured, PMSConfigs fallback) {
+        return StringUtils.isNotBlank(configured)
+                ? configured.trim()
+                : configService.getConfigByName(fallback).get().stringValue();
     }
 }

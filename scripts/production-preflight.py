@@ -511,8 +511,10 @@ def main() -> int:
     check_service(preflight, "pms.service")
     check_service(preflight, "pm2-silverocean.service")
     check_clamav(preflight)
-    check_readiness(preflight, args.readiness_url,
-                    {"wealth", "insurance", "affiliate", "services", "soko", "helpdesk"})
+    expected_scope = {"wealth", "insurance", "affiliate", "services", "soko", "helpdesk"}
+    if args.expected_flyway_version >= 95:
+        expected_scope.update({"notifications", "whatsapp"})
+    check_readiness(preflight, args.readiness_url, expected_scope)
     check_cors(preflight, args.public_origin.rstrip("/"))
     check_database(preflight, config, args.expected_flyway_version)
 
