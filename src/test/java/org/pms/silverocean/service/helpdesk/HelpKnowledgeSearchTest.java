@@ -21,6 +21,34 @@ class HelpKnowledgeSearchTest {
     @Test void invitationAndPluralFormsMatch() {
         assertEquals(1, HelpKnowledgeSearch.rank(List.of(article(1, "Invite homeowners", "Select the home.")), "How do invitations work?").size());
     }
+    @Test void loginPhrasesHaveTheSameIntent() {
+        var article = article(1, "Sign in to SlickHood", "Enter your email and password on the login page.");
+        for (String question : List.of("How do I log in?", "I need to access my account", "Where is account access?", "I cannot sign in")) {
+            assertEquals(List.of(1L), HelpKnowledgeSearch.rank(List.of(article), question).stream().map(HelpArticle::getId).toList(), question);
+        }
+    }
+    @Test void relatedTermsFindTheSameCustomerJourney() {
+        var delivery = article(1, "Rider delivery code", "The courier enters the handover code after delivery.");
+        var property = article(2, "Property sale buyers", "A purchaser receives a letter of offer.");
+        assertEquals(1L, HelpKnowledgeSearch.rank(List.of(delivery, property), "Where does the delivery driver enter the delivery PIN?").getFirst().getId());
+        assertEquals(2L, HelpKnowledgeSearch.rank(List.of(delivery, property), "How does a home buyer receive the offer letter?").getFirst().getId());
+    }
+    @Test void punctuationAndApostrophesDoNotBreakIntentRecognition() {
+        var article = article(1, "Password reset", "Recover your account from the sign-in page.");
+        assertEquals(1, HelpKnowledgeSearch.rank(List.of(article), "I can't remember it; how do I recover my account?").size());
+    }
+    @Test void relatedVocabularyDoesNotUseSubstringMatching() {
+        var article = article(1, "Sign in", "Access your account.");
+        assertTrue(HelpKnowledgeSearch.rank(List.of(article), "Show me signal reports").isEmpty());
+    }
+    @Test void commonActionPhrasesMatchWithoutConflatingDifferentLifecycleActions() {
+        var edit = article(1, "Edit a team member", "Update the staff member's details.");
+        var suspend = article(2, "Suspend a team member", "Temporarily disable access without deleting the user.");
+        assertEquals(1L, HelpKnowledgeSearch.rank(List.of(edit, suspend), "How can I modify a staff member?").getFirst().getId());
+        assertEquals(2L, HelpKnowledgeSearch.rank(List.of(edit, suspend), "How can I pause an internal user?").getFirst().getId());
+        assertNotEquals(2L, HelpKnowledgeSearch.rank(List.of(edit, suspend), "How can I remove a staff member?").stream()
+                .map(HelpArticle::getId).findFirst().orElse(-1L));
+    }
     @Test void oneIncidentalBodyWordIsNotEnoughEvidence() {
         assertTrue(HelpKnowledgeSearch.rank(List.of(article(1, "Rentals", "Check the document.")), "Explain my document?").isEmpty());
     }

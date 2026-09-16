@@ -11,21 +11,8 @@ final class HelpKnowledgeSearch {
             "which", "where", "when", "can", "could", "would", "should", "does", "did", "not", "are", "was", "were",
             "you", "your", "please", "help", "need", "want", "more", "about", "from", "into", "there", "here", "why", "will", "all");
     static Set<String> terms(String text) {
-        return Arrays.stream(Objects.toString(text, "").toLowerCase(Locale.ROOT).split("[^a-z0-9]+"))
-                .filter(t -> t.length() > 2 && !STOP.contains(t)).map(HelpKnowledgeSearch::canonical).collect(Collectors.toSet());
-    }
-    private static String canonical(String word) {
-        String value = word.endsWith("ies") ? word.substring(0, word.length() - 3) + "y"
-                : word.endsWith("s") && word.length() > 4 && !word.endsWith("ss") ? word.substring(0, word.length() - 1) : word;
-        return switch (value) {
-            case "invitation", "invited", "inviting" -> "invite";
-            case "registration", "registering", "registered", "signup" -> "register";
-            case "verification", "verified", "verifying" -> "verify";
-            case "started", "starting" -> "start";
-            case "pay", "paid", "paying" -> "payment";
-            case "courier", "rider" -> "rider";
-            default -> value;
-        };
+        return Arrays.stream(HelpIntentLexicon.normalizePhrases(text).split("[^a-z0-9]+"))
+                .filter(t -> t.length() > 2 && !STOP.contains(t)).map(HelpIntentLexicon::canonicalWord).collect(Collectors.toSet());
     }
     static int score(HelpArticle article, Set<String> query) {
         Set<String> title = terms(article.getTitle()), keywords = terms(article.getKeywords()), body = terms(article.getBody());
