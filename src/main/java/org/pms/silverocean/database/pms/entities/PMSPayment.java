@@ -3,6 +3,10 @@ package org.pms.silverocean.database.pms.entities;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
+import jakarta.persistence.Column;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -18,6 +22,7 @@ import org.pms.silverocean.service.payment.wrappers.ManualPaymentDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Table(name = "pms_payment", indexes = {
         @Index(name = "idx_payment_customer_account_number", columnList = "customerAccountNumber"),
@@ -34,6 +39,10 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class PMSPayment extends BaseIDEntity {
     private Double amount;
+    @Column(name = "amount_decimal", precision = 19, scale = 2)
+    private BigDecimal amountDecimal;
+    @Column(name = "currency_code", length = 3)
+    private String currencyCode;
     private String customerAccountNumber;
     private String receivingAccountNumber;
     private String billReference;
@@ -56,7 +65,7 @@ public class PMSPayment extends BaseIDEntity {
 
     public PMSPayment(MPesaPaymentDTO mpesaPaymentDTO, TransactionCategory transactionCategory) {
         this.thirdPartyTransId = mpesaPaymentDTO.transId();
-        this.amount = StringUtils.isNotBlank(mpesaPaymentDTO.transAmount()) ? Double.parseDouble(mpesaPaymentDTO.transAmount()) : null;
+        if (StringUtils.isNotBlank(mpesaPaymentDTO.transAmount())) setMoneyAmount(new BigDecimal(mpesaPaymentDTO.transAmount()));
         this.billReference = mpesaPaymentDTO.billRefNumber();
         this.customerAccountNumber = mpesaPaymentDTO.msisdn();
         this.customerName = String.format("%s %s %s", mpesaPaymentDTO.firstName(), mpesaPaymentDTO.middleName(), mpesaPaymentDTO.lastName());
@@ -66,7 +75,7 @@ public class PMSPayment extends BaseIDEntity {
     }
 
     public PMSPayment(MPesaSTKPushRequest mpesaSTKPushRequest, long accountId) {
-        this.amount = Double.parseDouble(mpesaSTKPushRequest.amount());
+        setMoneyAmount(new BigDecimal(mpesaSTKPushRequest.amount()));
         this.customerAccountNumber = mpesaSTKPushRequest.phoneNumber();
         this.billReference = mpesaSTKPushRequest.accountReference();
         this.channel = PaymentChannel.MPESA.getName();
@@ -76,7 +85,8 @@ public class PMSPayment extends BaseIDEntity {
     }
 
     public PMSPayment(PMSInvoice pmsInvoice, String customerName, long accountId) {
-        this.amount = pmsInvoice.getPendingAmount();
+        setMoneyAmount(pmsInvoice.moneyPendingAmount());
+        this.currencyCode = org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(pmsInvoice.getCurrency());
         this.customerAccountNumber = pmsInvoice.getCustomerEmail();
         this.billReference = pmsInvoice.getRef();
         this.channel = PaymentChannel.FLUTTER_WAVE.getName();
@@ -89,7 +99,7 @@ public class PMSPayment extends BaseIDEntity {
 
     public PMSPayment(ManualPaymentDTO manualPaymentDTO) {
         this.billReference = manualPaymentDTO.invoiceRef();
-        this.amount = manualPaymentDTO.amount();
+        setMoneyAmount(manualPaymentDTO.amount());
         this.category = TransactionCategory.MANUAL_RECORD.name();
         this.channel = manualPaymentDTO.channel();
         this.thirdPartyTransId = manualPaymentDTO.transId();
@@ -99,7 +109,7 @@ public class PMSPayment extends BaseIDEntity {
 
     public PMSPayment(PesalinkValidatePaymentRequestDTO pesalinkValidatePaymentRequestDTO, TransactionCategory transactionCategory) {
         this.thirdPartyTransId = pesalinkValidatePaymentRequestDTO.requestId();
-        this.amount = pesalinkValidatePaymentRequestDTO.amount().doubleValue();
+        setMoneyAmount(pesalinkValidatePaymentRequestDTO.amount());
         this.billReference = pesalinkValidatePaymentRequestDTO.billRef();
         this.channel = PaymentChannel.PESA_LINK.getName();
         this.category = transactionCategory.name();
@@ -107,7 +117,7 @@ public class PMSPayment extends BaseIDEntity {
 
     public PMSPayment(IPNCallbackDTO ipnCallbackDTO, TransactionCategory transactionCategory) {
         this.thirdPartyTransId = ipnCallbackDTO.rrn();
-        this.amount = ipnCallbackDTO.amount().doubleValue();
+        setMoneyAmount(ipnCallbackDTO.amount());
         this.billReference = ipnCallbackDTO.billReference();
         this.channel = PaymentChannel.PESA_LINK.getName();
         this.category = transactionCategory.name();
@@ -115,5 +125,26 @@ public class PMSPayment extends BaseIDEntity {
 
     public boolean isCompletedSuccessfully() {
         return inProgress ? false : TransactionCategory.valueOf(category).getSuccessString().equals(status);
+    }
+
+    public BigDecimal moneyAmount() {
+        if (amountDecimal != null) return org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(amountDecimal);
+        return amount == null ? null : org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(amount);
+    }
+
+    public void setMoneyAmount(BigDecimal value) {
+        amountDecimal = value == null ? null : org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(value);
+        amount = amountDecimal == null ? null : amountDecimal.doubleValue();
+    }
+
+    @PostLoad
+    private void readDecimalShadow() {
+        if (amountDecimal != null) amount = amountDecimal.doubleValue();
+    }
+
+    @PrePersist @PreUpdate
+    private void writeDecimalShadow() {
+        amountDecimal = amount == null ? null : org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(amount);
+        if (currencyCode != null) currencyCode = org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(currencyCode);
     }
 }

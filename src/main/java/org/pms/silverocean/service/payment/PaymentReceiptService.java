@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
@@ -46,7 +45,7 @@ public class PaymentReceiptService {
         model.put("providerReference", payment.getThirdPartyTransId());
         model.put("channel", payment.getChannel());
         model.put("currency", StringUtils.defaultIfBlank(invoice.getCurrency(), ""));
-        model.put("amount", BigDecimal.valueOf(payment.getAmount()).setScale(2, RoundingMode.HALF_UP));
+        model.put("amount", payment.moneyAmount());
         model.put("paidAt", payment.getCreatedOn() == null ? "" : DATE_TIME.format(payment.getCreatedOn()));
         model.put("payer", StringUtils.defaultIfBlank(payment.getCustomerName(), invoice.getCustomerEmail()));
         model.put("payee", users.findById(invoice.getPayToUserId()).map(u -> u.getFullName()).orElse("Property owner"));

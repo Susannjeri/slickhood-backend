@@ -35,9 +35,9 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.Arrays;
 import java.util.List;
+import org.pms.silverocean.service.payment.money.MonetaryPolicy;
 
 @Service("Paystack")
 @Slf4j
@@ -107,8 +107,8 @@ public class PaystackPlatform extends PaymentPlatform {
 
         try {
             PaystackInitializeRequest request = new PaystackInitializeRequest(
-                    customer.getEmail(), toSubunit(invoice.getPendingAmount()),
-                    StringUtils.defaultIfBlank(invoice.getCurrency(), defaultCurrency),
+                    customer.getEmail(), MonetaryPolicy.toMinorUnits(invoice.moneyPendingAmount(), invoice.getCurrency()),
+                    MonetaryPolicy.currency(StringUtils.defaultIfBlank(invoice.getCurrency(), defaultCurrency)),
                     String.valueOf(payment.getId()), callbackUrl, channels(), subaccountCode, subscription ? null : feeBearer);
             PaystackInitializeResponse response = restTemplateService.sendPostRequest(
                     apiUrl + INITIALIZE_PATH, request, authHeaders(), PaystackInitializeResponse.class);
@@ -209,7 +209,8 @@ public class PaystackPlatform extends PaymentPlatform {
         boolean matchingTransaction = response != null && response.status() && data != null
                 && String.valueOf(payment.getId()).equals(data.reference())
                 && StringUtils.equals(secretKey.startsWith("sk_test_") ? "test" : "live", data.domain())
-                && toSubunit(payment.getAmount()) == data.amount();
+                && payment.moneyAmount() != null
+                && MonetaryPolicy.toMinorUnits(payment.moneyAmount(), data.currency()) == data.amount();
 
         PMSInvoice invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference()).orElse(null);
         matchingTransaction = matchingTransaction && invoice != null && StringUtils.equalsIgnoreCase(invoice.getCurrency(), data.currency());
@@ -236,7 +237,8 @@ public class PaystackPlatform extends PaymentPlatform {
         paymentDao.savePMSPayment(payment);
         updatePaymentService.setInvoiceTransactionStatusByBillRefNumber(payment.getBillReference(), false);
         if (valid) {
-            updatePaymentService.setInvoiceToPaid(invoice, payment.getThirdPartyTransId(), fromSubunit(data.amount()));
+            updatePaymentService.setInvoiceToPaid(invoice, payment.getThirdPartyTransId(),
+                    MonetaryPolicy.fromMinorUnits(data.amount(), data.currency()));
         } else {
             log.warn("Rejected Paystack settlement for payment {} after verification mismatch", payment.getId());
         }
@@ -252,14 +254,6 @@ public class PaystackPlatform extends PaymentPlatform {
     private List<String> channels() {
         return Arrays.stream(configuredChannels.split(","))
                 .map(String::trim).filter(StringUtils::isNotBlank).toList();
-    }
-
-    private static long toSubunit(double amount) {
-        return BigDecimal.valueOf(amount).movePointRight(2).setScale(0, RoundingMode.UNNECESSARY).longValueExact();
-    }
-
-    private static double fromSubunit(long amount) {
-        return BigDecimal.valueOf(amount, 2).doubleValue();
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)

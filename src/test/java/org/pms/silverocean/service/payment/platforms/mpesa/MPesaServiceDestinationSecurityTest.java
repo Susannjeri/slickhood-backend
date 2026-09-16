@@ -35,6 +35,7 @@ import org.pms.silverocean.service.payment.platforms.mpesa.wrappers.STKResponseD
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
 import org.springframework.http.HttpHeaders;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -79,7 +80,7 @@ class MPesaServiceDestinationSecurityTest {
 
         service.confirmPayment(callback("999999"), 77L, "127.0.0.1");
 
-        verify(updatePaymentService, never()).setInvoiceToPaid(any(PMSInvoice.class), any(), any(Double.class));
+        verify(updatePaymentService, never()).setInvoiceToPaid(any(PMSInvoice.class), any(), any(BigDecimal.class));
         ArgumentCaptor<PMSPayment> saved = ArgumentCaptor.forClass(PMSPayment.class);
         verify(paymentDao).savePMSPayment(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo(MPesaResultCodes.INVALID_ACCOUNT_NUMBER.getCode());
@@ -123,7 +124,7 @@ class MPesaServiceDestinationSecurityTest {
 
         service.stkCallBack(stkCallback(1032, "RCPT-FAIL", "500.00"), "127.0.0.1");
 
-        verify(updatePaymentService, never()).setInvoiceToPaid(any(PMSInvoice.class), any(), any(Double.class));
+        verify(updatePaymentService, never()).setInvoiceToPaid(any(PMSInvoice.class), any(), any(BigDecimal.class));
         assertThat(payment.getProviderReceipt()).isNull();
     }
 
@@ -138,7 +139,7 @@ class MPesaServiceDestinationSecurityTest {
 
         service.stkCallBack(stkCallback(0, "RCPT-1", "499.00"), "127.0.0.1");
 
-        verify(updatePaymentService, never()).setInvoiceToPaid(any(PMSInvoice.class), any(), any(Double.class));
+        verify(updatePaymentService, never()).setInvoiceToPaid(any(PMSInvoice.class), any(), any(BigDecimal.class));
         assertThat(payment.getProviderReceipt()).isNull();
         assertThat(payment.getStatus()).isEqualTo(MPesaResultCodes.INVALID_AMOUNT.getCode());
     }
@@ -159,7 +160,7 @@ class MPesaServiceDestinationSecurityTest {
 
         service.stkCallBack(stkCallback(0, "RCPT-1", "500.00"), "127.0.0.1");
 
-        verify(updatePaymentService).setInvoiceToPaid(invoice, "RCPT-1", 500D);
+        verify(updatePaymentService).setInvoiceToPaid(invoice, "RCPT-1", new BigDecimal("500.00"));
         assertThat(payment.getProviderReceipt()).isEqualTo("RCPT-1");
         assertThat(payment.getThirdPartyTransId()).isEqualTo("CHECKOUT-1");
     }
@@ -212,6 +213,7 @@ class MPesaServiceDestinationSecurityTest {
         invoice.setPropertyId(44L);
         invoice.setPaymentAccountId(91L);
         invoice.setPayToUserId(77L);
+        invoice.setCurrency("KES");
         invoice.setDescription("Test invoice".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         invoice.setPendingAmount(500D);
         invoice.setActive(true);

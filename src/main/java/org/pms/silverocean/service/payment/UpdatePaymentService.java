@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import org.pms.silverocean.service.payment.money.MonetaryPolicy;
 
 @Component
 public class UpdatePaymentService {
@@ -41,35 +42,40 @@ public class UpdatePaymentService {
 
     @Transactional
     public void setInvoiceToPaid(PMSInvoice invoice, String thirdPartyId, double transAMount) {
+        setInvoiceToPaid(invoice, thirdPartyId, BigDecimal.valueOf(transAMount));
+    }
+
+    @Transactional
+    public void setInvoiceToPaid(PMSInvoice invoice, String thirdPartyId, BigDecimal transactionAmount) {
         if(invoice.getId()!=null)invoice=invoiceDao.getInvoiceByIdForUpdate(invoice.getId()).orElse(invoice);
-        boolean alreadyFullyPaid = invoice.isPaid() && invoice.getPendingAmount() <= 0;
+        MonetaryPolicy.currency(invoice.getCurrency());
+        boolean alreadyFullyPaid = invoice.isPaid() && invoice.moneyPendingAmount().signum() <= 0;
         if (alreadyFullyPaid) {
-            publishInvoicePaid(invoice,thirdPartyId,invoice.getAmount());
+            publishInvoicePaid(invoice,thirdPartyId,invoice.moneyAmount());
             return;
         }
 
-        BigDecimal requestedAmount = BigDecimal.valueOf(transAMount).setScale(2, java.math.RoundingMode.HALF_UP);
-        BigDecimal pendingAmount = BigDecimal.valueOf(invoice.getPendingAmount()).setScale(2, java.math.RoundingMode.HALF_UP);
+        BigDecimal requestedAmount = MonetaryPolicy.positive(transactionAmount);
+        BigDecimal pendingAmount = invoice.moneyPendingAmount();
         if (requestedAmount.signum() <= 0) throw new IllegalArgumentException("Payment amount must be positive");
         BigDecimal appliedAmount = requestedAmount.min(pendingAmount);
         if (!financialLedgerService.recordPaymentApplied(invoice, thirdPartyId, appliedAmount)) return;
         BigDecimal excess = requestedAmount.subtract(appliedAmount);
         if (excess.signum() > 0) financialLedgerService.recordUnappliedCredit(invoice, thirdPartyId, excess);
-        invoice.setPendingAmount(pendingAmount.subtract(appliedAmount).doubleValue());
+        invoice.setMoneyPendingAmount(pendingAmount.subtract(appliedAmount));
         invoice.setTransactionInProgress(false);
         String formattedPaymentMessage = String.format(i18NService.getLocalizedMessage(NotificationType.PAYMENT_SUCCESS_SMS.getBody()),
                 thirdPartyId, invoice.getCurrency(), appliedAmount.doubleValue(), invoice.getRef(), LocalDateTime.now());
         notificationService.sendNotification(new NotificationDTO(formattedPaymentMessage,
                 invoice.getCustomerPhoneNumber(), NotificationType.PAYMENT_SUCCESS_SMS));
-        boolean nowFullyPaid = invoice.getPendingAmount() <= 0;
+        boolean nowFullyPaid = invoice.moneyPendingAmount().signum() <= 0;
         if (nowFullyPaid) {
             invoice.setPaid(true);
         }
         invoiceDao.saveInvoice(invoice);
 
         if (invoice.getCustomerEmail() != null && !invoice.getCustomerEmail().isBlank()) {
-            BigDecimal balance = BigDecimal.valueOf(invoice.getPendingAmount())
-                    .setScale(2, java.math.RoundingMode.HALF_UP);
+            BigDecimal balance = invoice.moneyPendingAmount();
             String receiptBody = String.format(i18NService.getLocalizedMessage(NotificationType.PAYMENT_RECEIPT_EMAIL.getBody()),
                     thirdPartyId, invoice.getCurrency(), appliedAmount.doubleValue(), invoice.getRef(),
                     balance.doubleValue(), invoice.getCurrency());
@@ -80,12 +86,17 @@ public class UpdatePaymentService {
                             + invoice.getCurrency() + " " + balance.toPlainString() + ". Open /dashboard/invoices to view the receipt.");
         }
 
-        if(nowFullyPaid)publishInvoicePaid(invoice,thirdPartyId,invoice.getAmount());
+        if(nowFullyPaid)publishInvoicePaid(invoice,thirdPartyId,invoice.moneyAmount());
     }
 
     @Transactional
     public void setInvoiceToPaid(String billRefNumber, String thirdPartyId, double transAMount) {
         getInvoicePayToIDUsingInvoiceRef(billRefNumber).ifPresent(invoice -> setInvoiceToPaid(invoice, thirdPartyId, transAMount));
+    }
+
+    @Transactional
+    public void setInvoiceToPaid(String billRefNumber, String thirdPartyId, BigDecimal transactionAmount) {
+        getInvoicePayToIDUsingInvoiceRef(billRefNumber).ifPresent(invoice -> setInvoiceToPaid(invoice, thirdPartyId, transactionAmount));
     }
 
     public void setInvoiceTransactionStatusByBillRefNumber(String billRefNumber, boolean inProgress) {
@@ -109,9 +120,9 @@ public class UpdatePaymentService {
         invoiceDao.saveInvoice(invoice);
     }
 
-    private void publishInvoicePaid(PMSInvoice invoice,String providerReference,double paidAmount){
+    private void publishInvoicePaid(PMSInvoice invoice,String providerReference,BigDecimal paidAmount){
         if(invoice.getId()==null)return;InvoicePaidEvent event=new InvoicePaidEvent(invoice.getId(),invoice.getRef(),providerReference,
-                BigDecimal.valueOf(paidAmount),invoice.getCurrency(),LocalDateTime.now());
+                MonetaryPolicy.amount(paidAmount),invoice.getCurrency(),LocalDateTime.now());
         eventPublisher.publish(InvoicePaidEvent.TYPE,"INVOICE",Long.toString(invoice.getId()),event.dedupeKey(),event);
     }
 }

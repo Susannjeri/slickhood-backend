@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.time.LocalDate;
+import org.pms.silverocean.service.payment.money.MonetaryPolicy;
 
 @Service
 @Slf4j
@@ -73,33 +74,33 @@ public class InvoiceService {
     }
 
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
-    public void createInvoice(long unitId, long tenantUserId, Map<String, Double> invoiceAmounts) {
+    public void createInvoice(long unitId, long tenantUserId, Map<String, ? extends Number> invoiceAmounts) {
         createPropertyInvoice(unitId, tenantUserId, invoiceAmounts, "RENTAL", LocalDate.now(PMSUtils.getZoneId()));
     }
 
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
-    public PMSInvoice createPropertyInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
+    public PMSInvoice createPropertyInvoice(long unitId, long billedUserId, Map<String, ? extends Number> invoiceAmounts,
                                             String billingType, LocalDate dueDate) {
         return createScopedInvoice(unitId, billedUserId, invoiceAmounts, billingType, dueDate, null, null);
     }
 
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public PMSInvoice createFundInvoice(long unitId, long billedUserId, long custodianUserId, long paymentAccountId,
-                                        Map<String, Double> invoiceAmounts, LocalDate dueDate) {
+                                        Map<String, ? extends Number> invoiceAmounts, LocalDate dueDate) {
         return createScopedInvoice(unitId, billedUserId, invoiceAmounts, "COMMUNITY_FUND", dueDate, custodianUserId, paymentAccountId);
     }
 
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public PMSInvoice createFundInvoice(long unitId, long billedUserId, long custodianUserId, long paymentAccountId,
-                                        Map<String, Double> invoiceAmounts, LocalDate dueDate, String fundCurrency) {
-        java.util.Currency.getInstance(fundCurrency);
+                                        Map<String, ? extends Number> invoiceAmounts, LocalDate dueDate, String fundCurrency) {
+        fundCurrency = MonetaryPolicy.currency(fundCurrency);
         return createScopedInvoice(unitId, billedUserId, invoiceAmounts, "COMMUNITY_FUND", dueDate,
                 custodianUserId, paymentAccountId, fundCurrency);
     }
 
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public PMSInvoice createSaleInvoice(long unitId, long billedUserId, long salesRecipientUserId,
-                                        long paymentAccountId, Map<String, Double> invoiceAmounts,
+                                        long paymentAccountId, Map<String, ? extends Number> invoiceAmounts,
                                         LocalDate dueDate) {
         PaymentAccount account = accountDao.getAccountById(paymentAccountId);
         if (!account.isActive() || !account.isVerified()
@@ -121,40 +122,41 @@ public class InvoiceService {
         }
         String label = "Late payment fee (" + percentageRate.stripTrailingZeros().toPlainString()
                 + "% of outstanding invoice " + source.getRef() + ")";
-        return createScopedInvoice(source.getUnitId(), source.getBilledUserId(), Map.of(label, fee.doubleValue()),
+        return createScopedInvoice(source.getUnitId(), source.getBilledUserId(), Map.of(label, fee),
                 source.getBillingType(), assessedOn, source.getPayToUserId(), source.getPaymentAccountId(),
                 source.getCurrency(), source.getId(), percentageRate);
     }
 
-    private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
+    private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, ? extends Number> invoiceAmounts,
                                            String billingType, LocalDate dueDate, Long payToUserId, Long paymentAccountId) {
         return createScopedInvoice(unitId, billedUserId, invoiceAmounts, billingType, dueDate, payToUserId, paymentAccountId, null);
     }
 
-    private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
+    private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, ? extends Number> invoiceAmounts,
                                            String billingType, LocalDate dueDate, Long payToUserId, Long paymentAccountId,
                                            String currencyOverride) {
         return createScopedInvoice(unitId, billedUserId, invoiceAmounts, billingType, dueDate, payToUserId,
                 paymentAccountId, currencyOverride, null, null);
     }
 
-    private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, Double> invoiceAmounts,
+    private PMSInvoice createScopedInvoice(long unitId, long billedUserId, Map<String, ? extends Number> invoiceAmounts,
                                            String billingType, LocalDate dueDate, Long payToUserId, Long paymentAccountId,
                                            String currencyOverride, Long lateFeeSourceInvoiceId,
                                            BigDecimal lateFeePercentageRate) {
         Unit unit = unitDao.findById(unitId).orElseThrow();
 
-        double totalAmount = 0.0;
+        BigDecimal totalAmount = BigDecimal.ZERO.setScale(MonetaryPolicy.SCALE);
 
         StringBuilder descriptionBuilder = new StringBuilder();
         StringBuilder htmlDescriptionBuilder = new StringBuilder();
-        String currency = currencyOverride == null ? unit.getCurrency() : currencyOverride;
+        String currency = MonetaryPolicy.currency(currencyOverride == null ? unit.getCurrency() : currencyOverride);
 
-        for (Map.Entry<String, Double> entry : invoiceAmounts.entrySet()) {
-            String formattedAmount = String.format("%,.2f", entry.getValue());
-            String line = String.format("%s: %s %,.2f", entry.getKey(), currency, entry.getValue());
+        for (Map.Entry<String, ? extends Number> entry : invoiceAmounts.entrySet()) {
+            BigDecimal lineAmount = MonetaryPolicy.positive(MonetaryPolicy.amount(entry.getValue()));
+            String formattedAmount = String.format("%,.2f", lineAmount);
+            String line = String.format("%s: %s %,.2f", entry.getKey(), currency, lineAmount);
             descriptionBuilder.append(line).append("\n");
-            totalAmount += entry.getValue();
+            totalAmount = totalAmount.add(lineAmount);
             htmlDescriptionBuilder.append("<tr>")
                     .append("<td>")
                     .append("<span>").append(org.springframework.web.util.HtmlUtils.htmlEscape(entry.getKey())).append("</span>")
@@ -172,7 +174,7 @@ public class InvoiceService {
         pmsInvoice.setUnitId(unitId);
         pmsInvoice.setDescription(finalDescription.getBytes());
         pmsInvoice.setHtmlDescription(finalHtmlDescription.getBytes());
-        pmsInvoice.setAmount(totalAmount);
+        pmsInvoice.setMoneyAmount(totalAmount);
         pmsInvoice.setBilledUserId(billedUserId);
         pmsInvoice.setCurrency(currency);
         pmsInvoice.setPropertyId(unit.getPropertyId());
@@ -181,7 +183,7 @@ public class InvoiceService {
                 : payToUserId);
         pmsInvoice.setPaymentAccountId(paymentAccountId);
         pmsInvoice.setActive(true);
-        pmsInvoice.setPendingAmount(totalAmount);
+        pmsInvoice.setMoneyPendingAmount(totalAmount);
         pmsInvoice.setBillingType(billingType);
         pmsInvoice.setDueDate(dueDate);
         pmsInvoice.setLateFeeSourceInvoiceId(lateFeeSourceInvoiceId);
@@ -252,8 +254,8 @@ public class InvoiceService {
 
         invoiceData.put("currency", invoice.getCurrency());
         invoiceData.put("descriptionHtml", new String(invoice.getHtmlDescription()));
-        invoiceData.put("totalAmount", invoice.getAmount());
-        invoiceData.put("pendingAmount", invoice.getPendingAmount());
+        invoiceData.put("totalAmount", invoice.moneyAmount());
+        invoiceData.put("pendingAmount", invoice.moneyPendingAmount());
 
         invoiceData.put("isPaid", invoice.isPaid());
         return invoiceData;

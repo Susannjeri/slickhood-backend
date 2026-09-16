@@ -57,7 +57,7 @@ public class SubscriptionPlanService {
                 .roleFamily(request.roleFamily())
                 .billingCycle(request.billingCycle())
                 .price(request.price())
-                .currency(request.currency().trim().toUpperCase(Locale.ROOT))
+                .currency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(request.currency()))
                 .productKey(productFor(request.planCategory()))
                 .purchaseMode(modeFor(normalizedCode, request.price()))
                 .tierRank(rankFor(request.displayName()))
@@ -100,7 +100,7 @@ public class SubscriptionPlanService {
         existingPlan.setRoleFamily(request.roleFamily());
         existingPlan.setBillingCycle(request.billingCycle());
         existingPlan.setPrice(request.price());
-        existingPlan.setCurrency(request.currency().trim().toUpperCase(Locale.ROOT));
+        existingPlan.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(request.currency()));
         // Soko and add-ons share categories with other products; never infer their identity again on edit.
         if (existingPlan.getProductKey() == null) existingPlan.setProductKey(productFor(request.planCategory()));
         if (modeOrDefault(existingPlan) != SubscriptionPurchaseMode.SALES_MANAGED) {

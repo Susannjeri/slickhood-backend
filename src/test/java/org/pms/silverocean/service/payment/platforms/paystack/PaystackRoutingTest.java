@@ -18,6 +18,7 @@ import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
+import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -39,20 +40,20 @@ class PaystackRoutingTest {
         assertFalse(pending.paid());
         assertTrue(payment.isInProgress(), "Nonterminal provider status must retain callback eligibility");
         assertTrue(invoice.isTransactionInProgress(), "Do not unlock a duplicate checkout while provider is pending");
-        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), anyDouble());
+        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), any(BigDecimal.class));
         verify(updater, never()).setInvoiceTransactionStatusByBillRefNumber("INV-TEST", false);
 
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test")))
                 .when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
-        doAnswer(call -> { invoice.setPaid(true); return null; }).when(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(100.0));
+        doAnswer(call -> { invoice.setPaid(true); return null; }).when(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(new BigDecimal("100.00")));
         platform.handleCallBack(new PaystackCallbackDTO("{\"event\":\"charge.success\",\"data\":{\"reference\":\"601\"}}", "127.0.0.1"));
         assertTrue(invoice.isPaid());
         assertFalse(payment.isInProgress());
         assertTrue(payment.isCompletedSuccessfully());
-        verify(updater, times(1)).setInvoiceToPaid(eq(invoice), eq("123"), eq(100.0));
+        verify(updater, times(1)).setInvoiceToPaid(eq(invoice), eq("123"), eq(new BigDecimal("100.00")));
         platform.handleCallBack(new PaystackCallbackDTO("{\"event\":\"charge.success\",\"data\":{\"reference\":\"601\"}}", "127.0.0.1"));
-        verify(updater, times(1)).setInvoiceToPaid(eq(invoice), eq("123"), eq(100.0));
+        verify(updater, times(1)).setInvoiceToPaid(eq(invoice), eq("123"), eq(new BigDecimal("100.00")));
     }
     final UserDao users = mock(UserDao.class);
     final PaymentDao payments = mock(PaymentDao.class);
@@ -132,7 +133,7 @@ class PaystackRoutingTest {
                 new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "live")))
                 .when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
         platform.handleCallBack(new PaystackCallbackDTO("{\"event\":\"charge.success\",\"data\":{\"reference\":\"601\"}}", "127.0.0.1"));
-        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), anyDouble());
+        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), any(BigDecimal.class));
         assertEquals("verification_failed", payment.getStatus());
     }
 
@@ -144,8 +145,8 @@ class PaystackRoutingTest {
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test")))
                 .when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
-        doAnswer(call -> { invoice.setPaid(true); invoice.setPendingAmount(0); return null; })
-                .when(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(100.0));
+        doAnswer(call -> { invoice.setPaid(true); invoice.setMoneyPendingAmount(BigDecimal.ZERO); return null; })
+                .when(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(new BigDecimal("100.00")));
 
         var result = platform.confirmBrowserReturn("601", "127.0.0.1");
 
@@ -178,7 +179,7 @@ class PaystackRoutingTest {
         assertEquals("verification_failed", payment.getStatus());
         assertFalse(payment.isInProgress());
         verify(updater).setInvoiceTransactionStatusByBillRefNumber("INV-TEST", false);
-        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), anyDouble());
+        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), any(BigDecimal.class));
     }
 
     @Test void reversalOrRefundEventsRequireTheAuthorisedManualFinanceWorkflow() {
@@ -192,7 +193,7 @@ class PaystackRoutingTest {
 
         assertNotNull(response);
         assertTrue(payment.isInProgress(), "Provider refund notices must not silently mutate the finance ledger");
-        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), anyDouble());
+        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), any(BigDecimal.class));
         verify(updater, never()).setInvoiceTransactionStatusByBillRefNumber(anyString(), anyBoolean());
     }
 }

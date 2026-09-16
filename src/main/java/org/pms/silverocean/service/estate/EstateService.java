@@ -230,7 +230,7 @@ public class EstateService {
         EstateServiceCharge charge = new EstateServiceCharge();
         charge.setPropertyId(ownership.getPropertyId()); charge.setUnitId(ownership.getUnitId());
         charge.setHomeownerUserId(ownership.getHomeownerUserId()); charge.setInvoiceId(invoice.getId());
-        charge.setAmount(request.amount()); charge.setCurrency(request.currency().toUpperCase());
+        charge.setAmount(org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(request.amount())); charge.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(request.currency()));
         charge.setDueDate(request.dueDate()); charge.setDescription(request.description());
         charge.setCreatedBy(userDao.getUserId()); charge.setActive(true);
         return chargeRepo.save(charge);

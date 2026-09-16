@@ -7,6 +7,9 @@ import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -19,6 +22,7 @@ import org.pms.silverocean.service.property.wrappers.UtilitiesDTO;
 
 import java.util.Objects;
 import java.util.stream.Collectors;
+import java.math.BigDecimal;
 
 @Table(name = "pms_unit", indexes = {
         @Index(name = "idx_unit_created_by", columnList = "createdBy, active"),
@@ -40,6 +44,8 @@ public class Unit extends BaseCreatorEntity implements Auditable {
     private String utilities;
     private String leaseMode;
     private double price;
+    @Column(name = "price_decimal", precision = 19, scale = 2)
+    private BigDecimal priceDecimal;
     private String currency;
     private boolean occupied;
     private boolean advertise;
@@ -123,5 +129,20 @@ public class Unit extends BaseCreatorEntity implements Auditable {
 
     public void setThumbnail(String thumbnail) {
         this.thumbnail = StringUtils.isNotBlank(thumbnail) ? thumbnail.replaceAll("\\s+", "_") : thumbnail;
+    }
+
+    public BigDecimal moneyPrice() {
+        return priceDecimal == null ? org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(price)
+                : org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(priceDecimal);
+    }
+
+    public void setMoneyPrice(BigDecimal value) {
+        priceDecimal = org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(value);
+        price = priceDecimal.doubleValue();
+    }
+
+    @PostLoad private void readPriceShadow() { if (priceDecimal != null) price = priceDecimal.doubleValue(); }
+    @PrePersist @PreUpdate private void writePriceShadow() {
+        priceDecimal = org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(price);
     }
 }

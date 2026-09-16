@@ -107,7 +107,7 @@ public class SalesService {
         sale.setBuyerUserId(buyer == null ? null : buyer.getId()); sale.setInvitedBuyerEmail(buyerEmail);
         sale.setStatus(automatedOffer ? SaleStatus.OFFERED : SaleStatus.LEAD); sale.setAskingPrice(authoritativeAskingPrice);
         sale.setOfferAmount(request.offerAmount());
-        sale.setCurrency(request.currency().trim().toUpperCase()); sale.setNotes(StringUtils.trimToNull(request.notes()));
+        sale.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(request.currency())); sale.setNotes(StringUtils.trimToNull(request.notes()));
         sale.setCreatedBy(actorId); sale.setActive(true);
         SaleTransaction saved = sales.save(sale);
         Invite invite = invites.createBuyerInvite(saved.getId(), buyerEmail, request.responseDueDate());

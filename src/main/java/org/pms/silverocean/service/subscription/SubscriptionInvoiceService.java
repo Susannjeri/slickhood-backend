@@ -59,7 +59,6 @@ public class SubscriptionInvoiceService {
         if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
             throw new PMSCustomException(ResponseCode.GENERAL_FAILURE);
         }
-        double amount = price.doubleValue();
         String currency = StringUtils.isNotBlank(plan.getCurrency())
                 ? plan.getCurrency().trim()
                 : defaultCurrency;
@@ -73,9 +72,9 @@ public class SubscriptionInvoiceService {
         invoice.setBillingType("SUBSCRIPTION");
         invoice.setDescription(line.getBytes(StandardCharsets.UTF_8));
         invoice.setHtmlDescription(htmlLine.getBytes(StandardCharsets.UTF_8));
-        invoice.setAmount(amount);
-        invoice.setPendingAmount(amount);
-        invoice.setCurrency(currency);
+        invoice.setMoneyAmount(price);
+        invoice.setMoneyPendingAmount(price);
+        invoice.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(currency));
         invoice.setBilledUserId(billedUserId);
         invoice.setPayToUserId(paymentAccount.getCreatedBy());
         // Pin the exact verified platform destination selected at checkout.

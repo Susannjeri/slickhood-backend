@@ -90,7 +90,7 @@ public class ProviderServiceService {
         service.setCategoryId(category.getId());
         service.setCategoryName(category.getName());
         service.setAmount(request.amount());
-        service.setCurrency(request.currency());
+        service.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(request.currency()));
         service.setPricingUnit(request.pricingUnit());
         service.setStatus(ProviderServiceStatus.DRAFT.name());
         service.setActive(true);
@@ -122,7 +122,7 @@ public class ProviderServiceService {
         service.setCategoryId(category.getId());
         service.setCategoryName(category.getName());
         service.setAmount(request.amount());
-        service.setCurrency(request.currency());
+        service.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(request.currency()));
         service.setPricingUnit(request.pricingUnit());
         service.setStatus(ProviderServiceStatus.DRAFT.name());
         serviceDao.save(service, Permission.EDIT_SP_SERVICE);

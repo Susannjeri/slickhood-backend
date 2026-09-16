@@ -127,11 +127,13 @@ public class PesaLinkService extends PaymentPlatform {
             }
             payment.setInProgress(false);
             Optional<PMSInvoice> invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(ipnCallbackDTO.billReference());
+            invoice.ifPresent(value -> payment.setCurrencyCode(
+                    org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(value.getCurrency())));
             if (invoice.isPresent() && invoice.get().isActive() && payment.getAmount() != null && payment.getAmount() > 0) {
                 payment.setStatus(PesalinkStatus.SUCCESS.getStatus());
                 payment.setStatusDesc(PesalinkStatus.SUCCESS.getDescription());
                 payment.setPayToUserId(invoice.get().getPayToUserId());
-                updatePaymentService.setInvoiceToPaid(invoice.get(), payment.getThirdPartyTransId(), payment.getAmount());
+                updatePaymentService.setInvoiceToPaid(invoice.get(), payment.getThirdPartyTransId(), payment.moneyAmount());
             } else {
                 payment.setStatus(PesalinkStatus.INVALID_BILL_REF.getStatus());
                 payment.setStatusDesc(PesalinkStatus.INVALID_BILL_REF.getDescription());
@@ -151,6 +153,8 @@ public class PesaLinkService extends PaymentPlatform {
         validatePayment.setSourceIp(sourceIp);
 
         Optional<PMSInvoice> paymentInvoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(pesalinkValidatePaymentRequestDTO.billRef());
+        paymentInvoice.ifPresent(value -> validatePayment.setCurrencyCode(
+                org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(value.getCurrency())));
 
         PesalinkValidatePaymentResponseDTO pesalinkValidatePaymentResponseDTO;
 
@@ -158,8 +162,9 @@ public class PesaLinkService extends PaymentPlatform {
         if (paymentInvoice.isPresent() && paymentInvoice.get().isActive()) {
             PMSInvoice pmsInvoice = paymentInvoice.get();
             validatePayment.setPayToUserId(pmsInvoice.getPayToUserId());
-            double amount = pesalinkValidatePaymentRequestDTO.amount().doubleValue();
-            if (pmsInvoice.isPaid() || amount <= 0 || amount > pmsInvoice.getPendingAmount()) {
+            java.math.BigDecimal amount = org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(
+                    pesalinkValidatePaymentRequestDTO.amount());
+            if (pmsInvoice.isPaid() || amount.signum() <= 0 || amount.compareTo(pmsInvoice.moneyPendingAmount()) > 0) {
                 validatePayment.setStatus(PesalinkStatus.INVALID_AMOUNT.getStatus());
                 validatePayment.setStatusDesc(PesalinkStatus.INVALID_AMOUNT.getDescription());
                 pesalinkValidatePaymentResponseDTO = new PesalinkValidatePaymentResponseDTO(pesalinkValidatePaymentRequestDTO, null, PesalinkStatus.INVALID_AMOUNT);

@@ -27,7 +27,7 @@ public class FinancialLedgerService {
     private final FinancialLedgerLineRepo lines;
 
     public boolean recordInvoiceIssued(PMSInvoice invoice) {
-        BigDecimal amount=money(invoice.getAmount());
+        BigDecimal amount=invoice.moneyAmount();
         if(invoice.getId()==null||amount.signum()<=0)return false;
         String creditAccount="COMMUNITY_FUND".equals(billingType(invoice))?"RESTRICTED_FUND_LIABILITY":"REVENUE_"+billingType(invoice);
         return post("INVOICE_ISSUED:"+invoice.getId(),"INVOICE_ISSUED",invoice,null,amount,

@@ -7,13 +7,14 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 import java.time.LocalDate;
+import java.math.BigDecimal;
 
 public record ManualPaymentDTO(@NotBlank(message = "Invoice reference is required")
                                @Size(max = 50, message = "Invoice reference must not exceed 50 characters")
                                String invoiceRef,
 
                                @Positive(message = "Amount must be greater than zero")
-                               double amount,
+                               BigDecimal amount,
 
                                @NotBlank(message = "Payment channel is required")
                                @Size(max = 50, message = "Payment Channel must not exceed 50 characters")
@@ -26,4 +27,7 @@ public record ManualPaymentDTO(@NotBlank(message = "Invoice reference is require
                                @NotNull(message = "Transaction date is required")
                                @PastOrPresent(message = "Transaction date cannot be in the future")
                                LocalDate transactionDate) {
+    public ManualPaymentDTO(String invoiceRef, double amount, String channel, String transId, LocalDate transactionDate) {
+        this(invoiceRef, BigDecimal.valueOf(amount), channel, transId, transactionDate);
+    }
 }

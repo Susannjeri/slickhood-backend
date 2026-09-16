@@ -64,7 +64,7 @@ public class PaymentOperationService {
         if(status!=PaymentOperationModels.Status.CONFIRMED)return;
         if(List.of(PaymentOperationModels.Type.REFUND,PaymentOperationModels.Type.REVERSAL,PaymentOperationModels.Type.CHARGEBACK).contains(type)){
             BigDecimal already=operations.sumConfirmed(payment.getId(),"REFUND").add(operations.sumConfirmed(payment.getId(),"REVERSAL")).add(operations.sumConfirmed(payment.getId(),"CHARGEBACK"));
-            BigDecimal collected=BigDecimal.valueOf(payment.getAmount()).setScale(2,RoundingMode.HALF_UP); if(already.add(amount).compareTo(collected)>0)throw invalid();
+            BigDecimal collected=payment.moneyAmount(); if(collected==null||already.add(amount).compareTo(collected)>0)throw invalid();
         }
     }
     private void requireFinance(){if(!users.hasRole(PMSRole.FINANCE)&&!users.hasRole(PMSRole.SUPER_ADMIN))throw new PMSCustomException(ResponseCode.INVALID_ROLE);}

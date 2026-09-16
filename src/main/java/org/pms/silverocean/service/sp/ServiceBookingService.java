@@ -285,9 +285,9 @@ public class ServiceBookingService {
         invoice.setPropertyId(booking.getPropertyId() == null ? 0 : booking.getPropertyId());
         invoice.setDescription(("Marketplace service: " + serviceName).getBytes(StandardCharsets.UTF_8));
         invoice.setHtmlDescription(("<tr><td><span>" + escapedName + "</span></td><td class='amount-col'>" + booking.getQuotedAmount() + "</td></tr>").getBytes(StandardCharsets.UTF_8));
-        invoice.setAmount(booking.getQuotedAmount().doubleValue());
-        invoice.setPendingAmount(booking.getQuotedAmount().doubleValue());
-        invoice.setCurrency(booking.getCurrency());
+        invoice.setMoneyAmount(booking.getQuotedAmount());
+        invoice.setMoneyPendingAmount(booking.getQuotedAmount());
+        invoice.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(booking.getCurrency()));
         invoice.setBilledUserId(booking.getCreatedBy());
         invoice.setPayToUserId(providerUserId);
         invoice.setCustomerPhoneNumber(customer.getPhoneNumber());

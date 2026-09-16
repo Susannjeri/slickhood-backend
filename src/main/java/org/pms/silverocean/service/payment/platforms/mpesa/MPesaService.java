@@ -130,6 +130,7 @@ public class MPesaService extends PaymentPlatform {
 
         PMSPayment stkPayment = new PMSPayment(mpesaSTKPushRequest, accountId);
         stkPayment.setPayToUserId(pmsInvoice.getPayToUserId());
+        stkPayment.setCurrencyCode(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(pmsInvoice.getCurrency()));
         boolean responsePersisted = false;
         try {
             AccountFilterDetails accountFilterDetails = new AccountFilterDetails(accountId, pmsInvoice.getPropertyId());
@@ -274,12 +275,14 @@ public class MPesaService extends PaymentPlatform {
         }
         payment.setInProgress(false);
         Optional<PMSInvoice> invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(mpesaPaymentDTO.billRefNumber());
+        invoice.ifPresent(value -> payment.setCurrencyCode(
+                org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(value.getCurrency())));
         if (invoice.isPresent() && invoice.get().isActive() && payment.getAmount() != null && payment.getAmount() > 0
                 && callbackMatchesInvoiceDestination(invoice.get(), mpesaPaymentDTO)) {
             payment.setStatus(MPesaResultCodes.COMPLETED.getCode());
             payment.setStatusDesc(MPesaResultCodes.COMPLETED.getDesc());
             payment.setPayToUserId(invoice.get().getPayToUserId());
-            updatePaymentService.setInvoiceToPaid(invoice.get(), payment.getThirdPartyTransId(), payment.getAmount());
+            updatePaymentService.setInvoiceToPaid(invoice.get(), payment.getThirdPartyTransId(), payment.moneyAmount());
         } else {
             payment.setStatus(MPesaResultCodes.INVALID_ACCOUNT_NUMBER.getCode());
             payment.setStatusDesc(MPesaResultCodes.INVALID_ACCOUNT_NUMBER.getDesc());
@@ -296,6 +299,8 @@ public class MPesaService extends PaymentPlatform {
         validatePayment.setPayToUserId(Optional.ofNullable(userId).orElse(0L));
 
         Optional<PMSInvoice> paymentInvoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(mpesaPaymentDTO.billRefNumber());
+        paymentInvoice.ifPresent(value -> validatePayment.setCurrencyCode(
+                org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(value.getCurrency())));
 
         MPesaPaymentResponseDTO mPesaPaymentResponseDTO;
 
@@ -303,8 +308,9 @@ public class MPesaService extends PaymentPlatform {
                 && callbackMatchesInvoiceDestination(paymentInvoice.get(), mpesaPaymentDTO)) {
             PMSInvoice pmsInvoice = paymentInvoice.get();
             validatePayment.setPayToUserId(pmsInvoice.getPayToUserId());
-            double amount = Double.parseDouble(mpesaPaymentDTO.transAmount());
-            if (pmsInvoice.isPaid() || amount <= 0 || amount > pmsInvoice.getPendingAmount()) {
+            java.math.BigDecimal amount = org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(
+                    new java.math.BigDecimal(mpesaPaymentDTO.transAmount()));
+            if (pmsInvoice.isPaid() || amount.signum() <= 0 || amount.compareTo(pmsInvoice.moneyPendingAmount()) > 0) {
                 validatePayment.setStatus(MPesaResultCodes.INVALID_AMOUNT.getCode());
                 validatePayment.setStatusDesc(MPesaResultCodes.INVALID_AMOUNT.getDesc());
                 mPesaPaymentResponseDTO = new MPesaPaymentResponseDTO(MPesaResultCodes.INVALID_AMOUNT);
@@ -404,7 +410,7 @@ public class MPesaService extends PaymentPlatform {
                         if (valid) {
                             pmsPayment.setProviderReceipt(receipt.orElseThrow());
                             paymentDao.savePMSPayment(pmsPayment);
-                            updatePaymentService.setInvoiceToPaid(invoice.orElseThrow(), receipt.orElseThrow(), callbackAmount.orElseThrow().doubleValue());
+                            updatePaymentService.setInvoiceToPaid(invoice.orElseThrow(), receipt.orElseThrow(), callbackAmount.orElseThrow());
                         } else {
                             pmsPayment.setStatus(MPesaResultCodes.INVALID_AMOUNT.getCode());
                             pmsPayment.setStatusDesc("M-Pesa callback failed settlement validation");

@@ -60,7 +60,7 @@ public class PaymentService {
             throw new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER);
         } else if (invoice.isTransactionInProgress()) {
             throw new PMSCustomException(ResponseCode.TRANSACTION_IN_PROGRESS);
-        } else if (manualPaymentDTO.amount() <= 0 || manualPaymentDTO.amount() > invoice.getPendingAmount()) {
+        } else if (manualPaymentDTO.amount().signum() <= 0 || manualPaymentDTO.amount().compareTo(invoice.moneyPendingAmount()) > 0) {
             throw new PMSCustomException(ResponseCode.INVALID_AMOUNT);
         }
 
@@ -68,6 +68,7 @@ public class PaymentService {
         invoiceDao.saveInvoice(invoice);
         PMSPayment payment = new PMSPayment(manualPaymentDTO);
         payment.setPayToUserId(invoice.getPayToUserId());
+        payment.setCurrencyCode(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(invoice.getCurrency()));
         String rawMessage = String.format("%s : %s ", manualPaymentDTO.transactionDate(), userObject.getFullName());
         String finalMessage = rawMessage.length() > 255
                 ? rawMessage.substring(0, 255)

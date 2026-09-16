@@ -30,9 +30,9 @@ class LeaseInitialBillingServiceTest {
         new LeaseInitialBillingService(leases, invoices).issue(lease, tenancy, unit);
 
         verify(invoices).createPropertyInvoice(eq(3L), eq(4L), argThat(amounts ->
-                amounts.get("First month's rent") == 50000d
-                        && amounts.get("DEPOSIT amount") == 50000d
-                        && amounts.get("SERVICE amount") == 2500d),
+                amounts.get("First month's rent").doubleValue() == 50000d
+                        && amounts.get("DEPOSIT amount").doubleValue() == 50000d
+                        && amounts.get("SERVICE amount").doubleValue() == 2500d),
                 eq("RENTAL"), eq(LocalDate.of(2026, 10, 15)));
         verify(leases).updateLeaseChargeNextPaymentDate(9L, LocalDate.of(2026, 11, 15));
         verify(leases, never()).updateLeaseChargeNextPaymentDate(eq(8L), any());

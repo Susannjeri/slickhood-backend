@@ -129,12 +129,12 @@ public class ReportService {
         long overdue = data.stream().filter(i -> !i.isPaid() && i.getDueDate() != null && i.getDueDate().isBefore(LocalDate.now(PMSUtils.getZoneId()))).count();
         List<Map<String, Object>> rows = data.stream().map(i -> row(
                 "Reference", i.getRef(), "Type", value(i.getBillingType(), "GENERAL"), "Property", i.getPropertyId(), "Unit", i.getUnitId(),
-                "Amount", money(i.getAmount()), "Currency", i.getCurrency(), "Collected", money(i.getAmount() - i.getPendingAmount()),
-                "Outstanding", money(i.getPendingAmount()), "Due date", i.getDueDate(), "Status", i.isPaid() ? "PAID" : overdueStatus(i.getDueDate()), "Created", i.getCreatedOn())).toList();
+                "Amount", i.moneyAmount(), "Currency", i.getCurrency(), "Collected", i.moneyAmount().subtract(i.moneyPendingAmount()),
+                "Outstanding", i.moneyPendingAmount(), "Due date", i.getDueDate(), "Status", i.isPaid() ? "PAID" : overdueStatus(i.getDueDate()), "Created", i.getCreatedOn())).toList();
         return data(definition, range, map("Invoices", data.size(),
-                "Billed by currency", totalsByCurrency(data, i -> i.getCurrency(), i -> BigDecimal.valueOf(i.getAmount())),
-                "Collected by currency", totalsByCurrency(data, i -> i.getCurrency(), i -> BigDecimal.valueOf(i.getAmount() - i.getPendingAmount())),
-                "Outstanding by currency", totalsByCurrency(data, i -> i.getCurrency(), i -> BigDecimal.valueOf(i.getPendingAmount())), "Overdue", overdue), rows, truncated, rowLimit);
+                "Billed by currency", totalsByCurrency(data, PMSInvoice::getCurrency, PMSInvoice::moneyAmount),
+                "Collected by currency", totalsByCurrency(data, PMSInvoice::getCurrency, i -> i.moneyAmount().subtract(i.moneyPendingAmount())),
+                "Outstanding by currency", totalsByCurrency(data, PMSInvoice::getCurrency, PMSInvoice::moneyPendingAmount), "Overdue", overdue), rows, truncated, rowLimit);
     }
 
     private ReportModels.Data paymentReconciliation(ReportModels.Definition definition, Range range, int rowLimit) {
@@ -145,7 +145,7 @@ public class ReportService {
         long successful = data.stream().filter(this::successful).count();
         long pending = data.stream().filter(PMSPayment::isInProgress).count();
         List<Map<String, Object>> rows = data.stream().map(p -> row(
-                "Reference", p.getBillReference(), "Channel", p.getChannel(), "Category", p.getCategory(), "Amount", money(p.getAmount()),
+                "Reference", p.getBillReference(), "Channel", p.getChannel(), "Category", p.getCategory(), "Amount", p.moneyAmount(),
                 "Status", value(p.getStatus(), p.isInProgress() ? "PENDING" : "UNKNOWN"), "Transaction", p.getThirdPartyTransId(), "Created", p.getCreatedOn())).toList();
         return data(definition, range, map("Payments", data.size(), "Successful", successful, "Pending", pending, "Exceptions", data.size() - successful - pending), rows, truncated, rowLimit);
     }
@@ -189,10 +189,10 @@ public class ReportService {
         long occupied = data.stream().filter(Unit::isOccupied).count();
         List<Map<String, Object>> rows = data.stream().map(u -> row(
                 "Property", u.getProperty() == null ? u.getPropertyId() : u.getProperty().getName(), "Unit", u.getRef(), "Use", u.getLeaseMode(),
-                "Type", u.getUnitType(), "Price", money(u.getPrice()), "Currency", u.getCurrency(), "Occupied", yesNo(u.isOccupied()), "Advertised", yesNo(u.isAdvertise()))).toList();
+                "Type", u.getUnitType(), "Price", u.moneyPrice(), "Currency", u.getCurrency(), "Occupied", yesNo(u.isOccupied()), "Advertised", yesNo(u.isAdvertise()))).toList();
         double rate = data.isEmpty() ? 0 : occupied * 100.0 / data.size();
         return data(definition, range, map("Units", data.size(), "Occupied", occupied, "Vacant", data.size() - occupied, "Occupancy %", rounded(rate),
-                "Occupied value by currency", totalsByCurrency(data.stream().filter(Unit::isOccupied).toList(), Unit::getCurrency, u -> BigDecimal.valueOf(u.getPrice()))), rows, truncated, rowLimit);
+                "Occupied value by currency", totalsByCurrency(data.stream().filter(Unit::isOccupied).toList(), Unit::getCurrency, Unit::moneyPrice)), rows, truncated, rowLimit);
     }
 
     private ReportModels.Data visitorActivity(ReportModels.Definition definition, Range range, int rowLimit) {
@@ -232,7 +232,7 @@ public class ReportService {
         return data(definition, range, map("Charges", data.size(),
                 "Billed by currency", totalsByCurrency(data, EstateServiceCharge::getCurrency, EstateServiceCharge::getAmount),
                 "Outstanding by currency", totalsByCurrency(data, EstateServiceCharge::getCurrency,
-                        c -> Optional.ofNullable(invoiceMap.get(c.getInvoiceId())).filter(i -> !i.isPaid()).map(i -> BigDecimal.valueOf(i.getPendingAmount())).orElse(BigDecimal.ZERO))), rows, truncated, rowLimit);
+                        c -> Optional.ofNullable(invoiceMap.get(c.getInvoiceId())).filter(i -> !i.isPaid()).map(PMSInvoice::moneyPendingAmount).orElse(BigDecimal.ZERO))), rows, truncated, rowLimit);
     }
 
     private ReportModels.Data serviceBookings(ReportModels.Definition definition, Range range, int rowLimit) {
