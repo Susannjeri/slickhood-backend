@@ -30,7 +30,7 @@ public class InsuranceGuestAccess extends BaseCreatorEntity {
     @Column(nullable = false)
     private int otpAttempts;
     private LocalDateTime verifiedAt;
-    @Column(length = 64, unique = true)
+    @Column(length = 64, unique = true, columnDefinition = "CHAR(64)")
     private String accessTokenHash;
     @Lob @Column(columnDefinition = "LONGBLOB")
     private byte[] encryptedAccessToken;

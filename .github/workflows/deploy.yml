@@ -188,9 +188,10 @@ jobs:
             test -f "$candidate"
             # Validate the already-deployed compatibility baseline before the
             # candidate JAR has had a chance to apply its new migrations.
-            run_preflight 95
-            # Protected, host-local backups are required before applying the
-            # additive V96 public insurance guest-access migration.
+            # V96 may already be present after a rollback because Flyway
+            # migrations are forward-only. Validate the current production
+            # baseline before replacing the application binary.
+            run_preflight 96
             # Backup contents never leave the host or appear in workflow logs.
             sudo python3 /tmp/slickhood-backend-release/production-backup.py
             umask 077

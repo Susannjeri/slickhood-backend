@@ -1,5 +1,6 @@
 package org.pms.silverocean.service.insurance;
 
+import jakarta.persistence.Column;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -96,6 +97,12 @@ class InsuranceGuestAccessServiceTest {
         assertThat(access.getAccessTokenHash()).hasSize(64).doesNotContain(result.accessToken());
         assertThat(access.getEncryptedAccessToken()).containsExactly(1,2,3);
         assertThat(access.getAccessExpiresAt()).isAfter(LocalDateTime.now().plusDays(29));
+    }
+
+    @Test void tokenHashMappingMatchesTheFixedLengthProductionDigestColumn() throws Exception {
+        Column mapping = InsuranceGuestAccess.class.getDeclaredField("accessTokenHash").getAnnotation(Column.class);
+        assertThat(mapping.columnDefinition()).isEqualTo("CHAR(64)");
+        assertThat(mapping.length()).isEqualTo(64);
     }
 
     private InsuranceGuestAccess challenge(String code) {
