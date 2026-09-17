@@ -6,6 +6,8 @@ import lombok.Getter;
 public enum NotificationType {
     OTP_SMS("sms.otp.message", false, NotificationChannel.SMS),
     EMAIL_OTP("email.otp.subject", "email.otp.body", false, NotificationChannel.EMAIL),
+    INSURANCE_GUEST_OTP_EMAIL("email.insurance.guest.otp.subject", "email.insurance.guest.otp.body", false, NotificationChannel.EMAIL),
+    INSURANCE_GUEST_OTP_SMS("sms.insurance.guest.otp", false, NotificationChannel.SMS),
 
     ADD_UNITS_REMINDER_EMAIL("add.units.reminder.email.subject", "add.units.reminder.email.body", true, NotificationChannel.EMAIL),
     PAYMENT_SUCCESS_SMS("sms.payment.success.message", true, NotificationChannel.SMS),

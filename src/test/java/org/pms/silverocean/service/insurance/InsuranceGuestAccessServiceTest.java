@@ -11,11 +11,18 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.database.pms.InsuranceGuestAccessRepo;
 import org.pms.silverocean.database.pms.entities.InsuranceGuestAccess;
+import org.pms.silverocean.database.pms.entities.Notification;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.config.ConfigService;
+import org.pms.silverocean.service.config.ConfigDTO;
+import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.helpdesk.HelpDeskRateLimiter;
+import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.notification.common.NotificationDao;
+import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -38,8 +45,10 @@ class InsuranceGuestAccessServiceTest {
     @Spy PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     @Mock EncryptionService encryptionService;
     @Mock NotificationService notifications;
+    @Mock NotificationDao notificationDao;
     @Mock I18NService i18n;
     @Mock UserDao userDao;
+    @Mock ConfigService configService;
     @InjectMocks InsuranceGuestAccessService service;
 
     @BeforeEach void configure() {
@@ -51,16 +60,22 @@ class InsuranceGuestAccessServiceTest {
     @Test void requestStoresOnlyHashedOtpAndReturnsOpaqueChallenge() {
         when(i18n.getLocalizedMessage(anyString())).thenReturn("Code %s expires %s");
         when(accessRepo.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(notifications.queueNotification(any())).thenReturn(42L);
         GuestAccessChallenge result = service.requestAccess(
-                new GuestAccessRequest("Guest User", " Guest@Example.com ", "+254700000000"), "127.0.0.1");
+                new GuestAccessRequest("Guest User", " Guest@Example.com ", "+254700000000", "EMAIL"), "127.0.0.1");
 
         ArgumentCaptor<InsuranceGuestAccess> saved = ArgumentCaptor.forClass(InsuranceGuestAccess.class);
         verify(accessRepo).save(saved.capture());
         assertThat(result.challengeId()).isEqualTo(saved.getValue().getChallengeId());
         assertThat(saved.getValue().getEmail()).isEqualTo("guest@example.com");
+        assertThat(saved.getValue().getPhone()).isEqualTo("+254700000000");
+        assertThat(saved.getValue().getDeliveryChannel()).isEqualTo("EMAIL");
+        assertThat(saved.getValue().getNotificationId()).isEqualTo(42L);
         assertThat(saved.getValue().getOtpHash()).hasSize(60).doesNotContain("000000");
         verify(rateLimiter, times(2)).check(any(), anyInt());
-        verify(notifications).sendNotification(any());
+        ArgumentCaptor<NotificationDTO> queued = ArgumentCaptor.forClass(NotificationDTO.class);
+        verify(notifications).queueNotification(queued.capture());
+        assertThat(queued.getValue().notificationType()).isEqualTo(NotificationType.INSURANCE_GUEST_OTP_EMAIL);
     }
 
     @Test void verifyRejectsExpiredChallengeWithoutIssuingToken() {
@@ -72,6 +87,42 @@ class InsuranceGuestAccessServiceTest {
                 .isInstanceOf(PMSCustomException.class);
         assertThat(access.isActive()).isFalse();
         verify(encryptionService, never()).encrypt(anyString());
+    }
+
+    @Test void requestCanQueueSmsToANormalizedPhoneWhenGatewayIsReady() {
+        when(configService.getConfigByName(PMSConfigs.ACTIVE_SMS_PROVIDER)).thenReturn(() -> config("TextSMS"));
+        when(configService.getConfigByName(PMSConfigs.TEXT_SMS_PARTNER_ID)).thenReturn(() -> config("partner-1"));
+        when(configService.getConfigByName(PMSConfigs.TEXT_SMS_API_KEY)).thenReturn(() -> config("secret-value"));
+        when(i18n.getLocalizedMessage(anyString())).thenReturn("Code %s expires in %s minutes");
+        when(notifications.queueNotification(any())).thenReturn(84L);
+        when(accessRepo.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        GuestAccessChallenge result = service.requestAccess(
+                new GuestAccessRequest("Guest User", "guest@example.com", "0700 000 000", "SMS"), "127.0.0.1");
+
+        ArgumentCaptor<NotificationDTO> queued = ArgumentCaptor.forClass(NotificationDTO.class);
+        verify(notifications).queueNotification(queued.capture());
+        assertThat(queued.getValue().recipient()).isEqualTo("+254700000000");
+        assertThat(queued.getValue().notificationType()).isEqualTo(NotificationType.INSURANCE_GUEST_OTP_SMS);
+        assertThat(result.deliveryChannel()).isEqualTo("SMS");
+        assertThat(result.maskedDestination()).endsWith("000");
+    }
+
+    @Test void deliveryStatusReportsProviderFailureWithoutRevealingTheContact() {
+        InsuranceGuestAccess access = challenge("123456");
+        access.setDeliveryChannel("EMAIL");
+        access.setNotificationId(42L);
+        access.setLastSentAt(LocalDateTime.now());
+        Notification notification = new Notification();
+        notification.setActive(false);
+        when(accessRepo.findByChallengeIdAndActiveTrue("challenge")).thenReturn(Optional.of(access));
+        when(notificationDao.findById(42L)).thenReturn(Optional.of(notification));
+
+        GuestDeliveryStatus result = service.deliveryStatus(new GuestAccessStatusRequest("challenge"), "127.0.0.1");
+
+        assertThat(result.deliveryStatus()).isEqualTo("FAILED");
+        assertThat(result.maskedDestination()).isEqualTo("g***@example.com");
+        verify(rateLimiter).check(any(), eq(30));
     }
 
     @Test void verifyLocksChallengeAfterFifthIncorrectAttempt() {
@@ -115,5 +166,9 @@ class InsuranceGuestAccessServiceTest {
         access.setOtpExpiresAt(LocalDateTime.now().plusMinutes(10));
         access.setActive(true);
         return access;
+    }
+
+    private ConfigDTO config(String value) {
+        return new ConfigDTO(1L, "test", value, 0, false);
     }
 }

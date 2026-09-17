@@ -28,6 +28,7 @@ public class WhatsAppNotificationSender extends AbstractNotificationRetryService
 
     @Override protected NotificationPoolConfigs getPoolConfigs() { return CONFIGS; }
     @Override protected boolean isRetryableStatusCode(int statusCode) { return false; }
+    @Override protected boolean isAcceptedStatusCode(int statusCode) { return statusCode == 0; }
 
     @Override protected int callProviderApi(NotificationDTO dto, long id) {
         if (dto.notificationType().name().contains("OTP"))

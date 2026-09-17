@@ -49,6 +49,12 @@ public class SmsDispatcherService extends AbstractNotificationRetryService {
     }
 
     @Override
+    protected boolean isAcceptedStatusCode(int statusCode) {
+        getActiveProvider();
+        return provider.isAccepted(statusCode);
+    }
+
+    @Override
     protected int callProviderApi(NotificationDTO dto, long notificationId) throws Exception {
         getActiveProvider();
         return provider.executeSend(dto, notificationId);

@@ -89,6 +89,11 @@ public class TextSMSService implements SmsProvider {
     }
 
     @Override
+    public boolean isAccepted(int statusCode) {
+        return TestSMSStatusCode.SUCCESS.getCode() == statusCode;
+    }
+
+    @Override
     public boolean supports(String providerName) {
         if (StringUtils.isBlank(providerName)) return false;
         String normalizedInput = providerName.replaceAll("[^a-zA-Z0-9]", "");
@@ -98,10 +103,15 @@ public class TextSMSService implements SmsProvider {
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public void updateFinalDLRStatus(String id, String status, String deliveryDescription, String network) {
         if(id==null||id.isBlank()||status==null||deliveryDescription==null)return;
+        Long notificationId = smsDao.findByThirdPartyId(id).map(SMS::getNotificationId).orElse(null);
         // The separate DAO transaction also covers calls from the scheduled DLR
         // callback (self-invocation on this service cannot provide a transaction).
         smsDao.recordProviderReceipt(TEXTSMS,id,status,deliveryDescription,network,null)
                 .ifPresent(notificationDao::confirmDelivered);
+        if (notificationId != null && !DELIVERED_TO_TERMINAL_STATUS.equals(deliveryDescription)
+                && !"SentToNetwork".equals(deliveryDescription)) {
+            notificationDao.markDeliveryFailed(notificationId);
+        }
     }
 
     private void updateNotification(long notificationId, String deliveryDescription) {

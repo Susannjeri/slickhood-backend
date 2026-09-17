@@ -58,10 +58,15 @@ public abstract class AbstractNotificationRetryService  implements NotificationS
                         Throwable actualError = throwable.getCause() != null ? throwable.getCause() : throwable;
                         log.error("Provider API failed for notification {} ({})", notificationId, actualError.getClass().getSimpleName());
 
-                        triggerRetryIfAllowed(notificationDTO, notificationId);
+                        if (notificationDTO.notificationType().isRetry()) triggerRetryIfAllowed(notificationDTO, notificationId);
+                        else notificationDao.markDeliveryFailed(notificationId);
                     } else if (isRetryableStatusCode(statusCode)) {
                         log.warn("Retryable status code {} for notification {}", statusCode, notificationId);
-                        triggerRetryIfAllowed(notificationDTO, notificationId);
+                        if (notificationDTO.notificationType().isRetry()) triggerRetryIfAllowed(notificationDTO, notificationId);
+                        else notificationDao.markDeliveryFailed(notificationId);
+                    } else if (!isAcceptedStatusCode(statusCode)) {
+                        log.warn("Notification {} was rejected with provider status {}", notificationId, statusCode);
+                        notificationDao.markDeliveryFailed(notificationId);
                     }
                 });
     }
@@ -78,7 +83,7 @@ public abstract class AbstractNotificationRetryService  implements NotificationS
         if (dto.notificationType().isRetry()) {
             notificationDao.findById(id).ifPresent(notification -> {
                 if (notification.getRetries() >= maxRetries) {
-                    notificationDao.stopRetry(id);
+                    notificationDao.markDeliveryFailed(id);
                     log.error("Notification {} exhausted its {} delivery retries", id, maxRetries);
                 } else {
                     retryFailedPool.schedule(() -> scheduledRetryOperation(dto, id),
@@ -104,6 +109,8 @@ public abstract class AbstractNotificationRetryService  implements NotificationS
     }
 
     protected abstract boolean isRetryableStatusCode(int statusCode);
+
+    protected abstract boolean isAcceptedStatusCode(int statusCode);
 
     protected abstract int callProviderApi(NotificationDTO dto, long id) throws Exception;
 }

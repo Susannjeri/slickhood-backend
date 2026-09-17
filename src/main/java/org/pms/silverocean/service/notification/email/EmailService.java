@@ -72,6 +72,11 @@ public class EmailService extends AbstractNotificationRetryService {
         return statusCode == 0;
     }
 
+    @Override
+    protected boolean isAcceptedStatusCode(int statusCode) {
+        return statusCode == 1;
+    }
+
 
     private void sendEmail(final String email, final String body, final String subject) throws IOException {
         log.info("sending {} email", subject);

@@ -35,8 +35,10 @@ public class SMSService {
         if (StringUtils.isBlank(id) || ATsmsStatus == null || ATsmsNetworkCode == null) return;
 
         String description=ATSMSStatus.Success.equals(ATsmsStatus)||ATsmsFailureReason==null?ATsmsStatus.getDescription():ATsmsFailureReason.name();
+        Long notificationId = smsDao.findByThirdPartyId(id).map(org.pms.silverocean.database.pms.entities.SMS::getNotificationId).orElse(null);
         smsDao.recordProviderReceipt("Africastalking",id,ATsmsStatus.name(),description,ATsmsNetworkCode.name(),ip)
                 .ifPresent(notificationDao::confirmDelivered);
+        if (notificationId != null && isFinalFailure(ATsmsStatus)) notificationDao.markDeliveryFailed(notificationId);
     }
 
     private void updateNotification(long notificationId, boolean delivered) {
@@ -72,6 +74,11 @@ public class SMSService {
     private static int rank(String status) {
         if (status == null) return 0;
         return switch (status) { case "sent" -> 1; case "failed" -> 2; case "delivered" -> 3; case "read" -> 4; default -> 0; };
+    }
+
+    private static boolean isFinalFailure(ATSMSStatus status) {
+        return status == ATSMSStatus.Rejected || status == ATSMSStatus.Failed
+                || status == ATSMSStatus.AbsentSubscriber || status == ATSMSStatus.Expired;
     }
 
 }

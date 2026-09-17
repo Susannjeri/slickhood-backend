@@ -51,6 +51,10 @@ public interface NotificationRepo extends JpaRepository<Notification, Long>, Jpa
     @Query("UPDATE Notification n SET n.delivered=true,n.retry=false,n.updatedOn=:now WHERE n.id=:id AND n.active")
     int confirmDelivered(@Param("id") long id, @Param("now") LocalDateTime now);
 
+    @Modifying
+    @Query("UPDATE Notification n SET n.active=false,n.retry=false,n.updatedOn=:now WHERE n.id=:id AND n.delivered=false")
+    int markDeliveryFailed(@Param("id") long id, @Param("now") LocalDateTime now);
+
     @Query("SELECT n.id FROM Notification n WHERE n.active AND n.delivered=false AND n.retry=true " +
             "AND n.channel=:channel AND n.retries<:maxRetries " +
             "AND NOT EXISTS (SELECT s.id FROM SMS s WHERE s.notificationId=n.id AND s.active AND s.thirdPartyId IS NOT NULL AND s.thirdPartyId<>'') " +

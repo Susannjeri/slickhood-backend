@@ -80,6 +80,13 @@ public class AfricasTalkingService implements SmsProvider {
     }
 
     @Override
+    public boolean isAccepted(int statusCode) {
+        return statusCode == ATStatusCode.PROCESSED.getCode()
+                || statusCode == ATStatusCode.SENT.getCode()
+                || statusCode == ATStatusCode.QUEUED.getCode();
+    }
+
+    @Override
     public boolean supports(String providerName) {
         if (StringUtils.isBlank(providerName)) return false;
         String normalizedInput = providerName.replaceAll("[^a-zA-Z0-9]", "");

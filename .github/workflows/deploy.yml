@@ -221,7 +221,7 @@ jobs:
             installed=true
             sudo systemctl restart pms.service
             if wait_for_health; then
-              run_preflight 96 on-hold
+              run_preflight 97 on-hold
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
               installed=false
               exit 0

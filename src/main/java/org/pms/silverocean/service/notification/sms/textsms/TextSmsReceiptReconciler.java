@@ -42,6 +42,10 @@ public class TextSmsReceiptReconciler {
                 if(response==null||response.responseCode()!=200||!receipt.getThirdPartyId().equals(response.messageId())||response.deliveryDescription()==null)continue;
                 sms.recordProviderReceipt("TEXTSMS",receipt.getThirdPartyId(),Integer.toString(response.deliveryStatus()),response.deliveryDescription(),Integer.toString(response.deliveryNetworkId()),null)
                         .ifPresent(notifications::confirmDelivered);
+                if (!"DeliveredToTerminal".equals(response.deliveryDescription())
+                        && !"SentToNetwork".equals(response.deliveryDescription())) {
+                    notifications.markDeliveryFailed(receipt.getNotificationId());
+                }
             }catch(RuntimeException failure){
                 log.warn("Receipt reconciliation deferred for SMS {} ({})",receipt.getId(),failure.getClass().getSimpleName());
             }

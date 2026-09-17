@@ -69,8 +69,16 @@ public final class InsuranceModels {
     public record AgencyView(String code,String name,String supportEmail,String supportPhone,String logoUrl) {}
 
     public record GuestAccessRequest(@NotBlank @Size(max=160) String fullName,
-            @Email @NotBlank String email, @NotBlank @Size(max=40) String phone) {}
-    public record GuestAccessChallenge(String challengeId, String message) {}
+            @Email @NotBlank String email, @NotBlank @Size(max=40) String phone,
+            @Pattern(regexp="EMAIL|SMS") String deliveryChannel) {}
+    public record GuestAccessResendRequest(@NotBlank String challengeId,
+            @NotBlank @Pattern(regexp="EMAIL|SMS") String deliveryChannel) {}
+    public record GuestAccessStatusRequest(@NotBlank String challengeId) {}
+    public record GuestDeliveryOptions(boolean email, boolean sms) {}
+    public record GuestAccessChallenge(String challengeId, String message, String deliveryChannel,
+            String maskedDestination, String deliveryStatus, LocalDateTime resendAvailableAt) {}
+    public record GuestDeliveryStatus(String deliveryChannel, String maskedDestination,
+            String deliveryStatus, LocalDateTime resendAvailableAt) {}
     public record GuestAccessVerifyRequest(@NotBlank String challengeId,
             @NotBlank @Pattern(regexp="[0-9]{6}") String code) {}
     public record GuestAccessView(String accessToken, LocalDateTime expiresAt, Long caseId) {}

@@ -1,6 +1,7 @@
 package org.pms.silverocean.service.notification;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.pms.silverocean.database.pms.entities.Notification;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -23,6 +24,7 @@ import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class NotificationService {
     private final EncryptionService encryptionService;
     private final NotificationDao notificationDao;
@@ -142,8 +144,15 @@ public class NotificationService {
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void deliverAfterCommit(NotificationQueued queued) {
-        NotificationSender sender = getPlatform(queued.notification().notificationType().getChannel());
-        sender.send(queued.notification(), queued.notificationId());
+        try {
+            NotificationSender sender = getPlatform(queued.notification().notificationType().getChannel());
+            sender.send(queued.notification(), queued.notificationId());
+        } catch (RuntimeException routingFailure) {
+            notificationDao.markDeliveryFailed(queued.notificationId());
+            log.error("Notification {} could not be routed to channel {} ({})",
+                    queued.notificationId(), queued.notification().notificationType().getChannel(),
+                    routingFailure.getClass().getSimpleName());
+        }
     }
 
     public void sendEmailToSuperAdmin(NotificationType notificationType, String formattedMessage) {

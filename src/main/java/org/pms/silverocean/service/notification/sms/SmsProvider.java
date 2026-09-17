@@ -7,5 +7,7 @@ public interface SmsProvider {
 
     boolean isRetryable(int statusCode);
 
+    boolean isAccepted(int statusCode);
+
     boolean supports(String providerName);
 }

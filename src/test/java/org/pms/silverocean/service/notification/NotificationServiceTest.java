@@ -138,6 +138,20 @@ class NotificationServiceTest {
     }
 
     @Test
+    void deliveryRoutingFailureIsRecordedInsteadOfRemainingQueued() {
+        NotificationDao dao = mock(NotificationDao.class);
+        NotificationService service = new NotificationService(mock(EncryptionService.class), dao,
+                mock(UserDao.class), Map.of(), mock(ApplicationEventPublisher.class),
+                mock(NotificationPreferenceService.class));
+        NotificationDTO request = new NotificationDTO("Code", "owner@example.com",
+                NotificationType.INSURANCE_GUEST_OTP_EMAIL);
+
+        service.deliverAfterCommit(new NotificationService.NotificationQueued(92L, request));
+
+        verify(dao).markDeliveryFailed(92L);
+    }
+
+    @Test
     void superAdminEscalationUsesCurrentActiveRecipientsWithoutRestart() {
         EncryptionService encryption = mock(EncryptionService.class);
         NotificationDao dao = mock(NotificationDao.class);

@@ -20,4 +20,6 @@ public interface InsuranceGuestAccessRepo extends JpaRepository<InsuranceGuestAc
     Optional<InsuranceGuestAccess> findAccessForUpdate(String accessTokenHash);
 
     Optional<InsuranceGuestAccess> findByIdAndActiveTrue(long id);
+
+    Optional<InsuranceGuestAccess> findByChallengeIdAndActiveTrue(String challengeId);
 }

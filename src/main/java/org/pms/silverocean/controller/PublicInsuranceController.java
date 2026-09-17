@@ -29,6 +29,7 @@ public class PublicInsuranceController {
     @GetMapping("/agency") public ResponseEntity<ResponseDTO> agency() { return ok(operations.agency()); }
     @GetMapping("/products") public ResponseEntity<ResponseDTO> products() { return ok(operations.products()); }
     @GetMapping("/companies") public ResponseEntity<ResponseDTO> companies() { return ok(insurance.companies()); }
+    @GetMapping("/access/channels") public ResponseEntity<ResponseDTO> channels() { return ok(guests.deliveryOptions()); }
 
     @PostMapping("/access/request")
     public ResponseEntity<ResponseDTO> request(@Valid @RequestBody InsuranceModels.GuestAccessRequest request,
@@ -39,6 +40,18 @@ public class PublicInsuranceController {
     @PostMapping("/access/verify")
     public ResponseEntity<ResponseDTO> verify(@Valid @RequestBody InsuranceModels.GuestAccessVerifyRequest request) {
         return ok(guests.verify(request));
+    }
+
+    @PostMapping("/access/resend")
+    public ResponseEntity<ResponseDTO> resend(@Valid @RequestBody InsuranceModels.GuestAccessResendRequest request,
+                                               HttpServletRequest servletRequest) {
+        return ok(guests.resend(request, PMSUtils.getIPAddress(servletRequest)));
+    }
+
+    @PostMapping("/access/status")
+    public ResponseEntity<ResponseDTO> deliveryStatus(@Valid @RequestBody InsuranceModels.GuestAccessStatusRequest request,
+                                                       HttpServletRequest servletRequest) {
+        return ok(guests.deliveryStatus(request, PMSUtils.getIPAddress(servletRequest)));
     }
 
     @GetMapping("/case")

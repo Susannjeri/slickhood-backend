@@ -29,6 +29,12 @@ public class InsuranceGuestAccess extends BaseCreatorEntity {
     private LocalDateTime otpExpiresAt;
     @Column(nullable = false)
     private int otpAttempts;
+    @Column(length = 12)
+    private String deliveryChannel;
+    private Long notificationId;
+    private LocalDateTime lastSentAt;
+    @Column(nullable = false)
+    private int sendCount;
     private LocalDateTime verifiedAt;
     @Column(length = 64, unique = true, columnDefinition = "CHAR(64)")
     private String accessTokenHash;

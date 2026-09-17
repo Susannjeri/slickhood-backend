@@ -61,6 +61,11 @@ public class NotificationDao {
         notificationRepo.confirmDelivered(id, LocalDateTime.now());
     }
 
+    @Transactional
+    public void markDeliveryFailed(long id) {
+        notificationRepo.markDeliveryFailed(id, LocalDateTime.now());
+    }
+
     public List<Long> findRetryCandidates(String channel, LocalDateTime eligibleBefore, int maxRetries, int batchSize) {
         return notificationRepo.findRetryCandidates(channel, eligibleBefore, maxRetries, PageRequest.of(0, batchSize));
     }
