@@ -58,7 +58,7 @@ class InsuranceGuestAccessServiceTest {
     }
 
     @Test void requestStoresOnlyHashedOtpAndReturnsOpaqueChallenge() {
-        when(i18n.getLocalizedMessage(anyString())).thenReturn("Code %s expires %s");
+        when(i18n.getLocalizedMessage(anyString())).thenReturn("Code %s expires %s. Powered by SlickHood.");
         when(accessRepo.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(notifications.queueNotification(any())).thenReturn(42L);
         GuestAccessChallenge result = service.requestAccess(
@@ -76,6 +76,8 @@ class InsuranceGuestAccessServiceTest {
         ArgumentCaptor<NotificationDTO> queued = ArgumentCaptor.forClass(NotificationDTO.class);
         verify(notifications).queueNotification(queued.capture());
         assertThat(queued.getValue().notificationType()).isEqualTo(NotificationType.INSURANCE_GUEST_OTP_EMAIL);
+        assertThat(queued.getValue().notificationType().getChannel().name()).isEqualTo("EMAIL");
+        assertThat(queued.getValue().formattedMessage()).contains("Powered by SlickHood");
     }
 
     @Test void verifyRejectsExpiredChallengeWithoutIssuingToken() {
@@ -93,7 +95,7 @@ class InsuranceGuestAccessServiceTest {
         when(configService.getConfigByName(PMSConfigs.ACTIVE_SMS_PROVIDER)).thenReturn(() -> config("TextSMS"));
         when(configService.getConfigByName(PMSConfigs.TEXT_SMS_PARTNER_ID)).thenReturn(() -> config("partner-1"));
         when(configService.getConfigByName(PMSConfigs.TEXT_SMS_API_KEY)).thenReturn(() -> config("secret-value"));
-        when(i18n.getLocalizedMessage(anyString())).thenReturn("Code %s expires in %s minutes");
+        when(i18n.getLocalizedMessage(anyString())).thenReturn("Code %s expires in %s minutes. Powered by SlickHood.");
         when(notifications.queueNotification(any())).thenReturn(84L);
         when(accessRepo.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -104,6 +106,8 @@ class InsuranceGuestAccessServiceTest {
         verify(notifications).queueNotification(queued.capture());
         assertThat(queued.getValue().recipient()).isEqualTo("+254700000000");
         assertThat(queued.getValue().notificationType()).isEqualTo(NotificationType.INSURANCE_GUEST_OTP_SMS);
+        assertThat(queued.getValue().notificationType().getChannel().name()).isEqualTo("SMS");
+        assertThat(queued.getValue().formattedMessage()).contains("Powered by SlickHood");
         assertThat(result.deliveryChannel()).isEqualTo("SMS");
         assertThat(result.maskedDestination()).endsWith("000");
     }
