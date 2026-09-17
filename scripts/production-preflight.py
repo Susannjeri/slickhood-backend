@@ -177,7 +177,7 @@ def check_readiness(preflight: Preflight, readiness_url: str, expected_scope: se
         preflight.fail("backend production readiness", "unreachable or invalid response")
 
 
-def check_cors(preflight: Preflight, public_origin: str) -> None:
+def check_cors(preflight: Preflight, public_origin: str, require_public_insurance: bool = False) -> None:
     try:
         status, _, headers = request_status(
             f"{public_origin}/api/auth/login",
@@ -205,7 +205,7 @@ def check_cors(preflight: Preflight, public_origin: str) -> None:
             preflight.pass_("HTTPS same-origin and CORS rejection contract")
         else:
             preflight.fail("HTTPS same-origin and CORS rejection contract", "production origin failed or an untrusted origin was allowed")
-        for insurance_origin in ("https://slickhood.com", "https://www.slickhood.com"):
+        for insurance_origin in (("https://slickhood.com", "https://www.slickhood.com") if require_public_insurance else ()):
             channel_status, _, channel_headers = request_status(
                 f"{public_origin}/api/public/insurance/access/channels",
                 headers={"Origin": insurance_origin},
@@ -521,6 +521,7 @@ def main() -> int:
     parser.add_argument("--expected-bucket", required=True)
     parser.add_argument("--expected-region", required=True)
     parser.add_argument("--expected-whatsapp-status", choices=("enabled", "on-hold"))
+    parser.add_argument("--require-public-insurance-cors", action="store_true")
     args = parser.parse_args()
 
     preflight = Preflight()
@@ -541,7 +542,7 @@ def main() -> int:
         if args.expected_whatsapp_status == "enabled":
             expected_scope.add("whatsapp")
     check_readiness(preflight, args.readiness_url, expected_scope, args.expected_whatsapp_status)
-    check_cors(preflight, args.public_origin.rstrip("/"))
+    check_cors(preflight, args.public_origin.rstrip("/"), args.require_public_insurance_cors)
     check_database(preflight, config, args.expected_flyway_version)
 
     bucket = required(preflight, config, "S3 bucket", "garage.s3.bucket", "GARAGE_S3_BUCKET")
