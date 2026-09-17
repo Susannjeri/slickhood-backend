@@ -205,6 +205,25 @@ def check_cors(preflight: Preflight, public_origin: str) -> None:
             preflight.pass_("HTTPS same-origin and CORS rejection contract")
         else:
             preflight.fail("HTTPS same-origin and CORS rejection contract", "production origin failed or an untrusted origin was allowed")
+        for insurance_origin in ("https://slickhood.com", "https://www.slickhood.com"):
+            channel_status, _, channel_headers = request_status(
+                f"{public_origin}/api/public/insurance/access/channels",
+                headers={"Origin": insurance_origin},
+            )
+            otp_status, _, otp_headers = request_status(
+                f"{public_origin}/api/public/insurance/access/request",
+                method="OPTIONS",
+                headers={"Origin": insurance_origin,
+                         "Access-Control-Request-Method": "POST",
+                         "Access-Control-Request-Headers": "content-type,x-insurance-access"},
+            )
+            if (channel_status == 200 and otp_status in (200, 204)
+                    and channel_headers.get("Access-Control-Allow-Origin") == insurance_origin
+                    and otp_headers.get("Access-Control-Allow-Origin") == insurance_origin):
+                preflight.pass_(f"public insurance browser access from {insurance_origin}")
+            else:
+                preflight.fail(f"public insurance browser access from {insurance_origin}",
+                               "channel lookup or verification preflight blocked")
     except (OSError, urllib.error.URLError):
         preflight.fail("HTTPS same-origin and CORS rejection contract", "preflight request failed")
 

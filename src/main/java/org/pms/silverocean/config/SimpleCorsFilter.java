@@ -52,6 +52,18 @@ public class SimpleCorsFilter {
         config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        // The public insurance website is hosted separately from the application.
+        // Keep its guest-only CORS policy separate from authenticated APIs.
+        CorsConfiguration insurance = new CorsConfiguration();
+        var insuranceOrigins = new java.util.LinkedHashSet<>(origins);
+        insuranceOrigins.add("https://slickhood.com");
+        insuranceOrigins.add("https://www.slickhood.com");
+        insurance.setAllowedOrigins(List.copyOf(insuranceOrigins));
+        insurance.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        insurance.setAllowedHeaders(List.of("Content-Type", "Authorization", "X-Insurance-Access",
+                "X-Slickhood-Role", "X-Slickhood-Workspace", "X-Correlation-Id"));
+        insurance.setAllowCredentials(false);
+        source.registerCorsConfiguration("/public/insurance/**", insurance);
         source.registerCorsConfiguration("/**", config);
         return source;
     }

@@ -10,6 +10,26 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SimpleCorsFilterTest {
     @Test
+    void guestInsuranceAllowsOnlyTrustedWebsitesAndGuestMethods() throws Exception {
+        var source = configured("https://app.slickhood.com", true).corsConfigurationSource();
+        var request = new org.springframework.mock.web.MockHttpServletRequest("OPTIONS", "/public/insurance/access/request");
+        request.addHeader("Origin", "https://slickhood.com");
+        request.addHeader("Access-Control-Request-Method", "POST");
+        request.addHeader("Access-Control-Request-Headers", "content-type,x-insurance-access");
+        var response = new org.springframework.mock.web.MockHttpServletResponse();
+        var policy = source.getCorsConfiguration(request);
+        assertThat(new org.springframework.web.cors.DefaultCorsProcessor().processRequest(policy, request, response)).isTrue();
+        assertThat(response.getHeader("Access-Control-Allow-Origin")).isEqualTo("https://slickhood.com");
+        assertThat(response.getHeader("Access-Control-Allow-Credentials")).isNull();
+        assertThat(policy.checkOrigin("https://www.slickhood.com")).isEqualTo("https://www.slickhood.com");
+        assertThat(policy.checkOrigin("https://untrusted.invalid")).isNull();
+        assertThat(policy.checkOrigin("https://slickhood.com.attacker.invalid")).isNull();
+        assertThat(policy.checkHttpMethod(org.springframework.http.HttpMethod.DELETE)).isNull();
+        var protectedPolicy = source.getCorsConfiguration(new org.springframework.mock.web.MockHttpServletRequest("POST", "/auth/login"));
+        assertThat(protectedPolicy.checkOrigin("https://slickhood.com")).isNull();
+    }
+
+    @Test
     void productionRejectsHttpOrigins() {
         SimpleCorsFilter filter = configured("http://app.slickhood.com", true);
         assertThatThrownBy(filter::corsConfigurationSource)
