@@ -35,6 +35,7 @@ import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
+import org.pms.silverocean.database.pms.entities.Users;
 
 import static org.pms.silverocean.service.insurance.InsuranceModels.*;
 
@@ -95,6 +96,10 @@ public class InsuranceGuestAccessService {
     public GuestAccessChallenge resend(GuestAccessResendRequest request, String remoteAddress) {
         InsuranceGuestAccess access = accessRepo.findChallengeForUpdate(request.challengeId()).orElseThrow(this::invalidAccess);
         if (access.getVerifiedAt() != null) throw invalidAccess();
+        LocalDateTime now = LocalDateTime.now();
+        if (access.getLastSentAt() != null && now.isBefore(access.getLastSentAt().plusSeconds(60))) {
+            throw new PMSCustomException(ResponseCode.OTP_RESEND_TOO_SOON);
+        }
         String channel = normalizeChannel(request.deliveryChannel());
         checkChannelAvailable(channel);
         checkSendRate(access.getEmail(), access.getPhone(), channel, remoteAddress);
@@ -120,7 +125,7 @@ public class InsuranceGuestAccessService {
                 access.getLastSentAt() == null ? LocalDateTime.now() : access.getLastSentAt().plusSeconds(60));
     }
 
-    @Transactional("pmsDBTransactionManager")
+    @Transactional(transactionManager = "pmsDBTransactionManager", noRollbackFor = PMSCustomException.class)
     public GuestAccessView verify(GuestAccessVerifyRequest request) {
         InsuranceGuestAccess access = accessRepo.findChallengeForUpdate(request.challengeId()).orElseThrow(this::invalidAccess);
         if (access.getVerifiedAt() != null || access.getOtpExpiresAt().isBefore(LocalDateTime.now())
@@ -137,6 +142,7 @@ public class InsuranceGuestAccessService {
         }
         String token = randomToken();
         access.setVerifiedAt(LocalDateTime.now());
+        access.setVerifiedChannel(access.getDeliveryChannel());
         access.setAccessTokenHash(hash(token));
         access.setEncryptedAccessToken(encryptionService.encrypt(token));
         access.setAccessExpiresAt(LocalDateTime.now().plusDays(accessDays));
@@ -186,9 +192,14 @@ public class InsuranceGuestAccessService {
     public CaseView claim(ClaimGuestCaseRequest request, long userId) {
         InsuranceGuestAccess access = verifiedForUpdate(request.accessToken());
         if (access.getCaseId() == null || access.getClaimedAt() != null) throw invalidAccess();
-        String accountEmail = userDao.findById(userId).map(user -> user.getEmail().trim().toLowerCase(Locale.ROOT))
-                .orElseThrow(this::invalidAccess);
-        if (!accountEmail.equals(access.getEmail())) throw invalidAccess();
+        Users user = userDao.findById(userId).orElseThrow(this::invalidAccess);
+        if ("SMS".equals(access.getVerifiedChannel())) {
+            String accountPhone = normalizePhone(user.getPhoneNumber());
+            if (!user.isPhoneVerified() || !accountPhone.equals(access.getPhone())) throw invalidAccess();
+        } else {
+            String accountEmail = StringUtils.trimToEmpty(user.getEmail()).toLowerCase(Locale.ROOT);
+            if (!user.isEmailVerified() || !accountEmail.equals(access.getEmail())) throw invalidAccess();
+        }
         CaseView claimed = operations.claimGuestCase(access.getCaseId(), access.getId(), userId, access.getEmail());
         access.setClaimedAt(LocalDateTime.now());
         access.setClaimedByUserId(userId);
@@ -229,6 +240,12 @@ public class InsuranceGuestAccessService {
         // web server, reverse proxy, analytics pipeline, or referrer header.
         String link = StringUtils.removeEnd(publicUrl, "/") + "/insurance#access=" + token;
         String expires = access.getAccessExpiresAt().atZone(NAIROBI).format(DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm z"));
+        if ("SMS".equals(access.getVerifiedChannel())) {
+            String body = String.format(i18n.getLocalizedMessage(NotificationType.INSURANCE_GUEST_ACCESS_SMS.getBody()),
+                    reference, link, expires);
+            notifications.queueNotification(new NotificationDTO(body, access.getPhone(), NotificationType.INSURANCE_GUEST_ACCESS_SMS));
+            return;
+        }
         String body = String.format(i18n.getLocalizedMessage(NotificationType.INSURANCE_GUEST_ACCESS_EMAIL.getBody()),
                 HtmlUtils.htmlEscape(reference), HtmlUtils.htmlEscape(link), HtmlUtils.htmlEscape(expires));
         notifications.queueEmailAndInApp(access.getEmail(), NotificationType.INSURANCE_GUEST_ACCESS_EMAIL, body,

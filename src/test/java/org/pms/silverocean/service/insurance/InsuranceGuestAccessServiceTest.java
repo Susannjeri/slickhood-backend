@@ -27,9 +27,11 @@ import org.pms.silverocean.service.security.EncryptionService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.lang.reflect.Method;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -88,6 +90,7 @@ class InsuranceGuestAccessServiceTest {
         assertThatThrownBy(() -> service.verify(new GuestAccessVerifyRequest("challenge", "123456")))
                 .isInstanceOf(PMSCustomException.class);
         assertThat(access.isActive()).isFalse();
+        verify(accessRepo).save(access);
         verify(encryptionService, never()).encrypt(anyString());
     }
 
@@ -138,6 +141,44 @@ class InsuranceGuestAccessServiceTest {
                 .isInstanceOf(PMSCustomException.class);
         assertThat(access.getOtpAttempts()).isEqualTo(5);
         assertThat(access.isActive()).isFalse();
+        verify(accessRepo).save(access);
+    }
+
+    @Test void failedVerificationCommitsAttemptAndLockoutState() throws Exception {
+        Method verify = InsuranceGuestAccessService.class.getMethod("verify", GuestAccessVerifyRequest.class);
+        var attribute = new AnnotationTransactionAttributeSource().getTransactionAttribute(verify, InsuranceGuestAccessService.class);
+
+        assertThat(attribute).isNotNull();
+        assertThat(attribute.rollbackOn(new PMSCustomException(org.pms.silverocean.common.ResponseCode.FORBIDDEN_ACCESS)))
+                .isFalse();
+    }
+
+    @Test void resendIsRejectedDuringServerEnforcedCooldown() {
+        InsuranceGuestAccess access = challenge("123456");
+        access.setLastSentAt(LocalDateTime.now().minusSeconds(10));
+        when(accessRepo.findChallengeForUpdate("challenge")).thenReturn(Optional.of(access));
+
+        assertThatThrownBy(() -> service.resend(new GuestAccessResendRequest("challenge", "EMAIL"), "127.0.0.1"))
+                .isInstanceOf(PMSCustomException.class);
+        verify(rateLimiter, never()).check(any(), anyInt());
+        verify(accessRepo, never()).save(any());
+        verifyNoInteractions(notifications);
+    }
+
+    @Test void resendIsAllowedAfterCooldown() {
+        InsuranceGuestAccess access = challenge("123456");
+        access.setDeliveryChannel("EMAIL");
+        access.setLastSentAt(LocalDateTime.now().minusSeconds(61));
+        access.setSendCount(1);
+        when(accessRepo.findChallengeForUpdate("challenge")).thenReturn(Optional.of(access));
+        when(i18n.getLocalizedMessage(anyString())).thenReturn("Code %s expires %s. Powered by SlickHood.");
+        when(notifications.queueNotification(any())).thenReturn(43L);
+
+        GuestAccessChallenge result = service.resend(new GuestAccessResendRequest("challenge", "EMAIL"), "127.0.0.1");
+
+        assertThat(result.deliveryChannel()).isEqualTo("EMAIL");
+        assertThat(access.getSendCount()).isEqualTo(2);
+        verify(accessRepo).save(access);
     }
 
     @Test void verifyIssuesThirtyDayOpaqueAccessToken() {
@@ -152,6 +193,7 @@ class InsuranceGuestAccessServiceTest {
         assertThat(access.getAccessTokenHash()).hasSize(64).doesNotContain(result.accessToken());
         assertThat(access.getEncryptedAccessToken()).containsExactly(1,2,3);
         assertThat(access.getAccessExpiresAt()).isAfter(LocalDateTime.now().plusDays(29));
+        assertThat(access.getVerifiedChannel()).isEqualTo("EMAIL");
     }
 
     @Test void tokenHashMappingMatchesTheFixedLengthProductionDigestColumn() throws Exception {
@@ -166,6 +208,7 @@ class InsuranceGuestAccessServiceTest {
         access.setFullName("Guest User");
         access.setEmail("guest@example.com");
         access.setPhone("+254700000000");
+        access.setDeliveryChannel("EMAIL");
         access.setOtpHash(passwordEncoder.encode(code));
         access.setOtpExpiresAt(LocalDateTime.now().plusMinutes(10));
         access.setActive(true);

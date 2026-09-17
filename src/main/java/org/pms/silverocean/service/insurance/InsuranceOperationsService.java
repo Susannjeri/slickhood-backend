@@ -196,7 +196,22 @@ public class InsuranceOperationsService {
  private String hash(byte[] b){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(b));}catch(Exception e){throw new IllegalStateException(e);}}
  private String ref(String prefix){return prefix+"-"+LocalDate.now().getYear()+"-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(Locale.ROOT);}
  private void notifyEmail(String email,NotificationType type,Object...args){Object[] safe=Arrays.stream(args).map(x->HtmlUtils.htmlEscape(Objects.toString(x,""))).toArray();String body=String.format(i18n.getLocalizedMessage(type.getBody()),safe);notifications.queueEmailAndInApp(email,type,body,type.name().replace("_EMAIL",""),"An insurance update is ready. Open /dashboard/insurance to review the current status securely.");}
- private void notifyQuoteReady(InsuranceCase c){if(c.getGuestAccessId()==null){notifyEmail(c.getEmail(),NotificationType.INSURANCE_QUOTE_EMAIL,c.getReference());return;}InsuranceGuestAccess access=guestAccessRepo.findByIdAndActiveTrue(c.getGuestAccessId()).orElse(null);if(access==null||access.getEncryptedAccessToken()==null){notifyEmail(c.getEmail(),NotificationType.INSURANCE_QUOTE_EMAIL,c.getReference());return;}access.setAccessExpiresAt(LocalDateTime.now().plusDays(30));guestAccessRepo.save(access);String token=encryptionService.decrypt(access.getEncryptedAccessToken()).decryptedValue();String link=StringUtils.removeEnd(publicUrl,"/")+"/insurance#access="+token;String expires=access.getAccessExpiresAt().atZone(ZoneId.of("Africa/Nairobi")).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm z"));String body=String.format(i18n.getLocalizedMessage(NotificationType.INSURANCE_GUEST_QUOTE_EMAIL.getBody()),HtmlUtils.htmlEscape(c.getReference()),HtmlUtils.htmlEscape(link),HtmlUtils.htmlEscape(expires));notifications.queueEmailAndInApp(c.getEmail(),NotificationType.INSURANCE_GUEST_QUOTE_EMAIL,body,"INSURANCE_GUEST_QUOTE","A guest insurance quotation is ready to compare securely.");}
+ private void notifyQuoteReady(InsuranceCase c){
+  if(c.getGuestAccessId()==null){notifyEmail(c.getEmail(),NotificationType.INSURANCE_QUOTE_EMAIL,c.getReference());return;}
+  InsuranceGuestAccess access=guestAccessRepo.findByIdAndActiveTrue(c.getGuestAccessId()).orElse(null);
+  if(access==null||access.getEncryptedAccessToken()==null){notifyEmail(c.getEmail(),NotificationType.INSURANCE_QUOTE_EMAIL,c.getReference());return;}
+  access.setAccessExpiresAt(LocalDateTime.now().plusDays(30));guestAccessRepo.save(access);
+  String token=encryptionService.decrypt(access.getEncryptedAccessToken()).decryptedValue();
+  String link=StringUtils.removeEnd(publicUrl,"/")+"/insurance#access="+token;
+  String expires=access.getAccessExpiresAt().atZone(ZoneId.of("Africa/Nairobi")).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm z"));
+  if("SMS".equals(access.getVerifiedChannel())){
+   String body=String.format(i18n.getLocalizedMessage(NotificationType.INSURANCE_GUEST_QUOTE_SMS.getBody()),c.getReference(),link,expires);
+   notifications.queueNotification(new NotificationDTO(body,access.getPhone(),NotificationType.INSURANCE_GUEST_QUOTE_SMS));
+   return;
+  }
+  String body=String.format(i18n.getLocalizedMessage(NotificationType.INSURANCE_GUEST_QUOTE_EMAIL.getBody()),HtmlUtils.htmlEscape(c.getReference()),HtmlUtils.htmlEscape(link),HtmlUtils.htmlEscape(expires));
+  notifications.queueEmailAndInApp(access.getEmail(),NotificationType.INSURANCE_GUEST_QUOTE_EMAIL,body,"INSURANCE_GUEST_QUOTE","A guest insurance quotation is ready to compare securely.");
+ }
  private boolean staff(){var authentication=SecurityContextHolder.getContext().getAuthentication();return authentication!=null&&authentication.getAuthorities().stream().map(Object::toString).anyMatch(a->Set.of("review_insurance_applications","manage_insurance_quotes","manage_insurance_claims","manage_insurance_renewals","issue_insurance_policies").contains(a));}
  private long uid(){return userDao.getUserId();} private void stamp(org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity e){stampAs(e,uid());} private void stampAs(org.pms.silverocean.database.pms.entities.base.BaseCreatorEntity e,long actorId){e.setCreatedBy(actorId==0?null:actorId);e.setActive(true);} private PMSCustomException invalid(){return new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);} private PMSCustomException notFound(){return new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND);} private PMSCustomException forbidden(){return new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);}
 }

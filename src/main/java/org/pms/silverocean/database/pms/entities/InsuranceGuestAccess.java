@@ -36,6 +36,8 @@ public class InsuranceGuestAccess extends BaseCreatorEntity {
     @Column(nullable = false)
     private int sendCount;
     private LocalDateTime verifiedAt;
+    @Column(length = 12)
+    private String verifiedChannel;
     @Column(length = 64, unique = true, columnDefinition = "CHAR(64)")
     private String accessTokenHash;
     @Lob @Column(columnDefinition = "LONGBLOB")
