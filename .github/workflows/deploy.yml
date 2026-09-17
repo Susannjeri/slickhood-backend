@@ -188,10 +188,9 @@ jobs:
             test -f "$candidate"
             # Validate the already-deployed compatibility baseline before the
             # candidate JAR has had a chance to apply its new migrations.
-            run_preflight 91
+            run_preflight 95
             # Protected, host-local backups are required before applying the
-            # additive V92 resumable-role KYC, V93 notification preferences,
-            # V94 decimal money shadows and V95 currency-preference migrations.
+            # additive V96 public insurance guest-access migration.
             # Backup contents never leave the host or appear in workflow logs.
             sudo python3 /tmp/slickhood-backend-release/production-backup.py
             umask 077
@@ -221,7 +220,7 @@ jobs:
             installed=true
             sudo systemctl restart pms.service
             if wait_for_health; then
-              run_preflight 95 on-hold
+              run_preflight 96 on-hold
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
               installed=false
               exit 0
