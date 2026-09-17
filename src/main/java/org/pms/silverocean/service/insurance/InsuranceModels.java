@@ -68,6 +68,15 @@ public final class InsuranceModels {
     public record ProductView(String code,String name,String description,List<String> subjectTypes) {}
     public record AgencyView(String code,String name,String supportEmail,String supportPhone,String logoUrl) {}
 
+    public record GuestAccessRequest(@NotBlank @Size(max=160) String fullName,
+            @Email @NotBlank String email, @NotBlank @Size(max=40) String phone) {}
+    public record GuestAccessChallenge(String challengeId, String message) {}
+    public record GuestAccessVerifyRequest(@NotBlank String challengeId,
+            @NotBlank @Pattern(regexp="[0-9]{6}") String code) {}
+    public record GuestAccessView(String accessToken, LocalDateTime expiresAt, Long caseId) {}
+    public record GuestCaseView(CaseView insuranceCase, boolean accountRequiredForPayment) {}
+    public record ClaimGuestCaseRequest(@NotBlank @Size(min=32,max=200) String accessToken) {}
+
     public record CaseRequest(
             @NotBlank @Pattern(regexp="MOTOR|DOMESTIC|FIRE_ALLIED|WIBA_EL|CONTRACTORS_ALL_RISK|MEDICAL|MARINE_CARGO|TRAVEL|GOODS_IN_TRANSIT") String productCode,
             @NotBlank @Size(max=160) String fullName,@Email @NotBlank String email,

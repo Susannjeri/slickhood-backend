@@ -8,6 +8,7 @@ import java.time.*;
 public class InsuranceCase extends BaseCreatorEntity {
  @Column(nullable=false) private long agencyId;
  @Column(nullable=false) private long customerUserId;
+ private Long guestAccessId;
  @Column(nullable=false,unique=true,length=32) private String reference;
  @Column(nullable=false,length=40) private String productCode;
  @Column(nullable=false,length=32) private String status;

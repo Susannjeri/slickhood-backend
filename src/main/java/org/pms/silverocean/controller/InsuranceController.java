@@ -10,6 +10,7 @@ import org.pms.silverocean.service.insurance.InsuranceModels.CompanyEmailConfigu
 import org.pms.silverocean.service.insurance.InsuranceService;
 import org.pms.silverocean.service.insurance.InsuranceCorrespondenceService;
 import org.pms.silverocean.service.insurance.InsuranceOperationsService;
+import org.pms.silverocean.service.insurance.InsuranceGuestAccessService;
 import org.pms.silverocean.service.insurance.InsuranceStaffDirectoryService;
 import org.pms.silverocean.service.insurance.InsuranceModels.InsurerEmailRequest;
 import org.pms.silverocean.service.insurance.InsuranceModels.InsurerEmailResponse;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
+import org.pms.silverocean.service.auth.dao.UserDao;
 
 @RestController
 @RequestMapping("/insurance")
@@ -30,6 +32,8 @@ public class InsuranceController {
     private final org.pms.silverocean.service.insurance.InsuranceRenewalService renewals;
     private final InsuranceStaffDirectoryService staffDirectory;
     private final I18NService i18n;
+    private final InsuranceGuestAccessService guestAccess;
+    private final UserDao userDao;
 
     @GetMapping("/companies") @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ResponseDTO> companies() { return ok(service.companies()); }
@@ -38,6 +42,7 @@ public class InsuranceController {
     @GetMapping("/products") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> products(){return ok(operations.products());}
     @PostMapping(value="/proposal-ocr/marine-idf",consumes="multipart/form-data") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> extractMarineIdf(@RequestParam MultipartFile file)throws IOException{return ok(operations.extractMarineIdf(file));}
     @PostMapping("/cases") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> createCase(@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.CaseRequest r){return ok(operations.create(r));}
+    @PostMapping("/cases/claim-guest") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> claimGuestCase(@Valid @RequestBody org.pms.silverocean.service.insurance.InsuranceModels.ClaimGuestCaseRequest r){return ok(guestAccess.claim(r,userDao.getUserId()));}
     @GetMapping("/cases") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> myCases(){return ok(operations.mine());}
     @GetMapping("/cases/{id}") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> myCase(@PathVariable long id){return ok(operations.myCase(id));}
     @PostMapping("/cases/{id}/withdraw") @PreAuthorize("isAuthenticated()") public ResponseEntity<ResponseDTO> withdrawCase(@PathVariable long id){return ok(operations.withdraw(id));}

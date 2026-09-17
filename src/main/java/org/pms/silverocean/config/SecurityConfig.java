@@ -58,6 +58,7 @@ public class SecurityConfig {
                         .requestMatchers("/affiliate/public/**").permitAll()
                         .requestMatchers("/helpdesk/public/**").permitAll()
                         .requestMatchers("/public/property-listings/**").permitAll()
+                        .requestMatchers("/public/insurance/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .cors(cors -> cors.configurationSource(corsFilter.corsConfigurationSource()))
