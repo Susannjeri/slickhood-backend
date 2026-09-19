@@ -29,6 +29,11 @@ jobs:
             grep -Ei 'for key|constraint' "$log_file" | grep -Eio '[A-Za-z0-9_.-]*(constraint|uk_|fk_|chk_|key)[A-Za-z0-9_.-]*' | sort | uniq -c || true
             echo 'Affected columns'
             grep -Eo "Column '[A-Za-z0-9_.-]+' cannot be null|Data too long for column '[A-Za-z0-9_.-]+'" "$log_file" | sed -E "s/.*'([A-Za-z0-9_.-]+)'.*/\1/" | sort | uniq -c || true
+            echo 'Migration failure classifications'
+            grep -Ei 'Flyway|migration|SQL Error: 1406|Data too long for column|Schema-validation:' "$log_file" \
+              | sed -E "s/(SQL \[[^]]*\]|VALUES? \([^)]*\))/[REDACTED_SQL]/Ig" \
+              | sed -E 's/(password|secret|token|api[_-]?key)[=: ][^ ,;]+/\1=[REDACTED]/Ig' \
+              | tail -n 80 || true
             echo 'Persistence exception classes'
             grep -Eo '(DataIntegrityViolationException|ConstraintViolationException|SQLIntegrityConstraintViolationException|JpaSystemException)' "$log_file" | sort | uniq -c || true
             echo 'Hibernate schema validation mismatches'
