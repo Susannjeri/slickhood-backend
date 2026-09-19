@@ -103,7 +103,7 @@ public class ApiErrorHandler extends ResponseEntityExceptionHandler {
             WebRequest request) {
         Set<String> errors = new HashSet<>();
 //        errors.add("Validation error");
-        ex.getBindingResult().getFieldErrors().forEach(ge -> errors.add(ge.getRejectedValue() + " - " + ge.getDefaultMessage()));
+        ex.getBindingResult().getFieldErrors().forEach(ge -> errors.add(ge.getField() + ": " + ge.getDefaultMessage()));
         ex.getBindingResult().getGlobalErrors().forEach(ge -> errors.add(ge.getObjectName() + " : " + ge.getDefaultMessage()));
         log.error("Validation error");
         return buildResponseEntity(new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),

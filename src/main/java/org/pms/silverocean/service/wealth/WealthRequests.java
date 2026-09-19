@@ -19,8 +19,8 @@ public final class WealthRequests {
             @NotNull @PositiveOrZero BigDecimal currentValue,
             @NotNull @PastOrPresent LocalDate valuationDate,
             @Pattern(regexp="ACTIVE|MATURED|SOLD|CLOSED") String status,
-            @Pattern(regexp="[A-Za-z0-9._-]{1,20}") String exchangeCode,
-            @Pattern(regexp="[A-Za-z0-9.^:_-]{1,40}") String instrumentSymbol,
+            @Pattern(regexp="[A-Za-z0-9._-]{1,20}", message="must be a short exchange code with no spaces, for example NSE") String exchangeCode,
+            @Pattern(regexp="[A-Za-z0-9.^:_-]{1,40}", message="must be the fund or security ticker with no spaces") String instrumentSymbol,
             @Positive BigDecimal quantity,
             @PositiveOrZero BigDecimal averageUnitCost,
             @Pattern(regexp="MANUAL|MARKET") String pricingMode) {}
