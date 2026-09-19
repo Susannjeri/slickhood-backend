@@ -9,7 +9,7 @@ VALUES
     (UUID_TO_BIN(UUID()),NOW(6),b'1','INVESTMENT','Other investments','Private or managed investments',60,b'0'),
     (UUID_TO_BIN(UUID()),NOW(6),b'1','SACCO','SACCO','Deposits and shares held in a SACCO',70,b'0'),
     (UUID_TO_BIN(UUID()),NOW(6),b'1','PENSION','Pension','Retirement and pension accounts',80,b'0'),
-    (UUID_TO_BIN(UUID()),NOW(6),b'1','CASH','Cash','Cash and bank balances',90,b'0'),
+    (UUID_TO_BIN(UUID()),NOW(6),b'1','CASH','Cash and bank balances',90,b'0'),
     (UUID_TO_BIN(UUID()),NOW(6),b'1','BUSINESS','Business','Ownership interests in a business',100,b'0'),
     (UUID_TO_BIN(UUID()),NOW(6),b'1','VEHICLE','Vehicle','Cars and other vehicles',110,b'0'),
     (UUID_TO_BIN(UUID()),NOW(6),b'1','DIGITAL_ASSET','Digital assets','Digital assets tracked manually or by market price',120,b'1'),
