@@ -8,6 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.database.pms.*;
 import org.pms.silverocean.database.pms.entities.*;
+import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.currencyexchange.CurrencyConversionService;
@@ -36,13 +37,21 @@ class WealthJourneyRegressionTest {
  @BeforeEach void setup(){ReflectionTestUtils.setField(service,"baseCurrency","KES");lenient().when(userDao.getUserId()).thenReturn(7L);}
  private WealthAsset asset(){var a=new WealthAsset();a.setId(1L);a.setOwnerUserId(7L);a.setActive(true);a.setAssetType("CASH");a.setName("Savings");a.setCurrency("KES");a.setCurrentValue(new BigDecimal("100000"));a.setAcquisitionCost(new BigDecimal("90000"));a.setValuationDate(LocalDate.now());a.setStatus("ACTIVE");return a;}
  private void owned(WealthAsset a){when(assetRepo.findByIdAndOwnerUserIdAndActiveTrue(1L,7L)).thenReturn(Optional.of(a));}
- private WealthRequests.AssetRequest request(String currency){return new WealthRequests.AssetRequest(null,"CASH","Savings",null,null,currency,BigDecimal.TEN,null,BigDecimal.TEN,LocalDate.now(),"ACTIVE",null,null,null,null,"MANUAL");}
+ private WealthRequests.AssetRequest request(String currency){return new WealthRequests.AssetRequest(null,"CASH","Savings",null,null,currency,BigDecimal.TEN,null,BigDecimal.TEN,LocalDate.now(PMSUtils.getZoneId()),"ACTIVE",null,null,null,null,"MANUAL");}
  @Test void createsAssetAndOpeningValuationTogether(){
   var type=new WealthAssetType();type.setCode("CASH");type.setActive(true);
   when(wealthAdminService.requireForAsset("CASH",null)).thenReturn(type);
   when(assetRepo.save(any())).thenAnswer(call->{WealthAsset a=call.getArgument(0);a.setId(1L);return a;});
   assertThat(service.createAsset(request("KES")).name()).isEqualTo("Savings");
   verify(valuationRepo).save(argThat(v->v.getAssetId()==1L&&v.getAmount().compareTo(BigDecimal.TEN)==0&&"OPENING_VALUE".equals(v.getSource())));
+ }
+ @Test void acceptsTheCurrentNairobiBusinessDate(){
+  var type=new WealthAssetType();type.setCode("LAND");type.setActive(true);
+  when(wealthAdminService.requireForAsset("LAND",null)).thenReturn(type);
+  when(assetRepo.save(any())).thenAnswer(call->{WealthAsset a=call.getArgument(0);a.setId(2L);return a;});
+  LocalDate nairobiToday=LocalDate.now(PMSUtils.getZoneId());
+  var request=new WealthRequests.AssetRequest(null,"LAND","Mangu Holdings",null,null,"KES",new BigDecimal("300000"),LocalDate.of(2020,9,20),new BigDecimal("1000000"),nairobiToday,"ACTIVE",null,null,null,null,"MANUAL");
+  assertThat(service.createAsset(request).valuationDate()).isEqualTo(nairobiToday);
  }
  @Test void historicalValuationDoesNotOverwriteLatest(){var a=asset();owned(a);when(valuationRepo.save(any())).thenAnswer(call->call.getArgument(0));service.addValuation(1,new WealthRequests.ValuationRequest(BigDecimal.TEN,LocalDate.now().minusYears(1),"STATEMENT",null));assertThat(a.getCurrentValue()).isEqualByComparingTo("100000");verify(assetRepo,never()).save(any());verify(valuationRepo).save(any());}
  @Test void anAssetEditCannotReplaceANewerValuationWithAnOlderOne(){owned(asset());var r=new WealthRequests.AssetRequest(null,"CASH","Savings",null,null,"KES",BigDecimal.TEN,null,BigDecimal.TEN,LocalDate.now().minusDays(1),"ACTIVE",null,null,null,null,"MANUAL");assertThatThrownBy(()->service.updateAsset(1,r)).isInstanceOf(PMSCustomException.class);verify(assetRepo,never()).save(any());verifyNoInteractions(valuationRepo);}
