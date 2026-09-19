@@ -9,7 +9,7 @@ on:
         type: choice
         options:
           - inspect
-          - repair-v99
+          - finalize-v99
 
 permissions:
   contents: read
@@ -101,15 +101,19 @@ jobs:
             present = set(mysql("SELECT code FROM pms_wealth_asset_type ORDER BY code").splitlines())
             print("wealthAssetTypesPresent=" + ",".join(sorted(present & set(expected_codes))))
             print("wealthAssetTypesMissing=" + ",".join(sorted(set(expected_codes) - present)))
+            active = set(mysql("SELECT code FROM pms_wealth_asset_type WHERE active=b'1' ORDER BY code").splitlines())
+            print("wealthAssetTypesInactive=" + ",".join(sorted(set(expected_codes) - active)))
 
             if os.environ["RECOVERY_ACTION"] == "inspect":
                 raise SystemExit(0)
             expected = "99|restore missing wealth asset categories|0"
             if rows != [expected]:
                 raise RuntimeError("Guard refused repair: failed migration is not the expected V99 marker")
-            mysql("DELETE FROM flyway_schema_history WHERE version='99' AND success=0")
+            if present & set(expected_codes) != set(expected_codes) or active & set(expected_codes) != set(expected_codes):
+                raise RuntimeError("Guard refused finalization: V99 wealth catalogue postcondition is incomplete")
+            mysql("UPDATE flyway_schema_history SET success=1 WHERE version='99' AND success=0")
             remaining = mysql("SELECT COUNT(*) FROM flyway_schema_history WHERE success=0")
             if remaining != "0":
                 raise RuntimeError("Flyway recovery verification failed")
-            print("repairedMigration=V99")
+            print("finalizedMigration=V99")
             PY
