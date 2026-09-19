@@ -157,7 +157,7 @@ class PropertyListingServiceTest {
     private Unit eligibleUnit() {
         Property property=new Property(); property.setId(3L); property.setName("Atlas Court"); property.setAddress("Kilimani, Nairobi, Kenya");
         property.setManagementMode(PMSPropertyManagementMode.RENTAL); property.setActive(true);
-        Unit unit=new Unit(); unit.setId(7L); unit.setPropertyId(3L); unit.setProperty(property); unit.setUnitType("TWO_BEDROOM");
+        Unit unit=new Unit(); unit.setId(7L); unit.setRef("ATLAS-2B-07"); unit.setPropertyId(3L); unit.setProperty(property); unit.setUnitType("TWO_BEDROOM");
         unit.setLeaseMode("RENT");
         unit.setPrice(85000); unit.setCurrency("KES"); unit.setActive(true); unit.setImagePath("properties/3/units/7"); unit.setThumbnail("cover.jpg");
         return unit;
