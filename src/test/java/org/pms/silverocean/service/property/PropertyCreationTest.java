@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.entities.Property;
+import org.pms.silverocean.database.pms.entities.PaymentAccount;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
@@ -75,6 +76,14 @@ class PropertyCreationTest {
         when(user.isCompletedProfile()).thenReturn(true);
         when(user.getId()).thenReturn(7L);
         when(userDao.getUserObject()).thenReturn(user);
+        when(userDao.getUserId()).thenReturn(7L);
+        var paymentAccount = new PaymentAccount();
+        paymentAccount.setId(11L);
+        paymentAccount.setCreatedBy(7L);
+        paymentAccount.setActive(true);
+        paymentAccount.setVerified(true);
+        paymentAccount.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.LANDLORD);
+        when(propertyDao.findActiveOwnedAccount(11L, 7L)).thenReturn(java.util.Optional.of(paymentAccount));
         doAnswer(invocation -> {
             Property property = invocation.getArgument(0);
             property.setId(19L);
@@ -84,10 +93,11 @@ class PropertyCreationTest {
 
     @Test
     void creationIsTransactionalAndUsesServerGeneratedImageKey() throws Exception {
-        Method method = PropertyService.class.getMethod("createProperty", PropertyDTO.class, org.springframework.web.multipart.MultipartFile.class);
+        Method method = PropertyService.class.getMethod("createProperty", PropertyDTO.class, org.springframework.web.multipart.MultipartFile.class, long.class);
         assertTrue(method.isAnnotationPresent(Transactional.class));
 
-        var response = service.createProperty(request(), validPng());
+        when(propertyDao.findByIdAndCreatedBy(19L, 7L)).thenReturn(java.util.Optional.of(new Property(request())));
+        var response = service.createProperty(request(), validPng(), 11L);
 
         assertTrue(response.isSuccess());
         verify(garageService).uploadBytes(eq("7/19/property-cover.png"), any(byte[].class), eq("image/png"));
@@ -99,7 +109,7 @@ class PropertyCreationTest {
                 .when(garageService).uploadBytes(anyString(), any(byte[].class), eq("image/png"));
 
         PMSCustomException error = assertThrows(PMSCustomException.class,
-                () -> service.createProperty(request(), validPng()));
+                () -> service.createProperty(request(), validPng(), 11L));
 
         assertEquals(ResponseCode.GENERAL_FAILURE, error.getResponseCode());
     }
@@ -108,7 +118,7 @@ class PropertyCreationTest {
     void oversizedUploadIsRejectedBeforePersistence() {
         MockMultipartFile image = new MockMultipartFile("image", "cover.png", "image/png", new byte[10 * 1024 * 1024 + 1]);
 
-        var response = service.createProperty(request(), image);
+        var response = service.createProperty(request(), image, 11L);
 
         assertEquals(ResponseCode.MAX_UPLOAD_SIZE_EXCEEDED.getCode(), response.getCode());
     }

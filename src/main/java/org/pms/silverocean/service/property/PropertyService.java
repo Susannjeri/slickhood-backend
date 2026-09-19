@@ -287,7 +287,7 @@ public class PropertyService {
     }
 
     @Transactional
-    public ResponseDTO createProperty(PropertyDTO propertyDTO, MultipartFile image) {
+    public ResponseDTO createProperty(PropertyDTO propertyDTO, MultipartFile image, long paymentAccountId) {
         subscriptionEntitlements.requirePropertyPortfolioAccess();
         if (propertyDTO.managementMode() != null) {
             subscriptionEntitlements.requireUnitMode(defaultUnitMode(propertyDTO.managementMode()));
@@ -296,6 +296,7 @@ public class PropertyService {
         if (!user.isCompletedProfile()) {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
         }
+        requireCompatiblePaymentAccount(paymentAccountId, user.getId(), propertyDTO.managementMode());
         Optional<ResponseDTO> imageValidationError = validateImage(image);
         if (imageValidationError.isPresent()) {
             return imageValidationError.get();
@@ -313,6 +314,7 @@ public class PropertyService {
         } catch (IOException e) {
             throw new PMSCustomException(ResponseCode.INVALID_IMAGE, e);
         }
+        attachAccountToProperty(paymentAccountId, property.getId());
 
         return new ResponseDTO(true, ResponseCode.PROPERTY_CREATION_SUCCESS.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.PROPERTY_CREATION_SUCCESS), Set.of(property.getId()));
@@ -955,6 +957,19 @@ public class PropertyService {
         propertyAccount.setActive(true);
         propertyAccount.setCreatedBy(userId);
         propertyDao.saveAccount(propertyAccount);
+    }
+
+    private PaymentAccount requireCompatiblePaymentAccount(long accountId, long userId, PMSPropertyManagementMode managementMode) {
+        PaymentAccount account = propertyDao.findActiveOwnedAccount(accountId, userId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND));
+        var expected = switch (managementMode) {
+            case RENTAL -> org.pms.silverocean.service.account.enums.AccountCategory.LANDLORD;
+            case SALE -> org.pms.silverocean.service.account.enums.AccountCategory.PROPERTY_SALES;
+            case SERVICE_CHARGE -> org.pms.silverocean.service.account.enums.AccountCategory.ESTATE_MANAGEMENT;
+        };
+        if (account.getCategory() != expected) throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);
+        if (!account.isVerified()) throw new PMSCustomException(ResponseCode.ERROR_ATTACHING_PARAM_TO_PROPERTY_UNVERIFIED);
+        return account;
     }
 
     public void removeAccountFromProperty(long accountId, long propertyId) {

@@ -56,6 +56,7 @@ public class PropertyController extends BasePropertyController {
                                                       @RequestParam("address") String address,
                                                       @RequestParam("mapLocation") String mapLocation,
                                                       @RequestParam("currency") String currency,
+                                                      @RequestParam("paymentAccountId") long paymentAccountId,
                                                       @RequestParam("image") MultipartFile image) {
         PropertyDTO propertyDTO = new PropertyDTO(name, type, null, managementMode, address, mapLocation, currency, null, null, null);
         Optional<ResponseDTO> violations = validate(propertyDTO);
@@ -63,7 +64,7 @@ public class PropertyController extends BasePropertyController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(violations.get());
         }
 
-        ResponseDTO responseDTO = propertyService.createProperty(propertyDTO, image);
+        ResponseDTO responseDTO = propertyService.createProperty(propertyDTO, image, paymentAccountId);
         return responseDTO.isSuccess() ? ResponseEntity.status(HttpStatus.CREATED).body(responseDTO) : ResponseEntity.status(propertyFailureStatus(responseDTO)).body(responseDTO);
     }
 
