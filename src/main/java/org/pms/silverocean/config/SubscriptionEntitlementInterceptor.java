@@ -39,6 +39,11 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
             entitlements.requireSessionFeatureIfApplicable(null, null, "PROPERTY_SALES");
             return true;
         }
+        if (path.startsWith("/wealth")) {
+            entitlements.requireFeatureOrAddOn(entitlements.sessionBusinessProduct(),
+                    "WEALTH_INCLUDED_UNITS", SubscriptionProduct.MY_WEALTH);
+            return true;
+        }
         SubscriptionProduct product = product(path);
         if (product != null) {
             entitlements.requireProduct(product);
@@ -49,7 +54,6 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
     }
 
     private SubscriptionProduct product(String path) {
-        if (path.startsWith("/wealth")) return SubscriptionProduct.MY_WEALTH;
         if (path.startsWith("/soko/store") || path.startsWith("/soko/product")
                 || path.startsWith("/soko/rider") || path.equals("/soko/order/merchant")
                 || path.matches("/soko/order/[^/]+/(status|finance)")) return SubscriptionProduct.SOKO;

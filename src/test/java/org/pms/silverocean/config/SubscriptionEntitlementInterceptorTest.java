@@ -51,4 +51,27 @@ class SubscriptionEntitlementInterceptorTest {
                 "ESTATE_AND_HOMEOWNER_MANAGEMENT", "PROPERTY_SALES");
         verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
     }
+
+    @Test void wealthAcceptsTheFeatureBundledWithTheActiveLandlordPlan() {
+        when(request.getRequestURI()).thenReturn("/wealth/assets");
+        when(entitlements.sessionBusinessProduct()).thenReturn(SubscriptionProduct.LANDLORD);
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements).requireFeatureOrAddOn(SubscriptionProduct.LANDLORD,
+                "WEALTH_INCLUDED_UNITS", SubscriptionProduct.MY_WEALTH);
+        verify(entitlements, never()).requireProduct(SubscriptionProduct.MY_WEALTH);
+    }
+
+    @Test void wealthAcceptsTheStandaloneMyWealthProduct() {
+        when(request.getRequestURI()).thenReturn("/wealth/categories");
+        when(entitlements.sessionBusinessProduct()).thenReturn(SubscriptionProduct.MY_WEALTH);
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements).requireFeatureOrAddOn(SubscriptionProduct.MY_WEALTH,
+                "WEALTH_INCLUDED_UNITS", SubscriptionProduct.MY_WEALTH);
+    }
 }
