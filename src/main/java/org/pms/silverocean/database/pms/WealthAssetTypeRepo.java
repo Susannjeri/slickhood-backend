@@ -7,4 +7,5 @@ public interface WealthAssetTypeRepo extends JpaRepository<WealthAssetType,Long>
  List<WealthAssetType> findAllByOrderByDisplayOrderAscLabelAsc();
  Optional<WealthAssetType> findByCodeIgnoreCase(String code);
  boolean existsByCodeIgnoreCase(String code);
+ long countByActiveTrue();
 }
