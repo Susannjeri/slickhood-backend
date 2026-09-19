@@ -54,16 +54,17 @@ public class SimpleCorsFilter {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         // The public insurance website is hosted separately from the application.
         // Keep its guest-only CORS policy separate from authenticated APIs.
-        CorsConfiguration insurance = new CorsConfiguration();
-        var insuranceOrigins = new java.util.LinkedHashSet<>(origins);
-        insuranceOrigins.add("https://slickhood.com");
-        insuranceOrigins.add("https://www.slickhood.com");
-        insurance.setAllowedOrigins(List.copyOf(insuranceOrigins));
-        insurance.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
-        insurance.setAllowedHeaders(List.of("Content-Type", "Authorization", "X-Insurance-Access",
+        CorsConfiguration publicWebsite = new CorsConfiguration();
+        var publicWebsiteOrigins = new java.util.LinkedHashSet<>(origins);
+        publicWebsiteOrigins.add("https://slickhood.com");
+        publicWebsiteOrigins.add("https://www.slickhood.com");
+        publicWebsite.setAllowedOrigins(List.copyOf(publicWebsiteOrigins));
+        publicWebsite.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        publicWebsite.setAllowedHeaders(List.of("Content-Type", "Authorization", "X-Insurance-Access",
                 "X-Slickhood-Role", "X-Slickhood-Workspace", "X-Correlation-Id"));
-        insurance.setAllowCredentials(false);
-        source.registerCorsConfiguration("/public/insurance/**", insurance);
+        publicWebsite.setAllowCredentials(false);
+        source.registerCorsConfiguration("/public/insurance/**", publicWebsite);
+        source.registerCorsConfiguration("/public/property-listings/**", publicWebsite);
         source.registerCorsConfiguration("/**", config);
         return source;
     }

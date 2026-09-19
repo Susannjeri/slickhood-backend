@@ -78,7 +78,9 @@ public class SilverOceanUserService {
             throw new PMSCustomException(ResponseCode.COULD_NOT_FIND_USER_SESSION);
         }
         EnumWrapper profileType = new EnumWrapper(ProfileType.valueOf(loggedInUser.getProfileType()).name(), i18NService.getLocalizedMessage(ProfileType.valueOf(loggedInUser.getProfileType()).getName()), null);
-        return new UserDTO(loggedInUser, profileType);
+        List<String> roleNames = userRoleRepo.findRoleNamesByUserIds(List.of(loggedInUser.getId())).stream()
+                .map(UserRoleNameDTO::roleName).distinct().sorted().toList();
+        return new UserDTO(loggedInUser, profileType, roleNames);
     }
 
     public void verifyOTPAndUpdateContact(String code) {
