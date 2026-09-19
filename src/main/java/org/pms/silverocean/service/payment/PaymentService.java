@@ -45,8 +45,13 @@ public class PaymentService {
         } else {
             pmsPayment = StringUtils.isBlank(filter) ? paymentDao.findPaymentByUser(pageable, userId) : paymentDao.findPaymentByInvoiceRefAndUser(pageable, userId, filter);
         }
-        return pmsPayment
-                .map(payment -> new PaymentDTO(payment, i18NService.getLocalizedMessage(payment.getStatusDesc())));
+        return pmsPayment.map(payment -> {
+            String statusDescription = StringUtils.defaultIfBlank(payment.getStatusDesc(), payment.getStatus());
+            String localizedDescription = StringUtils.isBlank(statusDescription)
+                    ? "Status unavailable"
+                    : i18NService.getLocalizedMessage(statusDescription);
+            return new PaymentDTO(payment, localizedDescription);
+        });
     }
 
     @Transactional

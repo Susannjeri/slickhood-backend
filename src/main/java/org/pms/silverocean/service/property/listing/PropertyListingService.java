@@ -58,6 +58,7 @@ public class PropertyListingService {
     @Value("${property-listings.public-api-prefix:/public/property-listings}") private String publicApiPrefix;
     @Value("${property-listings.max-public-image-bytes:10485760}") private long maxPublicImageBytes;
     @Value("${property-listings.inquiry-consent-version:property-enquiry-2026-09}") private String inquiryConsentVersion;
+    @Value("${property-listings.public-site-url:https://slickhood.com/property}") private String publicSiteUrl;
 
     @Transactional
     public Publication publish(long unitId, PublishRequest request) {
@@ -194,8 +195,17 @@ public class PropertyListingService {
         inquiry.setActive(true);
         inquiries.save(inquiry);
         users.findById(listing.getPublisherUserId()).map(u -> u.getEmail()).filter(StringUtils::isNotBlank).ifPresent(email -> {
+            Unit unit = units.findById(listing.getUnitId()).orElse(null);
+            String propertyName = unit != null && unit.getProperty() != null
+                    ? StringUtils.defaultIfBlank(unit.getProperty().getName(), "Property") : "Property";
+            String unitReference = unit == null ? Long.toString(listing.getUnitId())
+                    : StringUtils.defaultIfBlank(unit.getRef(), Long.toString(listing.getUnitId()));
+            String listingUrl = StringUtils.removeEnd(publicSiteUrl, "/") + "/" + listing.getPublicSlug();
             String body = "New property enquiry for <strong>" + HtmlUtils.htmlEscape(listing.getHeadline()) +
-                    "</strong><br>Name: " + HtmlUtils.htmlEscape(inquiry.getName()) +
+                    "</strong><br>Property: " + HtmlUtils.htmlEscape(propertyName) +
+                    "<br>Unit: <strong>" + HtmlUtils.htmlEscape(unitReference) + "</strong>" +
+                    "<br><a href=\"" + HtmlUtils.htmlEscape(listingUrl) + "\">Open this unit listing</a>" +
+                    "<br>Name: " + HtmlUtils.htmlEscape(inquiry.getName()) +
                     "<br>Email: " + HtmlUtils.htmlEscape(inquiry.getEmail()) +
                     "<br>Phone: " + HtmlUtils.htmlEscape(StringUtils.defaultString(inquiry.getPhone(), "Not provided")) +
                     "<br>Message: " + HtmlUtils.htmlEscape(inquiry.getMessage());

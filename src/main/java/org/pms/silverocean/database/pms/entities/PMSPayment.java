@@ -124,7 +124,12 @@ public class PMSPayment extends BaseIDEntity {
     }
 
     public boolean isCompletedSuccessfully() {
-        return inProgress ? false : TransactionCategory.valueOf(category).getSuccessString().equals(status);
+        if (inProgress || category == null) return false;
+        try {
+            return TransactionCategory.valueOf(category).getSuccessString().equals(status);
+        } catch (IllegalArgumentException ignored) {
+            return "success".equalsIgnoreCase(status) || "successful".equalsIgnoreCase(status);
+        }
     }
 
     public BigDecimal moneyAmount() {

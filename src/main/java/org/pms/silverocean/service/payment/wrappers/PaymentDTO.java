@@ -7,13 +7,23 @@ import java.time.ZonedDateTime;
 import java.math.BigDecimal;
 
 public record PaymentDTO(long id, BigDecimal amount, String customerName, String customerAccount, String transId,
-                         PaymentChannel channel,
-                         TransactionCategory category, ZonedDateTime createdOn, String status,
+                         String channel,
+                         String category, ZonedDateTime createdOn, String status,
                          String description, boolean inProgress, boolean success) {
     public PaymentDTO(PMSPayment pmsPayment, String statusDesc) {
         this(pmsPayment.getId(), pmsPayment.moneyAmount(), pmsPayment.getCustomerName(), pmsPayment.getCustomerAccountNumber(), pmsPayment.getThirdPartyTransId(),
-                PaymentChannel.fromName(pmsPayment.getChannel()), TransactionCategory.valueOf(pmsPayment.getCategory()),
+                channel(pmsPayment.getChannel()), category(pmsPayment.getCategory()),
                 pmsPayment.getCreatedOn(), pmsPayment.getStatus(),
                 statusDesc, pmsPayment.isInProgress(), pmsPayment.isCompletedSuccessfully());
+    }
+
+    private static String channel(String value) {
+        try { return PaymentChannel.fromName(value).name(); }
+        catch (IllegalArgumentException ignored) { return value == null || value.isBlank() ? "UNKNOWN" : value; }
+    }
+
+    private static String category(String value) {
+        try { return TransactionCategory.valueOf(value).name(); }
+        catch (IllegalArgumentException | NullPointerException ignored) { return value == null || value.isBlank() ? "UNKNOWN" : value; }
     }
 }

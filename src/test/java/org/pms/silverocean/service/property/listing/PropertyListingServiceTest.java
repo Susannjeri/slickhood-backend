@@ -18,6 +18,7 @@ import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.helpdesk.HelpDeskRateLimiter;
 import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
@@ -45,6 +46,7 @@ class PropertyListingServiceTest {
         ReflectionTestUtils.setField(service, "inquiryLimit", 5);
         ReflectionTestUtils.setField(service, "maxPublicImageBytes", 10_485_760L);
         ReflectionTestUtils.setField(service, "inquiryConsentVersion", "property-enquiry-2026-09");
+        ReflectionTestUtils.setField(service, "publicSiteUrl", "https://slickhood.com/property");
         lenient().when(users.getUserId()).thenReturn(42L);
     }
 
@@ -111,6 +113,27 @@ class PropertyListingServiceTest {
                 assertThat(subject).matches("[0-9a-f]{64}"));
         verify(limiter).check(anyString(),eq(5));
         verify(limiter).check(anyString(),eq(25));
+    }
+
+    @Test void inquiryNotificationIdentifiesAndLinksTheExactUnit() {
+        Unit unit=eligibleUnit(); unit.setAdvertise(true);
+        PropertyListing listing=new PropertyListing(); listing.setId(9L); listing.setUnitId(unit.getId());
+        listing.setUnit(unit); listing.setPublicSlug("atlas-court-two-bedroom-1234567890abcdef1234567890abcdef");
+        listing.setListingType("RENT"); listing.setHeadline("Two bedroom at Atlas Court");
+        listing.setPublisherUserId(42L); listing.setStatus("PUBLISHED"); listing.setActive(true);
+        listing.setExpiresAt(ZonedDateTime.now(ZoneOffset.UTC).plusDays(30));
+        Users publisher=new Users(); publisher.setEmail("owner@example.com");
+        when(listings.findPublicBySlug(eq(listing.getPublicSlug()),any())).thenReturn(Optional.of(listing));
+        when(users.findById(42L)).thenReturn(Optional.of(publisher));
+        when(units.findById(unit.getId())).thenReturn(Optional.of(unit));
+
+        service.inquire(listing.getPublicSlug(), new PropertyListingModels.InquiryRequest(
+                "Amina", "amina@example.com", null, "Please arrange a viewing.", true, ""), "203.0.113.8");
+
+        var message=org.mockito.ArgumentCaptor.forClass(NotificationDTO.class);
+        verify(notifications).queueNotification(message.capture());
+        assertThat(message.getValue().formattedMessage()).contains("Atlas Court", unit.getRef(),
+                "https://slickhood.com/property/" + listing.getPublicSlug());
     }
 
     @Test void estateHomeCannotBePublishedAsARental() {
