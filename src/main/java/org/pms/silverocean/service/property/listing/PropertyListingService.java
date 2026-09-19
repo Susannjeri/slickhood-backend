@@ -173,8 +173,11 @@ public class PropertyListingService {
         String normalizedClient = StringUtils.left(StringUtils.defaultString(clientFingerprint, "unknown"), 500);
         String fingerprint = hash(normalizedClient + ":" + normalizedEmail);
         try {
-            rateLimiter.check("property-inquiry-email:" + hash(normalizedEmail), Math.max(1, inquiryLimit));
-            rateLimiter.check("property-inquiry-client:" + hash(normalizedClient), Math.max(10, inquiryLimit * 5));
+            // Help-rate subjects are persisted in a fixed CHAR(64) column. Hash
+            // the complete, namespaced subject so it remains scoped without
+            // exceeding that security boundary.
+            rateLimiter.check(hash("property-inquiry-email:" + normalizedEmail), Math.max(1, inquiryLimit));
+            rateLimiter.check(hash("property-inquiry-client:" + normalizedClient), Math.max(10, inquiryLimit * 5));
         }
         catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Please wait before sending another enquiry"); }
         PropertyListing listing = publicListing(slug);

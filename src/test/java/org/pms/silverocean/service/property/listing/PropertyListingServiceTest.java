@@ -105,8 +105,12 @@ class PropertyListingServiceTest {
         assertThat(captor.getValue().getEmail()).isEqualTo("amina@example.com");
         assertThat(captor.getValue().getConsentVersion()).isEqualTo("property-enquiry-2026-09");
         assertThat(captor.getValue().getConsentedAt()).isNotNull();
-        verify(limiter).check(startsWith("property-inquiry-email:"),eq(5));
-        verify(limiter).check(startsWith("property-inquiry-client:"),eq(25));
+        var rateSubjects=org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(limiter,times(2)).check(rateSubjects.capture(),anyInt());
+        assertThat(rateSubjects.getAllValues()).allSatisfy(subject ->
+                assertThat(subject).matches("[0-9a-f]{64}"));
+        verify(limiter).check(anyString(),eq(5));
+        verify(limiter).check(anyString(),eq(25));
     }
 
     @Test void estateHomeCannotBePublishedAsARental() {
