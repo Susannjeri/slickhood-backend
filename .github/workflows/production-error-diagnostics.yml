@@ -45,6 +45,11 @@ jobs:
               | sed -E "s/(SQL \[[^]]*\]|VALUES? \([^)]*\))/[REDACTED_SQL]/Ig" \
               | sed -E 's/(password|secret|token|api[_-]?key)[=: ][^ ,;]+/\1=[REDACTED]/Ig' \
               | tail -n 160 || true
+            echo 'Redacted V99 failure'
+            grep -B 4 -A 12 -Ei 'Migration V99|Migration.*failed|Script V99|Unable to execute|restore missing wealth' "$log_file" \
+              | sed -E "s/(SQL \[[^]]*\]|VALUES? \([^)]*\))/[REDACTED_SQL]/Ig" \
+              | sed -E 's/(password|secret|token|api[_-]?key)[=: ][^ ,;]+/\1=[REDACTED]/Ig' \
+              | tail -n 100 || true
             echo 'Persistence exception classes'
             grep -Eo '(DataIntegrityViolationException|ConstraintViolationException|SQLIntegrityConstraintViolationException|JpaSystemException)' "$log_file" | sort | uniq -c || true
             echo 'Hibernate schema validation mismatches'
