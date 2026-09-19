@@ -128,12 +128,13 @@ class PropertyListingServiceTest {
         when(units.findById(unit.getId())).thenReturn(Optional.of(unit));
 
         service.inquire(listing.getPublicSlug(), new PropertyListingModels.InquiryRequest(
-                "Amina", "amina@example.com", null, "Please arrange a viewing.", true, ""), "203.0.113.8");
+                "Amina", "amina@example.com", "+254700000000", "Please arrange a viewing.", true, ""), "203.0.113.8");
 
         var message=org.mockito.ArgumentCaptor.forClass(NotificationDTO.class);
         verify(notifications).queueNotification(message.capture());
         assertThat(message.getValue().formattedMessage()).contains("Atlas Court", unit.getRef(),
-                "https://slickhood.com/property/" + listing.getPublicSlug());
+                "https://slickhood.com/property/" + listing.getPublicSlug(),
+                "Requester email", "amina@example.com", "Requester phone", "+254700000000");
     }
 
     @Test void estateHomeCannotBePublishedAsARental() {

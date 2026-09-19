@@ -206,8 +206,8 @@ public class PropertyListingService {
                     "<br>Unit: <strong>" + HtmlUtils.htmlEscape(unitReference) + "</strong>" +
                     "<br><a href=\"" + HtmlUtils.htmlEscape(listingUrl) + "\">Open this unit listing</a>" +
                     "<br>Name: " + HtmlUtils.htmlEscape(inquiry.getName()) +
-                    "<br>Email: " + HtmlUtils.htmlEscape(inquiry.getEmail()) +
-                    "<br>Phone: " + HtmlUtils.htmlEscape(StringUtils.defaultString(inquiry.getPhone(), "Not provided")) +
+                    "<br>Requester email: <strong>" + HtmlUtils.htmlEscape(inquiry.getEmail()) + "</strong>" +
+                    "<br>Requester phone: <strong>" + HtmlUtils.htmlEscape(StringUtils.defaultString(inquiry.getPhone(), "Not provided")) + "</strong>" +
                     "<br>Message: " + HtmlUtils.htmlEscape(inquiry.getMessage());
             try { notifications.queueNotification(new NotificationDTO(body, email, NotificationType.PROPERTY_LISTING_INQUIRY_EMAIL)); }
             catch (RuntimeException ex) { log.warn("Property listing enquiry notification could not be queued for listing {}", listing.getId(), ex); }
