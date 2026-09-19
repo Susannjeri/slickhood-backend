@@ -22,7 +22,7 @@ jobs:
             set -eu
             log_file="$(mktemp)"
             trap 'rm -f -- "$log_file"' EXIT
-            sudo journalctl -u pms.service --since '45 minutes ago' --no-pager >"$log_file" 2>/dev/null || true
+            sudo journalctl -u pms.service --since '3 hours ago' --no-pager >"$log_file" 2>/dev/null || true
             echo 'SQL error classifications'
             grep -Eo 'SQL Error: [0-9]+, SQLState: [0-9A-Z]+' "$log_file" | sort | uniq -c || true
             echo 'Named constraints or keys'
@@ -31,6 +31,11 @@ jobs:
             grep -Eo "Column '[A-Za-z0-9_.-]+' cannot be null|Data too long for column '[A-Za-z0-9_.-]+'" "$log_file" | sed -E "s/.*'([A-Za-z0-9_.-]+)'.*/\1/" | sort | uniq -c || true
             echo 'Migration failure classifications'
             grep -Ei 'Flyway|migration|SQL Error: 1406|Data too long for column|Schema-validation:' "$log_file" \
+              | sed -E "s/(SQL \[[^]]*\]|VALUES? \([^)]*\))/[REDACTED_SQL]/Ig" \
+              | sed -E 's/(password|secret|token|api[_-]?key)[=: ][^ ,;]+/\1=[REDACTED]/Ig' \
+              | tail -n 80 || true
+            echo 'Redacted error 1406 context'
+            grep -B 3 -A 6 -E 'SQL Error: 1406|Data too long' "$log_file" \
               | sed -E "s/(SQL \[[^]]*\]|VALUES? \([^)]*\))/[REDACTED_SQL]/Ig" \
               | sed -E 's/(password|secret|token|api[_-]?key)[=: ][^ ,;]+/\1=[REDACTED]/Ig' \
               | tail -n 80 || true
