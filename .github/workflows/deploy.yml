@@ -70,19 +70,11 @@ jobs:
 
       - name: Install, verify and roll back on failure
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          WA_BILLING_TEMPLATE: ${{ vars.WHATSAPP_TEMPLATES_BILLING_NAME }}
-          WA_PROPERTY_TEMPLATE: ${{ vars.WHATSAPP_TEMPLATES_PROPERTY_NAME }}
-          WA_MARKETPLACE_TEMPLATE: ${{ vars.WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_NAME }}
-          WA_SECURITY_TEMPLATE: ${{ vars.WHATSAPP_TEMPLATES_SECURITY_NAME }}
-          WA_MARKETING_TEMPLATE: ${{ vars.WHATSAPP_TEMPLATES_MARKETING_NAME }}
-          WA_TEMPLATE_LANGUAGE: ${{ vars.WHATSAPP_TEMPLATE_LANGUAGE || 'en' }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           command_timeout: 10m
-          envs: WA_BILLING_TEMPLATE,WA_PROPERTY_TEMPLATE,WA_MARKETPLACE_TEMPLATE,WA_SECURITY_TEMPLATE,WA_MARKETING_TEMPLATE,WA_TEMPLATE_LANGUAGE
           script: |
             set -eu
             stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -208,30 +200,14 @@ jobs:
             sudo python3 /tmp/slickhood-backend-release/production-backup.py
             umask 077
             whatsapp_env="$(mktemp)"
-            current_whatsapp_env=/etc/slickhood/secrets/whatsapp.env
-            test -f "$current_whatsapp_env" || { echo 'Protected WhatsApp credentials are not staged.' >&2; exit 1; }
-            # Template names are non-secret Meta identifiers, but still validate
-            # them before touching the protected runtime file. Credentials already
-            # staged by the operator are preserved and never printed to CI logs.
-            for value in "$WA_BILLING_TEMPLATE" "$WA_PROPERTY_TEMPLATE" "$WA_MARKETPLACE_TEMPLATE" "$WA_SECURITY_TEMPLATE" "$WA_MARKETING_TEMPLATE"; do
-              printf '%s' "$value" | grep -Eq '^[a-z0-9_]+$' || { echo 'An approved WhatsApp template name is missing or invalid.' >&2; exit 1; }
-            done
-            printf '%s' "$WA_TEMPLATE_LANGUAGE" | grep -Eq '^[A-Za-z_-]{2,12}$' || { echo 'WhatsApp template language is invalid.' >&2; exit 1; }
-            sudo sed -E '/^WHATSAPP_ENABLED=|^WHATSAPP_TEMPLATES_(BILLING|PROPERTY|MARKETPLACE_DELIVERY|SECURITY|MARKETING)_(APPROVED|NAME|LANGUAGE)=/d' "$current_whatsapp_env" >"$whatsapp_env"
             {
-              printf 'WHATSAPP_ENABLED=true\n'
-              # Public Meta identifiers for the registered Slickhood WhatsApp
-              # account. Access, verify and app-secret values remain staged in
-              # the protected file and are never supplied by this workflow.
-              printf 'WHATSAPP_API_URL=https://graph.facebook.com/v22.0/%%s/messages\n'
-              printf 'WHATSAPP_BUSINESS_ACCOUNT_ID=2306816990066695\n'
-              printf 'WHATSAPP_PHONE_NUMBER_ID=1220537841150602\n'
-              printf 'WHATSAPP_TEMPLATES_BILLING_APPROVED=true\nWHATSAPP_TEMPLATES_BILLING_NAME=%s\nWHATSAPP_TEMPLATES_BILLING_LANGUAGE=%s\n' "$WA_BILLING_TEMPLATE" "$WA_TEMPLATE_LANGUAGE"
-              printf 'WHATSAPP_TEMPLATES_PROPERTY_APPROVED=true\nWHATSAPP_TEMPLATES_PROPERTY_NAME=%s\nWHATSAPP_TEMPLATES_PROPERTY_LANGUAGE=%s\n' "$WA_PROPERTY_TEMPLATE" "$WA_TEMPLATE_LANGUAGE"
-              printf 'WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_APPROVED=true\nWHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_NAME=%s\nWHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_LANGUAGE=%s\n' "$WA_MARKETPLACE_TEMPLATE" "$WA_TEMPLATE_LANGUAGE"
-              printf 'WHATSAPP_TEMPLATES_SECURITY_APPROVED=true\nWHATSAPP_TEMPLATES_SECURITY_NAME=%s\nWHATSAPP_TEMPLATES_SECURITY_LANGUAGE=%s\n' "$WA_SECURITY_TEMPLATE" "$WA_TEMPLATE_LANGUAGE"
-              printf 'WHATSAPP_TEMPLATES_MARKETING_APPROVED=true\nWHATSAPP_TEMPLATES_MARKETING_NAME=%s\nWHATSAPP_TEMPLATES_MARKETING_LANGUAGE=%s\n' "$WA_MARKETING_TEMPLATE" "$WA_TEMPLATE_LANGUAGE"
-            } >>"$whatsapp_env"
+              printf 'WHATSAPP_ENABLED=false\n'
+              printf 'WHATSAPP_TEMPLATES_BILLING_APPROVED=false\n'
+              printf 'WHATSAPP_TEMPLATES_PROPERTY_APPROVED=false\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_APPROVED=false\n'
+              printf 'WHATSAPP_TEMPLATES_SECURITY_APPROVED=false\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETING_APPROVED=false\n'
+            } >"$whatsapp_env"
             sudo install -d -o root -g root -m 0700 /etc/slickhood/secrets
             sudo install -o root -g root -m 0600 "$whatsapp_env" /etc/slickhood/secrets/whatsapp.env
             rm -f "$whatsapp_env"
@@ -249,7 +225,7 @@ jobs:
             installed=true
             sudo systemctl restart pms.service
             if wait_for_health; then
-              run_preflight 97 enabled require-insurance
+              run_preflight 97 on-hold require-insurance
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
               installed=false
               exit 0
