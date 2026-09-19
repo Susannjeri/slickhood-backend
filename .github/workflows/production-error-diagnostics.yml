@@ -39,6 +39,12 @@ jobs:
               | sed -E "s/(SQL \[[^]]*\]|VALUES? \([^)]*\))/[REDACTED_SQL]/Ig" \
               | sed -E 's/(password|secret|token|api[_-]?key)[=: ][^ ,;]+/\1=[REDACTED]/Ig' \
               | tail -n 80 || true
+            echo 'Redacted application lifecycle'
+            grep -Ei 'Starting |Started |Tomcat|Hikari|Flyway|Application run failed|APPLICATION FAILED|BeanCreation|Caused by|OutOfMemory|killed process|address already in use' "$log_file" \
+              | sed -E "s/(jdbc:mysql:\/\/)[^ ?]+/\1[REDACTED]/Ig" \
+              | sed -E "s/(SQL \[[^]]*\]|VALUES? \([^)]*\))/[REDACTED_SQL]/Ig" \
+              | sed -E 's/(password|secret|token|api[_-]?key)[=: ][^ ,;]+/\1=[REDACTED]/Ig' \
+              | tail -n 160 || true
             echo 'Persistence exception classes'
             grep -Eo '(DataIntegrityViolationException|ConstraintViolationException|SQLIntegrityConstraintViolationException|JpaSystemException)' "$log_file" | sort | uniq -c || true
             echo 'Hibernate schema validation mismatches'
