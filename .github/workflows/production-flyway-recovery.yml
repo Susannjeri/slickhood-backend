@@ -1,0 +1,105 @@
+name: Production Flyway Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Inspect, or repair only the known failed V99 migration marker
+        required: true
+        type: choice
+        options:
+          - inspect
+          - repair-v99
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Inspect or repair guarded Flyway state
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RECOVERY_ACTION: ${{ inputs.action }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: RECOVERY_ACTION
+          script: |
+            set -eu
+            sudo RECOVERY_ACTION="$RECOVERY_ACTION" python3 - <<'PY'
+            from __future__ import annotations
+
+            import os
+            import re
+            import subprocess
+            from pathlib import Path
+
+            files = (
+                Path("/etc/slickhood/application.properties"),
+                Path("/home/silverocean/backend/config/application.properties"),
+            )
+            config = dict(os.environ)
+            for path in files:
+                if not path.exists():
+                    continue
+                for raw in path.read_text(encoding="utf-8-sig").splitlines():
+                    line = raw.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    config[key.strip()] = value.strip().strip("\"'")
+
+            def resolve(*keys: str) -> str:
+                for key in keys:
+                    value = config.get(key, "").strip()
+                    match = re.fullmatch(r"\$\{([^}:]+)(?::([^}]*))?}", value)
+                    if match:
+                        value = config.get(match.group(1), match.group(2) or "").strip()
+                    if value:
+                        return value
+                raise RuntimeError("Required datasource configuration is unavailable")
+
+            jdbc = resolve("spring.datasource.url", "SPRING_DATASOURCE_URL")
+            username = resolve("spring.datasource.username", "DATABASE_USERNAME", "SPRING_DATASOURCE_USERNAME")
+            password = resolve("spring.datasource.password", "DATABASE_PASSWORD", "SPRING_DATASOURCE_PASSWORD")
+            match = re.match(r"jdbc:mysql://([^/:?]+)(?::(\d+))?/([^?]+)", jdbc)
+            if not match:
+                raise RuntimeError("Unsupported datasource configuration")
+            host, port, database = match.group(1), match.group(2) or "3306", match.group(3)
+            env = dict(os.environ)
+            env["MYSQL_PWD"] = password
+
+            def mysql(query: str) -> str:
+                result = subprocess.run(
+                    ["mysql", "--batch", "--skip-column-names", "--host", host,
+                     "--port", port, "--user", username, database, "--execute", query],
+                    env=env, text=True, capture_output=True, timeout=20, check=False,
+                )
+                if result.returncode:
+                    raise RuntimeError("Database operation failed")
+                return result.stdout.strip()
+
+            rows = mysql(
+                "SELECT CONCAT(version,'|',description,'|',success) "
+                "FROM flyway_schema_history WHERE success=0 ORDER BY installed_rank"
+            ).splitlines()
+            print("failedMigrations=" + str(len(rows)))
+            for row in rows:
+                print("failedMigration=" + row)
+
+            if os.environ["RECOVERY_ACTION"] == "inspect":
+                raise SystemExit(0)
+            expected = "99|restore missing wealth asset categories|0"
+            if rows != [expected]:
+                raise RuntimeError("Guard refused repair: failed migration is not the expected V99 marker")
+            mysql("DELETE FROM flyway_schema_history WHERE version='99' AND success=0")
+            remaining = mysql("SELECT COUNT(*) FROM flyway_schema_history WHERE success=0")
+            if remaining != "0":
+                raise RuntimeError("Flyway recovery verification failed")
+            print("repairedMigration=V99")
+            PY
