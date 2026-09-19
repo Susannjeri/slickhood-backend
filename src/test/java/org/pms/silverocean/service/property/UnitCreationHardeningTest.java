@@ -198,18 +198,18 @@ class UnitCreationHardeningTest {
         unit.setLeaseMode(PMSLeaseMode.RENT.name());
         when(properties.findByIdAndCreatedBy(9L, 77L)).thenReturn(Optional.of(property));
         when(units.findByIdAndCreatedBy(31L, 77L)).thenReturn(Optional.of(unit));
-        when(unitReports.countUnitsByOwnerAndLeaseMode(77L, PMSLeaseMode.SALE.name())).thenReturn(2);
+        when(unitReports.countUnitsByOwner(77L)).thenReturn(2);
         doAnswer(call -> {
             assertThat(((LongSupplier) call.getArgument(1)).getAsLong()).isEqualTo(2L);
             return null;
-        }).when(entitlements).requireAvailableUnitQuota(eq(PMSLeaseMode.SALE), any(), eq(1L));
+        }).when(entitlements).requireAvailableUnitQuota(eq(PMSLeaseMode.SALE), any(), eq(0L));
 
         var response = service.editUnit(31L, request(PMSLeaseMode.SALE), null);
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(unit.getLeaseMode()).isEqualTo(PMSLeaseMode.SALE.name());
-        verify(entitlements).requireAvailableUnitQuota(eq(PMSLeaseMode.SALE), any(), eq(1L));
-        verify(unitReports).countUnitsByOwnerAndLeaseMode(77L, PMSLeaseMode.SALE.name());
+        verify(entitlements).requireAvailableUnitQuota(eq(PMSLeaseMode.SALE), any(), eq(0L));
+        verify(unitReports).countUnitsByOwner(77L);
         verify(units).update(unit);
     }
 
@@ -281,8 +281,8 @@ class UnitCreationHardeningTest {
         source.setRef("A-01");
         source.setLeaseMode(PMSLeaseMode.RENT.name());
         when(units.findByIdAndCreatedBy(31L, 77L)).thenReturn(Optional.of(source));
-        when(unitReports.countUnitsByOwnerAndLeaseMode(77L, PMSLeaseMode.RENT.name())).thenReturn(1);
-        when(units.countPendingUnitCopiesByPropertyOwnerAndLeaseMode(77L, PMSLeaseMode.RENT.name())).thenReturn(2L);
+        when(unitReports.countUnitsByOwner(77L)).thenReturn(1);
+        when(units.countPendingUnitCopiesByPropertyOwner(77L)).thenReturn(2L);
         doAnswer(call -> {
             ((LongSupplier) call.getArgument(1)).getAsLong();
             return null;
@@ -298,7 +298,7 @@ class UnitCreationHardeningTest {
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.getData()).hasSize(1);
         assertThat(response.getData().get(0).toString()).contains("jobId=901", "count=12", "status=QUEUED");
-        verify(units).countPendingUnitCopiesByPropertyOwnerAndLeaseMode(77L, PMSLeaseMode.RENT.name());
+        verify(units).countPendingUnitCopiesByPropertyOwner(77L);
         verify(routines).scheduleDuplicateUnitJob(eq(901L), any());
     }
 

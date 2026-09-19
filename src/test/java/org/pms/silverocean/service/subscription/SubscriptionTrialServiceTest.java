@@ -22,6 +22,7 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.subscription.enums.BillingCycle;
 import org.pms.silverocean.service.subscription.enums.PlanCategory;
 import org.pms.silverocean.service.subscription.enums.SubscriptionEventType;
+import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -45,13 +46,15 @@ class SubscriptionTrialServiceTest {
     @Mock DefaultFreePlanCodeResolver planCodeResolver;
     @Mock SubscriptionPlanService planService;
     @Mock SubscriptionInvoiceService invoiceService;
+    @Mock SharedPropertySubscriptionService sharedPropertySubscriptions;
 
     private SubscriptionProvisioningService service;
 
     @BeforeEach
     void setUp() {
         service = new SubscriptionProvisioningService(userDao, roleRepo, userRoleRepo, planRepo,
-                subscriptionRepo, eventRepo, planCodeResolver, planService, invoiceService, 30, 21);
+                subscriptionRepo, eventRepo, planCodeResolver, planService, invoiceService,
+                sharedPropertySubscriptions, 30, 21);
     }
 
     @Test
@@ -63,8 +66,7 @@ class SubscriptionTrialServiceTest {
         SubscriptionPlan plan = plan("LANDLORD_SILVER", "Silver", PMSRole.LANDLORD);
 
         when(userDao.getUserId()).thenReturn(userId);
-        when(subscriptionRepo.findTopByCreatedByAndRoleOrderByStartAtDesc(userId, PMSRole.LANDLORD))
-                .thenReturn(Optional.empty());
+        when(subscriptionRepo.findAllByCreatedByOrderByCreatedOnDesc(userId)).thenReturn(List.of());
         when(planCodeResolver.isProvisioningRole(PMSRole.LANDLORD)).thenReturn(true);
         when(roleRepo.findByName(PMSRole.LANDLORD.getName())).thenReturn(Optional.of(role));
         when(userRoleRepo.findByUserIdAndRoleId(userId, 2L)).thenReturn(1);
@@ -83,16 +85,17 @@ class SubscriptionTrialServiceTest {
     }
 
     @Test
-    void preventsRepeatingTrialOnlyForTheSameRole() {
+    void preventsRepeatingTrialAcrossTheSharedPropertySubscription() {
         when(userDao.getUserId()).thenReturn(7L);
-        when(subscriptionRepo.findTopByCreatedByAndRoleOrderByStartAtDesc(7L, PMSRole.LANDLORD))
-                .thenReturn(Optional.of(new UserSubscription()));
+        UserSubscription existing = UserSubscription.builder().productKey(SubscriptionProduct.PROPERTY_SALES).build();
+        when(subscriptionRepo.findAllByCreatedByOrderByCreatedOnDesc(7L)).thenReturn(List.of(existing));
+        when(sharedPropertySubscriptions.supports(SubscriptionProduct.PROPERTY_SALES)).thenReturn(true);
 
         PMSCustomException error = assertThrows(PMSCustomException.class,
                 () -> service.startTrialForSessionUser("LANDLORD", "LANDLORD_BRONZE"));
 
         assertEquals(ResponseCode.SUBSCRIPTION_TRIAL_ALREADY_USED, error.getResponseCode());
-        verify(subscriptionRepo).findTopByCreatedByAndRoleOrderByStartAtDesc(7L, PMSRole.LANDLORD);
+        verify(subscriptionRepo).findAllByCreatedByOrderByCreatedOnDesc(7L);
     }
 
     @Test

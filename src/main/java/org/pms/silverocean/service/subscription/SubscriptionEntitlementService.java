@@ -36,21 +36,27 @@ public class SubscriptionEntitlementService {
     private final PlanQuotaRepo quotas;
     private final CustomerWorkspaceRepo workspaces;
     private final WorkspaceSelectionService workspaceSelection;
+    private final SharedPropertySubscriptionService sharedPropertySubscriptions;
 
     public SubscriptionEntitlementService(UserDao users, UserSubscriptionRepo subscriptions,
                                           SubscriptionPlanRepo plans, PlanFeatureRepo features,
                                           PlanQuotaRepo quotas, WorkspaceMembershipRepo memberships,
                                           CustomerWorkspaceRepo workspaces,
-                                          WorkspaceSelectionService workspaceSelection) {
+                                          WorkspaceSelectionService workspaceSelection,
+                                          SharedPropertySubscriptionService sharedPropertySubscriptions) {
         this.users = users; this.subscriptions = subscriptions; this.plans = plans;
         this.features = features; this.quotas = quotas; this.workspaces = workspaces;
         this.workspaceSelection = workspaceSelection;
+        this.sharedPropertySubscriptions = sharedPropertySubscriptions;
     }
 
     @Transactional(readOnly = true)
     public UserSubscription requireProduct(SubscriptionProduct product) {
         if (internalStaff()) return null;
         long payerId = subscriptionOwner(users.getUserId());
+        if (sharedPropertySubscriptions.supports(product)) {
+            return sharedPropertySubscriptions.requireActive(payerId);
+        }
         UserSubscription subscription = subscriptions
                 .findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
                         payerId, product, SubscriptionStatus.ACTIVE)
@@ -135,6 +141,10 @@ public class SubscriptionEntitlementService {
         if (userId == null || internalStaff()) return;
         SubscriptionProduct product = sessionBusinessProductIfApplicable(userId);
         if (product == null) return;
+        if (sharedPropertySubscriptions.supports(product)) {
+            requireFeature(product, featureForProduct(product));
+            return;
+        }
         String featureKey = switch (product) {
             case LANDLORD -> landlordFeature;
             case ESTATE_MANAGEMENT -> estateFeature;
@@ -193,7 +203,7 @@ public class SubscriptionEntitlementService {
         if (internalStaff()) return product;
         long userId = users.getUserId();
         SubscriptionProduct workspaceProduct = selectedWorkspaceProduct(userId);
-        if (workspaceProduct != null && workspaceProduct != product) {
+        if (workspaceProduct != null && !sharedPropertySubscriptions.supports(workspaceProduct)) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_FEATURE_NOT_INCLUDED);
         }
         requireFeature(product, featureForProduct(product));
@@ -202,7 +212,8 @@ public class SubscriptionEntitlementService {
 
     @Transactional
     public void requireAvailableUnitQuota(PMSLeaseMode mode, LongSupplier currentUsage, long increment) {
-        requireAvailableQuota(requireUnitMode(mode), "UNITS", currentUsage, increment);
+        requireUnitMode(mode);
+        sharedPropertySubscriptions.requireAvailableUnits(subscriptionOwner(users.getUserId()), currentUsage, increment);
     }
 
     private long subscriptionOwner(long userId) {

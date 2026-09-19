@@ -41,7 +41,8 @@ class SubscriptionManagementServiceTest {
         UnitReportDao usage = mock(UnitReportDao.class);
         SubscriptionManagementService service = new SubscriptionManagementService(users, subscriptions, plans,
                 features, events, mock(PMSInvoiceRepo.class), usage, provisioning,
-                mock(SubscriptionInvoiceService.class), mock(NotificationService.class));
+                mock(SubscriptionInvoiceService.class), mock(NotificationService.class),
+                mock(SharedPropertySubscriptionService.class));
 
         when(users.getUserId()).thenReturn(7L);
         var summary = new SubscriptionPlanSummaryRestDTO(null, "LANDLORD_BRONZE", "Bronze", "STANDARD",
@@ -90,7 +91,7 @@ class SubscriptionManagementServiceTest {
         SubscriptionManagementService service = new SubscriptionManagementService(users, subscriptions, plans,
                 features, mock(SubscriptionEventRepo.class), mock(PMSInvoiceRepo.class), mock(UnitReportDao.class),
                 mock(SubscriptionProvisioningService.class), mock(SubscriptionInvoiceService.class),
-                mock(NotificationService.class));
+                mock(NotificationService.class), mock(SharedPropertySubscriptionService.class));
 
         when(users.getUserId()).thenReturn(9L);
         UserSubscription addOn = subscription(SubscriptionProduct.PORTFOLIO_MANAGEMENT_ADDON,
@@ -121,7 +122,8 @@ class SubscriptionManagementServiceTest {
         SubscriptionManagementService service = new SubscriptionManagementService(users, subscriptions,
                 mock(SubscriptionPlanRepo.class), mock(PlanFeatureRepo.class), events, mock(PMSInvoiceRepo.class),
                 mock(UnitReportDao.class), mock(SubscriptionProvisioningService.class),
-                mock(SubscriptionInvoiceService.class), mock(NotificationService.class));
+                mock(SubscriptionInvoiceService.class), mock(NotificationService.class),
+                mock(SharedPropertySubscriptionService.class));
         UserSubscription subscription = subscription(SubscriptionProduct.LANDLORD, "LANDLORD_BRONZE", null);
         subscription.setId(22L);
         subscription.setAutoRenew(false);

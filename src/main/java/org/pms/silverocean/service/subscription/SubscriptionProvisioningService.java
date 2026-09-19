@@ -44,6 +44,7 @@ public class SubscriptionProvisioningService {
     private final SubscriptionPlanService subscriptionPlanService;
     private final UserRoleRepo userRoleRepo;
     private final SubscriptionInvoiceService subscriptionInvoiceService;
+    private final SharedPropertySubscriptionService sharedPropertySubscriptions;
     private final int graceDaysAfterExpiry;
     private final int trialDays;
 
@@ -57,6 +58,7 @@ public class SubscriptionProvisioningService {
             DefaultFreePlanCodeResolver defaultFreePlanCodeResolver,
             SubscriptionPlanService subscriptionPlanService,
             SubscriptionInvoiceService subscriptionInvoiceService,
+            SharedPropertySubscriptionService sharedPropertySubscriptions,
             @Value("${subscription.upgrade.grace-days-after-expiry:30}") int graceDaysAfterExpiry,
             @Value("${subscription.trial.days:14}") int trialDays
     ) {
@@ -69,6 +71,7 @@ public class SubscriptionProvisioningService {
         this.defaultFreePlanCodeResolver = defaultFreePlanCodeResolver;
         this.subscriptionPlanService = subscriptionPlanService;
         this.subscriptionInvoiceService = subscriptionInvoiceService;
+        this.sharedPropertySubscriptions = sharedPropertySubscriptions;
         this.graceDaysAfterExpiry = graceDaysAfterExpiry;
         this.trialDays = Math.max(1, trialDays);
     }
@@ -89,7 +92,8 @@ public class SubscriptionProvisioningService {
             throw new PMSCustomException(ResponseCode.COULD_NOT_FIND_USER_SESSION);
         }
         PMSRole role = parsePmsRoleConstant(roleValue);
-        if (userSubscriptionRepo.findTopByCreatedByAndRoleOrderByStartAtDesc(userId, role).isPresent()) {
+        if ((propertyRole(role) && hasUsedPropertyTrial(userId))
+                || (!propertyRole(role) && userSubscriptionRepo.findTopByCreatedByAndRoleOrderByStartAtDesc(userId, role).isPresent())) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_TRIAL_ALREADY_USED);
         }
         validateCatalogRole(role);
@@ -196,8 +200,9 @@ public class SubscriptionProvisioningService {
             throw new PMSCustomException(ResponseCode.COULD_NOT_FIND_USER_SESSION);
         }
         PMSRole role = parsePmsRoleConstant(roleValue);
-        Optional<UserSubscription> latest = userSubscriptionRepo
-                .findTopByCreatedByAndRoleOrderByStartAtDesc(userId, role);
+        Optional<UserSubscription> latest = propertyRole(role)
+                ? currentOrLatestPropertySubscription(userId)
+                : userSubscriptionRepo.findTopByCreatedByAndRoleOrderByStartAtDesc(userId, role);
         if (latest.isEmpty()) {
             return null;
         }
@@ -214,7 +219,10 @@ public class SubscriptionProvisioningService {
         } catch (RuntimeException error) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_PRODUCT_MISMATCH);
         }
-        return userSubscriptionRepo.findTopByCreatedByAndProductKeyOrderByStartAtDesc(userId, product)
+        Optional<UserSubscription> latest = sharedPropertySubscriptions.supports(product)
+                ? currentOrLatestPropertySubscription(userId)
+                : userSubscriptionRepo.findTopByCreatedByAndProductKeyOrderByStartAtDesc(userId, product);
+        return latest
                 .map(this::refreshAndMap).orElse(null);
     }
 
@@ -278,6 +286,12 @@ public class SubscriptionProvisioningService {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_NOT_FOUND));
         if (!role.equals(plan.getRoleFamily())) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_PLAN_ROLE_MISMATCH);
+        }
+        if (propertyRole(role)) {
+            Optional<UserSubscription> activeProperty = sharedPropertySubscriptions.active(subscriberUserId);
+            if (activeProperty.isPresent() && activeProperty.get().getProductKey() != product(plan)) {
+                throw new PMSCustomException(ResponseCode.PROPERTY_SUBSCRIPTION_ALREADY_ACTIVE);
+            }
         }
         if (purchaseMode(plan) == SubscriptionPurchaseMode.SALES_MANAGED) {
             throw new PMSCustomException(ResponseCode.SUBSCRIPTION_SALES_MANAGED_REQUIRED);
@@ -455,6 +469,23 @@ public class SubscriptionProvisioningService {
     private int tierRank(SubscriptionPlan plan) {
         if (plan == null) return -1;
         return plan.getTierRank() == null ? 0 : plan.getTierRank();
+    }
+
+    private Optional<UserSubscription> currentOrLatestPropertySubscription(long userId) {
+        Optional<UserSubscription> active = sharedPropertySubscriptions.active(userId);
+        if (active.isPresent()) return active;
+        return userSubscriptionRepo.findAllByCreatedByOrderByCreatedOnDesc(userId).stream()
+                .filter(subscription -> sharedPropertySubscriptions.supports(subscription.getProductKey()))
+                .findFirst();
+    }
+
+    private boolean hasUsedPropertyTrial(long userId) {
+        return userSubscriptionRepo.findAllByCreatedByOrderByCreatedOnDesc(userId).stream()
+                .anyMatch(subscription -> sharedPropertySubscriptions.supports(subscription.getProductKey()));
+    }
+
+    private boolean propertyRole(PMSRole role) {
+        return role == PMSRole.LANDLORD || role == PMSRole.ESTATE_MANAGER || role == PMSRole.SALES_AGENT;
     }
 
     private String normalizePlanCode(String code) {

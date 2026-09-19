@@ -50,6 +50,7 @@ public class SubscriptionManagementService {
     private final SubscriptionProvisioningService provisioningService;
     private final SubscriptionInvoiceService subscriptionInvoiceService;
     private final NotificationService notificationService;
+    private final SharedPropertySubscriptionService sharedPropertySubscriptions;
 
     public SubscriptionManagementService(UserDao userDao, UserSubscriptionRepo userSubscriptionRepo,
                                          SubscriptionPlanRepo subscriptionPlanRepo,
@@ -58,7 +59,8 @@ public class SubscriptionManagementService {
                                          PMSInvoiceRepo invoiceRepo, UnitReportDao unitReportDao,
                                          SubscriptionProvisioningService provisioningService,
                                          SubscriptionInvoiceService subscriptionInvoiceService,
-                                         NotificationService notificationService) {
+                                         NotificationService notificationService,
+                                         SharedPropertySubscriptionService sharedPropertySubscriptions) {
         this.userDao = userDao;
         this.userSubscriptionRepo = userSubscriptionRepo;
         this.subscriptionPlanRepo = subscriptionPlanRepo;
@@ -69,6 +71,7 @@ public class SubscriptionManagementService {
         this.provisioningService = provisioningService;
         this.subscriptionInvoiceService = subscriptionInvoiceService;
         this.notificationService = notificationService;
+        this.sharedPropertySubscriptions = sharedPropertySubscriptions;
     }
 
     @Transactional
@@ -99,9 +102,10 @@ public class SubscriptionManagementService {
                 .filter(notes -> notes.startsWith("target:"))
                 .map(notes -> notes.substring("target:".length()))
                 .orElse(null);
-        int propertiesUsed = current.role().equals(PMSRole.LANDLORD.name())
+        boolean propertySubscription = sharedPropertySubscriptions.supports(subscription.getProductKey());
+        int propertiesUsed = propertySubscription
                 ? unitReportDao.countPropertiesByOwner(userId) : 0;
-        int unitsUsed = current.role().equals(PMSRole.LANDLORD.name())
+        int unitsUsed = propertySubscription
                 ? unitReportDao.countUnitsByOwner(userId) : 0;
         Set<String> effectiveFeatures = new LinkedHashSet<>();
         if (current.planDetails() != null && current.planDetails().features() != null) {
@@ -301,6 +305,9 @@ public class SubscriptionManagementService {
     }
 
     private UserSubscription active(long userId, PMSRole role, SubscriptionProduct product) {
+        if (sharedPropertySubscriptions.supports(product)) {
+            return sharedPropertySubscriptions.requireActive(userId);
+        }
         if (product != null) {
             return userSubscriptionRepo.findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
                             userId, product, SubscriptionStatus.ACTIVE)
@@ -312,6 +319,10 @@ public class SubscriptionManagementService {
     }
 
     private UserSubscription latest(long userId, PMSRole role, SubscriptionProduct product) {
+        if (sharedPropertySubscriptions.supports(product)) {
+            return sharedPropertySubscriptions.active(userId)
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_CURRENT_ABSENT));
+        }
         if (product != null) {
             return userSubscriptionRepo.findTopByCreatedByAndProductKeyOrderByStartAtDesc(userId, product)
                     .orElseThrow(() -> new PMSCustomException(ResponseCode.SUBSCRIPTION_CURRENT_ABSENT));

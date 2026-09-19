@@ -324,7 +324,7 @@ public class PropertyService {
     public ResponseDTO createUnit(UnitDTO unitDTO, MultipartFile image) {
         long subscriptionOwner = subscriptionEntitlements.subscriptionOwnerUserId();
         subscriptionEntitlements.requireAvailableUnitQuota(unitDTO.leaseMode(),
-                () -> unitReportDao.countUnitsByOwnerAndLeaseMode(subscriptionOwner, unitDTO.leaseMode().name()), 1);
+                () -> unitReportDao.countUnitsByOwner(subscriptionOwner), 1);
         Pair<ResponseDTO, Property> validationResult = validateUnitAndImage(unitDTO, image);
         if (validationResult.getLeft() != null) {
             return validationResult.getLeft();
@@ -422,8 +422,8 @@ public class PropertyService {
         }
         long subscriptionOwner = subscriptionEntitlements.subscriptionOwnerUserId();
         subscriptionEntitlements.requireAvailableUnitQuota(sourceMode,
-                () -> unitReportDao.countUnitsByOwnerAndLeaseMode(subscriptionOwner, sourceMode.name())
-                        + unitDao.countPendingUnitCopiesByPropertyOwnerAndLeaseMode(subscriptionOwner, sourceMode.name()), count);
+                () -> unitReportDao.countUnitsByOwner(subscriptionOwner)
+                        + unitDao.countPendingUnitCopiesByPropertyOwner(subscriptionOwner), count);
 
         BulkUnitJob bulkUnitJob = new BulkUnitJob();
         bulkUnitJob.setUnitId(unitFromDb.get().getId());
@@ -540,8 +540,7 @@ public class PropertyService {
         if (modeChanged) {
             long subscriptionOwner = subscriptionEntitlements.subscriptionOwnerUserId();
             subscriptionEntitlements.requireAvailableUnitQuota(unitDTO.leaseMode(),
-                    () -> unitReportDao.countUnitsByOwnerAndLeaseMode(
-                            subscriptionOwner, unitDTO.leaseMode().name()), 1);
+                    () -> unitReportDao.countUnitsByOwner(subscriptionOwner), 0);
         } else {
             subscriptionEntitlements.requireUnitMode(unitDTO.leaseMode());
         }

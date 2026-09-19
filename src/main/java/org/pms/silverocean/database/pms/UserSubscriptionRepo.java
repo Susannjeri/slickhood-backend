@@ -6,7 +6,9 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Page;
 import org.pms.silverocean.service.subscription.SubscriptionSubscriberView;
@@ -47,6 +49,13 @@ public interface UserSubscriptionRepo extends JpaRepository<UserSubscription, Lo
     Optional<UserSubscription> findActiveProductForUpdate(@Param("createdBy") long createdBy,
                                                            @Param("productKey") SubscriptionProduct productKey,
                                                            @Param("status") SubscriptionStatus status);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM UserSubscription s WHERE s.createdBy=:createdBy AND s.productKey IN :products " +
+            "AND s.status=:status AND s.active=true ORDER BY s.startAt DESC")
+    List<UserSubscription> findActiveProductsForUpdate(@Param("createdBy") long createdBy,
+                                                        @Param("products") List<SubscriptionProduct> products,
+                                                        @Param("status") SubscriptionStatus status);
 
     List<UserSubscription> findAllByStatusAndActiveTrueAndEndAtLessThanEqual(
             SubscriptionStatus status, ZonedDateTime endAt);

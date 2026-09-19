@@ -34,10 +34,12 @@ class SubscriptionEntitlementServiceTest {
     @Mock WorkspaceMembershipRepo memberships;
     @Mock CustomerWorkspaceRepo workspaces;
     @Mock WorkspaceSelectionService workspaceSelection;
+    @Mock SharedPropertySubscriptionService sharedPropertySubscriptions;
     SubscriptionEntitlementService service;
 
     @BeforeEach void setup() {
-        service = new SubscriptionEntitlementService(users, subscriptions, plans, features, quotas, memberships, workspaces, workspaceSelection);
+        service = new SubscriptionEntitlementService(users, subscriptions, plans, features, quotas, memberships,
+                workspaces, workspaceSelection, sharedPropertySubscriptions);
         when(users.getUserId()).thenReturn(7L);
     }
 
