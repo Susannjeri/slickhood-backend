@@ -1,4 +1,4 @@
--- One property subscription covers Rental/Landlord, Estate/Homeowner and Property Sales.
++-- One property subscription covers Rental/Landlord, Estate/Homeowner and Property Sales.
 -- Existing invoices and subscription rows remain untouched; role permissions continue
 -- to govern the operations available in each workspace.
 INSERT INTO pms_plan_feature
@@ -19,3 +19,5 @@ WHERE plan.active = 1
         AND existing.active = 1
         AND existing.enabled = 1
   );
+
+
