@@ -91,6 +91,16 @@ jobs:
             print("failedMigrations=" + str(len(rows)))
             for row in rows:
                 print("failedMigration=" + row)
+            print("wealthAssetTypeSchemaStart")
+            print(mysql("SHOW COLUMNS FROM pms_wealth_asset_type"))
+            print("wealthAssetTypeSchemaEnd")
+            expected_codes = (
+                "PROPERTY","LAND","LISTED_SECURITY","FUND","GOVERNMENT_SECURITY","INVESTMENT",
+                "SACCO","PENSION","CASH","BUSINESS","VEHICLE","DIGITAL_ASSET","OTHER",
+            )
+            present = set(mysql("SELECT code FROM pms_wealth_asset_type ORDER BY code").splitlines())
+            print("wealthAssetTypesPresent=" + ",".join(sorted(present & set(expected_codes))))
+            print("wealthAssetTypesMissing=" + ",".join(sorted(set(expected_codes) - present)))
 
             if os.environ["RECOVERY_ACTION"] == "inspect":
                 raise SystemExit(0)
