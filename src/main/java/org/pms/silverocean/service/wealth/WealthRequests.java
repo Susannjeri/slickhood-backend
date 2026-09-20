@@ -1,6 +1,7 @@
 package org.pms.silverocean.service.wealth;
 
 import jakarta.validation.constraints.*;
+import org.pms.silverocean.config.BusinessDate;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
@@ -15,9 +16,9 @@ public final class WealthRequests {
             @Size(max=500) String location,
             @NotBlank @Pattern(regexp="[A-Za-z]{3}") String currency,
             @PositiveOrZero BigDecimal acquisitionCost,
-            @PastOrPresent LocalDate acquisitionDate,
+            @BusinessDate(message="acquisition date cannot be in the future") LocalDate acquisitionDate,
             @NotNull @PositiveOrZero BigDecimal currentValue,
-            @NotNull @PastOrPresent LocalDate valuationDate,
+            @NotNull @BusinessDate(message="valuation date cannot be in the future") LocalDate valuationDate,
             @Pattern(regexp="ACTIVE|MATURED|SOLD|CLOSED") String status,
             @Pattern(regexp="[A-Za-z0-9._-]{1,20}", message="must be a short exchange code with no spaces, for example NSE") String exchangeCode,
             @Pattern(regexp="[A-Za-z0-9.^:_-]{1,40}", message="must be the fund or security ticker with no spaces") String instrumentSymbol,
@@ -26,12 +27,12 @@ public final class WealthRequests {
             @Pattern(regexp="MANUAL|MARKET") String pricingMode) {}
 
     public record ValuationRequest(@NotNull @PositiveOrZero BigDecimal amount,
-            @NotNull @PastOrPresent LocalDate valuationDate, @NotBlank @Size(max=60) String source,
+            @NotNull @BusinessDate(message="valuation date cannot be in the future") LocalDate valuationDate, @NotBlank @Size(max=60) String source,
             @Size(max=1000) String notes) {}
 
     public record CashFlowRequest(@NotBlank @Pattern(regexp="INCOME|EXPENSE") String flowType,
             @NotBlank @Size(max=60) String category, @NotNull @Positive BigDecimal amount,
-            @NotNull @PastOrPresent LocalDate entryDate, @Size(max=500) String description, boolean recurring) {}
+            @NotNull @BusinessDate(message="entry date cannot be in the future") LocalDate entryDate, @Size(max=500) String description, boolean recurring) {}
 
     public record LiabilityRequest(@NotBlank @Size(max=100) String lender,
             @NotBlank @Pattern(regexp="[A-Za-z]{3}") String currency,
@@ -49,7 +50,7 @@ public final class WealthRequests {
     public record GoalRequest(@NotBlank @Pattern(regexp="NET_WORTH|INCOME|EQUITY|DEBT_REDUCTION") String goalType,
             @NotBlank @Size(max=160) String name, @NotNull @PositiveOrZero BigDecimal targetAmount,
             @NotBlank @Pattern(regexp="[A-Za-z]{3}") String currency,
-            @NotNull @FutureOrPresent LocalDate targetDate) {}
+            @NotNull @BusinessDate(direction=BusinessDate.Direction.FUTURE_OR_PRESENT, message="target date cannot be in the past") LocalDate targetDate) {}
 
     public record LiabilityBalanceRequest(@NotNull @PositiveOrZero BigDecimal outstandingPrincipal,
             @PositiveOrZero BigDecimal monthlyPayment, LocalDate maturityDate) {}

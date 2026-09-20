@@ -71,6 +71,17 @@ class PaymentReceiptServiceTest {
         verify(renderer, never()).toPdf(any(), any());
     }
 
+    @Test void refusesReceiptBelongingToAnotherWorkspaceParticipant() throws Exception {
+        when(payments.findPaymentByIdForAuthorizedUser(88L, 7L)).thenReturn(Optional.empty());
+
+        assertThrows(PMSCustomException.class,
+                () -> service.render(88L, new ByteArrayOutputStream()));
+
+        verify(invoices, never()).getInvoiceByRef(any());
+        verify(renderer, never()).render(any(), any());
+        verify(renderer, never()).toPdf(any(), any());
+    }
+
     private PMSPayment successfulPayment() {
         PMSPayment payment = new PMSPayment();
         payment.setId(31L); payment.setBillReference("INV-100"); payment.setAmount(1250d);
