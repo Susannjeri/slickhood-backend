@@ -78,6 +78,13 @@ public class PublicInsuranceController {
         return ok(guests.uploadProposal(token, caseId, file));
     }
 
+    @PostMapping(value = "/cases/{caseId}/invoice", consumes = "multipart/form-data")
+    public ResponseEntity<ResponseDTO> uploadInvoice(@RequestHeader("X-Insurance-Access") String token,
+                                                      @PathVariable long caseId,
+                                                      @RequestParam MultipartFile file) throws IOException {
+        return ok(guests.uploadInvoice(token, caseId, file));
+    }
+
     @PostMapping("/cases/{caseId}/select-quote")
     public ResponseEntity<ResponseDTO> selectQuote(@RequestHeader("X-Insurance-Access") String token,
                                                     @PathVariable long caseId,

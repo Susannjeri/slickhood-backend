@@ -183,6 +183,12 @@ public class InsuranceGuestAccessService {
     }
 
     @Transactional("pmsDBTransactionManager")
+    public DocumentView uploadInvoice(String token, long caseId, MultipartFile file) throws IOException {
+        InsuranceGuestAccess access = verifiedForCase(token, caseId);
+        return operations.uploadGuestInvoice(caseId, access.getId(), file);
+    }
+
+    @Transactional("pmsDBTransactionManager")
     public GuestCaseView selectQuote(String token, long caseId, SelectQuoteRequest request) {
         InsuranceGuestAccess access = verifiedForCase(token, caseId);
         return new GuestCaseView(operations.selectGuestQuote(caseId, access.getId(), request), true);
