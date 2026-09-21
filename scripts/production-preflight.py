@@ -40,6 +40,8 @@ DEFAULT_FILES = (
     Path("/etc/slickhood/secrets/s3-credentials.env"),
     Path("/etc/slickhood/secrets/alpha-vantage.env"),
     Path("/etc/slickhood/secrets/insurance-imap.env"),
+    Path("/etc/slickhood/secrets/paystack.env"),
+    Path("/etc/slickhood/secrets/whatsapp.env"),
     Path("/home/silverocean/backend/config/application.properties"),
 )
 PLACEHOLDER = re.compile(r"^\$\{([^}:]+)(?::([^}]*))?}$")
