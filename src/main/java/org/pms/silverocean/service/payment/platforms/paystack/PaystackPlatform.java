@@ -33,6 +33,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
@@ -164,6 +165,7 @@ public class PaystackPlatform extends PaymentPlatform {
     }
 
     @Override
+    @Transactional("pmsDBTransactionManager")
     public PaymentCallBackResponse handleCallBack(PaymentCallBackRequest request) {
         if (!(request instanceof PaystackCallbackDTO callback)) {
             throw new PMSCustomException(ResponseCode.GENERAL_FAILURE);
@@ -174,7 +176,7 @@ public class PaystackPlatform extends PaymentPlatform {
                 return new PaystackCallbackResponse("Event acknowledged");
             }
             long paymentId = Long.parseLong(event.data().reference());
-            paymentDao.findPaymentByID(paymentId)
+            paymentDao.findPaymentByIDForUpdate(paymentId)
                     .filter(PMSPayment::isInProgress)
                     .filter(payment -> PaymentChannel.PAYSTACK.getName().equals(payment.getChannel()))
                     .ifPresent(payment -> verifyAndSettle(payment, callback.sourceIp()));
@@ -190,6 +192,7 @@ public class PaystackPlatform extends PaymentPlatform {
      * The reference is SlickHood's payment id, access is restricted to the billed user, and the
      * final state is obtained directly from Paystack using the server-side secret.
      */
+    @Transactional("pmsDBTransactionManager")
     public PaystackReturnConfirmation confirmBrowserReturn(String reference, String sourceIp) {
         final long paymentId;
         try {
@@ -201,7 +204,10 @@ public class PaystackPlatform extends PaymentPlatform {
             throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);
         }
 
-        PMSPayment payment = paymentDao.findPaymentByIDAndUserId(paymentId, userDao.getUserId())
+        PMSPayment authorised = paymentDao.findPaymentByIDAndUserId(paymentId, userDao.getUserId())
+                .filter(candidate -> PaymentChannel.PAYSTACK.getName().equals(candidate.getChannel()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED));
+        PMSPayment payment = paymentDao.findPaymentByIDForUpdate(authorised.getId())
                 .filter(candidate -> PaymentChannel.PAYSTACK.getName().equals(candidate.getChannel()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED));
 

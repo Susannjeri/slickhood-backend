@@ -44,6 +44,10 @@ public class PaymentDao {
         return pmsPaymentRepo.findById(paymentId);
     }
 
+    public Optional<PMSPayment> findPaymentByIDForUpdate(long paymentId) {
+        return pmsPaymentRepo.findByIdForUpdate(paymentId);
+    }
+
     public Optional<PMSPayment> findPaymentByIDAndUserId(long paymentId, long userId) {
         return pmsPaymentRepo.findByIdAndUserId(paymentId, userId);
     }

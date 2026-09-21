@@ -30,7 +30,7 @@ class PaystackRoutingTest {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);
         when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
-        when(payments.findPaymentByID(601L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
         when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, state, "601", 10000L, "KES", "Awaiting completion", "test")))
@@ -127,7 +127,7 @@ class PaystackRoutingTest {
 
     @Test void providerDomainMustMatchTheConfiguredTestKey() {
         invoice.setSubscriptionPlanCode("BRONZE"); platform.processPayment(invoice, null, 71L);
-        when(payments.findPaymentByID(601L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
         when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "live")))
@@ -141,6 +141,7 @@ class PaystackRoutingTest {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);
         when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
         when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test")))
@@ -177,6 +178,7 @@ class PaystackRoutingTest {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);
         when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
         when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, "failed", "601", 10000L, "KES", "Declined", "test")))
@@ -194,7 +196,7 @@ class PaystackRoutingTest {
     @Test void reversalOrRefundEventsRequireTheAuthorisedManualFinanceWorkflow() {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);
-        when(payments.findPaymentByID(601L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
 
         var response = platform.handleCallBack(new PaystackCallbackDTO(
                 "{\"event\":\"refund.processed\",\"data\":{\"reference\":\"601\",\"status\":\"processed\"}}",

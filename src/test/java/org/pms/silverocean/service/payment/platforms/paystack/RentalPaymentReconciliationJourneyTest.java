@@ -119,6 +119,7 @@ class RentalPaymentReconciliationJourneyTest {
             return payment;
         });
         when(paymentRepo.findById(601L)).thenAnswer(ignored -> Optional.ofNullable(storedPayment.get()));
+        when(paymentRepo.findByIdForUpdate(601L)).thenAnswer(ignored -> Optional.ofNullable(storedPayment.get()));
 
         PaymentDao payments = new PaymentDao(paymentRepo);
         NotificationService notifications = mock(NotificationService.class);

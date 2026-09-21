@@ -70,6 +70,32 @@ class MPesaServiceDestinationSecurityTest {
     }
 
     @Test
+    void mpesaIsHiddenWhenItsCallbackIsNotPublicHttps() {
+        when(configService.getConfigByName(PMSConfigs.PAYMENT_MPESA_ENABLED))
+                .thenReturn(Optional.of(config(PMSConfigs.PAYMENT_MPESA_ENABLED, "TRUE")));
+        when(configService.getConfigByName(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL))
+                .thenReturn(Optional.of(config(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL,
+                        "http://127.0.0.1:8989/callback/stk")));
+
+        assertThat(service.isActive()).isFalse();
+    }
+
+    @Test
+    void mpesaIsAvailableOnlyWithAnExplicitPublicHttpsCallback() {
+        when(configService.getConfigByName(PMSConfigs.PAYMENT_MPESA_ENABLED))
+                .thenReturn(Optional.of(config(PMSConfigs.PAYMENT_MPESA_ENABLED, "TRUE")));
+        when(configService.getConfigByName(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL))
+                .thenReturn(Optional.of(config(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL,
+                        "https://app.slickhood.com/api/callback/stk?token=fixture")));
+
+        assertThat(service.isActive()).isTrue();
+    }
+
+    private ConfigDTO config(PMSConfigs key, String value) {
+        return new ConfigDTO(1L, key.getName(), value, 0, false);
+    }
+
+    @Test
     void nonKesInvoiceIsRejectedBeforeStkInitialization() {
         PMSInvoice invoice = invoice(); invoice.setCurrency("EUR");
         assertThatThrownBy(() -> service.initPayment(invoice, "+254722788650", 91L))

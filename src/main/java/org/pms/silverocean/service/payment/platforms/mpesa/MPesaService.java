@@ -210,7 +210,16 @@ public class MPesaService extends PaymentPlatform {
 
     @Override
     protected boolean isActive() {
-        return PMSUtils.booleanizeConfig(configService.getConfigByName(PMSConfigs.PAYMENT_MPESA_ENABLED).get());
+        if (!PMSUtils.booleanizeConfig(configService.getConfigByName(PMSConfigs.PAYMENT_MPESA_ENABLED).get())) {
+            return false;
+        }
+        String callback = configService.getConfigByName(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL)
+                .map(org.pms.silverocean.service.config.ConfigDTO::stringValue).orElse("");
+        // Safaricom must be able to reach the callback over TLS. Local defaults are
+        // development placeholders and must never expose M-Pesa as a usable channel.
+        return StringUtils.startsWithIgnoreCase(callback, "https://")
+                && !StringUtils.containsIgnoreCase(callback, "localhost")
+                && !StringUtils.contains(callback, "127.0.0.1");
     }
 
     @Override

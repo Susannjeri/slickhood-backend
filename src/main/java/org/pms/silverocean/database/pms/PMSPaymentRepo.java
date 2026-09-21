@@ -6,6 +6,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
 
 import java.time.ZonedDateTime;
 import java.util.List;
@@ -13,6 +15,10 @@ import java.util.Optional;
 
 public interface PMSPaymentRepo extends JpaRepository<PMSPayment, Long>, JpaSpecificationExecutor<PMSPayment> {
     Optional<PMSPayment> findByThirdPartyTransId(String thirdPartyTransId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM PMSPayment p WHERE p.id=:paymentId")
+    Optional<PMSPayment> findByIdForUpdate(long paymentId);
     Optional<PMSPayment> findFirstByBillReferenceAndChannelAndInProgressTrueOrderByCreatedOnDesc(
             String billReference, String channel);
 
