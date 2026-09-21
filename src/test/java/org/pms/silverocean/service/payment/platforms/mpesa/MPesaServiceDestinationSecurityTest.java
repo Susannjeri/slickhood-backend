@@ -72,10 +72,10 @@ class MPesaServiceDestinationSecurityTest {
     @Test
     void mpesaIsHiddenWhenItsCallbackIsNotPublicHttps() {
         when(configService.getConfigByName(PMSConfigs.PAYMENT_MPESA_ENABLED))
-                .thenReturn(Optional.of(config(PMSConfigs.PAYMENT_MPESA_ENABLED, "TRUE")));
+                .thenReturn(() -> config(PMSConfigs.PAYMENT_MPESA_ENABLED, "TRUE"));
         when(configService.getConfigByName(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL))
-                .thenReturn(Optional.of(config(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL,
-                        "http://127.0.0.1:8989/callback/stk")));
+                .thenReturn(() -> config(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL,
+                        "http://127.0.0.1:8989/callback/stk"));
 
         assertThat(service.isActive()).isFalse();
     }
@@ -83,10 +83,10 @@ class MPesaServiceDestinationSecurityTest {
     @Test
     void mpesaIsAvailableOnlyWithAnExplicitPublicHttpsCallback() {
         when(configService.getConfigByName(PMSConfigs.PAYMENT_MPESA_ENABLED))
-                .thenReturn(Optional.of(config(PMSConfigs.PAYMENT_MPESA_ENABLED, "TRUE")));
+                .thenReturn(() -> config(PMSConfigs.PAYMENT_MPESA_ENABLED, "TRUE"));
         when(configService.getConfigByName(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL))
-                .thenReturn(Optional.of(config(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL,
-                        "https://app.slickhood.com/api/callback/stk?token=fixture")));
+                .thenReturn(() -> config(PMSConfigs.MPESA_STK_CALLBACK_BASE_URL,
+                        "https://app.slickhood.com/api/callback/stk?token=fixture"));
 
         assertThat(service.isActive()).isTrue();
     }
