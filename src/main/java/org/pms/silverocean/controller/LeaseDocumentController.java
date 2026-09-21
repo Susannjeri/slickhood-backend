@@ -98,7 +98,7 @@ public class LeaseDocumentController extends OutputStreamErrorHandler {
     }
 
     @GetMapping("/templates")
-    @PreAuthorize("hasAuthority(" + PERMISSION + ".CREATE_LEASE_DOCUMENT) or hasAuthority(" + PERMISSION + ".MANAGE_LEASE_DOCUMENT_TEMPLATE)")
+    @PreAuthorize("hasAuthority(" + PERMISSION + ".CREATE_LEASE_DOCUMENT) or hasAuthority(" + PERMISSION + ".MANAGE_LEASE_DOCUMENT_TEMPLATE) or hasAuthority(" + PERMISSION + ".VIEW_DOCUMENT_TEMPLATE_HISTORY)")
     public ResponseEntity<ResponseDTO> templates() {
         return ok(ResponseCode.GENERAL_SUCCESS, service.templates());
     }

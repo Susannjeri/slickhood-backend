@@ -362,7 +362,18 @@ public class LeaseDocumentService {
     }
 
     public List<LeaseDocumentTemplate> templates() {
-        return templateRepo.findAllByActiveTrueOrderByDocumentTypeAscVersionDesc();
+        List<LeaseDocumentTemplate> activeTemplates = templateRepo.findAllByActiveTrueOrderByDocumentTypeAscVersionDesc();
+        PMSRole role = userDao.getActiveRole();
+        if (role == PMSRole.SUPER_ADMIN || role == PMSRole.SUPPORT) {
+            return activeTemplates;
+        }
+        // The repository order is document type ascending and version descending, so the
+        // first row for each type is the current effective version. Historical wording is
+        // deliberately restricted to SlickHood governance and support staff.
+        java.util.EnumSet<LeaseDocumentType> included = java.util.EnumSet.noneOf(LeaseDocumentType.class);
+        return activeTemplates.stream()
+                .filter(template -> included.add(template.getDocumentType()))
+                .toList();
     }
 
     private LeaseDocument accessible(long id) {

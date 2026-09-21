@@ -387,6 +387,37 @@ class LeaseDocumentServiceTest {
         assertEquals(DocumentTemplateIntegrity.sha256(body), saved.getContentSha256());
     }
 
+    @Test void ordinaryPropertyUserSeesOnlyTheCurrentTemplateVersionForEachType() {
+        LeaseDocumentTemplate leaseV3 = template(31L, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT, 3);
+        LeaseDocumentTemplate leaseV2 = template(30L, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT, 2);
+        LeaseDocumentTemplate saleV4 = template(44L, LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER, 4);
+        when(templates.findAllByActiveTrueOrderByDocumentTypeAscVersionDesc())
+                .thenReturn(List.of(leaseV3, leaseV2, saleV4));
+        when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
+
+        List<LeaseDocumentTemplate> visible = service.templates();
+
+        assertEquals(List.of(leaseV3, saleV4), visible);
+    }
+
+    @Test void superadminAndSupportCanReviewAllActiveTemplateVersions() {
+        LeaseDocumentTemplate current = template(31L, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT, 3);
+        LeaseDocumentTemplate historical = template(30L, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT, 2);
+        List<LeaseDocumentTemplate> history = List.of(current, historical);
+        when(templates.findAllByActiveTrueOrderByDocumentTypeAscVersionDesc()).thenReturn(history);
+
+        when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);
+        assertEquals(history, service.templates());
+        when(users.getActiveRole()).thenReturn(PMSRole.SUPPORT);
+        assertEquals(history, service.templates());
+    }
+
+    private LeaseDocumentTemplate template(long id, LeaseDocumentType type, int version) {
+        LeaseDocumentTemplate template = new LeaseDocumentTemplate();
+        template.setId(id); template.setDocumentType(type); template.setVersion(version); template.setActive(true);
+        return template;
+    }
+
     @Test void rejectsTemplateContentThatNoLongerMatchesItsApprovedHash() {
         when(documents.existsOpen(11L, LeaseDocumentType.RESIDENTIAL_LEASE_AGREEMENT)).thenReturn(false);
         LeaseDocumentTemplate template = new LeaseDocumentTemplate();

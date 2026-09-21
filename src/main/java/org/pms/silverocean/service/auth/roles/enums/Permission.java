@@ -88,6 +88,7 @@ public class Permission {
     public static final String ACKNOWLEDGE_LEASE_DOCUMENT = "acknowledge_lease_document";
     public static final String SIGN_LEASE_DOCUMENT = "sign_lease_document";
     public static final String MANAGE_LEASE_DOCUMENT_TEMPLATE = "manage_lease_document_template";
+    public static final String VIEW_DOCUMENT_TEMPLATE_HISTORY = "view_document_template_history";
     public static final String VIEW_ESTATE = "view_estate";
     public static final String MANAGE_ESTATE = "manage_estate";
     public static final String CREATE_SERVICE_CHARGE = "create_service_charge";
