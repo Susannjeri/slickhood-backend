@@ -1,0 +1,70 @@
+name: Paystack sandbox smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  initialize-test-transaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Initialize from whitelisted Lightsail host
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          PAYSTACK_TEST_SECRET_KEY: ${{ secrets.PAYSTACK_TEST_SECRET_KEY }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: PAYSTACK_TEST_SECRET_KEY
+          command_timeout: 2m
+          script: |
+            set -eu
+            test -n "$PAYSTACK_TEST_SECRET_KEY"
+            request="$(mktemp)"
+            response="$(mktemp)"
+            curl_config="$(mktemp)"
+            cleanup() {
+              rm -f "$request" "$response" "$curl_config"
+            }
+            trap cleanup EXIT
+            chmod 0600 "$request" "$response" "$curl_config"
+            reference="slickhood-smoke-$(date -u +%Y%m%dT%H%M%SZ)"
+            python3 - "$request" "$reference" <<'PY'
+            import json
+            import sys
+
+            with open(sys.argv[1], "w", encoding="utf-8") as target:
+                json.dump({
+                    "email": "paystack-smoke@slickhood.com",
+                    "amount": "100",
+                    "currency": "KES",
+                    "reference": sys.argv[2],
+                    "channels": ["card"],
+                    "callback_url": "https://app.slickhood.com/payment/callback",
+                    "metadata": json.dumps({"purpose": "credential-and-initialization-smoke-test"}),
+                }, target)
+            PY
+            printf 'header = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\n' \
+              "$PAYSTACK_TEST_SECRET_KEY" >"$curl_config"
+            http="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
+              --config "$curl_config" --data-binary "@$request" \
+              https://api.paystack.co/transaction/initialize || true)"
+            test "$http" = 200 || { echo "Paystack initialization failed (HTTP $http)" >&2; exit 1; }
+            python3 - "$response" <<'PY'
+            import json
+            import sys
+
+            with open(sys.argv[1], encoding="utf-8") as source:
+                payload = json.load(source)
+            data = payload.get("data") or {}
+            if payload.get("status") is not True or not data.get("authorization_url") or not data.get("reference"):
+                raise SystemExit("Paystack returned an incomplete initialization response")
+            print("Paystack sandbox initialization accepted")
+            print("reference=" + data["reference"])
+            print("authorization_url=" + data["authorization_url"])
+            print("No payment was completed and no charge was made")
+            PY
