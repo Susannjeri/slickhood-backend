@@ -400,6 +400,7 @@ The dashboard is a recordkeeping and planning aid, not a valuation certificate o
 Audience: All users, including registration guests.
 
 1. Open Insurance Hub and submit a request for the relevant cover using accurate risk details and the required protected documents.
+   - For Marine Cargo Insurance, upload each Import Declaration Form (IDF/IM0), review the extracted consignment details, and attach the supplier's commercial invoice separately. The commercial invoice accepts PDF, JPG or PNG files up to 10 MB. SlickHood will not send the request to an insurer until both the declaration and commercial invoice are present.
 2. Track the request while authorised insurance staff review it. A request is not cover and an indicative amount is not a binding policy.
 3. Review the offered quotes and insurer, cover scope, exclusions, excess, premium and dates. Ask an authorised adviser if anything is unclear.
 4. Select the intended quote through the application. Use the premium payment instructions/account linked to that transaction.
@@ -409,6 +410,8 @@ Audience: All users, including registration guests.
 8. For a claim, use the claim workflow and provide accurate incident details and requested evidence. Track review status and requests for further information.
 
 Silverwood's authorised insurance operations team handles review and policy decisions. Insurer brands identify insurers; SlickHood's platform role is not the same as underwriting insurance.
+
+CIC Insurance is one of the participating insurers shown in the catalogue. Its logo identifies the insurer only; it does not mean CIC has accepted the risk or issued cover. Silverwood coordinates quotation requests and presents only the quotations actually returned for the specific application.
 
 For urgent claims, disputed premiums, coverage interpretation or a policy not received after payment, request human support with the case/reference. Do not send identity numbers, payment secrets or medical/private documents in ordinary chat. The chatbot cannot bind cover, accept a claim or give a definitive coverage decision.
 

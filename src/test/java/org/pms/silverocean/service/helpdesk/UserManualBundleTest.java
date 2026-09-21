@@ -68,4 +68,16 @@ class UserManualBundleTest {
         assertTrue(publishing.contains("locally verified but not evidence of deployment"));
         assertTrue(publishing.contains("does not replace them with the revised packaged text"));
     }
+
+    @Test void insuranceGuidanceCoversMarineCargoDocumentsAndCicBoundary() throws Exception {
+        String insurance="";
+        for (JsonNode chapter:bundle().path("chapters")) {
+            JsonNode article=chapter.path("article");
+            if(article.path("slug").asText().equals("manual-insurance"))insurance=article.path("body").asText();
+        }
+        assertTrue(insurance.contains("Import Declaration Form (IDF/IM0)"));
+        assertTrue(insurance.contains("commercial invoice"));
+        assertTrue(insurance.contains("CIC Insurance"));
+        assertTrue(insurance.contains("does not mean CIC has accepted the risk or issued cover"));
+    }
 }
