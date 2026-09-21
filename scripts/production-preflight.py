@@ -346,7 +346,10 @@ def check_external_apis(preflight: Preflight, config: dict[str, str]) -> None:
             except ValueError:
                 preflight.fail("Alpha Vantage credential validity", "provider returned invalid JSON")
 
-    paystack_enabled = resolve(config, "payment.paystack.enabled", "PAYSTACK_ENABLED", default="false").lower() == "true"
+    # The root-owned service environment is authoritative for emergency or
+    # staged provider shutdowns; application.properties can retain an older
+    # default without re-enabling a payment channel during deployment.
+    paystack_enabled = resolve(config, "PAYSTACK_ENABLED", "payment.paystack.enabled", default="false").lower() == "true"
     if paystack_enabled:
         paystack_key = required(preflight, config, "Paystack key", "payment.paystack.secret-key", "PAYSTACK_SECRET_KEY")
         paystack_base = resolve(config, "payment.paystack.api-url", "PAYSTACK_API_URL", default="https://api.paystack.co").rstrip("/")
