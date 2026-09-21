@@ -80,4 +80,23 @@ class UserManualBundleTest {
         assertTrue(insurance.contains("CIC Insurance"));
         assertTrue(insurance.contains("does not mean CIC has accepted the risk or issued cover"));
     }
+
+    @Test void propertyJourneysExplainTheSharedSubscriptionAndUnitAllowance() throws Exception {
+        String subscriptions="",rental="",estate="",sales="";
+        for (JsonNode chapter:bundle().path("chapters")) {
+            JsonNode article=chapter.path("article");
+            switch (article.path("slug").asText()) {
+                case "manual-subscriptions" -> subscriptions=article.path("body").asText();
+                case "manual-rental-setup" -> rental=article.path("body").asText();
+                case "manual-estate-setup" -> estate=article.path("body").asText();
+                case "manual-sales-setup" -> sales=article.path("body").asText();
+                default -> { }
+            }
+        }
+        assertTrue(subscriptions.contains("one active property subscription covers"));
+        assertTrue(subscriptions.contains("unit allowance is shared"));
+        assertTrue(rental.contains("shared unit allowance"));
+        assertTrue(estate.contains("same property subscription can cover rental, estate and sale work"));
+        assertTrue(sales.contains("shared unit allowance"));
+    }
 }

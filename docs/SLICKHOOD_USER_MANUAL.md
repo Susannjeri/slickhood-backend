@@ -132,8 +132,8 @@ For a persistent problem, provide support with document type, approximate upload
 Audience: All users, including registration guests.
 
 1. Choose the intended business area before opening Upgrade Plan or the package selection step.
-2. Compare the displayed price, currency, billing period, quotas, staff seats and included functions. Similar Bronze, Silver or Gold names in different business areas are not the same product.
-3. Select only the package for the activity you intend to operate. Separately purchased add-ons and the primary package contribute to effective access; the backend remains authoritative.
+2. Compare the displayed price, currency, billing period, quotas, staff seats and included functions. For property operations, one active property subscription covers Landlord/Property Management, Estate Management and Property Sales; you do not need three subscriptions for those areas.
+3. The plan's unit allowance is shared across the combined property inventory in those three areas. Switching business area does not create another allowance. Separately purchased add-ons and the primary package contribute to effective access; the backend remains authoritative.
 4. Review the invoice and use the payment route offered for that invoice. A free plan and a sales-managed/custom quote are different: custom pricing must not be treated as zero-cost activation.
 5. After payment initiation, check the invoice and subscription state. A browser return or payment prompt alone is not payment confirmation.
 6. For renewal, use the current renewal or upgrade journey and check the resulting term and invoice. Do not pay repeatedly because a button still appears.
@@ -148,7 +148,7 @@ Success looks like: the intended product and term are active, with the expected 
 
 Audience: Landlord,WorkspaceAdmin,PropertyManager,LeasingOfficer,Superadmin,Support.
 
-Before setup: choose the Landlord rental workspace, complete verification, and have an eligible package and unit allowance.
+Before setup: choose the Landlord rental workspace, complete verification, and have an active property subscription with available shared unit allowance.
 
 1. Open Properties → All Properties and create the property. Enter the required description, location, currency and property type. Rental inventory must use the rental workflow, not estate service charges or sale.
 2. Save once. Open the saved property before creating it again if navigation fails. A page-load error does not prove that the save failed.
@@ -203,7 +203,7 @@ If status appears inconsistent, refresh and report the lease reference and the l
 
 Audience: EstateManager,EstateOperationsManager,WorkspaceAdmin,PropertyManager,Superadmin,Support.
 
-Before setup: activate the Estate Management business area and package, not the rental or sale package.
+Before setup: activate the Estate Management business area and an active property subscription. The same property subscription can cover rental, estate and sale work, subject to its shared unit allowance.
 
 1. Create or choose the estate property using SERVICE_CHARGE inventory. Set up its homes/units in the correct estate workspace.
 2. Open Estate Payment Setup and attach the estate's own verified operating/receiving account.
@@ -239,7 +239,7 @@ If ownership ends, historical signed evidence and obligations must not disappear
 
 Audience: SalesAgent,SalesCoordinator,ListingAgent,WorkspaceAdmin,Superadmin,Support.
 
-1. Select Property Sale Management and its eligible package. Set up SALE properties and units in the authorised workspace.
+1. Select Property Sale Management and confirm an active property subscription with available shared unit allowance. Set up SALE properties and units in the authorised workspace.
 2. Use Sales Payment Setup for the sales recipient's verified account. SlickHood's subscription account is not automatically the seller's receiving account.
 3. Prepare the listing with accurate property details, currency, price, images and location. Follow the listing moderation process where required.
 4. Inspect the saved listing and availability. A reserved/completed unit should not still be presented as freely available inventory.
