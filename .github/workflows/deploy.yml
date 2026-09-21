@@ -70,10 +70,13 @@ jobs:
 
       - name: Install, verify and roll back on failure
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          PAYSTACK_TEST_SECRET_KEY: ${{ secrets.PAYSTACK_TEST_SECRET_KEY }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: PAYSTACK_TEST_SECRET_KEY
           command_timeout: 10m
           script: |
             set -eu
@@ -88,6 +91,10 @@ jobs:
             expected_region=ca-central-1
             whatsapp_env=""
             whatsapp_dropin=""
+            paystack_env=""
+            paystack_dropin=""
+            paystack_curl_config=""
+            paystack_probe=""
             test -n "$health_url"
             test -f "$preflight"
             case "$health_url" in
@@ -156,6 +163,10 @@ jobs:
               trap - EXIT
               test -z "$whatsapp_env" || rm -f "$whatsapp_env"
               test -z "$whatsapp_dropin" || rm -f "$whatsapp_dropin"
+              test -z "$paystack_env" || rm -f "$paystack_env"
+              test -z "$paystack_dropin" || rm -f "$paystack_dropin"
+              test -z "$paystack_curl_config" || rm -f "$paystack_curl_config"
+              test -z "$paystack_probe" || rm -f "$paystack_probe"
               if [ "$status" -ne 0 ]; then
                 restore_previous_release || status=1
               fi
@@ -198,6 +209,40 @@ jobs:
             run_preflight 96
             # Backup contents never leave the host or appear in workflow logs.
             sudo python3 /tmp/slickhood-backend-release/production-backup.py
+            test -n "$PAYSTACK_TEST_SECRET_KEY"
+            paystack_curl_config="$(mktemp)"
+            paystack_probe="$(mktemp)"
+            chmod 0600 "$paystack_curl_config" "$paystack_probe"
+            printf 'header = "Authorization: Bearer %s"\n' "$PAYSTACK_TEST_SECRET_KEY" >"$paystack_curl_config"
+            paystack_http="$(curl --silent --show-error --output "$paystack_probe" --write-out '%{http_code}' \
+              --config "$paystack_curl_config" https://api.paystack.co/transaction/totals || true)"
+            rm -f "$paystack_curl_config" "$paystack_probe"
+            paystack_curl_config=""
+            paystack_probe=""
+            test "$paystack_http" = 200 || { echo "Paystack test credential was rejected from the production host (HTTP $paystack_http)" >&2; exit 1; }
+            echo 'Paystack test credential accepted from the production host'
+            umask 077
+            paystack_env="$(mktemp)"
+            {
+              printf 'PAYMENT_PAYSTACK_ENABLED=false\n'
+              printf 'PAYMENT_PAYSTACK_SECRET_KEY=%s\n' "$PAYSTACK_TEST_SECRET_KEY"
+              printf 'PAYMENT_PAYSTACK_API_URL=https://api.paystack.co\n'
+              printf 'PAYMENT_PAYSTACK_CALLBACK_URL=https://app.slickhood.com/payment/callback\n'
+              printf 'PAYMENT_PAYSTACK_CURRENCY=KES\n'
+              printf 'PAYMENT_PAYSTACK_SUPPORTED_CURRENCIES=KES,USD,NGN,GHS,ZAR\n'
+              printf 'PAYMENT_PAYSTACK_CHANNELS=card,mobile_money\n'
+              printf 'PAYMENT_PAYSTACK_FEE_BEARER=subaccount\n'
+            } >"$paystack_env"
+            sudo install -d -o root -g root -m 0700 /etc/slickhood/secrets
+            sudo install -o root -g root -m 0600 "$paystack_env" /etc/slickhood/secrets/paystack.env
+            rm -f "$paystack_env"
+            paystack_env=""
+            paystack_dropin="$(mktemp)"
+            printf '[Service]\nEnvironmentFile=/etc/slickhood/secrets/paystack.env\n' >"$paystack_dropin"
+            sudo install -d -o root -g root -m 0755 /etc/systemd/system/pms.service.d
+            sudo install -o root -g root -m 0644 "$paystack_dropin" /etc/systemd/system/pms.service.d/paystack.conf
+            rm -f "$paystack_dropin"
+            paystack_dropin=""
             umask 077
             whatsapp_env="$(mktemp)"
             {
