@@ -93,12 +93,14 @@ public final class InsuranceModels {
             @NotBlank @Pattern(regexp="[A-Z]{3}") String currency,@NotNull @FutureOrPresent LocalDate coverStartDate,
             @Size(max=8000) String riskDetails,@NotNull @Size(max=100) Map<String,Object> proposalData,
             @NotNull Boolean consent) {}
-    public record CaseStatusRequest(@NotBlank @Pattern(regexp="ADVISER_ASSIGNED|INFORMATION_REQUIRED|WITHDRAWN") String status,@Size(max=1000) String note) {}
+    public record CaseStatusRequest(@NotBlank @Pattern(regexp="INFORMATION_REQUIRED|WITHDRAWN") String status,@Size(max=1000) String note) {}
     public record MarineIdfOcrView(String idfNumber,String importerName,String importerPin,String origin,
             String portOfDischarge,String hsCode,String descriptionAndApplication,String fobValue,
             String transportMode,String netMass,String quantity,String unitOfMeasure,double confidence,
             List<String> reviewFields,String extractionReference) {}
     public record AssignmentRequest(@Positive long adviserUserId) {}
+    public record AdviserAssignmentDecision(@NotBlank @Pattern(regexp="ACCEPTED|DECLINED") String decision,
+            @Size(max=500) String reason) {}
     public record QuoteRequest(@Positive long companyId,@Size(max=80) String quoteNumber,
             @NotBlank @Pattern(regexp="[A-Z]{3}") String currency,@NotNull @DecimalMin("0.00") BigDecimal basePremium,
             @NotNull @DecimalMin("0.00") BigDecimal taxesLevies,@NotNull @DecimalMin("0.01") BigDecimal totalPremium,
@@ -134,7 +136,9 @@ public final class InsuranceModels {
             String status,String rejectionReason,String remittanceReference,LocalDateTime remittedAt,boolean proofAvailable,String proofContentType) {}
     public record CaseView(long id,String reference,String productCode,String status,String fullName,String email,String phone,
             String subjectType,String subjectDescription,BigDecimal sumInsured,String currency,LocalDate coverStartDate,String riskDetails,
-            Map<String,Object> proposalData,Long assignedAdviserId,LocalDateTime submittedAt,Long selectedQuoteId,
+            Map<String,Object> proposalData,Long assignedAdviserId,LocalDateTime assignmentOfferedAt,
+            LocalDateTime adviserAcceptedAt,LocalDateTime adviserDeclinedAt,String adviserDeclineReason,
+            LocalDateTime submittedAt,Long selectedQuoteId,
             List<QuoteView> quotes,List<PaymentView> payments) {}
     public record PolicyView(long id,long caseId,String policyNumber,String companyName,String productCode,String status,
             LocalDate startDate,LocalDate endDate,String renewalStatus) {}

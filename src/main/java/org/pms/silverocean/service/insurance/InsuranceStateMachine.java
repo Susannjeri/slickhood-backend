@@ -12,9 +12,10 @@ final class InsuranceStateMachine {
     private static final Set<String> QUOTEABLE_CASES = Set.of(
             "SUBMITTED", "ADVISER_ASSIGNED", "INFORMATION_REQUIRED", "QUOTED");
     private static final Set<String> CUSTOMER_WITHDRAWABLE_CASES = Set.of(
-            "SUBMITTED", "ADVISER_ASSIGNED", "INFORMATION_REQUIRED", "QUOTED");
+            "SUBMITTED", "ASSIGNMENT_PENDING", "ADVISER_ASSIGNED", "INFORMATION_REQUIRED", "QUOTED");
     private static final Map<String, Set<String>> CASE_TRANSITIONS = Map.of(
-            "SUBMITTED", Set.of("INFORMATION_REQUIRED", "WITHDRAWN"),
+            "SUBMITTED", Set.of("ASSIGNMENT_PENDING", "INFORMATION_REQUIRED", "WITHDRAWN"),
+            "ASSIGNMENT_PENDING", Set.of("ADVISER_ASSIGNED", "SUBMITTED", "WITHDRAWN"),
             "ADVISER_ASSIGNED", Set.of("INFORMATION_REQUIRED", "WITHDRAWN"),
             "INFORMATION_REQUIRED", Set.of("ADVISER_ASSIGNED", "WITHDRAWN"),
             "QUOTED", Set.of("WITHDRAWN"));

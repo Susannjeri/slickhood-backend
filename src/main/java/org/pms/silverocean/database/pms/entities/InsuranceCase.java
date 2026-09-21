@@ -24,6 +24,10 @@ public class InsuranceCase extends BaseCreatorEntity {
  @Lob @Column(columnDefinition="LONGTEXT") private String proposalDataJson;
  @Column(nullable=false) private LocalDateTime consentAt;
  private Long assignedAdviserId;
+ private LocalDateTime assignmentOfferedAt;
+ private LocalDateTime adviserAcceptedAt;
+ private LocalDateTime adviserDeclinedAt;
+ @Column(length=500) private String adviserDeclineReason;
  private LocalDateTime submittedAt;
  private LocalDateTime quotedAt;
  private LocalDateTime selectedAt;
