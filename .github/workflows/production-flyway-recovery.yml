@@ -11,6 +11,7 @@ on:
           - inspect
           - finalize-v99
           - repair-v101-marker
+          - repair-v107-marker
 
 permissions:
   contents: read
@@ -106,6 +107,21 @@ jobs:
             print("wealthAssetTypesInactive=" + ",".join(sorted(set(expected_codes) - active)))
 
             if os.environ["RECOVERY_ACTION"] == "inspect":
+                raise SystemExit(0)
+            if os.environ["RECOVERY_ACTION"] == "repair-v107-marker":
+                expected = "107|publish marketplace and affiliate journeys|0"
+                if rows != [expected]:
+                    raise RuntimeError("Guard refused repair: failed migration is not the expected V107 marker")
+                deleted = mysql(
+                    "DELETE FROM flyway_schema_history WHERE version='107' AND success=0; "
+                    "SELECT ROW_COUNT()"
+                ).splitlines()
+                if deleted != ["1"]:
+                    raise RuntimeError("V107 marker repair did not delete exactly one failed record")
+                remaining = mysql("SELECT COUNT(*) FROM flyway_schema_history WHERE success=0")
+                if remaining != "0":
+                    raise RuntimeError("Flyway recovery verification failed")
+                print("removedFailedMigrationMarker=V107")
                 raise SystemExit(0)
             if os.environ["RECOVERY_ACTION"] == "repair-v101-marker":
                 expected = "101|share property subscription capabilities|0"
