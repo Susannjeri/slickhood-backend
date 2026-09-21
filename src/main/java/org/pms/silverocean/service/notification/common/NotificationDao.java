@@ -62,6 +62,11 @@ public class NotificationDao {
     }
 
     @Transactional
+    public void confirmAccepted(long id) {
+        notificationRepo.confirmAccepted(id, LocalDateTime.now());
+    }
+
+    @Transactional
     public void markDeliveryFailed(long id) {
         notificationRepo.markDeliveryFailed(id, LocalDateTime.now());
     }

@@ -34,6 +34,14 @@ public class Notification extends BaseActiveEntity {
     private String type;
 
     private boolean delivered;
+    @Column(name = "provider_status", length = 32)
+    private String providerStatus;
+    @Column(name = "accepted_at")
+    private LocalDateTime acceptedAt;
+    @Column(name = "delivered_at")
+    private LocalDateTime deliveredAt;
+    @Column(name = "failed_at")
+    private LocalDateTime failedAt;
     private boolean retry;
     private int retries;
     private LocalDateTime updatedOn;

@@ -63,7 +63,9 @@ public class EmailService extends AbstractNotificationRetryService {
     @Override
     public int callProviderApi(NotificationDTO notificationDTO, long notificationId) throws IOException {
         sendEmail(notificationDTO.recipient(), notificationDTO.formattedMessage(), i18NService.getLocalizedMessage(notificationDTO.notificationType().getSubject()));
-        updateNotification(notificationId);
+        // SMTP acceptance proves that the configured mail server accepted the
+        // message for onward delivery; it does not prove inbox delivery.
+        notificationDao.confirmAccepted(notificationId);
         return 1;
     }
 
@@ -145,7 +147,4 @@ public class EmailService extends AbstractNotificationRetryService {
 
     }
 
-    private void updateNotification(long notificationId) {
-        notificationDao.confirmDelivered(notificationId);
-    }
 }

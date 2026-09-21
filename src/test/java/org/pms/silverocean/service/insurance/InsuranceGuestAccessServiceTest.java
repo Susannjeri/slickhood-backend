@@ -132,6 +132,23 @@ class InsuranceGuestAccessServiceTest {
         verify(rateLimiter).check(any(), eq(30));
     }
 
+    @Test void deliveryStatusDistinguishesMailServerAcceptanceFromDelivery() {
+        InsuranceGuestAccess access = challenge("123456");
+        access.setDeliveryChannel("EMAIL");
+        access.setNotificationId(43L);
+        access.setLastSentAt(LocalDateTime.now());
+        Notification notification = new Notification();
+        notification.setActive(true);
+        notification.setProviderStatus("ACCEPTED");
+        when(accessRepo.findByChallengeIdAndActiveTrue("challenge")).thenReturn(Optional.of(access));
+        when(notificationDao.findById(43L)).thenReturn(Optional.of(notification));
+
+        GuestDeliveryStatus result = service.deliveryStatus(new GuestAccessStatusRequest("challenge"), "127.0.0.1");
+
+        assertThat(result.deliveryStatus()).isEqualTo("ACCEPTED");
+        assertThat(result.maskedDestination()).isEqualTo("g***@example.com");
+    }
+
     @Test void verifyLocksChallengeAfterFifthIncorrectAttempt() {
         InsuranceGuestAccess access = challenge("123456");
         access.setOtpAttempts(4);

@@ -119,7 +119,9 @@ public class InsuranceGuestAccessService {
         rateLimiter.check(NotificationService.digest("insurance-guest-status-ip:" + StringUtils.defaultString(remoteAddress)), 30);
         InsuranceGuestAccess access = accessRepo.findByChallengeIdAndActiveTrue(request.challengeId()).orElseThrow(this::invalidAccess);
         String status = notificationDao.findById(access.getNotificationId() == null ? -1L : access.getNotificationId())
-                .map(notification -> notification.isDelivered() ? "DELIVERED" : notification.isActive() ? "QUEUED" : "FAILED")
+                .map(notification -> notification.isDelivered() ? "DELIVERED"
+                        : "ACCEPTED".equals(notification.getProviderStatus()) ? "ACCEPTED"
+                        : notification.isActive() ? "QUEUED" : "FAILED")
                 .orElse("FAILED");
         return new GuestDeliveryStatus(access.getDeliveryChannel(), maskedDestination(access), status,
                 access.getLastSentAt() == null ? LocalDateTime.now() : access.getLastSentAt().plusSeconds(60));

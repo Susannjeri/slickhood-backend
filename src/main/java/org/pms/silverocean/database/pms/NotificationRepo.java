@@ -23,7 +23,7 @@ public interface NotificationRepo extends JpaRepository<Notification, Long>, Jpa
 
     @Query("SELECT n.id as notificationId, n.channel as channel, n.type as notificationType, n.recipient as recipient," +
             " n.createdOn as createdOn, n.retry as retry, n.delivered as delivered, n.retries as retryCount," +
-            " s.status as status, s.description as description, s.network as network, COALESCE(s.cost, 0.0) as cost, s.currency as currency," +
+            " COALESCE(s.status,n.providerStatus) as status, s.description as description, s.network as network, COALESCE(s.cost, 0.0) as cost, s.currency as currency," +
             " s.callBackIP as callbackIP, n.updatedOn as lastUpdateOn  FROM Notification n LEFT JOIN SMS s ON n.id=s.notificationId AND s.active=true AND s.id=(SELECT MAX(latest.id) FROM SMS latest WHERE latest.notificationId=n.id AND latest.active=true) WHERE " +
             " LOWER(n.recipient) LIKE CONCAT('%', :recipient, '%') OR " +
             " LOWER(n.type) LIKE CONCAT('%', :type, '%') OR " +
@@ -33,7 +33,7 @@ public interface NotificationRepo extends JpaRepository<Notification, Long>, Jpa
 
     @Query("SELECT n.id as notificationId, n.channel as channel, n.type as notificationType, n.recipient as recipient," +
             " n.createdOn as createdOn, n.retry as retry, n.delivered as delivered, n.retries as retryCount," +
-            " s.status as status, s.description as description, s.network as network, COALESCE(s.cost, 0.0) as cost, s.currency as currency," +
+            " COALESCE(s.status,n.providerStatus) as status, s.description as description, s.network as network, COALESCE(s.cost, 0.0) as cost, s.currency as currency," +
             " s.callBackIP as callbackIP, n.updatedOn as lastUpdateOn  FROM Notification n LEFT JOIN SMS s ON n.id=s.notificationId AND s.active=true AND s.id=(SELECT MAX(latest.id) FROM SMS latest WHERE latest.notificationId=n.id AND latest.active=true)")
     Page<NotificationProjection> findAllNotifications(Pageable pageable);
 
@@ -48,11 +48,15 @@ public interface NotificationRepo extends JpaRepository<Notification, Long>, Jpa
     int markRecipientRead(@Param("id") long id, @Param("recipients") Collection<String> recipients, @Param("now") LocalDateTime now);
 
     @Modifying
-    @Query("UPDATE Notification n SET n.delivered=true,n.retry=false,n.updatedOn=:now WHERE n.id=:id AND n.active")
+    @Query("UPDATE Notification n SET n.delivered=true,n.providerStatus='DELIVERED',n.deliveredAt=COALESCE(n.deliveredAt,:now),n.failedAt=NULL,n.retry=false,n.updatedOn=:now WHERE n.id=:id AND n.active")
     int confirmDelivered(@Param("id") long id, @Param("now") LocalDateTime now);
 
     @Modifying
-    @Query("UPDATE Notification n SET n.active=false,n.retry=false,n.updatedOn=:now WHERE n.id=:id AND n.delivered=false")
+    @Query("UPDATE Notification n SET n.providerStatus='ACCEPTED',n.acceptedAt=COALESCE(n.acceptedAt,:now),n.failedAt=NULL,n.retry=false,n.updatedOn=:now WHERE n.id=:id AND n.active AND n.delivered=false")
+    int confirmAccepted(@Param("id") long id, @Param("now") LocalDateTime now);
+
+    @Modifying
+    @Query("UPDATE Notification n SET n.active=false,n.providerStatus='FAILED',n.failedAt=COALESCE(n.failedAt,:now),n.retry=false,n.updatedOn=:now WHERE n.id=:id AND n.delivered=false")
     int markDeliveryFailed(@Param("id") long id, @Param("now") LocalDateTime now);
 
     @Query("SELECT n.id FROM Notification n WHERE n.active AND n.delivered=false AND n.retry=true " +
