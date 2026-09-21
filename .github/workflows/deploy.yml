@@ -189,7 +189,7 @@ jobs:
               if [ -n "$whatsapp_status" ]; then
                 whatsapp_args="--expected-whatsapp-status $whatsapp_status"
               fi
-              sudo python3 "$preflight" \
+              sudo env PAYSTACK_ENABLED=false python3 "$preflight" \
                 --readiness-url "$health_url" \
                 --public-origin "$public_origin" \
                 --expected-flyway-version "$required_version" \
