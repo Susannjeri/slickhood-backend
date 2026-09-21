@@ -351,8 +351,10 @@ def check_external_apis(preflight: Preflight, config: dict[str, str]) -> None:
     # default without re-enabling a payment channel during deployment.
     paystack_enabled = resolve(config, "PAYSTACK_ENABLED", "payment.paystack.enabled", default="false").lower() == "true"
     if paystack_enabled:
-        paystack_key = required(preflight, config, "Paystack key", "payment.paystack.secret-key", "PAYSTACK_SECRET_KEY")
-        paystack_base = resolve(config, "payment.paystack.api-url", "PAYSTACK_API_URL", default="https://api.paystack.co").rstrip("/")
+        paystack_key = required(preflight, config, "Paystack key", "PAYMENT_PAYSTACK_SECRET_KEY",
+                                "payment.paystack.secret-key", "PAYSTACK_SECRET_KEY")
+        paystack_base = resolve(config, "PAYMENT_PAYSTACK_API_URL", "payment.paystack.api-url",
+                                "PAYSTACK_API_URL", default="https://api.paystack.co").rstrip("/")
         if paystack_key:
             # Use an authenticated account endpoint for the deployment gate. The
             # public bank-directory endpoint can return 403 for otherwise valid
@@ -540,6 +542,8 @@ def main() -> int:
     check_service(preflight, "pm2-silverocean.service")
     check_clamav(preflight)
     expected_scope = {"wealth", "insurance", "affiliate", "services", "soko", "helpdesk"}
+    if resolve(config, "PAYSTACK_ENABLED", "payment.paystack.enabled", default="false").lower() == "true":
+        expected_scope.add("paystack")
     if args.expected_flyway_version >= 95:
         expected_scope.add("notifications")
         if args.expected_whatsapp_status == "enabled":

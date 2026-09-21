@@ -21,11 +21,14 @@ public class ProductionReadinessController implements HealthIndicator {
         var assessment = guardrails.assess();
         var builder = assessment.ready() ? Health.up() : Health.down();
         boolean whatsappEnabled = environment.getProperty("whatsapp.enabled", Boolean.class, false);
+        boolean paystackEnabled = environment.getProperty("payment.paystack.enabled", Boolean.class, false);
         String scope = "wealth,insurance,affiliate,services,soko,helpdesk,notifications"
-                + (whatsappEnabled ? ",whatsapp" : "");
+                + (whatsappEnabled ? ",whatsapp" : "")
+                + (paystackEnabled ? ",paystack" : "");
         return builder
                 .withDetail("scope", scope)
                 .withDetail("whatsappStatus", whatsappEnabled ? "enabled" : "on-hold")
+                .withDetail("paystackStatus", paystackEnabled ? "enabled" : "disabled")
                 .withDetail("missingOrUnsafeConfiguration", assessment.missingOrUnsafeConfiguration())
                 .build();
     }

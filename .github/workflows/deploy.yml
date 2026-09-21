@@ -194,7 +194,7 @@ jobs:
               if [ -n "$whatsapp_status" ]; then
                 whatsapp_args="--expected-whatsapp-status $whatsapp_status"
               fi
-              sudo env PAYSTACK_ENABLED=false python3 "$preflight" \
+              sudo python3 "$preflight" \
                 --readiness-url "$health_url" \
                 --public-origin "$public_origin" \
                 --expected-flyway-version "$required_version" \
@@ -229,13 +229,13 @@ jobs:
               umask 077
               paystack_env="$(mktemp)"
               {
-                printf 'PAYSTACK_ENABLED=false\n'
-                printf 'PAYMENT_PAYSTACK_ENABLED=false\n'
+                printf 'PAYSTACK_ENABLED=true\n'
+                printf 'PAYMENT_PAYSTACK_ENABLED=true\n'
                 printf 'PAYMENT_PAYSTACK_SECRET_KEY=%s\n' "$PAYSTACK_TEST_SECRET_KEY"
                 printf 'PAYMENT_PAYSTACK_API_URL=https://api.paystack.co\n'
                 printf 'PAYMENT_PAYSTACK_CALLBACK_URL=https://app.slickhood.com/payment/callback\n'
                 printf 'PAYMENT_PAYSTACK_CURRENCY=KES\n'
-                printf 'PAYMENT_PAYSTACK_SUPPORTED_CURRENCIES=KES,USD,NGN,GHS,ZAR\n'
+                printf 'PAYMENT_PAYSTACK_SUPPORTED_CURRENCIES=KES,USD\n'
                 printf 'PAYMENT_PAYSTACK_CHANNELS=card,mobile_money\n'
                 printf 'PAYMENT_PAYSTACK_FEE_BEARER=subaccount\n'
               } >"$paystack_env"
@@ -261,7 +261,7 @@ jobs:
                 printf 'PAYMENT_PAYSTACK_API_URL=https://api.paystack.co\n'
                 printf 'PAYMENT_PAYSTACK_CALLBACK_URL=https://app.slickhood.com/payment/callback\n'
                 printf 'PAYMENT_PAYSTACK_CURRENCY=KES\n'
-                printf 'PAYMENT_PAYSTACK_SUPPORTED_CURRENCIES=KES,USD,NGN,GHS,ZAR\n'
+                printf 'PAYMENT_PAYSTACK_SUPPORTED_CURRENCIES=KES,USD\n'
                 printf 'PAYMENT_PAYSTACK_CHANNELS=card,mobile_money\n'
                 printf 'PAYMENT_PAYSTACK_FEE_BEARER=subaccount\n'
               } >"$paystack_env"
