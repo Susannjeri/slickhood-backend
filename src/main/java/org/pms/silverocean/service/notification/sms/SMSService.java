@@ -63,6 +63,8 @@ public class SMSService {
                     smsDao.saveSMS(sms);
                     if ("delivered".equals(status.status()) || "read".equals(status.status())) {
                         updateNotification(sms.getNotificationId(), true);
+                    } else if ("failed".equals(status.status())) {
+                        notificationDao.markDeliveryFailed(sms.getNotificationId());
                     }
                 }));
     }

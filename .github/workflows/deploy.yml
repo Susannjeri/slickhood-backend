@@ -72,11 +72,16 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           PAYSTACK_TEST_SECRET_KEY: ${{ secrets.PAYSTACK_TEST_SECRET_KEY }}
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+          WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
+          WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+          WHATSAPP_BUSINESS_ACCOUNT_ID: ${{ secrets.WHATSAPP_BUSINESS_ACCOUNT_ID }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: PAYSTACK_TEST_SECRET_KEY
+          envs: PAYSTACK_TEST_SECRET_KEY,WHATSAPP_ACCESS_TOKEN,WHATSAPP_APP_SECRET,WHATSAPP_VERIFY_TOKEN,WHATSAPP_BUSINESS_ACCOUNT_ID,WHATSAPP_PHONE_NUMBER_ID
           command_timeout: 10m
           script: |
             set -eu
@@ -272,14 +277,35 @@ jobs:
               paystack_dropin=""
             fi
             umask 077
+            test -n "$WHATSAPP_ACCESS_TOKEN"
+            test -n "$WHATSAPP_APP_SECRET"
+            test -n "$WHATSAPP_VERIFY_TOKEN"
+            test -n "$WHATSAPP_BUSINESS_ACCOUNT_ID"
+            test -n "$WHATSAPP_PHONE_NUMBER_ID"
             whatsapp_env="$(mktemp)"
             {
-              printf 'WHATSAPP_ENABLED=false\n'
-              printf 'WHATSAPP_TEMPLATES_BILLING_APPROVED=false\n'
-              printf 'WHATSAPP_TEMPLATES_PROPERTY_APPROVED=false\n'
-              printf 'WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_APPROVED=false\n'
-              printf 'WHATSAPP_TEMPLATES_SECURITY_APPROVED=false\n'
-              printf 'WHATSAPP_TEMPLATES_MARKETING_APPROVED=false\n'
+              printf 'WHATSAPP_ENABLED=true\n'
+              printf 'WHATSAPP_API_URL=https://graph.facebook.com/v22.0/%%s/messages\n'
+              printf 'WHATSAPP_BUSINESS_ACCOUNT_ID=%s\n' "$WHATSAPP_BUSINESS_ACCOUNT_ID"
+              printf 'WHATSAPP_PHONE_NUMBER_ID=%s\n' "$WHATSAPP_PHONE_NUMBER_ID"
+              printf 'WHATSAPP_ACCESS_TOKEN=%s\n' "$WHATSAPP_ACCESS_TOKEN"
+              printf 'WHATSAPP_APP_SECRET=%s\n' "$WHATSAPP_APP_SECRET"
+              printf 'WHATSAPP_VERIFY_TOKEN=%s\n' "$WHATSAPP_VERIFY_TOKEN"
+              printf 'WHATSAPP_TEMPLATES_BILLING_APPROVED=true\n'
+              printf 'WHATSAPP_TEMPLATES_BILLING_NAME=slickhood_billing_notification_v1\n'
+              printf 'WHATSAPP_TEMPLATES_BILLING_LANGUAGE=en\n'
+              printf 'WHATSAPP_TEMPLATES_PROPERTY_APPROVED=true\n'
+              printf 'WHATSAPP_TEMPLATES_PROPERTY_NAME=slickhood_property_notification_v1\n'
+              printf 'WHATSAPP_TEMPLATES_PROPERTY_LANGUAGE=en\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_APPROVED=true\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_NAME=slickhood_marketplace_notification_v1\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETPLACE_DELIVERY_LANGUAGE=en\n'
+              printf 'WHATSAPP_TEMPLATES_SECURITY_APPROVED=true\n'
+              printf 'WHATSAPP_TEMPLATES_SECURITY_NAME=slickhood_security_notification_v1\n'
+              printf 'WHATSAPP_TEMPLATES_SECURITY_LANGUAGE=en\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETING_APPROVED=true\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETING_NAME=slickhood_marketing_notification_v1\n'
+              printf 'WHATSAPP_TEMPLATES_MARKETING_LANGUAGE=en\n'
             } >"$whatsapp_env"
             sudo install -d -o root -g root -m 0700 /etc/slickhood/secrets
             sudo install -o root -g root -m 0600 "$whatsapp_env" /etc/slickhood/secrets/whatsapp.env
@@ -298,7 +324,7 @@ jobs:
             installed=true
             sudo systemctl restart pms.service
             if wait_for_health; then
-              run_preflight 97 on-hold require-insurance
+              run_preflight 97 enabled require-insurance
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
               installed=false
               exit 0

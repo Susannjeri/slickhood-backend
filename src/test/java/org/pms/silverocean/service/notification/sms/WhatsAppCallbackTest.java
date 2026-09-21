@@ -35,6 +35,16 @@ class WhatsAppCallbackTest {
         verify(messages, never()).saveSMS(any()); verifyNoInteractions(notifications);
     }
 
+    @Test void finalFailureIsRecordedAgainstTheNotification() {
+        SMS stored = message(9);
+        when(messages.lockWhatsAppMessage("failed-message")).thenReturn(Optional.of(stored));
+        service.receiveWhatsAppCallback(payload(status("failed-message", "failed")), "127.0.0.1");
+        assertEquals("failed", stored.getStatus());
+        verify(messages).saveSMS(stored);
+        verify(notifications).markDeliveryFailed(9);
+        verify(notifications, never()).confirmDelivered(anyLong());
+    }
+
     @Test void inboundMessagesMissingStatusesAndEmptyPayloadsAreSafe() {
         service.receiveWhatsAppCallback(null, "127.0.0.1");
         service.receiveWhatsAppCallback(new WAWebHook("whatsapp_business_account", null), "127.0.0.1");
