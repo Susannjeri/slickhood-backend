@@ -218,7 +218,9 @@ public class PaystackPlatform extends PaymentPlatform {
             invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference())
                     .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED));
         }
-        return new PaystackReturnConfirmation(invoice.getRef(), invoice.isPaid(), payment.getStatus());
+        boolean paymentConfirmed = invoice.isPaid()
+                || TransactionCategory.CARD_PAYMENT.getSuccessString().equals(payment.getStatus());
+        return new PaystackReturnConfirmation(invoice.getRef(), paymentConfirmed, payment.getStatus());
     }
 
     private void verifyAndSettle(PMSPayment payment, String sourceIp) {

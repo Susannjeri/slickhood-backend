@@ -137,7 +137,7 @@ class PaystackRoutingTest {
         assertEquals("verification_failed", payment.getStatus());
     }
 
-    @Test void browserReturnReconcilesOnlyTheAuthenticatedPayerAndStillVerifiesWithPaystack() {
+    @Test void browserReturnReportsTheVerifiedPaymentEvenBeforeTheInvoiceReadModelRefreshes() {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);
         when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
@@ -146,13 +146,11 @@ class PaystackRoutingTest {
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test")))
                 .when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
-        doAnswer(call -> { invoice.setPaid(true); invoice.setMoneyPendingAmount(BigDecimal.ZERO); return null; })
-                .when(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(new BigDecimal("100.00")));
-
         var result = platform.confirmBrowserReturn("601", "127.0.0.1");
 
         assertTrue(result.paid());
         assertEquals("INV-TEST", result.invoiceRef());
+        verify(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(new BigDecimal("100.00")));
         verify(payments).findPaymentByIDAndUserId(601L, 22L);
         verify(http).sendGetRequest(contains("/transaction/verify/601"), any(),
                 eq(PaystackPlatform.PaystackVerifyResponse.class));
