@@ -72,6 +72,14 @@ public class AccountDao {
         return accountRepo.listAccountsByProperty(pageable, propertyId, userId);
     }
 
+    public Page<PaymentAccount> listByPropertyAndOwner(Pageable pageable, long propertyId, long ownerId) {
+        return accountRepo.listAccountsByPropertyAndOwner(pageable, propertyId, ownerId);
+    }
+
+    public boolean isAttachedToProperty(long accountId, long propertyId) {
+        return accountRepo.existsActivePropertyAttachment(accountId, propertyId);
+    }
+
     public Page<PaymentAccount> listByOwner(Long ownerId, Pageable pageable) {
         return accountRepo.findByCreatedByAndActiveTrue(ownerId, pageable);
     }

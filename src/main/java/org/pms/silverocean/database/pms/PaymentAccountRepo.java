@@ -27,6 +27,12 @@ public interface PaymentAccountRepo extends JpaRepository<PaymentAccount, Long>,
             " EXISTS (SELECT 1 FROM UnitTenant ut JOIN Unit u ON ut.unitId=u.id " +
             "         WHERE u.propertyId=:propertyId AND ut.userId=:userId AND ut.active))")
     Page<PaymentAccount> listAccountsByProperty(Pageable pageable, long propertyId, long userId);
+    @Query("SELECT pa FROM PaymentAccount pa JOIN PropertyAccount link ON pa.id=link.accountId " +
+            "WHERE link.propertyId=:propertyId AND link.active AND pa.active AND pa.verified AND pa.createdBy=:ownerId")
+    Page<PaymentAccount> listAccountsByPropertyAndOwner(Pageable pageable, long propertyId, long ownerId);
+    @Query("SELECT CASE WHEN COUNT(pa)>0 THEN true ELSE false END FROM PropertyAccount pa " +
+            "WHERE pa.accountId=:accountId AND pa.propertyId=:propertyId AND pa.active")
+    boolean existsActivePropertyAttachment(long accountId, long propertyId);
     @Query("SELECT pa FROM PaymentAccount pa WHERE pa.category=AccountCategory.SLICKHOOD AND pa.active AND pa.verified")
     Page<PaymentAccount> listSlickHoodAccountByVerifiedTrueAndActive(Pageable pageable);
     @Query("SELECT pa FROM PaymentAccount pa WHERE pa.category=AccountCategory.SLICKHOOD AND pa.active")

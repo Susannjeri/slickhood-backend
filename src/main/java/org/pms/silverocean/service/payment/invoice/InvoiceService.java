@@ -38,8 +38,11 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.util.HashMap;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.time.LocalDate;
 import org.pms.silverocean.service.payment.money.MonetaryPolicy;
 
@@ -397,11 +400,26 @@ public class InvoiceService {
                 .orElse("SlickHood payment partner");
     }
 
-    public AccountSummaryDTO getInvoicePaymentAccount(long invoiceId){
+    public List<AccountSummaryDTO> getInvoicePaymentAccounts(long invoiceId){
         PMSInvoice invoice=accessibleInvoice(invoiceId);
-        if(invoice.getPaymentAccountId()==null)throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);
-        PaymentAccount account=accountDao.getAccountById(invoice.getPaymentAccountId());
-        return new AccountSummaryDTO(account,paymentPlatformFactory.getChannelImage(account.getChannel()));
+        List<PaymentAccount> candidates = invoice.getSubscriptionPlanCode()!=null
+                ? accountDao.getActiveAndVerifiedSlickHoodAccount(Pageable.unpaged()).getContent()
+                : accountDao.listByPropertyAndOwner(Pageable.unpaged(),invoice.getPropertyId(),invoice.getPayToUserId()).getContent();
+        AccountCategory expectedCategory=expectedAccountCategory(invoice);
+        Set<String> activeChannels=paymentPlatformFactory.getPaymentTypes().stream()
+                .map(PaymentChannelDTO::id).collect(Collectors.toSet());
+        return candidates.stream()
+                .filter(account->account.isActive()&&account.isVerified())
+                .filter(account->account.getCreatedBy()==invoice.getPayToUserId())
+                .filter(account->account.getChannel()!=PaymentChannel.FLUTTER_WAVE)
+                .filter(account->activeChannels.contains(account.getChannel().name()))
+                .filter(account->expectedCategory==null||account.getCategory()==expectedCategory)
+                .sorted(Comparator
+                        .comparing((PaymentAccount account)->!java.util.Objects.equals(invoice.getPaymentAccountId(),account.getId()))
+                        .thenComparing(account->account.getChannel().getName())
+                        .thenComparing(PaymentAccount::getName))
+                .map(account->new AccountSummaryDTO(account,paymentPlatformFactory.getChannelImage(account.getChannel())))
+                .toList();
     }
 
     public PaymentResponse initInvoicePayment(String invoiceRef, PaymentChannel paymentChannel, String phoneNumber, long accountId) {
@@ -443,7 +461,7 @@ public class InvoiceService {
             if (!account.isActive() || !account.isVerified() || account.getCreatedBy() != invoice.getPayToUserId()
                     || account.getChannel() != paymentChannel || account.getCategory() == AccountCategory.SLICKHOOD
                     || expectedCategory != null && account.getCategory() != expectedCategory
-                    || invoice.getPaymentAccountId()!=null&&!invoice.getPaymentAccountId().equals(accountId)) {
+                    || !accountDao.isAttachedToProperty(accountId,invoice.getPropertyId())) {
                 throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
             }
             return;

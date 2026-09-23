@@ -222,7 +222,7 @@ public class PaystackPlatform extends PaymentPlatform {
         }
         boolean paymentConfirmed = invoice.isPaid()
                 || TransactionCategory.CARD_PAYMENT.getSuccessString().equals(payment.getStatus());
-        return new PaystackReturnConfirmation(invoice.getRef(), paymentConfirmed, payment.getStatus());
+        return new PaystackReturnConfirmation(invoice.getId(), invoice.getRef(), paymentConfirmed, payment.getStatus());
     }
 
     /** Provider-verified recovery path used when a browser return or webhook was interrupted. */
@@ -337,6 +337,6 @@ public class PaystackPlatform extends PaymentPlatform {
         }
     }
 
-    public record PaystackReturnConfirmation(String invoiceRef, boolean paid, String paymentStatus) {
+    public record PaystackReturnConfirmation(long invoiceId, String invoiceRef, boolean paid, String paymentStatus) {
     }
 }

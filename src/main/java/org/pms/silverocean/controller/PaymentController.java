@@ -124,7 +124,7 @@ public class PaymentController extends OutputStreamErrorHandler {
     @GetMapping("/invoice/payment-account")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_INVOICE_LIST)")
     public ResponseEntity<ResponseDTO> invoicePaymentAccount(@RequestParam long invoiceId){
-        return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.ACCOUNT_LIST.getCode(),i18NService.getLocalizedMessage(ResponseCode.ACCOUNT_LIST),invoiceService.getInvoicePaymentAccount(invoiceId)));
+        return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.ACCOUNT_LIST.getCode(),i18NService.getLocalizedMessage(ResponseCode.ACCOUNT_LIST),invoiceService.getInvoicePaymentAccounts(invoiceId)));
     }
 
     @PostMapping("/init")

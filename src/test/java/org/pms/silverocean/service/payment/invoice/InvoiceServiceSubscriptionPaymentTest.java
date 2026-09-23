@@ -168,6 +168,7 @@ class InvoiceServiceSubscriptionPaymentTest {
         when(userDao.getUserId()).thenReturn(7L);
         when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
         when(accountDao.getAccountById(12L)).thenReturn(account);
+        when(accountDao.isAttachedToProperty(12L, 0L)).thenReturn(true);
         when(paymentPlatformFactory.getPlatform(PaymentChannel.MPESA)).thenReturn(paymentPlatform);
         when(paymentPlatform.processPayment(invoice, null, 12L)).thenReturn(expected);
 
@@ -182,10 +183,41 @@ class InvoiceServiceSubscriptionPaymentTest {
         when(userDao.getUserId()).thenReturn(7L);
         when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
         when(accountDao.getAccountById(12L)).thenReturn(account);
+        when(accountDao.isAttachedToProperty(12L, 0L)).thenReturn(true);
         when(paymentPlatformFactory.getPlatform(PaymentChannel.MPESA)).thenReturn(paymentPlatform);
         when(paymentPlatform.processPayment(invoice, null, 12L)).thenReturn(expected);
 
         assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 12L));
+    }
+
+    @Test
+    void allowsCustomerToSwitchToAnotherVerifiedAccountAttachedToTheSameProperty() {
+        PMSInvoice invoice = propertyInvoice("RENTAL", 12L);
+        PaymentAccount alternative = paymentAccount(AccountCategory.LANDLORD, PaymentChannel.PAYSTACK, 99L);
+        PaymentResponse expected = new PaymentResponse(true, ResponseCode.CARD_PAYMENT_INITIALIZED, "https://pay.example");
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(accountDao.getAccountById(13L)).thenReturn(alternative);
+        when(accountDao.isAttachedToProperty(13L, 0L)).thenReturn(true);
+        when(paymentPlatformFactory.getPlatform(PaymentChannel.PAYSTACK)).thenReturn(paymentPlatform);
+        when(paymentPlatform.processPayment(invoice, null, 13L)).thenReturn(expected);
+
+        assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 13L));
+    }
+
+    @Test
+    void rejectsOtherwiseValidAccountFromAnotherProperty() {
+        PMSInvoice invoice = propertyInvoice("RENTAL", 12L);
+        PaymentAccount alternative = paymentAccount(AccountCategory.LANDLORD, PaymentChannel.PAYSTACK, 99L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(accountDao.getAccountById(13L)).thenReturn(alternative);
+        when(accountDao.isAttachedToProperty(13L, 0L)).thenReturn(false);
+
+        assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 13L));
+
+        verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PAYSTACK);
     }
 
     @Test
