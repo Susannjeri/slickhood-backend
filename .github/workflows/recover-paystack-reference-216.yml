@@ -27,17 +27,26 @@ jobs:
             test -n "$PAYSTACK_TEST_SECRET_KEY"
             sudo PAYSTACK_TEST_SECRET_KEY="$PAYSTACK_TEST_SECRET_KEY" python3 - <<'PY'
             from __future__ import annotations
-            import hashlib, hmac, json, os, re, subprocess, urllib.request
+            import hashlib, hmac, json, os, re, subprocess, tempfile, urllib.request
             from pathlib import Path
 
             reference = "216"
             invoice_ref = "INV-DE4"
             secret = os.environ["PAYSTACK_TEST_SECRET_KEY"]
-            request = urllib.request.Request(
-                "https://api.paystack.co/transaction/verify/" + reference,
-                headers={"Authorization": "Bearer " + secret, "Accept": "application/json"})
-            with urllib.request.urlopen(request, timeout=20) as response:
-                payload = json.load(response)
+            curl_config = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False)
+            try:
+                curl_config.write('header = "Authorization: Bearer ' + secret.replace('"', '') + '"\n')
+                curl_config.close()
+                os.chmod(curl_config.name, 0o600)
+                verified = subprocess.run(["curl", "--silent", "--show-error", "--fail-with-body",
+                    "--config", curl_config.name, "https://api.paystack.co/transaction/verify/" + reference],
+                    text=True, capture_output=True, timeout=20, check=False)
+                if verified.returncode:
+                    raise RuntimeError("Provider verification request failed")
+                payload = json.loads(verified.stdout)
+            finally:
+                try: os.unlink(curl_config.name)
+                except FileNotFoundError: pass
             data = payload.get("data") or {}
             if payload.get("status") is not True or data.get("status") != "success":
                 raise RuntimeError("Provider did not confirm success")
