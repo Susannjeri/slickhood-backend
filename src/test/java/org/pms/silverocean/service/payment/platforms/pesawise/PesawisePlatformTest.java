@@ -113,7 +113,9 @@ class PesawisePlatformTest {
 
     private static PMSInvoice invoice() {
         PMSInvoice i=new PMSInvoice(); i.setRef("INV-SUB-1"); i.setSubscriptionPlanCode("BRONZE");
-        i.setBillingType("SUBSCRIPTION"); i.setPropertyId(0L); i.setPaymentAccountId(91L);
+        // The invoice may have been issued with a different default rail. The
+        // payer is allowed to select this verified PesaWise platform account.
+        i.setBillingType("SUBSCRIPTION"); i.setPropertyId(0L); i.setPaymentAccountId(90L);
         i.setPayToUserId(77L); i.setBilledUserId(22L); i.setPendingAmount(1000D); i.setCurrency("KES");
         i.setCustomerPhoneNumber("+254712345678"); i.setActive(true); return i;
     }

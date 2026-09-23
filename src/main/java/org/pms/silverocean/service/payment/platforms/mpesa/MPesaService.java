@@ -30,6 +30,7 @@ import org.pms.silverocean.service.payment.PaymentCallBackRequest;
 import org.pms.silverocean.service.payment.PaymentCallBackResponse;
 import org.pms.silverocean.service.payment.PaymentDao;
 import org.pms.silverocean.service.payment.PaymentPlatform;
+import org.pms.silverocean.service.payment.PaymentPhoneNumber;
 import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.payment.UpdatePaymentService;
 import org.pms.silverocean.service.payment.platforms.TokenStore;
@@ -111,12 +112,10 @@ public class MPesaService extends PaymentPlatform {
     public PaymentResponse initPayment(PMSInvoice pmsInvoice, String msisdn, long accountId) throws PaymentRequestException {
         if (!"KES".equalsIgnoreCase(StringUtils.defaultIfBlank(pmsInvoice.getCurrency(), "KES")))
             throw new PaymentRequestException(ResponseCode.PAYMENT_CURRENCY_UNSUPPORTED);
-        if (StringUtils.isBlank(msisdn)) {
-            log.info("MSISDN is blank {}", msisdn);
+        if (StringUtils.isBlank(msisdn))
             throw new PaymentRequestException(ResponseCode.PHONENUMBER_NOT_CONFIGURED_ERROR);
-        }
         log.info("Processing Mpesa STK Payment {} ", pmsInvoice.getRef());
-        msisdn = msisdn.replaceFirst("^\\+", "");
+        msisdn = PaymentPhoneNumber.normalizeKenyanMsisdn(msisdn);
 
         String businessShortCode = paramService.getParamByAccountIdAndType(accountId, PaymentChannel.MPESA.findProperty(PaymentPropertyKeys.PAYBILL), pmsInvoice.getPropertyId());
         String passKey = paramService.getParamByAccountIdAndType(accountId, PaymentChannel.MPESA.findProperty(PaymentPropertyKeys.STK_PASSKEY), pmsInvoice.getPropertyId());

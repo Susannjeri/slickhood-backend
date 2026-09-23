@@ -19,6 +19,7 @@ import org.pms.silverocean.service.payment.PaymentCallBackRequest;
 import org.pms.silverocean.service.payment.PaymentCallBackResponse;
 import org.pms.silverocean.service.payment.PaymentDao;
 import org.pms.silverocean.service.payment.PaymentPlatform;
+import org.pms.silverocean.service.payment.PaymentPhoneNumber;
 import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.payment.UpdatePaymentService;
 import org.pms.silverocean.service.payment.WebhookSignatureVerifier;
@@ -80,7 +81,7 @@ public class PesawisePlatform extends PaymentPlatform {
     protected PaymentResponse initPayment(PMSInvoice invoice, String phoneNumber, long accountId)
             throws PaymentRequestException {
         PaymentAccount account = requireAccount(invoice, accountId);
-        String phone = normalizePhone(phoneNumber);
+        String phone = PaymentPhoneNumber.normalizeKenyanMsisdn(phoneNumber);
         long balanceId = balanceId(accountId, invoice.getPropertyId());
         HttpHeaders headers = credentials(accountId, invoice.getPropertyId());
 
@@ -206,14 +207,15 @@ public class PesawisePlatform extends PaymentPlatform {
     }
 
     private PaymentAccount requireAccount(PMSInvoice invoice, Long accountId) {
-        if (accountId == null || invoice.getPaymentAccountId() == null || !invoice.getPaymentAccountId().equals(accountId)) {
+        if (accountId == null) {
             throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
         }
         PaymentAccount account = accountDao.getAccountById(accountId);
         boolean subscription = StringUtils.isNotBlank(invoice.getSubscriptionPlanCode());
         if (!account.isActive() || !account.isVerified() || account.getChannel() != PaymentChannel.PESAWISE
                 || !Objects.equals(account.getCreatedBy(), invoice.getPayToUserId())
-                || subscription != (account.getCategory() == AccountCategory.SLICKHOOD)) {
+                || subscription != (account.getCategory() == AccountCategory.SLICKHOOD)
+                || !subscription && !accountDao.isAttachedToProperty(accountId, invoice.getPropertyId())) {
             throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
         }
         return account;
@@ -244,15 +246,6 @@ public class PesawisePlatform extends PaymentPlatform {
 
     private String baseUrl() {
         return StringUtils.removeEnd(StringUtils.trimToEmpty(apiUrl), "/");
-    }
-
-    private static String normalizePhone(String value) {
-        String digits = StringUtils.defaultString(value).replaceAll("\\D", "");
-        if (digits.startsWith("0") && digits.length() == 10) digits = "254" + digits.substring(1);
-        if (!digits.matches("254\\d{9}")) {
-            throw new PaymentRequestException(ResponseCode.INVALID_PHONENUMBER);
-        }
-        return digits;
     }
 
     private static String maskedPhone(String phone) {
