@@ -147,4 +147,35 @@ jobs:
                                 "destinationMatches": destination_matches,
                             }
                             print("providerChecks=" + "|".join(key + "=" + str(value).lower() for key, value in checks.items()))
+
+            if payment_reference:
+                event_rows = mysql("SELECT CONVERT(event USING utf8mb4) FROM pms_events "
+                    f"WHERE t_id={payment_reference} AND event_type='PaystackVerifyResponse' ORDER BY id DESC LIMIT 1")
+                if not event_rows:
+                    print("storedProviderEvent=missing")
+                else:
+                    raw = event_rows[0]
+                    def field(name: str) -> str | None:
+                        match = re.search(r"(?:^|[, ])" + re.escape(name) + r"=([^,\]]*)", raw)
+                        return match.group(1).strip() if match else None
+                    expected_rows = mysql("SELECT CONCAT(COALESCE(p.amount_decimal,p.amount),'|',"
+                        "COALESCE(p.currency_code,''),'|',COALESCE(p.receiving_account_number,''),'|',"
+                        "COALESCE(i.currency,'')) FROM pms_payment p JOIN pms_invoice i ON i.ref=p.bill_reference "
+                        f"WHERE p.id={payment_reference} AND p.bill_reference='{escaped}' LIMIT 1")
+                    status_match = re.search(r"data=PaystackTransaction\[[^\]]*?status=([^,\]]*)", raw)
+                    provider_status = status_match.group(1).strip() if status_match else None
+                    print("storedProviderStatus=" + str(provider_status or "missing"))
+                    if expected_rows:
+                        from decimal import Decimal
+                        expected_amount, expected_currency, expected_destination, invoice_currency = expected_rows[0].split("|", 3)
+                        actual_destination_match = (re.search(r"subaccount=(null|MissingNode|null)", raw) is not None
+                            if expected_destination == "SLICKHOOD" else expected_destination in raw)
+                        stored_checks = {
+                            "referenceMatches": field("reference") == payment_reference,
+                            "domainMatches": field("domain") == ("test" if secret.startswith("sk_test_") else "live"),
+                            "amountMatches": field("amount") == str(int(Decimal(expected_amount) * 100)),
+                            "currencyMatches": str(field("currency") or "").upper() == expected_currency.upper() == invoice_currency.upper(),
+                            "destinationMatches": actual_destination_match,
+                        }
+                        print("storedProviderChecks=" + "|".join(key + "=" + str(value).lower() for key, value in stored_checks.items()))
             PY
