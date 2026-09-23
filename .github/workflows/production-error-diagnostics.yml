@@ -125,9 +125,11 @@ jobs:
             for row in otps: print("otpState=" + row)
             deliveries = mysql("SELECT CONCAT(n.channel,'|',n.type,'|',n.delivered,'|',"
                 "COALESCE(n.provider_status,'none'),'|',n.retry,'|',n.retries,'|',"
-                "IF(n.failed_at IS NULL,0,1),'|',DATE_FORMAT(n.created_on,'%Y-%m-%dT%H:%i:%s')) "
+                "IF(n.failed_at IS NULL,0,1),'|',DATE_FORMAT(n.created_on,'%Y-%m-%dT%H:%i:%s'),'|',"
+                "COALESCE(s.status,'none'),'|',COALESCE(s.description,'none'),'|',COALESCE(s.channel,'none')) "
                 "FROM pms_notification n JOIN pms_user_otp o ON n.recipient=o.contact AND o.channel='SMS' "
                 "JOIN pms_users u ON u.id=o.created_by "
+                "LEFT JOIN pms_sms s ON s.notificationId=n.id AND s.id=(SELECT MAX(latest.id) FROM pms_sms latest WHERE latest.notificationId=n.id) "
                 f"WHERE SHA2(LOWER(TRIM(u.email)),256)='{escaped}' AND UPPER(n.type) LIKE '%OTP%' "
                 "ORDER BY n.id DESC LIMIT 5")
             print("smsDeliveryRecords=" + str(len(deliveries)))
