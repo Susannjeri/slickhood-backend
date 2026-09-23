@@ -155,6 +155,7 @@ public class SilverOceanUserService {
             case WHATSAPP -> throw new IllegalArgumentException(
                     "OTP remains available through SMS or email until a Meta authentication template is approved");
         }
+        throw new IllegalStateException("Unsupported contact verification channel");
     }
 
     public record ContactVerificationDispatch(String deliveryStatus) {}
