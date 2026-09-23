@@ -337,6 +337,6 @@ public class PaystackPlatform extends PaymentPlatform {
         }
     }
 
-    public record PaystackReturnConfirmation(long invoiceId, String invoiceRef, boolean paid, String paymentStatus) {
+    public record PaystackReturnConfirmation(Long invoiceId, String invoiceRef, boolean paid, String paymentStatus) {
     }
 }
