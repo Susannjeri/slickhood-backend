@@ -205,7 +205,7 @@ class PaystackRoutingTest {
         var result = platform.confirmBrowserReturn("601", "127.0.0.1");
 
         assertTrue(result.paid());
-        assertEquals("success", payment.getStatus());
+        assertEquals("successful", payment.getStatus());
         verify(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(new BigDecimal("100.00")));
     }
 
