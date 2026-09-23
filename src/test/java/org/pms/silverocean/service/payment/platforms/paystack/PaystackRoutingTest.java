@@ -191,6 +191,24 @@ class PaystackRoutingTest {
         verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), any(BigDecimal.class));
     }
 
+    @Test void subscriptionAcceptsPaystackEmptySubaccountObjectAsMainIntegration() throws Exception {
+        invoice.setSubscriptionPlanCode("BRONZE");
+        platform.processPayment(invoice, null, 71L);
+        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
+        when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
+        doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
+                new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test",
+                        mapper.readTree("{}"))))
+                .when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
+
+        var result = platform.confirmBrowserReturn("601", "127.0.0.1");
+
+        assertTrue(result.paid());
+        assertEquals("success", payment.getStatus());
+        verify(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(new BigDecimal("100.00")));
+    }
+
     @Test void providerDestinationMustMatchThePersistedMerchantSubaccount() throws Exception {
         account.setCategory(AccountCategory.LANDLORD);
         invoice.setPropertyId(44L);

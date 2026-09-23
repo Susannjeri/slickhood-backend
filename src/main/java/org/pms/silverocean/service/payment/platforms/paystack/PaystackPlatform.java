@@ -284,11 +284,14 @@ public class PaystackPlatform extends PaymentPlatform {
         // Payments created before destination persistence are still protected by their immutable
         // account, invoice owner, amount, currency and provider reference checks.
         if (StringUtils.isBlank(expected) || "collection".equalsIgnoreCase(expected)) return true;
-        if ("SLICKHOOD".equals(expected)) return data.subaccount() == null || data.subaccount().isNull();
         JsonNode subaccount = data.subaccount();
         String actual = subaccount == null || subaccount.isNull() ? null
                 : subaccount.isTextual() ? subaccount.asText()
                 : subaccount.path("subaccount_code").asText(null);
+        // Paystack can serialize a main-integration payment as an empty subaccount object.
+        // Treat it as absent only when no subaccount code exists; a real merchant destination
+        // must still fail closed for a SlickHood subscription.
+        if ("SLICKHOOD".equals(expected)) return StringUtils.isBlank(actual);
         return StringUtils.equals(expected, actual);
     }
 
