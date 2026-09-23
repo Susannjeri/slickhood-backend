@@ -155,10 +155,17 @@ public class LeaseService {
             throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE, user.getProfileCompletenessState());
         }
 
-        leaseDao.getLeaseFromTokenAndUser(token, user.getId())
-                .map(invite -> {
-                    throw new PMSCustomException(ResponseCode.LEASE_ALREADY_EXISTS);
-                });
+        Optional<Lease> existingLease = leaseDao.getLeaseFromTokenAndUser(token, user.getId());
+        if (existingLease.isPresent()) {
+            Lease lease = existingLease.get();
+            var agreement = documents.findCurrentAgreementsForLeases(Set.of(lease.getId())).stream()
+                    .filter(candidate -> java.util.Objects.equals(candidate.getLeaseId(), lease.getId()))
+                    .findFirst()
+                    .orElseThrow(() -> new PMSCustomException(ResponseCode.LEASE_DOCUMENT_NOT_FOUND));
+            return new org.pms.silverocean.service.lease.wrappers.LeaseInitializationResult(
+                    lease.getId(), agreement.getDocumentId(), lease.getMoveInDate(), lease.getMoveOutDate(),
+                    agreement.getStatus().name());
+        }
         Unit unit = unitDao.findByToken(token).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVITE_LINK));
         unit = unitDao.findByAndLockById(unit.getId())
                 .filter(u -> u.isActive() && !u.isOccupied() && "RENT".equals(u.getLeaseMode()))

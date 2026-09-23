@@ -131,6 +131,28 @@ class LeaseJourneyTest {
         assertThrows(PMSCustomException.class,()->service.initializeLeaseDraft("token"));
         verifyNoInteractions(invites,tenantAgreements);
     }
+
+    @Test void repeatedInitializationReturnsTheExistingAgreementForSafeNavigation() {
+        Users tenant = new Users(); tenant.setId(4L); tenant.setFullName("Tenant"); tenant.setEmail("tenant@example.test");
+        tenant.setPhoneNumber("+254700000001"); tenant.setIdentificationNumber("ID-4"); tenant.setTaxPin("A000000004Z");
+        when(users.getUserObject()).thenReturn(tenant);
+        Lease existing = lease();
+        existing.setMoveInDate(LocalDate.of(2026, 10, 1));
+        existing.setMoveOutDate(LocalDate.of(2027, 9, 30));
+        when(leases.getLeaseFromTokenAndUser("token", 4L)).thenReturn(Optional.of(existing));
+        LeaseDocumentRepo.AgreementSummary agreement = mock(LeaseDocumentRepo.AgreementSummary.class);
+        when(agreement.getLeaseId()).thenReturn(1L);
+        when(agreement.getDocumentId()).thenReturn(91L);
+        when(agreement.getStatus()).thenReturn(org.pms.silverocean.service.leasedocument.LeaseDocumentStatus.ISSUED);
+        when(documents.findCurrentAgreementsForLeases(java.util.Set.of(1L))).thenReturn(java.util.List.of(agreement));
+
+        var result = service.initializeLeaseDraft("token");
+
+        assertEquals(1L, result.leaseId());
+        assertEquals(91L, result.agreementDocumentId());
+        assertEquals("ISSUED", result.agreementStatus());
+        verifyNoInteractions(units, invites, templates, tenantAgreements);
+    }
     @Test void legacyLandlordCannotSignBeforeTenant() {
         Lease lease = lease(); lease.setGovernedDocumentRequired(false);
         when(users.getUserId()).thenReturn(5L); when(users.getActiveRole()).thenReturn(PMSRole.LANDLORD);
