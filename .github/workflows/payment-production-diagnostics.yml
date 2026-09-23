@@ -11,6 +11,10 @@ on:
         description: Optional numeric Paystack transaction ID
         required: false
         type: string
+      payment_reference:
+        description: Optional numeric SlickHood payment reference for Paystack verification
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -26,24 +30,28 @@ jobs:
         env:
           INVOICE_REF: ${{ inputs.invoice_ref }}
           PROVIDER_TRANSACTION_ID: ${{ inputs.provider_transaction_id }}
+          PAYMENT_REFERENCE: ${{ inputs.payment_reference }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: INVOICE_REF,PROVIDER_TRANSACTION_ID
+          envs: INVOICE_REF,PROVIDER_TRANSACTION_ID,PAYMENT_REFERENCE
           script: |
             set -eu
-            sudo INVOICE_REF="$INVOICE_REF" PROVIDER_TRANSACTION_ID="$PROVIDER_TRANSACTION_ID" python3 - <<'PY'
+            sudo INVOICE_REF="$INVOICE_REF" PROVIDER_TRANSACTION_ID="$PROVIDER_TRANSACTION_ID" PAYMENT_REFERENCE="$PAYMENT_REFERENCE" python3 - <<'PY'
             from __future__ import annotations
             import json, os, re, subprocess, urllib.request
             from pathlib import Path
 
             invoice_ref = os.environ.get("INVOICE_REF", "").strip()
             provider_id = os.environ.get("PROVIDER_TRANSACTION_ID", "").strip()
+            payment_reference = os.environ.get("PAYMENT_REFERENCE", "").strip()
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", invoice_ref):
                 raise RuntimeError("Invalid invoice reference")
             if provider_id and not re.fullmatch(r"[0-9]{1,30}", provider_id):
                 raise RuntimeError("Invalid provider transaction ID")
+            if payment_reference and not re.fullmatch(r"[0-9]{1,19}", payment_reference):
+                raise RuntimeError("Invalid payment reference")
 
             files = (Path("/etc/slickhood/application.properties"), Path("/home/silverocean/backend/config/application.properties"))
             config = dict(os.environ)
@@ -101,22 +109,42 @@ jobs:
             for row in payments:
                 print("paymentState=" + row)
 
-            if provider_id:
+            if provider_id or payment_reference:
                 secret = resolve("payment.paystack.secret-key", "PAYSTACK_SECRET_KEY", "PAYSTACK_TEST_SECRET_KEY")
-                request = urllib.request.Request("https://api.paystack.co/transaction/" + provider_id,
+                path = "transaction/" + provider_id if provider_id else "transaction/verify/" + payment_reference
+                request = urllib.request.Request("https://api.paystack.co/" + path,
                     headers={"Authorization": "Bearer " + secret, "Accept": "application/json"})
                 try:
                     with urllib.request.urlopen(request, timeout=20) as response:
                         payload = json.load(response)
                 except Exception as exc:
-                    print("providerLookup=failed:" + type(exc).__name__)
+                    status = getattr(exc, "code", "none")
+                    print("providerLookup=failed:" + type(exc).__name__ + ":" + str(status))
                 else:
                     data = payload.get("data") or {}
-                    authorization = data.get("authorization") or {}
                     subaccount = data.get("subaccount") or {}
                     print("providerLookup=ok")
-                    print("providerState=" + "|".join(str(value) for value in (
-                        payload.get("status"), data.get("status"), data.get("domain"), data.get("reference"),
-                        data.get("amount"), data.get("currency"), data.get("gateway_response"),
-                        authorization.get("channel"), subaccount.get("subaccount_code") or "none")))
+                    print("providerStatus=" + str(data.get("status") or "missing"))
+                    if payment_reference:
+                        expected_rows = mysql("SELECT CONCAT(COALESCE(p.amount_decimal,p.amount),'|',"
+                            "COALESCE(p.currency_code,''),'|',COALESCE(p.receiving_account_number,''),'|',"
+                            "COALESCE(i.currency,'')) FROM pms_payment p JOIN pms_invoice i ON i.ref=p.bill_reference "
+                            f"WHERE p.id={payment_reference} AND p.bill_reference='{escaped}' LIMIT 1")
+                        if not expected_rows:
+                            print("providerChecks=paymentMissing")
+                        else:
+                            from decimal import Decimal
+                            expected_amount, expected_currency, expected_destination, invoice_currency = expected_rows[0].split("|", 3)
+                            actual_subaccount = subaccount.get("subaccount_code") if isinstance(subaccount, dict) else None
+                            destination_matches = (not expected_destination or expected_destination.lower() == "collection"
+                                or expected_destination == "SLICKHOOD" and not actual_subaccount
+                                or expected_destination == actual_subaccount)
+                            checks = {
+                                "referenceMatches": str(data.get("reference")) == payment_reference,
+                                "domainMatches": data.get("domain") == ("test" if secret.startswith("sk_test_") else "live"),
+                                "amountMatches": data.get("amount") == int(Decimal(expected_amount) * 100),
+                                "currencyMatches": str(data.get("currency") or "").upper() == expected_currency.upper() == invoice_currency.upper(),
+                                "destinationMatches": destination_matches,
+                            }
+                            print("providerChecks=" + "|".join(key + "=" + str(value).lower() for key, value in checks.items()))
             PY
