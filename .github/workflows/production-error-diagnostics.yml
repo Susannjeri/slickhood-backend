@@ -27,7 +27,7 @@ jobs:
             set -eu
             log_file="$(mktemp)"
             trap 'rm -f -- "$log_file"' EXIT
-            sudo journalctl -u pms.service --since '3 hours ago' --no-pager >"$log_file" 2>/dev/null || true
+            sudo journalctl -u pms.service --since '12 hours ago' --no-pager >"$log_file" 2>/dev/null || true
             echo 'SQL error classifications'
             grep -Eo 'SQL Error: [0-9]+, SQLState: [0-9A-Z]+' "$log_file" | sort | uniq -c || true
             echo 'Named constraints or keys'
@@ -57,6 +57,10 @@ jobs:
               | tail -n 100 || true
             echo 'Persistence exception classes'
             grep -Eo '(DataIntegrityViolationException|ConstraintViolationException|SQLIntegrityConstraintViolationException|JpaSystemException)' "$log_file" | sort | uniq -c || true
+            echo 'Notification provider failure classifications'
+            grep -E 'Provider API failed for notification [0-9]+ \([A-Za-z0-9_.]+\)|could not be routed to channel [A-Z_]+' "$log_file" \
+              | sed -E 's/^.*(Provider API failed|Notification [0-9]+ could not be routed)/\1/' \
+              | tail -n 100 || true
             echo 'Hibernate schema validation mismatches'
             grep -F 'Schema-validation:' "$log_file" \
               | sed -E 's/^.*Schema-validation:/Schema-validation:/' \
