@@ -1,0 +1,122 @@
+name: Production Payment Diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      invoice_ref:
+        description: Exact SlickHood invoice reference
+        required: true
+        type: string
+      provider_transaction_id:
+        description: Optional numeric Paystack transaction ID
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Inspect payment state without changing it
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          INVOICE_REF: ${{ inputs.invoice_ref }}
+          PROVIDER_TRANSACTION_ID: ${{ inputs.provider_transaction_id }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: INVOICE_REF,PROVIDER_TRANSACTION_ID
+          script: |
+            set -eu
+            sudo INVOICE_REF="$INVOICE_REF" PROVIDER_TRANSACTION_ID="$PROVIDER_TRANSACTION_ID" python3 - <<'PY'
+            from __future__ import annotations
+            import json, os, re, subprocess, urllib.request
+            from pathlib import Path
+
+            invoice_ref = os.environ.get("INVOICE_REF", "").strip()
+            provider_id = os.environ.get("PROVIDER_TRANSACTION_ID", "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", invoice_ref):
+                raise RuntimeError("Invalid invoice reference")
+            if provider_id and not re.fullmatch(r"[0-9]{1,30}", provider_id):
+                raise RuntimeError("Invalid provider transaction ID")
+
+            files = (Path("/etc/slickhood/application.properties"), Path("/home/silverocean/backend/config/application.properties"))
+            config = dict(os.environ)
+            for path in files:
+                if path.exists():
+                    for raw in path.read_text(encoding="utf-8-sig").splitlines():
+                        line = raw.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            key, value = line.split("=", 1)
+                            config[key.strip()] = value.strip().strip("\"'")
+
+            def resolve(*keys: str) -> str:
+                for key in keys:
+                    value = config.get(key, "").strip()
+                    match = re.fullmatch(r"\$\{([^}:]+)(?::([^}]*))?}", value)
+                    if match:
+                        value = config.get(match.group(1), match.group(2) or "").strip()
+                    if value:
+                        return value
+                raise RuntimeError("Required configuration is unavailable")
+
+            jdbc = resolve("spring.datasource.url", "SPRING_DATASOURCE_URL")
+            username = resolve("spring.datasource.username", "DATABASE_USERNAME", "SPRING_DATASOURCE_USERNAME")
+            password = resolve("spring.datasource.password", "DATABASE_PASSWORD", "SPRING_DATASOURCE_PASSWORD")
+            match = re.match(r"jdbc:mysql://([^/:?]+)(?::(\d+))?/([^?]+)", jdbc)
+            if not match:
+                raise RuntimeError("Unsupported datasource configuration")
+            host, port, database = match.group(1), match.group(2) or "3306", match.group(3)
+            mysql_env = dict(os.environ); mysql_env["MYSQL_PWD"] = password
+
+            def mysql(query: str) -> list[str]:
+                result = subprocess.run(["mysql", "--batch", "--skip-column-names", "--host", host,
+                    "--port", port, "--user", username, database, "--execute", query], env=mysql_env,
+                    text=True, capture_output=True, timeout=20, check=False)
+                if result.returncode:
+                    raise RuntimeError("Database read failed")
+                return result.stdout.strip().splitlines() if result.stdout.strip() else []
+
+            escaped = invoice_ref.replace("'", "''")
+            invoices = mysql("SELECT CONCAT(id,'|',paid,'|',transaction_in_progress,'|',"
+                "COALESCE(amount_decimal,amount),'|',COALESCE(pending_amount_decimal,pending_amount),'|',"
+                "COALESCE(currency,''),'|',COALESCE(payment_account_id,0),'|',COALESCE(billing_type,'')) "
+                f"FROM pms_invoice WHERE ref='{escaped}' LIMIT 1")
+            print("matchingInvoices=" + str(len(invoices)))
+            for row in invoices:
+                print("invoiceState=" + row)
+
+            payments = mysql("SELECT CONCAT(id,'|',COALESCE(channel,''),'|',COALESCE(category,''),'|',"
+                "COALESCE(status,''),'|',in_progress,'|',verification_retries,'|',"
+                "COALESCE(third_party_trans_id,''),'|',COALESCE(amount_decimal,amount),'|',"
+                "COALESCE(currency_code,''),'|',COALESCE(status_desc,''),'|',"
+                "COALESCE(DATE_FORMAT(updated_on,'%Y-%m-%dT%H:%i:%s'),'none')) "
+                f"FROM pms_payment WHERE bill_reference='{escaped}' ORDER BY id DESC LIMIT 10")
+            print("paymentRecords=" + str(len(payments)))
+            for row in payments:
+                print("paymentState=" + row)
+
+            if provider_id:
+                secret = resolve("paystack.secret.key", "PAYSTACK_SECRET_KEY", "PAYSTACK_TEST_SECRET_KEY")
+                request = urllib.request.Request("https://api.paystack.co/transaction/" + provider_id,
+                    headers={"Authorization": "Bearer " + secret, "Accept": "application/json"})
+                try:
+                    with urllib.request.urlopen(request, timeout=20) as response:
+                        payload = json.load(response)
+                except Exception as exc:
+                    print("providerLookup=failed:" + type(exc).__name__)
+                else:
+                    data = payload.get("data") or {}
+                    authorization = data.get("authorization") or {}
+                    subaccount = data.get("subaccount") or {}
+                    print("providerLookup=ok")
+                    print("providerState=" + "|".join(str(value) for value in (
+                        payload.get("status"), data.get("status"), data.get("domain"), data.get("reference"),
+                        data.get("amount"), data.get("currency"), data.get("gateway_response"),
+                        authorization.get("channel"), subaccount.get("subaccount_code") or "none")))
+            PY
