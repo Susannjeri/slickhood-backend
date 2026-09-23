@@ -115,6 +115,9 @@ jobs:
                 if result.returncode: raise RuntimeError("Database read failed")
                 return result.stdout.strip().splitlines() if result.stdout.strip() else []
             escaped = digest.replace("'", "''")
+            provider = mysql("SELECT CONVERT(string_value USING utf8mb4) FROM pms_config "
+                "WHERE name='Active SMS Gateway Provider' LIMIT 1")
+            print("activeSmsProvider=" + (provider[0] if provider else "missing"))
             users = mysql("SELECT CONCAT(id,'|',active,'|',email_verified,'|',phone_verified,'|',"
                 "COALESCE(account_status,''),'|',IF(phone_number IS NULL OR phone_number='',0,1),'|',"
                 "COALESCE(DATE_FORMAT(phone_verified_at,'%Y-%m-%dT%H:%i:%s'),'none')) "
