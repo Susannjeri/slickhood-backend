@@ -2,6 +2,11 @@ name: Production Backend Error Diagnostics
 
 on:
   workflow_dispatch:
+    inputs:
+      account_sha256:
+        description: Optional lowercase SHA-256 of an account email for redacted verification diagnostics
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -56,3 +61,74 @@ jobs:
             grep -F 'Schema-validation:' "$log_file" \
               | sed -E 's/^.*Schema-validation:/Schema-validation:/' \
               | sort -u || true
+      - name: Inspect redacted account verification state
+        if: ${{ inputs.account_sha256 != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          ACCOUNT_SHA256: ${{ inputs.account_sha256 }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: ACCOUNT_SHA256
+          script: |
+            set -eu
+            sudo ACCOUNT_SHA256="$ACCOUNT_SHA256" python3 - <<'PY'
+            from __future__ import annotations
+            import os, re, subprocess
+            from pathlib import Path
+
+            digest = os.environ.get("ACCOUNT_SHA256", "").strip().lower()
+            if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise RuntimeError("A valid SHA-256 digest is required")
+            files = (Path("/etc/slickhood/application.properties"), Path("/home/silverocean/backend/config/application.properties"))
+            config = dict(os.environ)
+            for path in files:
+                if path.exists():
+                    for raw in path.read_text(encoding="utf-8-sig").splitlines():
+                        line = raw.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            key, value = line.split("=", 1)
+                            config[key.strip()] = value.strip().strip("\"'")
+            def resolve(*keys: str) -> str:
+                for key in keys:
+                    value = config.get(key, "").strip()
+                    match = re.fullmatch(r"\$\{([^}:]+)(?::([^}]*))?}", value)
+                    if match: value = config.get(match.group(1), match.group(2) or "").strip()
+                    if value: return value
+                raise RuntimeError("Required datasource configuration is unavailable")
+            jdbc = resolve("spring.datasource.url", "SPRING_DATASOURCE_URL")
+            username = resolve("spring.datasource.username", "DATABASE_USERNAME", "SPRING_DATASOURCE_USERNAME")
+            password = resolve("spring.datasource.password", "DATABASE_PASSWORD", "SPRING_DATASOURCE_PASSWORD")
+            match = re.match(r"jdbc:mysql://([^/:?]+)(?::(\d+))?/([^?]+)", jdbc)
+            if not match: raise RuntimeError("Unsupported datasource configuration")
+            host, port, database = match.group(1), match.group(2) or "3306", match.group(3)
+            env = dict(os.environ); env["MYSQL_PWD"] = password
+            def mysql(query: str) -> list[str]:
+                result = subprocess.run(["mysql", "--batch", "--skip-column-names", "--host", host, "--port", port,
+                    "--user", username, database, "--execute", query], env=env, text=True,
+                    capture_output=True, timeout=20, check=False)
+                if result.returncode: raise RuntimeError("Database read failed")
+                return result.stdout.strip().splitlines() if result.stdout.strip() else []
+            escaped = digest.replace("'", "''")
+            users = mysql("SELECT CONCAT(id,'|',active,'|',email_verified,'|',phone_verified,'|',"
+                "COALESCE(account_status,''),'|',IF(phone_number IS NULL OR phone_number='',0,1),'|',"
+                "COALESCE(DATE_FORMAT(phone_verified_at,'%Y-%m-%dT%H:%i:%s'),'none')) "
+                f"FROM pms_users WHERE SHA2(LOWER(TRIM(email)),256)='{escaped}'")
+            print("matchingAccounts=" + str(len(users)))
+            for row in users: print("accountState=" + row)
+            otps = mysql("SELECT CONCAT(o.channel,'|',o.active,'|',o.verified,'|',o.attempts,'|',"
+                "IF(o.otp_expiry_time < NOW(),1,0),'|',DATE_FORMAT(o.created_on,'%Y-%m-%dT%H:%i:%s')) "
+                "FROM pms_user_otp o JOIN pms_users u ON u.id=o.created_by "
+                f"WHERE SHA2(LOWER(TRIM(u.email)),256)='{escaped}' ORDER BY o.id DESC LIMIT 5")
+            print("otpRecords=" + str(len(otps)))
+            for row in otps: print("otpState=" + row)
+            deliveries = mysql("SELECT CONCAT(n.channel,'|',n.type,'|',n.delivered,'|',"
+                "COALESCE(n.provider_status,'none'),'|',n.retry,'|',n.retries,'|',"
+                "IF(n.failed_at IS NULL,0,1),'|',DATE_FORMAT(n.created_on,'%Y-%m-%dT%H:%i:%s')) "
+                "FROM pms_notification n JOIN pms_users u ON n.recipient=u.phone_number "
+                f"WHERE SHA2(LOWER(TRIM(u.email)),256)='{escaped}' AND UPPER(n.type) LIKE '%OTP%' "
+                "ORDER BY n.id DESC LIMIT 5")
+            print("smsDeliveryRecords=" + str(len(deliveries)))
+            for row in deliveries: print("smsDeliveryState=" + row)
+            PY
