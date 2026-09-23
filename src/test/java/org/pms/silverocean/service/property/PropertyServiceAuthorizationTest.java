@@ -32,6 +32,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.any;
+import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 
 class PropertyServiceAuthorizationTest {
 
@@ -140,5 +141,23 @@ class PropertyServiceAuthorizationTest {
 
         verify(propertyDao).saveAccount(any());
         verify(propertyDao).findActiveOwnedAccount(12L, 7L);
+    }
+
+    @Test
+    void ownerCanOpenCreatedPropertyAfterSwitchingToHomeownerRole() {
+        Property property = new Property();
+        property.setId(99L);
+        property.setActive(true);
+        property.setCreatedBy(7L);
+        when(userDao.getActiveRole()).thenReturn(PMSRole.HOMEOWNER);
+        when(propertyDao.findByIdAndCreatedBy(99L, 7L)).thenReturn(Optional.of(property));
+
+        ResponseDTO response = propertyService.listProperty(
+                org.springframework.data.domain.PageRequest.of(0, 10), Optional.empty(),
+                Optional.of(99L), Optional.empty(), Optional.empty(), (candidate, userId) -> "LANDLORD");
+
+        assertTrue(response.isSuccess());
+        assertEquals(ResponseCode.PROPERTY_DETAILS.getCode(), response.getCode());
+        verify(propertyDao, never()).findByIdAndHomeowner(99L, 7L);
     }
 }

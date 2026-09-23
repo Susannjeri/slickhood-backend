@@ -842,7 +842,9 @@ public class PropertyService {
 
     private ResponseDTO getPropertyByIdAndOwnerOrStaff(long propertyId) {
         PMSRole activeRole = userDao.getActiveRole();
-        Optional<Property> accessible = switch (activeRole) {
+        long userId = userDao.getUserId();
+        Optional<Property> owned = propertyDao.findByIdAndCreatedBy(propertyId, userId);
+        Optional<Property> accessible = owned.isPresent() ? owned : switch (activeRole) {
             case LANDLORD, ESTATE_MANAGER, SALES_AGENT -> propertyDao.findByIdAndCreatedBy(propertyId, userDao.getUserId());
             case TENANT -> propertyDao.findByIdAndTenant(propertyId, userDao.getUserId());
             case PROPERTY_MANAGER, WORKSPACE_ADMIN, PROPERTY_ACCOUNTANT, LEASING_OFFICER,

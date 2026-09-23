@@ -63,7 +63,29 @@ public class PropertySpecification  extends CommonPropertySpecification {
                             criteriaBuilder.isTrue(unit.get("active")),
                             criteriaBuilder.equal(unit.get("leaseMode"), value.name())
                     );
-                    return criteriaBuilder.exists(units);
+                    var anyActiveUnits = query.subquery(Long.class);
+                    var anyUnit = anyActiveUnits.from(Unit.class);
+                    anyActiveUnits.select(anyUnit.get("propertyId"));
+                    anyActiveUnits.where(
+                            criteriaBuilder.equal(anyUnit.get("propertyId"), property.get("id")),
+                            criteriaBuilder.isTrue(anyUnit.get("active"))
+                    );
+
+                    PMSPropertyManagementMode initialMode = switch (value) {
+                        case RENT -> PMSPropertyManagementMode.RENTAL;
+                        case SALE -> PMSPropertyManagementMode.SALE;
+                        case SERVICE_CHARGE -> PMSPropertyManagementMode.SERVICE_CHARGE;
+                    };
+                    // Before the first unit exists, the property's creation journey
+                    // is the only valid classifier. Once inventory exists, unit use
+                    // remains authoritative for mixed-use properties.
+                    return criteriaBuilder.or(
+                            criteriaBuilder.exists(units),
+                            criteriaBuilder.and(
+                                    criteriaBuilder.not(criteriaBuilder.exists(anyActiveUnits)),
+                                    criteriaBuilder.equal(property.get("managementMode"), initialMode)
+                            )
+                    );
                 })
                 .orElse(null);
     }

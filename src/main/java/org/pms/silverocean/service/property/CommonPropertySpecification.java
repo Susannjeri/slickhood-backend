@@ -88,7 +88,7 @@ public class CommonPropertySpecification {
             buyerSubquery.select(saleEntityId).where(cb.and(
                     cb.equal(saleRoot.get("buyerUserId"), userId), cb.isTrue(saleRoot.get("active"))));
             Predicate buyerPredicate = root.get("id").in(buyerSubquery);
-            return switch (activeRole) {
+            Predicate roleAccess = switch (activeRole) {
                 case LANDLORD, ESTATE_MANAGER, SALES_AGENT -> createdByPredicate;
                 case TENANT -> tenantPredicate;
                 case HOMEOWNER -> homeownerPredicate;
@@ -98,6 +98,11 @@ public class CommonPropertySpecification {
                      LISTING_AGENT, WORKSPACE_VIEWER, GUARD -> staffPredicate;
                 default -> cb.disjunction();
             };
+
+            // Ownership is not a workspace role assignment. A multi-role user must
+            // not lose sight of a property they created merely because they switch
+            // to Homeowner, Buyer, Tenant, or a delegated workspace role.
+            return cb.or(createdByPredicate, roleAccess);
         };
     }
 }
