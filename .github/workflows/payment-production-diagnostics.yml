@@ -102,7 +102,7 @@ jobs:
                 print("paymentState=" + row)
 
             if provider_id:
-                secret = resolve("paystack.secret.key", "PAYSTACK_SECRET_KEY", "PAYSTACK_TEST_SECRET_KEY")
+                secret = resolve("payment.paystack.secret-key", "PAYSTACK_SECRET_KEY", "PAYSTACK_TEST_SECRET_KEY")
                 request = urllib.request.Request("https://api.paystack.co/transaction/" + provider_id,
                     headers={"Authorization": "Bearer " + secret, "Accept": "application/json"})
                 try:

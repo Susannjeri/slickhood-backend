@@ -31,6 +31,10 @@ public class PaymentDao {
                 invoiceRef, channel.getName());
     }
 
+    public boolean hasInProgressPayment(String invoiceRef) {
+        return pmsPaymentRepo.existsByBillReferenceAndInProgressTrue(invoiceRef);
+    }
+
     public boolean callbackAlreadyProcessed(String thirdPartyTransId, String billReference,
                                             String category, String successStatus) {
         return pmsPaymentRepo.existsByThirdPartyTransIdAndBillReferenceAndCategoryAndStatus(

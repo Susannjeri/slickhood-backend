@@ -21,6 +21,7 @@ import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.notification.email.EmailService;
 import org.pms.silverocean.service.payment.PaymentPlatform;
 import org.pms.silverocean.service.payment.PaymentPlatformFactory;
+import org.pms.silverocean.service.payment.PaymentDao;
 import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.payment.invoice.wrappers.InvoiceDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
@@ -57,6 +58,7 @@ public class InvoiceService {
     private final EmailService emailService;
     private final I18NService i18NService;
     private final PaymentPlatformFactory paymentPlatformFactory;
+    private final PaymentDao paymentDao;
     private final org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents;
     private static final String INVOICE_TEMPLATE = "invoice";
 
@@ -64,6 +66,7 @@ public class InvoiceService {
                           RenderService renderService, @Qualifier("EMAIL") EmailService emailService,
                           I18NService i18NService,
                           PaymentPlatformFactory paymentPlatformFactory,
+                          PaymentDao paymentDao,
                           org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents) {
         this.invoiceDao = invoiceDao;
         this.unitDao = unitDao;
@@ -73,6 +76,7 @@ public class InvoiceService {
         this.emailService = emailService;
         this.i18NService = i18NService;
         this.paymentPlatformFactory = paymentPlatformFactory;
+        this.paymentDao = paymentDao;
         this.notificationEvents = notificationEvents;
     }
 
@@ -422,24 +426,35 @@ public class InvoiceService {
                 .toList();
     }
 
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public PaymentResponse initInvoicePayment(String invoiceRef, PaymentChannel paymentChannel, String phoneNumber, long accountId) {
         if (paymentChannel == PaymentChannel.FLUTTER_WAVE) {
             throw new PaymentRequestException(ResponseCode.PAYMENT_INITIALIZATION_FAILED);
         }
         long userId = userDao.getUserId();
-        PMSInvoice invoice = invoiceDao.getInvoiceForOwnerOrTenantView(invoiceRef, userId)
+        PMSInvoice authorizedInvoice = invoiceDao.getInvoiceForOwnerOrTenantView(invoiceRef, userId)
                 .orElseThrow(() -> new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER));
         // Viewing an invoice as its issuer, manager or administrator must never
         // imply authority to initiate a charge on behalf of the billed customer.
-        if (invoice.getBilledUserId() != userId) {
+        if (authorizedInvoice.getBilledUserId() != userId) {
             throw new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER);
         }
+        // Persisted invoices are locked so two checkout requests cannot both repair/start the same invoice.
+        // The null-id branch supports transient invoices used by isolated service tests.
+        PMSInvoice invoice = authorizedInvoice.getId() == null ? authorizedInvoice
+                : invoiceDao.getInvoiceByIdForUpdate(authorizedInvoice.getId())
+                    .orElseThrow(() -> new PaymentRequestException(ResponseCode.INVALID_INVOICE_NUMBER));
         if (invoice.isPaid()) {
             return new PaymentResponse(false, ResponseCode.INVOICE_ALREADY_PAID);
         } else if (!invoice.isActive()) {
             return new PaymentResponse(false, ResponseCode.INVALID_INVOICE_NUMBER);
         } else if (invoice.isTransactionInProgress()) {
-            return new PaymentResponse(false, ResponseCode.TRANSACTION_IN_PROGRESS);
+            if (paymentDao.hasInProgressPayment(invoice.getRef())) {
+                return new PaymentResponse(false, ResponseCode.TRANSACTION_IN_PROGRESS);
+            }
+            log.warn("Repairing stale transaction lock for invoice {}", invoice.getRef());
+            invoice.setTransactionInProgress(false);
+            invoiceDao.saveInvoice(invoice);
         }
         validateSubscriptionPaymentAccount(invoice, paymentChannel, accountId);
         PaymentPlatform platform = paymentPlatformFactory.getPlatform(paymentChannel);

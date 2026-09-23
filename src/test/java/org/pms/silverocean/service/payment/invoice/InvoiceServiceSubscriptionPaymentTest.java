@@ -16,6 +16,7 @@ import org.pms.silverocean.service.mustache.RenderService;
 import org.pms.silverocean.service.notification.email.EmailService;
 import org.pms.silverocean.service.payment.PaymentPlatform;
 import org.pms.silverocean.service.payment.PaymentPlatformFactory;
+import org.pms.silverocean.service.payment.PaymentDao;
 import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
@@ -24,6 +25,7 @@ import org.pms.silverocean.service.property.UnitDao;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -40,6 +42,7 @@ class InvoiceServiceSubscriptionPaymentTest {
     @Mock private I18NService i18NService;
     @Mock private PaymentPlatformFactory paymentPlatformFactory;
     @Mock private PaymentPlatform paymentPlatform;
+    @Mock private PaymentDao paymentDao;
     @Mock private org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents;
 
     private InvoiceService service;
@@ -47,7 +50,7 @@ class InvoiceServiceSubscriptionPaymentTest {
     @BeforeEach
     void setUp() {
         service = new InvoiceService(invoiceDao, unitDao, userDao, accountDao, renderService,
-                emailService, i18NService, paymentPlatformFactory, notificationEvents);
+                emailService, i18NService, paymentPlatformFactory, paymentDao, notificationEvents);
     }
 
     @Test
@@ -64,6 +67,40 @@ class InvoiceServiceSubscriptionPaymentTest {
         PaymentResponse actual = service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 12L);
 
         assertSame(expected, actual);
+    }
+
+    @Test
+    void repairsStaleInvoiceLockWhenNoPaymentIsActuallyInProgress() {
+        PMSInvoice invoice = subscriptionInvoice(7L, 99L);
+        invoice.setTransactionInProgress(true);
+        PaymentAccount account = paymentAccount(AccountCategory.SLICKHOOD, PaymentChannel.PAYSTACK, 99L);
+        PaymentResponse expected = new PaymentResponse(true, ResponseCode.CARD_PAYMENT_INITIALIZED, "https://pay.example");
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(paymentDao.hasInProgressPayment("INV-SUB")).thenReturn(false);
+        when(accountDao.getAccountById(12L)).thenReturn(account);
+        when(paymentPlatformFactory.getPlatform(PaymentChannel.PAYSTACK)).thenReturn(paymentPlatform);
+        when(paymentPlatform.processPayment(invoice, null, 12L)).thenReturn(expected);
+
+        assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 12L));
+
+        verify(invoiceDao).saveInvoice(invoice);
+        assertEquals(false, invoice.isTransactionInProgress());
+    }
+
+    @Test
+    void retainsInvoiceLockWhenAPaymentIsActuallyInProgress() {
+        PMSInvoice invoice = subscriptionInvoice(7L, 99L);
+        invoice.setTransactionInProgress(true);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(paymentDao.hasInProgressPayment("INV-SUB")).thenReturn(true);
+
+        PaymentResponse result = service.initInvoicePayment("INV-SUB", PaymentChannel.PAYSTACK, null, 12L);
+
+        assertEquals(ResponseCode.TRANSACTION_IN_PROGRESS, result.responseCode());
+        verify(invoiceDao, never()).saveInvoice(invoice);
+        verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PAYSTACK);
     }
 
     @Test

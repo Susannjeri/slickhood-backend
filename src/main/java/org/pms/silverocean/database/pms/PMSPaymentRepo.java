@@ -21,6 +21,7 @@ public interface PMSPaymentRepo extends JpaRepository<PMSPayment, Long>, JpaSpec
     Optional<PMSPayment> findByIdForUpdate(long paymentId);
     Optional<PMSPayment> findFirstByBillReferenceAndChannelAndInProgressTrueOrderByCreatedOnDesc(
             String billReference, String channel);
+    boolean existsByBillReferenceAndInProgressTrue(String billReference);
 
     @Query("SELECT p.id FROM PMSPayment p WHERE p.channel=:channel AND p.inProgress=true " +
             "AND LOWER(COALESCE(p.status,'')) IN :statuses AND p.verificationRetries < :maxRetries " +

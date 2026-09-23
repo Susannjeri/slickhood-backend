@@ -53,7 +53,8 @@ class InvoiceAccessBoundaryTest {
 
     @BeforeEach
     void setUp() {
-        service = new InvoiceService(invoices, units, users, accounts, renderer, email, i18n, platforms, events);
+        service = new InvoiceService(invoices, units, users, accounts, renderer, email, i18n, platforms,
+                org.mockito.Mockito.mock(org.pms.silverocean.service.payment.PaymentDao.class), events);
     }
 
     @Test
