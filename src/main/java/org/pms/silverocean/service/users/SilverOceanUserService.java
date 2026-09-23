@@ -114,7 +114,7 @@ public class SilverOceanUserService {
         userDao.save(loggedInUser);
     }
 
-    public void saveChangeContactRequestAndSendOTP(String contact, NotificationChannel channel) {
+    public ContactVerificationDispatch saveChangeContactRequestAndSendOTP(String contact, NotificationChannel channel) {
         Users loggedInUser = userDao.getUserObject();
         if (loggedInUser == null) {
             throw new PMSCustomException(ResponseCode.LOAD_USER_ERROR);
@@ -130,6 +130,7 @@ public class SilverOceanUserService {
                 String formattedMessage = String.format(i18NService.getLocalizedMessage(NotificationType.EMAIL_OTP.getBody()), otp,
                         "expiry_time");
                 notificationService.sendNotification(new NotificationDTO(formattedMessage, contact, NotificationType.EMAIL_OTP));
+                return new ContactVerificationDispatch("QUEUED");
             }
             case SMS -> {
                 String localisedPhoneNumber = PMSUtils.getLocalisedPhoneNumber(contact);
@@ -143,12 +144,20 @@ public class SilverOceanUserService {
                 String otp = PMSUtils.generateRandomOTP();
                 otpEncryptionService.saveOTP(loggedInUser.getEmail(), otp, OtpType.SMS, localisedPhoneNumber);
                 String formattedMessage = String.format(i18NService.getLocalizedMessage(NotificationType.OTP_SMS.getBody()), otp);
-                notificationService.sendNotification(new NotificationDTO(formattedMessage, localisedPhoneNumber, NotificationType.OTP_SMS));
+                long notificationId = notificationService.queueNotification(
+                        new NotificationDTO(formattedMessage, localisedPhoneNumber, NotificationType.OTP_SMS));
+                String deliveryStatus = notificationService.awaitProviderDecision(notificationId, 2000);
+                if ("FAILED".equals(deliveryStatus)) {
+                    otpEncryptionService.invalidateActiveOTP(loggedInUser.getEmail(), "OTP delivery failed");
+                }
+                return new ContactVerificationDispatch(deliveryStatus);
             }
             case WHATSAPP -> throw new IllegalArgumentException(
                     "OTP remains available through SMS or email until a Meta authentication template is approved");
         }
     }
+
+    public record ContactVerificationDispatch(String deliveryStatus) {}
 
     private void ensureResendAllowed(long userId, String contact, OtpType otpType) {
         otpEncryptionService.getActiveOTP(userId)

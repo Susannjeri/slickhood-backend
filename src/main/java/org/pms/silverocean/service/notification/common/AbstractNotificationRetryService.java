@@ -54,8 +54,7 @@ public abstract class AbstractNotificationRetryService  implements NotificationS
                 })
                 .whenComplete((statusCode, throwable) -> {
                     if (throwable != null) {
-                        // Use getCause() because the original Exception is wrapped in a RuntimeException/CompletionException
-                        Throwable actualError = throwable.getCause() != null ? throwable.getCause() : throwable;
+                        Throwable actualError = rootCause(throwable);
                         log.error("Provider API failed for notification {} ({})", notificationId, actualError.getClass().getSimpleName());
 
                         if (notificationDTO.notificationType().isRetry()) triggerRetryIfAllowed(notificationDTO, notificationId);
@@ -67,8 +66,16 @@ public abstract class AbstractNotificationRetryService  implements NotificationS
                     } else if (!isAcceptedStatusCode(statusCode)) {
                         log.warn("Notification {} was rejected with provider status {}", notificationId, statusCode);
                         notificationDao.markDeliveryFailed(notificationId);
+                    } else {
+                        notificationDao.confirmAccepted(notificationId);
                     }
                 });
+    }
+
+    private static Throwable rootCause(Throwable failure) {
+        Throwable current = failure;
+        while (current.getCause() != null && current.getCause() != current) current = current.getCause();
+        return current;
     }
 
     @Override

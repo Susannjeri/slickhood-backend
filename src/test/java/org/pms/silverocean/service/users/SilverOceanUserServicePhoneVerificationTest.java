@@ -58,11 +58,28 @@ class SilverOceanUserServicePhoneVerificationTest {
         when(userDao.findByPhone("+254111379961")).thenReturn(Optional.of(currentUser));
         when(otpEncryptionService.getActiveOTP(41L)).thenReturn(Optional.empty());
         when(i18NService.getLocalizedMessage(anyString())).thenReturn("Code %s");
+        when(notificationService.queueNotification(any())).thenReturn(81L);
+        when(notificationService.awaitProviderDecision(81L, 2000)).thenReturn("ACCEPTED");
 
-        service.saveChangeContactRequestAndSendOTP("+254111379961", NotificationChannel.SMS);
+        var result = service.saveChangeContactRequestAndSendOTP("+254111379961", NotificationChannel.SMS);
 
         verify(otpEncryptionService).saveOTP(eq("owner@example.com"), anyString(), eq(OtpType.SMS), eq("+254111379961"));
-        verify(notificationService).sendNotification(any());
+        verify(notificationService).queueNotification(any());
+        assertEquals("ACCEPTED", result.deliveryStatus());
+    }
+
+    @Test
+    void failedSmsDeliveryInvalidatesChallengeAndAllowsSafeRetry() {
+        when(userDao.findByPhone("+254111379961")).thenReturn(Optional.empty());
+        when(otpEncryptionService.getActiveOTP(41L)).thenReturn(Optional.empty());
+        when(i18NService.getLocalizedMessage(anyString())).thenReturn("Code %s");
+        when(notificationService.queueNotification(any())).thenReturn(82L);
+        when(notificationService.awaitProviderDecision(82L, 2000)).thenReturn("FAILED");
+
+        var result = service.saveChangeContactRequestAndSendOTP("+254111379961", NotificationChannel.SMS);
+
+        assertEquals("FAILED", result.deliveryStatus());
+        verify(otpEncryptionService).invalidateActiveOTP("owner@example.com", "OTP delivery failed");
     }
 
     @Test

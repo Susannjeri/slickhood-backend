@@ -44,6 +44,23 @@ public class NotificationService {
         return notificationId;
     }
 
+    public String awaitProviderDecision(long notificationId, long timeoutMillis) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(Math.max(0, timeoutMillis));
+        do {
+            Notification notification = notificationDao.findById(notificationId).orElse(null);
+            if (notification == null || notification.getFailedAt() != null || "FAILED".equals(notification.getProviderStatus())) return "FAILED";
+            if (notification.isDelivered() || "DELIVERED".equals(notification.getProviderStatus())) return "DELIVERED";
+            if ("ACCEPTED".equals(notification.getProviderStatus())) return "ACCEPTED";
+            if (System.nanoTime() >= deadline) return "QUEUED";
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return "QUEUED";
+            }
+        } while (true);
+    }
+
     /**
      * Stores an actionable notification for an existing active SlickHood user without
      * invoking an external delivery provider. The email-bound recipient is checked

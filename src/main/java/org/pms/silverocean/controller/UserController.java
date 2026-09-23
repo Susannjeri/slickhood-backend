@@ -67,8 +67,9 @@ public class UserController {
 
     @PostMapping("/verify/contact")
     public ResponseEntity<ResponseDTO> sendOTPToNewNumber(@Valid @RequestBody VerifyContactRequest request) {
-        silverOceanUserService.saveChangeContactRequestAndSendOTP(request.contact(), request.channel());
-        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.OTP_VERIFICATION_SENT_TO_CONTACT.getCode(), i18NService.getLocalizedMessage(ResponseCode.OTP_VERIFICATION_SENT_TO_CONTACT)));
+        var dispatch = silverOceanUserService.saveChangeContactRequestAndSendOTP(request.contact(), request.channel());
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.OTP_VERIFICATION_SENT_TO_CONTACT.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.OTP_VERIFICATION_SENT_TO_CONTACT), dispatch));
     }
 
     @PutMapping("/details")

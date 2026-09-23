@@ -56,6 +56,10 @@ public class OTPEncryptionService {
         return otpDao.getActiveOTP(userId);
     }
 
+    public void invalidateActiveOTP(String username, String description) {
+        updateOTPRecord(username, description);
+    }
+
     public boolean hasRecentlyIssuedOTP(String username, String contact, OtpType verificationOption,
                                         int cooldownSeconds) {
         return userDao.findByEmail(username)
