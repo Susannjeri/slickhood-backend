@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.List;
 
 import static org.pms.silverocean.service.payment.PaymentSpecification.searchPayment;
 
@@ -42,6 +43,11 @@ public class PaymentDao {
 
     public Optional<PMSPayment> findPaymentByID(long paymentId) {
         return pmsPaymentRepo.findById(paymentId);
+    }
+
+    public List<Long> findPendingReconciliationIds(PaymentChannel channel, List<String> statuses,
+                                                    int maxRetries, LocalDateTime cutoff, Pageable pageable) {
+        return pmsPaymentRepo.findPendingReconciliationIds(channel.getName(), statuses, maxRetries, cutoff, pageable);
     }
 
     public Optional<PMSPayment> findPaymentByIDForUpdate(long paymentId) {

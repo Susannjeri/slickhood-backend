@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.pms.silverocean.common.ResponseCode;
@@ -112,6 +113,7 @@ public class PaystackPlatform extends PaymentPlatform {
         }
         PMSPayment payment = new PMSPayment(invoice, customer.getFullName(), accountId);
         payment.setChannel(PaymentChannel.PAYSTACK.getName());
+        payment.setReceivingAccountNumber(subscription ? "SLICKHOOD" : subaccountCode);
         paymentDao.savePMSPayment(payment);
 
         try {
@@ -223,16 +225,27 @@ public class PaystackPlatform extends PaymentPlatform {
         return new PaystackReturnConfirmation(invoice.getRef(), paymentConfirmed, payment.getStatus());
     }
 
+    /** Provider-verified recovery path used when a browser return or webhook was interrupted. */
+    @Transactional("pmsDBTransactionManager")
+    public void reconcilePendingPayment(long paymentId) {
+        paymentDao.findPaymentByIDForUpdate(paymentId)
+                .filter(PMSPayment::isInProgress)
+                .filter(payment -> PaymentChannel.PAYSTACK.getName().equals(payment.getChannel()))
+                .ifPresent(payment -> verifyAndSettle(payment, "scheduled-reconciliation"));
+    }
+
     private void verifyAndSettle(PMSPayment payment, String sourceIp) {
         PaystackVerifyResponse response = restTemplateService.sendGetRequest(
                 apiUrl + VERIFY_PATH + payment.getId(), authHeaders(), PaystackVerifyResponse.class);
         eventService.saveEvent(response, payment.getId());
         PaystackTransaction data = response == null ? null : response.data();
+        payment.setVerificationRetries(payment.getVerificationRetries() + 1);
         boolean matchingTransaction = response != null && response.status() && data != null
                 && String.valueOf(payment.getId()).equals(data.reference())
                 && StringUtils.equals(secretKey.startsWith("sk_test_") ? "test" : "live", data.domain())
                 && payment.moneyAmount() != null
-                && MonetaryPolicy.toMinorUnits(payment.moneyAmount(), data.currency()) == data.amount();
+                && MonetaryPolicy.toMinorUnits(payment.moneyAmount(), data.currency()) == data.amount()
+                && destinationMatches(payment, data);
 
         PMSInvoice invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference()).orElse(null);
         matchingTransaction = matchingTransaction && invoice != null && StringUtils.equalsIgnoreCase(invoice.getCurrency(), data.currency());
@@ -264,6 +277,19 @@ public class PaystackPlatform extends PaymentPlatform {
         } else {
             log.warn("Rejected Paystack settlement for payment {} after verification mismatch", payment.getId());
         }
+    }
+
+    private boolean destinationMatches(PMSPayment payment, PaystackTransaction data) {
+        String expected = payment.getReceivingAccountNumber();
+        // Payments created before destination persistence are still protected by their immutable
+        // account, invoice owner, amount, currency and provider reference checks.
+        if (StringUtils.isBlank(expected) || "collection".equalsIgnoreCase(expected)) return true;
+        if ("SLICKHOOD".equals(expected)) return data.subaccount() == null || data.subaccount().isNull();
+        JsonNode subaccount = data.subaccount();
+        String actual = subaccount == null || subaccount.isNull() ? null
+                : subaccount.isTextual() ? subaccount.asText()
+                : subaccount.path("subaccount_code").asText(null);
+        return StringUtils.equals(expected, actual);
     }
 
     private HttpHeaders authHeaders() {
@@ -303,7 +329,12 @@ public class PaystackPlatform extends PaymentPlatform {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record PaystackTransaction(long id, String status, String reference, long amount, String currency,
-                               @JsonProperty("gateway_response") String gatewayResponse, String domain) {
+                               @JsonProperty("gateway_response") String gatewayResponse, String domain,
+                               JsonNode subaccount) {
+        PaystackTransaction(long id, String status, String reference, long amount, String currency,
+                            String gatewayResponse, String domain) {
+            this(id, status, reference, amount, currency, gatewayResponse, domain, null);
+        }
     }
 
     public record PaystackReturnConfirmation(String invoiceRef, boolean paid, String paymentStatus) {

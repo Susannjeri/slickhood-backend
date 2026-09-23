@@ -22,6 +22,12 @@ public interface PMSPaymentRepo extends JpaRepository<PMSPayment, Long>, JpaSpec
     Optional<PMSPayment> findFirstByBillReferenceAndChannelAndInProgressTrueOrderByCreatedOnDesc(
             String billReference, String channel);
 
+    @Query("SELECT p.id FROM PMSPayment p WHERE p.channel=:channel AND p.inProgress=true " +
+            "AND LOWER(COALESCE(p.status,'')) IN :statuses AND p.verificationRetries < :maxRetries " +
+            "AND (p.updatedOn IS NULL OR p.updatedOn <= :cutoff) ORDER BY p.updatedOn ASC, p.id ASC")
+    List<Long> findPendingReconciliationIds(String channel, List<String> statuses, int maxRetries,
+                                            java.time.LocalDateTime cutoff, Pageable pageable);
+
     boolean existsByChannelAndProviderReceiptAndIdNot(String channel, String providerReceipt, Long id);
 
     boolean existsByThirdPartyTransIdAndBillReferenceAndCategoryAndStatus(

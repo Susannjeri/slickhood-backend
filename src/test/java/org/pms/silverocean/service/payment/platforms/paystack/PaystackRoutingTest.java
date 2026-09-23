@@ -191,6 +191,26 @@ class PaystackRoutingTest {
         verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), any(BigDecimal.class));
     }
 
+    @Test void providerDestinationMustMatchThePersistedMerchantSubaccount() throws Exception {
+        account.setCategory(AccountCategory.LANDLORD);
+        invoice.setPropertyId(44L);
+        when(params.getParamByAccountIdAndType(eq(71L), any(), eq(44L))).thenReturn("ACCT_expected");
+        platform.processPayment(invoice, null, 71L);
+        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
+        when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
+        doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
+                new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test",
+                        mapper.readTree("{\"subaccount_code\":\"ACCT_other\"}"))))
+                .when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
+
+        var result = platform.confirmBrowserReturn("601", "127.0.0.1");
+
+        assertFalse(result.paid());
+        assertEquals("verification_failed", payment.getStatus());
+        verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), any(BigDecimal.class));
+    }
+
     @Test void reversalOrRefundEventsRequireTheAuthorisedManualFinanceWorkflow() {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);

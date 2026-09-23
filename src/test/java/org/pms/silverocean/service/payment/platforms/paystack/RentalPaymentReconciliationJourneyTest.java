@@ -147,7 +147,9 @@ class RentalPaymentReconciliationJourneyTest {
         doReturn(initialized).when(http).sendPostRequest(anyString(), any(), any(), eq(PaystackPlatform.PaystackInitializeResponse.class));
         PaystackPlatform.PaystackVerifyResponse verified = new PaystackPlatform.PaystackVerifyResponse(
                 true, "Verified", new PaystackPlatform.PaystackTransaction(
-                998877L, "success", "601", 2_500_000L, "KES", "Approved", "test"));
+                998877L, "success", "601", 2_500_000L, "KES", "Approved", "test",
+                new com.fasterxml.jackson.databind.ObjectMapper().readTree(
+                        "{\"subaccount_code\":\"ACCT_seeded_landlord\"}")));
         doReturn(verified).when(http).sendGetRequest(anyString(), any(), eq(PaystackPlatform.PaystackVerifyResponse.class));
 
         var accounts = mock(org.pms.silverocean.service.account.dao.AccountDao.class);
