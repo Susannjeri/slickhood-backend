@@ -6,6 +6,7 @@ import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.database.pms.entities.PaymentAccount;
 import org.pms.silverocean.database.pms.entities.Property;
+import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
@@ -149,6 +150,10 @@ class PropertyServiceAuthorizationTest {
         property.setId(99L);
         property.setActive(true);
         property.setCreatedBy(7L);
+        Users user = mock(Users.class);
+        when(user.isCompletedProfile()).thenReturn(true);
+        when(user.getId()).thenReturn(7L);
+        when(userDao.getUserObject()).thenReturn(user);
         when(userDao.getActiveRole()).thenReturn(PMSRole.HOMEOWNER);
         when(propertyDao.findByIdAndCreatedBy(99L, 7L)).thenReturn(Optional.of(property));
 
