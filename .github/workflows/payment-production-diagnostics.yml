@@ -165,6 +165,8 @@ jobs:
                     status_match = re.search(r"data=PaystackTransaction\[[^\]]*?status=([^,\]]*)", raw)
                     provider_status = status_match.group(1).strip() if status_match else None
                     print("storedProviderStatus=" + str(provider_status or "missing"))
+                    print("storedDestinationCodePresent=" + str(
+                        bool(re.search(r"subaccount_code|ACCT_[A-Za-z0-9_]+", raw))).lower())
                     if expected_rows:
                         from decimal import Decimal
                         expected_amount, expected_currency, expected_destination, invoice_currency = expected_rows[0].split("|", 3)
