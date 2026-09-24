@@ -52,6 +52,26 @@ class SubscriptionEntitlementInterceptorTest {
         verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
     }
 
+    @Test void affiliateProgrammeIsNotTreatedAsASubscribedProduct() {
+        when(request.getRequestURI()).thenReturn("/affiliate/dashboard");
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements, never()).requireProduct(SubscriptionProduct.AFFILIATE);
+        verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
+    }
+
+    @Test void affiliateAdministrationIsNotTreatedAsASubscribedProduct() {
+        when(request.getRequestURI()).thenReturn("/affiliate/admin/policy");
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements, never()).requireProduct(SubscriptionProduct.AFFILIATE);
+        verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
+    }
+
     @Test void wealthAcceptsTheFeatureBundledWithTheActiveLandlordPlan() {
         when(request.getRequestURI()).thenReturn("/wealth/assets");
         when(entitlements.sessionBusinessProduct()).thenReturn(SubscriptionProduct.LANDLORD);

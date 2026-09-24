@@ -17,6 +17,10 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
         // Gate devices authenticate with their own timestamped HMAC signature in the
         // controller/service. They do not have a user subscription session.
         if (path.startsWith("/smart-gate/device/")) return true;
+        // Affiliate participation is a commission programme, not a subscribed
+        // SlickHood product. Endpoint role checks still protect affiliate and
+        // administrator data, but neither persona may be sent through billing.
+        if (path.startsWith("/affiliate")) return true;
         if (path.startsWith("/smart-gate")) {
             entitlements.requireFeatureOrAddOn(entitlements.sessionBusinessProduct(),
                     "GATE_MANAGEMENT_INCLUDED_UNITS", SubscriptionProduct.GATE_MANAGEMENT_ADDON);
@@ -62,7 +66,6 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
                 || path.matches("/sp/booking/[^/]+/(confirm|complete|start|finance)")) {
             return SubscriptionProduct.SERVICES;
         }
-        if (path.startsWith("/affiliate") && !path.startsWith("/affiliate/public")) return SubscriptionProduct.AFFILIATE;
         return null;
     }
 }
