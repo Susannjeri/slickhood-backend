@@ -9,6 +9,9 @@ import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.database.pms.entities.WorkspaceMembership;
 import org.pms.silverocean.database.pms.entities.TeamRoleDefinition;
+import org.pms.silverocean.database.pms.entities.PlanQuota;
+import org.pms.silverocean.database.pms.entities.SubscriptionPlan;
+import org.pms.silverocean.database.pms.entities.UserSubscription;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.I18NService;
@@ -18,6 +21,7 @@ import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.auth.roles.SuperadminRoleIsolationPolicy;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.subscription.SharedPropertySubscriptionService;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -38,6 +42,9 @@ class TeamAccessHardeningTest {
     private UserDao users;
     private WorkspaceSelectionService workspaceSelection;
     private TeamRoleDefinitionRepo definitions;
+    private SubscriptionPlanRepo plans;
+    private PlanQuotaRepo quotas;
+    private SharedPropertySubscriptionService sharedPropertySubscriptions;
     private TeamAccessService service;
 
     @BeforeEach
@@ -50,12 +57,42 @@ class TeamAccessHardeningTest {
         users = mock(UserDao.class);
         workspaceSelection = mock(WorkspaceSelectionService.class);
         definitions = mock(TeamRoleDefinitionRepo.class);
+        plans = mock(SubscriptionPlanRepo.class);
+        quotas = mock(PlanQuotaRepo.class);
+        sharedPropertySubscriptions = mock(SharedPropertySubscriptionService.class);
         service = new TeamAccessService(workspaces, invitations, memberships, definitions,
-                properties, propertyManagers, mock(UserSubscriptionRepo.class), mock(SubscriptionPlanRepo.class),
-                mock(PlanQuotaRepo.class), mock(RoleRepo.class), mock(UserRoleRepo.class), users,
+                properties, propertyManagers, mock(UserSubscriptionRepo.class), plans,
+                quotas, sharedPropertySubscriptions, mock(RoleRepo.class), mock(UserRoleRepo.class), users,
                 mock(ConfigService.class), mock(NotificationService.class), mock(I18NService.class),
                 mock(AuditLogService.class), new ObjectMapper(), workspaceSelection,
                 mock(SuperadminRoleIsolationPolicy.class));
+    }
+
+    @Test
+    void everyPropertyWorkspaceUsesTheSharedPropertyPlansTeamSeatLimit() {
+        Users owner = new Users(); owner.setId(42L); owner.setEmail("owner@example.com");
+        CustomerWorkspace workspace = new CustomerWorkspace(); workspace.setId(8L);
+        workspace.setOwnerUserId(42L); workspace.setBusinessArea(TeamBusinessArea.ESTATE_MANAGEMENT);
+        workspace.setName("Estate operations"); workspace.setActive(true);
+        UserSubscription subscription = UserSubscription.builder().planCode("LANDLORD_GOLD_MONTHLY").build();
+        SubscriptionPlan plan = new SubscriptionPlan(); plan.setCode("LANDLORD_GOLD_MONTHLY");
+        PlanQuota quota = new PlanQuota(); quota.setLimitValue(12L); quota.setActive(true);
+
+        when(users.getUserObject()).thenReturn(owner);
+        when(users.getActiveRole()).thenReturn(PMSRole.ESTATE_MANAGER);
+        when(workspaces.findByOwnerUserIdAndBusinessAreaAndActiveTrue(42L, TeamBusinessArea.ESTATE_MANAGEMENT))
+                .thenReturn(Optional.of(workspace));
+        when(invitations.findByWorkspaceIdAndActiveTrueOrderByCreatedOnDesc(8L)).thenReturn(List.of());
+        when(memberships.findByWorkspaceIdAndActiveTrueOrderByCreatedOnDesc(8L)).thenReturn(List.of());
+        when(properties.findAllByCreatedByAndActiveTrue(42L)).thenReturn(List.of());
+        when(sharedPropertySubscriptions.active(42L)).thenReturn(Optional.of(subscription));
+        when(plans.findByCode("LANDLORD_GOLD_MONTHLY")).thenReturn(Optional.of(plan));
+        when(quotas.findTopBySubscriptionPlanAndMetricKeyOrderByIdDesc(plan, "TEAM_SEATS"))
+                .thenReturn(Optional.of(quota));
+
+        TeamAccessModels.WorkspaceView result = service.current();
+
+        assertThat(result.seatLimit()).isEqualTo(12L);
     }
 
     @Test

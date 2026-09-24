@@ -17,7 +17,7 @@ import org.pms.silverocean.service.config.enums.PMSConfigs;
 import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.notification.*;
 import org.pms.silverocean.service.notification.common.NotificationType;
-import org.pms.silverocean.service.subscription.enums.SubscriptionStatus;
+import org.pms.silverocean.service.subscription.SharedPropertySubscriptionService;
 import org.pms.silverocean.service.wrappers.IdNameDescDTO;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +43,7 @@ public class TeamAccessService {
     private final UserSubscriptionRepo subscriptions;
     private final SubscriptionPlanRepo plans;
     private final PlanQuotaRepo quotas;
+    private final SharedPropertySubscriptionService sharedPropertySubscriptions;
     private final RoleRepo roles;
     private final UserRoleRepo userRoles;
     private final UserDao users;
@@ -215,7 +216,7 @@ public class TeamAccessService {
     private void requireCanGrant(AccessContext access,TeamMembershipRole role){if(!role.allowedFor(access.workspace().getBusinessArea()))throw new PMSCustomException(ResponseCode.INVALID_ROLE);if(!access.owner()&&access.privilegeLevel()<=role.privilegeLevel())throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
     private void requireCanManage(AccessContext access,WorkspaceMembership target){if(target.getStatus()==TeamMembershipStatus.REVOKED)throw invalid();if(!access.owner()&&access.privilegeLevel()<=target.getMembershipRole().privilegeLevel())throw new PMSCustomException(ResponseCode.INVALID_ROLE);requireWithinActorScope(access,target.getScopeType(),readIds(target.getResourceIdsJson()));}
     private void enforceSeats(CustomerWorkspace workspace){long limit=seatLimit(workspace);long used=invitations.countByWorkspaceIdAndStatusInAndActiveTrue(workspace.getId(),List.of(TeamMembershipStatus.PENDING))+memberships.countByWorkspaceIdAndStatusInAndActiveTrue(workspace.getId(),OCCUPIED_MEMBER_STATUSES);if(limit>=0&&used>=limit)throw new PMSCustomException(ResponseCode.SUBSCRIPTION_LIMIT_EXCEEDED);}
-    private long seatLimit(CustomerWorkspace workspace){return subscriptions.findTopByCreatedByAndRoleAndStatusAndActiveTrueOrderByStartAtDesc(workspace.getOwnerUserId(),workspace.getBusinessArea().ownerRole(),SubscriptionStatus.ACTIVE).flatMap(s->plans.findByCode(s.getPlanCode())).flatMap(p->quotas.findTopBySubscriptionPlanAndMetricKeyOrderByIdDesc(p,"TEAM_SEATS")).map(PlanQuota::getLimitValue).orElse(1L);}
+    private long seatLimit(CustomerWorkspace workspace){return sharedPropertySubscriptions.active(workspace.getOwnerUserId()).flatMap(s->plans.findByCode(s.getPlanCode())).flatMap(p->quotas.findTopBySubscriptionPlanAndMetricKeyOrderByIdDesc(p,"TEAM_SEATS")).map(PlanQuota::getLimitValue).orElse(1L);}
     private List<Long> validateScope(AccessContext access,TeamScopeType type,List<Long>requested){if(type==TeamScopeType.ENTIRE_WORKSPACE){requireWithinActorScope(access,type,List.of());return List.of();}List<Long>ids=requested==null?List.of():requested.stream().distinct().toList();if(ids.isEmpty())throw invalid();List<Property>owned=properties.findAllById(ids).stream().filter(p->p.isActive()&&Objects.equals(p.getCreatedBy(),access.workspace().getOwnerUserId())).toList();if(owned.size()!=ids.size())throw new PMSCustomException(ResponseCode.PROPERTY_FORBIDDEN_ACCESS);requireWithinActorScope(access,type,ids);return ids;}
     private void requireWithinActorScope(AccessContext access,TeamScopeType targetType,List<Long>targetIds){if(access.owner()||access.actorScopeType()==TeamScopeType.ENTIRE_WORKSPACE)return;if(targetType==TeamScopeType.ENTIRE_WORKSPACE||!access.allowedResourceIds().containsAll(targetIds))throw new PMSCustomException(ResponseCode.PROPERTY_FORBIDDEN_ACCESS);}
     private boolean visibleToActor(AccessContext access,TeamScopeType targetType,List<Long>targetIds){if(access.owner()||access.actorScopeType()==TeamScopeType.ENTIRE_WORKSPACE)return true;return targetType==TeamScopeType.SELECTED_RESOURCES&&access.allowedResourceIds().containsAll(targetIds);}
