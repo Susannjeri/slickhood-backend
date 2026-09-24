@@ -7,6 +7,10 @@ on:
         description: Optional lowercase SHA-256 of an account email for redacted verification diagnostics
         required: false
         type: string
+      invitation_sha256:
+        description: Optional lowercase SHA-256 of an invitation token for redacted lease-journey diagnostics
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -141,4 +145,69 @@ jobs:
                 "ORDER BY n.id DESC LIMIT 5")
             print("smsDeliveryRecords=" + str(len(deliveries)))
             for row in deliveries: print("smsDeliveryState=" + row)
+            PY
+      - name: Inspect redacted invitation lease state
+        if: ${{ inputs.invitation_sha256 != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          INVITATION_SHA256: ${{ inputs.invitation_sha256 }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: INVITATION_SHA256
+          script: |
+            set -eu
+            sudo INVITATION_SHA256="$INVITATION_SHA256" python3 - <<'PY'
+            from __future__ import annotations
+            import os, re, subprocess
+            from pathlib import Path
+
+            digest = os.environ.get("INVITATION_SHA256", "").strip().lower()
+            if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise RuntimeError("A valid SHA-256 digest is required")
+            files = (Path("/etc/slickhood/application.properties"), Path("/home/silverocean/backend/config/application.properties"))
+            config = dict(os.environ)
+            for path in files:
+                if path.exists():
+                    for raw in path.read_text(encoding="utf-8-sig").splitlines():
+                        line = raw.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            key, value = line.split("=", 1)
+                            config[key.strip()] = value.strip().strip("\"'")
+            def resolve(*keys: str) -> str:
+                for key in keys:
+                    value = config.get(key, "").strip()
+                    match = re.fullmatch(r"\$\{([^}:]+)(?::([^}]*))?}", value)
+                    if match: value = config.get(match.group(1), match.group(2) or "").strip()
+                    if value: return value
+                raise RuntimeError("Required datasource configuration is unavailable")
+            jdbc = resolve("spring.datasource.url", "SPRING_DATASOURCE_URL")
+            username = resolve("spring.datasource.username", "DATABASE_USERNAME", "SPRING_DATASOURCE_USERNAME")
+            password = resolve("spring.datasource.password", "DATABASE_PASSWORD", "SPRING_DATASOURCE_PASSWORD")
+            match = re.match(r"jdbc:mysql://([^/:?]+)(?::(\d+))?/([^?]+)", jdbc)
+            if not match: raise RuntimeError("Unsupported datasource configuration")
+            host, port, database = match.group(1), match.group(2) or "3306", match.group(3)
+            env = dict(os.environ); env["MYSQL_PWD"] = password
+            def mysql(query: str) -> list[str]:
+                result = subprocess.run(["mysql", "--batch", "--skip-column-names", "--host", host, "--port", port,
+                    "--user", username, database, "--execute", query], env=env, text=True,
+                    capture_output=True, timeout=20, check=False)
+                if result.returncode: raise RuntimeError("Database read failed")
+                return result.stdout.strip().splitlines() if result.stdout.strip() else []
+            escaped = digest.replace("'", "''")
+            invite = mysql("SELECT CONCAT(id,'|',active,'|',type,'|',entity_id,'|',"
+                "COALESCE(DATE_FORMAT(expiry_date,'%Y-%m-%dT%H:%i:%s'),'none')) FROM pms_invite "
+                f"WHERE SHA2(token,256)='{escaped}'")
+            print("matchingInvitations=" + str(len(invite)))
+            for row in invite: print("invitationState=" + row)
+            journeys = mysql("SELECT CONCAT(i.id,'|',ut.id,'|',ut.active,'|',l.id,'|',l.active,'|',"
+                "COALESCE(l.lifecycle_status,'none'),'|',COALESCE(d.id,'none'),'|',COALESCE(d.status,'none'),'|',"
+                "IF(d.recipient_user_id=ut.user_id,1,0)) FROM pms_invite i "
+                "LEFT JOIN pms_unit_tenant ut ON ut.invite_id=i.id "
+                "LEFT JOIN pms_lease l ON l.tenant_id=ut.id "
+                "LEFT JOIN pms_lease_document d ON d.lease_id=l.id AND d.active=1 "
+                f"WHERE SHA2(i.token,256)='{escaped}' ORDER BY l.id DESC,d.id DESC")
+            print("journeyRecords=" + str(len(journeys)))
+            for row in journeys: print("journeyState=" + row)
             PY
