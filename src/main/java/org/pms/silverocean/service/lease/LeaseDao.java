@@ -91,11 +91,7 @@ public class LeaseDao {
     }
 
     public Optional<Lease> getLeaseFromTokenAndUser(String token, long userId) {
-        Optional<Unit> unitContainer = inviteRepo.findUnitFromToken(token, InviteType.TENANT.name());
-        if (unitContainer.isEmpty()) {
-            return Optional.empty();
-        }
-        return inviteRepo.findByUnitIdAndTenant(unitContainer.get().getId(), userId);
+        return inviteRepo.findLeaseByInviteTokenAndUser(token, userId);
     }
 
     public boolean hasActiveLeaseForUnit(long unitId) {

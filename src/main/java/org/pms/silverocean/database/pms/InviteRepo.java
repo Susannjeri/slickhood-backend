@@ -58,8 +58,15 @@ public interface InviteRepo extends JpaRepository<Invite, Long> {
     @Query("SELECT u FROM Invite i JOIN Unit u ON i.entityId=u.id WHERE i.token=:token AND i.type=:inviteType AND u.active AND i.active")
     Optional<Unit> findUnitFromToken(String token, String inviteType);
 
-//    @Query("SELECT l FROM Invite i JOIN UnitTenant ut ON i.id=ut.inviteId JOIN Lease l ON ut.id=l.tenantId WHERE i.token=:token AND ut.userId=:userId AND ut.active AND l.active")
-//    Optional<Lease> findByInviteTokenAndActiveAndUserId(String token, long userId);
+    /**
+     * Resolve a lease created from an invitation even after that invitation is
+     * consumed.  The tenant and active tenancy/lease predicates prevent the
+     * token from exposing another user's agreement; deliberately do not require
+     * {@code i.active}, because successful initialization deactivates it.
+     */
+    @Query("SELECT l FROM Invite i JOIN UnitTenant ut ON i.id=ut.inviteId JOIN Lease l ON ut.id=l.tenantId " +
+            "WHERE i.token=:token AND i.type='TENANT' AND ut.userId=:userId AND ut.active AND l.active")
+    Optional<Lease> findLeaseByInviteTokenAndUser(String token, long userId);
 
     @Query("SELECT l FROM UnitTenant ut JOIN Lease l ON ut.id=l.tenantId WHERE ut.unitId=:unitId AND ut.userId=:userId AND ut.active AND l.active")
     Optional<Lease> findByUnitIdAndTenant(long unitId, long userId);
