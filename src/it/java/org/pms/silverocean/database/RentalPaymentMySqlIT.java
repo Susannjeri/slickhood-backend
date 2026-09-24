@@ -516,7 +516,8 @@ class RentalPaymentMySqlIT {
         I18NService i18n = mock(I18NService.class);
         when(i18n.getLocalizedMessage(anyString())).thenReturn("Ref %s %s %.2f invoice %s at %s");
         UpdatePaymentService updater = new UpdatePaymentService(mock(NotificationService.class), invoiceDao, i18n,
-                mock(DomainEventOutboxPublisher.class), ledger);
+                mock(DomainEventOutboxPublisher.class), ledger,
+                mock(org.pms.silverocean.service.auth.dao.UserDao.class));
         updater.setInvoiceToPaid(invoice, payment.getThirdPartyTransId(), payment.getAmount());
         invoices.flush();
         ledgerLines.flush();

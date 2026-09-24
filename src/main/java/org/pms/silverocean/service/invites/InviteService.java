@@ -345,6 +345,12 @@ public class InviteService {
                     boundRecipient, notificationDTO.notificationType(), notificationDTO.formattedMessage(), "INVITE_RECEIVED",
                     "You have a new " + inviteDisplayName(inviteType)
                             + " invitation. Review it securely: " + inviteLink);
+            userDao.findById(invite.getCreatedBy()).map(Users::getEmail)
+                    .filter(email -> email != null && !email.isBlank())
+                    .ifPresent(email -> notificationService.queueInAppNotificationForExistingUser(
+                            email, "INVITE_SENT",
+                            "Your " + inviteDisplayName(inviteType) + " invitation was sent to "
+                                    + boundRecipient + "."));
         } else {
             notificationService.queueNotification(notificationDTO);
         }

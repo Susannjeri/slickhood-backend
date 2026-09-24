@@ -186,6 +186,13 @@ public class TeamAccessService {
         member=memberships.save(member); assignPlatformRole(user.getId(),member.getMembershipRole().platformRole());
         invitation.setStatus(TeamMembershipStatus.ACCEPTED); invitation.setAcceptedAt(LocalDateTime.now()); invitation.setMembershipId(member.getId()); invitations.save(invitation);
         audit.createAuditLog(invitation,"workspace_invite_accept"); audit.createAuditLog(member,"workspace_membership_create");
+        workspaces.findById(invitation.getWorkspaceId()).ifPresent(workspace ->
+                users.findById(workspace.getOwnerUserId()).map(Users::getEmail)
+                        .filter(email -> email != null && !email.isBlank())
+                        .ifPresent(email -> notifications.queueInAppNotificationForExistingUser(
+                                email, "WORKSPACE_INVITE_ACCEPTED",
+                                String.valueOf(user.getFullName()) + " accepted the invitation to join "
+                                        + workspace.getName() + ".")));
         syncKycStatus(member); return member;
     }
 

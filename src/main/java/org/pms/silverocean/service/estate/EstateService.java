@@ -92,6 +92,12 @@ public class EstateService {
         PropertyOwnership ownership = createUnitOwnership(unit, homeowner.getId(), invite.getLeaseStartDate(),
                 "HOMEOWNER_INVITE", invite.getCreatedBy());
         homeownerAgreements.createIssuedAgreement(ownership, unit, invite, homeowner);
+        userDao.findById(invite.getCreatedBy()).map(Users::getEmail)
+                .filter(email -> email != null && !email.isBlank())
+                .ifPresent(email -> notificationService.queueInAppNotificationForExistingUser(
+                        email, "HOMEOWNER_INVITE_ACCEPTED",
+                        String.valueOf(homeowner.getFullName())
+                                + " accepted the homeowner invitation for unit " + unit.getId() + "."));
         return ownership;
     }
 

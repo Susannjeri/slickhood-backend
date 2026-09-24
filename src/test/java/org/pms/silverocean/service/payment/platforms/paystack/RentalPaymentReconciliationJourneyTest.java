@@ -126,7 +126,8 @@ class RentalPaymentReconciliationJourneyTest {
         I18NService i18n = mock(I18NService.class);
         when(i18n.getLocalizedMessage(anyString())).thenReturn("Ref %s %s %.2f invoice %s at %s");
         UpdatePaymentService updater = new UpdatePaymentService(notifications, invoices, i18n,
-                mock(DomainEventOutboxPublisher.class), ledger);
+                mock(DomainEventOutboxPublisher.class), ledger,
+                mock(org.pms.silverocean.service.auth.dao.UserDao.class));
 
         Users tenant = new Users();
         tenant.setId(TENANT_ID);

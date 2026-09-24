@@ -17,6 +17,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import org.pms.silverocean.service.payment.money.MonetaryPolicy;
+import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.database.pms.entities.Users;
 
 @Component
 public class UpdatePaymentService {
@@ -25,19 +27,22 @@ public class UpdatePaymentService {
     private final I18NService i18NService;
     private final DomainEventOutboxPublisher eventPublisher;
     private final FinancialLedgerService financialLedgerService;
+    private final UserDao userDao;
 
     public UpdatePaymentService(
             NotificationService notificationService,
             InvoiceDao invoiceDao,
             I18NService i18NService,
             DomainEventOutboxPublisher eventPublisher,
-            FinancialLedgerService financialLedgerService
+            FinancialLedgerService financialLedgerService,
+            UserDao userDao
     ) {
         this.notificationService = notificationService;
         this.invoiceDao = invoiceDao;
         this.i18NService = i18NService;
         this.eventPublisher = eventPublisher;
         this.financialLedgerService = financialLedgerService;
+        this.userDao = userDao;
     }
 
     @Transactional
@@ -84,6 +89,27 @@ public class UpdatePaymentService {
                     "Payment " + thirdPartyId + " of " + invoice.getCurrency() + " " + appliedAmount.toPlainString()
                             + " was applied to invoice " + invoice.getRef() + ". Outstanding balance: "
                             + invoice.getCurrency() + " " + balance.toPlainString() + ". Open /dashboard/invoices to view the receipt.");
+        }
+
+        if (invoice.getPayToUserId() > 0) {
+            PMSInvoice paidInvoice = invoice;
+            userDao.findById(paidInvoice.getPayToUserId()).map(Users::getEmail)
+                    .filter(email -> email != null && !email.isBlank())
+                    .filter(email -> paidInvoice.getCustomerEmail() == null
+                            || !email.equalsIgnoreCase(paidInvoice.getCustomerEmail()))
+                    .ifPresent(email -> notificationService.queueEmailAndInAppOnce(
+                            "invoice-payment:" + paidInvoice.getId() + ":" + thirdPartyId,
+                            email, NotificationType.BUSINESS_ALERT_EMAIL,
+                            "<p>Payment " + org.springframework.web.util.HtmlUtils.htmlEscape(thirdPartyId)
+                                    + " of " + paidInvoice.getCurrency() + " " + appliedAmount.toPlainString()
+                                    + " was received for invoice "
+                                    + org.springframework.web.util.HtmlUtils.htmlEscape(paidInvoice.getRef()) + ".</p>",
+                            nowFullyPaid ? "PAYMENT_RECEIVED" : "PARTIAL_PAYMENT_RECEIVED",
+                            "Payment " + thirdPartyId + " of " + paidInvoice.getCurrency() + " "
+                                    + appliedAmount.toPlainString() + " was received for invoice " + paidInvoice.getRef()
+                                    + ". Outstanding balance: " + paidInvoice.getCurrency() + " "
+                                    + paidInvoice.moneyPendingAmount().toPlainString() + ".",
+                            "/dashboard/payments"));
         }
 
         if(nowFullyPaid)publishInvoicePaid(invoice,thirdPartyId,invoice.moneyAmount());
