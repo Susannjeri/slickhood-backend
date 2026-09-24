@@ -1,3 +1,10 @@
+server:
+  # Multi-role access tokens include the permissions and scoped properties for
+  # each role. Keep the accepted header size bounded, but above Tomcat's 8 KiB
+  # default so legitimate established accounts are not rejected before the
+  # authentication filter can validate them.
+  max-http-request-header-size: 32KB
+
 management:
   endpoint:
     health:
