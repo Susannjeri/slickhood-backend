@@ -22,7 +22,12 @@ import org.pms.silverocean.service.payment.invoice.InvoiceService;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 
+import java.io.IOException;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.math.BigDecimal;
@@ -30,9 +35,15 @@ import java.util.EnumSet;
 import java.util.Map;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 @Service
 public class SalesService {
+    private static final long MAX_EVIDENCE_BYTES=10L*1024*1024;
+    private static final Set<String> EVIDENCE_TYPES=Set.of("application/pdf","image/jpeg","image/png");
     private static final Map<SaleStatus, EnumSet<SaleStatus>> TRANSITIONS = Map.of(
             SaleStatus.LEAD, EnumSet.of(SaleStatus.VIEWING, SaleStatus.OFFERED, SaleStatus.CANCELLED),
             SaleStatus.VIEWING, EnumSet.of(SaleStatus.OFFERED, SaleStatus.CANCELLED),
@@ -57,12 +68,17 @@ public class SalesService {
     private final SalesAccessService access;
     private final PaymentAccountRepo paymentAccounts;
     private final BuyerOfferDocumentService offerDocuments;
+    private final SaleEvidenceAttachmentRepo evidenceAttachments;
+    private final GarageService garage;
+    private final UploadMalwarePolicy malwarePolicy;
 
     public SalesService(SaleTransactionRepo sales, PropertyRepo properties, UnitRepo units, UserDao users,
                         EstateService estates, SaleMilestoneRepo milestones, InviteService invites,
                         NotificationService notifications, I18NService i18n, LeaseDocumentRepo documents,
                         PMSInvoiceRepo invoices, InvoiceService invoiceService, SalesAccessService access,
-                        PaymentAccountRepo paymentAccounts, BuyerOfferDocumentService offerDocuments) {
+                        PaymentAccountRepo paymentAccounts, BuyerOfferDocumentService offerDocuments,
+                        SaleEvidenceAttachmentRepo evidenceAttachments, GarageService garage,
+                        UploadMalwarePolicy malwarePolicy) {
         this.sales = sales; this.properties = properties; this.units = units; this.users = users;
         this.estates = estates; this.milestones = milestones; this.invites = invites;
         this.notifications = notifications; this.i18n = i18n;
@@ -72,6 +88,7 @@ public class SalesService {
         this.access = access;
         this.paymentAccounts = paymentAccounts;
         this.offerDocuments = offerDocuments;
+        this.evidenceAttachments=evidenceAttachments;this.garage=garage;this.malwarePolicy=malwarePolicy;
     }
 
     @Transactional
@@ -212,7 +229,12 @@ public class SalesService {
             verifiedEscrowInvoice = requireFundedEscrow(sale);
         }
         if (request.status() == SaleMilestoneModels.Status.COMPLETED
-                && request.type() != SaleMilestoneModels.Type.ESCROW_FUNDED && request.evidenceDocumentId() == null) throw invalid();
+                && request.type() == SaleMilestoneModels.Type.AGREEMENT_SIGNED && request.evidenceDocumentId() == null) throw invalid();
+        if (request.status() == SaleMilestoneModels.Status.COMPLETED
+                && request.type() != SaleMilestoneModels.Type.ESCROW_FUNDED
+                && request.type() != SaleMilestoneModels.Type.AGREEMENT_SIGNED
+                && (request.evidenceAttachmentId() == null || StringUtils.isBlank(request.externalReference())
+                || StringUtils.isBlank(request.notes()))) throw invalid();
         if (request.evidenceDocumentId() != null) {
             LeaseDocument evidence = documents.findByIdAndPropertyIdAndUnitIdAndActiveTrue(
                             request.evidenceDocumentId(), sale.getPropertyId(), sale.getUnitId())
@@ -222,8 +244,11 @@ public class SalesService {
                     || evidence.getStatus() != LeaseDocumentStatus.SIGNED) throw invalid();
             if (request.type() == SaleMilestoneModels.Type.AGREEMENT_SIGNED
                     && evidence.getDocumentType() != LeaseDocumentType.PROPERTY_SALE_AGREEMENT) throw invalid();
-            if (request.type() != SaleMilestoneModels.Type.AGREEMENT_SIGNED
-                    && (StringUtils.isBlank(request.externalReference()) || StringUtils.isBlank(request.notes()))) throw invalid();
+        }
+        if (request.evidenceAttachmentId() != null) {
+            SaleEvidenceAttachment evidence=evidenceAttachments.findByIdAndSaleIdAndActiveTrue(request.evidenceAttachmentId(),saleId).orElseThrow(this::invalid);
+            String required=switch(request.type()){case DUE_DILIGENCE_CHECK->SaleMilestoneModels.EvidenceCategory.DUE_DILIGENCE.name();case TRANSFER_REGISTERED->SaleMilestoneModels.EvidenceCategory.TRANSFER_REGISTRATION.name();case HANDOVER_COMPLETED->SaleMilestoneModels.EvidenceCategory.HANDOVER.name();default->null;};
+            if(required==null||!required.equals(evidence.getCategory()))throw invalid();
         }
         BigDecimal milestoneAmount = verifiedEscrowInvoice == null ? request.amount()
                 : BigDecimal.valueOf(verifiedEscrowInvoice.getAmount());
@@ -231,9 +256,30 @@ public class SalesService {
                 : verifiedEscrowInvoice.getRef();
         return milestones.save(new SaleMilestone(saleId, request.type().name(), request.status().name(), milestoneAmount,
                 sale.getCurrency(), StringUtils.left(StringUtils.trimToNull(milestoneReference), 120),
-                request.evidenceDocumentId(), StringUtils.left(StringUtils.trimToNull(request.notes()), 1000),
+                request.evidenceDocumentId(),request.evidenceAttachmentId(), StringUtils.left(StringUtils.trimToNull(request.notes()), 1000),
                 java.time.ZonedDateTime.now(PMSUtils.getZoneId()), users.getUserId()));
     }
+
+    @Transactional public SaleMilestoneModels.EvidenceView uploadEvidence(long saleId,SaleMilestoneModels.EvidenceCategory category,MultipartFile file)throws IOException{
+        SaleTransaction sale=managedForUpdate(saleId);if(sale.getStatus()==SaleStatus.COMPLETED||sale.getStatus()==SaleStatus.CANCELLED)throw invalidTransition();
+        if(evidenceAttachments.countBySaleIdAndActiveTrue(saleId)>=30)throw invalid();
+        byte[] bytes=validateEvidence(file);String type=file.getContentType().toLowerCase(Locale.ROOT);
+        String ext="application/pdf".equals(type)?".pdf":"image/png".equals(type)?".png":".jpg";
+        String ref="sales/"+sale.getPropertyId()+"/"+saleId+"/"+UUID.randomUUID()+ext;
+        garage.uploadBytes(ref,bytes,type);SaleEvidenceAttachment a=new SaleEvidenceAttachment();a.setSaleId(saleId);a.setCategory(category.name());
+        a.setDisplayName(safeName(file.getOriginalFilename()));a.setFileRef(ref);a.setContentType(type);a.setFileSize(bytes.length);
+        a.setChecksumSha256(hash(bytes));a.setUploadedByUserId(users.getUserId());a.setCreatedBy(users.getUserId());a.setActive(true);
+        return evidenceView(evidenceAttachments.save(a));
+    }
+    @Transactional(readOnly=true) public List<SaleMilestoneModels.EvidenceView> evidence(long saleId){
+        SaleTransaction sale=sales.findById(saleId).filter(SaleTransaction::isActive).orElseThrow(()->new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
+        if(users.getActiveRole()==PMSRole.BUYER){if(!Objects.equals(sale.getBuyerUserId(),users.getUserId()))throw new PMSCustomException(ResponseCode.SALE_NOT_FOUND);}else access.require(sale.getPropertyId(),Permission.VIEW_SALE_PIPELINE);
+        return evidenceAttachments.findAllBySaleIdAndActiveTrueOrderByCreatedOnAsc(saleId).stream().map(this::evidenceView).toList();
+    }
+    private SaleMilestoneModels.EvidenceView evidenceView(SaleEvidenceAttachment a){return new SaleMilestoneModels.EvidenceView(a.getId(),a.getSaleId(),a.getCategory(),a.getDisplayName(),a.getContentType(),a.getFileSize(),a.getChecksumSha256(),a.getUploadedByUserId(),a.getCreatedOn(),garage.getPresignedUrlForStoredObject(a.getFileRef()));}
+    private byte[] validateEvidence(MultipartFile file)throws IOException{if(file==null||file.isEmpty()||file.getSize()>MAX_EVIDENCE_BYTES)throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);String type=StringUtils.defaultString(file.getContentType()).toLowerCase(Locale.ROOT);if(!EVIDENCE_TYPES.contains(type))throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);byte[] b=file.getBytes();boolean valid="application/pdf".equals(type)?b.length>4&&b[0]=='%'&&b[1]=='P'&&b[2]=='D'&&b[3]=='F':"image/png".equals(type)?b.length>8&&(b[0]&255)==0x89&&b[1]=='P'&&b[2]=='N'&&b[3]=='G':b.length>3&&(b[0]&255)==0xff&&(b[1]&255)==0xd8;if(!valid)throw new PMSCustomException(ResponseCode.UNSUPPORTED_MEDIA_TYPE);malwarePolicy.requireSafe(b);return b;}
+    private String safeName(String supplied){String n=StringUtils.defaultIfBlank(supplied,"sale-evidence").replace('\\','/');n=n.substring(n.lastIndexOf('/')+1).replaceAll("[^A-Za-z0-9._ -]","_");return n.length()>255?n.substring(n.length()-255):n;}
+    private String hash(byte[] b){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(b));}catch(Exception e){throw new IllegalStateException(e);}}
 
     private EscrowInvoiceModels.View escrowView(PMSInvoice invoice) {
         return new EscrowInvoiceModels.View(invoice.getId(), invoice.getRef(), BigDecimal.valueOf(invoice.getAmount()),

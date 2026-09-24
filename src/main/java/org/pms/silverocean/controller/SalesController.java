@@ -11,6 +11,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
+import java.io.IOException;
 
 @RestController @RequestMapping("/sales")
 public class SalesController {
@@ -29,6 +32,8 @@ public class SalesController {
     public ResponseEntity<ResponseDTO> escrowInvoice(@PathVariable long id,@Valid @RequestBody EscrowInvoiceModels.Create request){return ok(ResponseCode.SALE_UPDATED,service.createEscrowInvoice(id,request));}
     @PostMapping("/{id}/milestones") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SALE_PIPELINE)") public ResponseEntity<ResponseDTO> milestone(@PathVariable long id,@Valid @RequestBody SaleMilestoneModels.Create request){return ok(ResponseCode.SALE_UPDATED,service.addMilestone(id,request));}
     @GetMapping("/{id}/milestones") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SALE_PIPELINE)") public ResponseEntity<ResponseDTO> milestones(@PathVariable long id,@PageableDefault(size=50,sort="occurredAt") Pageable pageable){return page(service.milestones(id,pageable));}
+    @PostMapping(value="/{id}/evidence",consumes=MediaType.MULTIPART_FORM_DATA_VALUE) @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).MANAGE_SALE_PIPELINE)") public ResponseEntity<ResponseDTO> uploadEvidence(@PathVariable long id,@RequestParam SaleMilestoneModels.EvidenceCategory category,@RequestPart("file") MultipartFile file)throws IOException{return ok(ResponseCode.SALE_UPDATED,service.uploadEvidence(id,category,file));}
+    @GetMapping("/{id}/evidence") @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SALE_PIPELINE)") public ResponseEntity<ResponseDTO> evidence(@PathVariable long id){return ok(ResponseCode.GENERAL_SUCCESS,service.evidence(id));}
     private ResponseEntity<ResponseDTO> ok(ResponseCode code,Object data){return ResponseEntity.ok(new ResponseDTO(true,code.getCode(),i18n.getLocalizedMessage(code),data));}
     private ResponseEntity<ResponseDTO> page(Page<?> values){ResponseDTO body=new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),values.getContent());body.setSize(values.getSize());body.setTotalPages(values.getTotalPages());body.setTotalElements(values.getTotalElements());return ResponseEntity.ok(body);}
 }
