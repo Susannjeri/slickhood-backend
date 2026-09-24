@@ -210,4 +210,13 @@ jobs:
                 f"WHERE SHA2(i.token,256)='{escaped}' ORDER BY l.id DESC,d.id DESC")
             print("journeyRecords=" + str(len(journeys)))
             for row in journeys: print("journeyState=" + row)
+            accounts = mysql("SELECT CONCAT(u.active,'|',u.email_verified,'|',u.phone_verified,'|',"
+                "COALESCE(u.account_status,'none'),'|',IF(NULLIF(TRIM(u.full_name),'') IS NULL,0,1),'|',"
+                "IF(NULLIF(TRIM(u.identification_number),'') IS NULL,0,1),'|',"
+                "IF(NULLIF(TRIM(u.phone_number),'') IS NULL,0,1),'|',"
+                "IF(NULLIF(TRIM(u.tax_pin),'') IS NULL,0,1)) FROM pms_invite i "
+                "JOIN pms_users u ON LOWER(TRIM(u.email))=LOWER(TRIM(i.recipient)) "
+                f"WHERE SHA2(i.token,256)='{escaped}'")
+            print("matchingRecipientAccounts=" + str(len(accounts)))
+            for row in accounts: print("recipientAccountState=" + row)
             PY
