@@ -9,11 +9,16 @@ import org.pms.silverocean.service.maintenance.MaintenanceService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.MediaType;
+import java.io.IOException;
 @RestController @RequestMapping("/maintenance") @RequiredArgsConstructor @PreAuthorize("isAuthenticated()")
 public class MaintenanceController {
  private final MaintenanceService service;private final I18NService i18n;
  @PostMapping public ResponseEntity<ResponseDTO> create(@Valid @RequestBody MaintenanceModels.Create request){return ok(service.create(request));}
  @GetMapping("/unit/{unitId}") public ResponseEntity<ResponseDTO> list(@PathVariable long unitId){return ok(service.list(unitId));}
  @PutMapping("/{id}") public ResponseEntity<ResponseDTO> update(@PathVariable long id,@Valid @RequestBody MaintenanceModels.Update request){return ok(service.update(id,request));}
+ @PostMapping(value="/{id}/attachments",consumes=MediaType.MULTIPART_FORM_DATA_VALUE) public ResponseEntity<ResponseDTO> upload(@PathVariable long id,@RequestParam MaintenanceModels.AttachmentCategory category,@RequestPart("file") MultipartFile file)throws IOException{return ok(service.uploadAttachment(id,category,file));}
+ @GetMapping("/{id}/attachments") public ResponseEntity<ResponseDTO> attachments(@PathVariable long id){return ok(service.attachments(id));}
  private ResponseEntity<ResponseDTO> ok(Object data){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),data));}
 }
