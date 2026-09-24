@@ -10,4 +10,5 @@ public interface MarketQuoteProvider {
                  String freshness, ZonedDateTime asOf) {}
     Optional<Quote> quote(String exchange, String symbol, String currency);
     boolean available();
+    boolean supports(String exchange, String currency);
 }

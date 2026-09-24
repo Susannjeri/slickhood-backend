@@ -14,6 +14,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.currencyexchange.CurrencyConversionService;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.wealth.vault.VaultMalwareScanner;
+import org.pms.silverocean.service.wealth.market.MarketQuoteProvider;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
@@ -31,6 +32,7 @@ class WealthJourneyRegressionTest {
  @Mock WealthObligationRepo obligationRepo; @Mock WealthVaultDocumentRepo vaultRepo;
  @Mock WealthGoalRepo goalRepo; @Mock UserDao userDao; @Mock GarageService garageService;
  @Mock CurrencyConversionService currencyConversionService; @Mock VaultMalwareScanner malwareScanner;
+ @Mock MarketQuoteProvider marketQuoteProvider;
  @Mock WealthAdminService wealthAdminService; @Mock UnitRepo unitRepo;
  @Mock PMSInvoiceRepo invoiceRepo; @Mock PropertyRepo propertyRepo;
  @InjectMocks WealthService service;
@@ -44,6 +46,14 @@ class WealthJourneyRegressionTest {
   when(assetRepo.save(any())).thenAnswer(call->{WealthAsset a=call.getArgument(0);a.setId(1L);return a;});
   assertThat(service.createAsset(request("KES")).name()).isEqualTo("Savings");
   verify(valuationRepo).save(argThat(v->v.getAssetId()==1L&&v.getAmount().compareTo(BigDecimal.TEN)==0&&"OPENING_VALUE".equals(v.getSource())));
+ }
+ @Test void rejectsUnsupportedAutomaticMarketPricingPair(){
+  var type=new WealthAssetType();type.setCode("LISTED_EQUITY");type.setActive(true);type.setMarketPricingAllowed(true);
+  when(wealthAdminService.requireForAsset("LISTED_EQUITY",null)).thenReturn(type);
+  when(marketQuoteProvider.supports("NSE","KES")).thenReturn(false);
+  var request=new WealthRequests.AssetRequest(null,"LISTED_EQUITY","Safaricom",null,null,"KES",BigDecimal.TEN,null,BigDecimal.TEN,LocalDate.now(PMSUtils.getZoneId()),"ACTIVE","NSE","SCOM",BigDecimal.ONE,BigDecimal.TEN,"MARKET");
+  assertThatThrownBy(()->service.createAsset(request)).isInstanceOf(PMSCustomException.class);
+  verify(assetRepo,never()).save(any());
  }
  @Test void acceptsTheCurrentNairobiBusinessDate(){
   var type=new WealthAssetType();type.setCode("LAND");type.setActive(true);
