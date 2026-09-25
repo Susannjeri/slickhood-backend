@@ -81,6 +81,8 @@ public enum NotificationType {
     INSURANCE_POLICY_EMAIL("email.insurance.policy.subject", "email.insurance.policy.body", true, NotificationChannel.EMAIL),
     INSURANCE_CLAIM_EMAIL("email.insurance.claim.subject", "email.insurance.claim.body", true, NotificationChannel.EMAIL),
     INSURANCE_RENEWAL_EMAIL("email.insurance.renewal.subject", "email.insurance.renewal.body", true, NotificationChannel.EMAIL),
+    INSURANCE_OPERATIONS_EMAIL("email.insurance.operations.subject", "email.insurance.operations.body", true, NotificationChannel.EMAIL),
+    INSURANCE_DOCUMENT_EMAIL("email.insurance.document.subject", "email.insurance.document.body", true, NotificationChannel.EMAIL),
     SOKO_MODERATION_EMAIL("email.soko.moderation.subject", "email.soko.moderation.body", true, NotificationChannel.EMAIL),
     SOKO_ORDER_STATUS_EMAIL("email.soko.order.status.subject", "email.soko.order.status.body", true, NotificationChannel.EMAIL),
     SOKO_DELIVERY_CODE_EMAIL("email.soko.delivery.code.subject", "email.soko.delivery.code.body", true, NotificationChannel.EMAIL),
