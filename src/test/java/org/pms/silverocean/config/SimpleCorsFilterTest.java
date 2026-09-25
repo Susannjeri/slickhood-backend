@@ -47,6 +47,23 @@ class SimpleCorsFilterTest {
     }
 
     @Test
+    void publicWebsiteCanUseGuestHelpWithoutOpeningAuthenticatedHelpDesk() throws Exception {
+        var source = configured("https://app.slickhood.com", true).corsConfigurationSource();
+        var request = new org.springframework.mock.web.MockHttpServletRequest("OPTIONS", "/helpdesk/public/conversations/SH-TEST/messages");
+        request.addHeader("Origin", "https://slickhood.com");
+        request.addHeader("Access-Control-Request-Method", "POST");
+        request.addHeader("Access-Control-Request-Headers", "content-type,x-help-token");
+        var response = new org.springframework.mock.web.MockHttpServletResponse();
+        var policy = source.getCorsConfiguration(request);
+        assertThat(new org.springframework.web.cors.DefaultCorsProcessor().processRequest(policy, request, response)).isTrue();
+        assertThat(response.getHeader("Access-Control-Allow-Origin")).isEqualTo("https://slickhood.com");
+        assertThat(response.getHeader("Access-Control-Allow-Headers")).containsIgnoringCase("x-help-token");
+        assertThat(response.getHeader("Access-Control-Allow-Credentials")).isNull();
+        assertThat(source.getCorsConfiguration(new org.springframework.mock.web.MockHttpServletRequest("POST", "/helpdesk/admin/articles"))
+                .checkOrigin("https://slickhood.com")).isNull();
+    }
+
+    @Test
     void productionRejectsHttpOrigins() {
         SimpleCorsFilter filter = configured("http://app.slickhood.com", true);
         assertThatThrownBy(filter::corsConfigurationSource)

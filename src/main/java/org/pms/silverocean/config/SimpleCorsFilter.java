@@ -61,10 +61,11 @@ public class SimpleCorsFilter {
         publicWebsite.setAllowedOrigins(List.copyOf(publicWebsiteOrigins));
         publicWebsite.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
         publicWebsite.setAllowedHeaders(List.of("Content-Type", "Authorization", "X-Insurance-Access",
-                "X-Slickhood-Role", "X-Slickhood-Workspace", "X-Correlation-Id"));
+                "X-Help-Token", "X-Slickhood-Role", "X-Slickhood-Workspace", "X-Correlation-Id"));
         publicWebsite.setAllowCredentials(false);
         source.registerCorsConfiguration("/public/insurance/**", publicWebsite);
         source.registerCorsConfiguration("/public/property-listings/**", publicWebsite);
+        source.registerCorsConfiguration("/helpdesk/public/**", publicWebsite);
         source.registerCorsConfiguration("/**", config);
         return source;
     }
