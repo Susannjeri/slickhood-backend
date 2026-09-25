@@ -36,7 +36,8 @@ public final class PropertyListingModels {
     public record AdminListing(long id, String slug, long unitId, String status, String listingType,
                                String headline, long publisherUserId, ZonedDateTime publishedAt,
                                ZonedDateTime expiresAt, String suspensionReason) { }
-    public record InquiryView(long id, long listingId, String listingSlug, String listingHeadline,
+    public record InquiryView(long id, long listingId, long propertyId, long unitId, String unitRef,
+                              String listingType, String listingSlug, String listingHeadline,
                               String name, String email, String phone, String message, String status,
                               ZonedDateTime createdOn) { }
 }

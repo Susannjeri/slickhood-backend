@@ -211,11 +211,10 @@ public class PropertyListingService {
             try {
                 notifications.queueEmailAndInAppOnce("property-inquiry:" + savedInquiry.getId(), email,
                         NotificationType.PROPERTY_LISTING_INQUIRY_EMAIL, body, "PROPERTY_LISTING_INQUIRY",
-                        "New enquiry for " + listing.getHeadline() + " (unit " + unitReference
-                                + "). Open the unit to review its listing and respond to the request.",
-                        "/dashboard/unit/details/" + listing.getUnitId()
-                                + (unit == null ? "" : "?p=" + unit.getPropertyId()
-                                + "&from=" + ("SALE".equals(listing.getListingType()) ? "sale" : "rentals")));
+                        "New enquiry from " + inquiry.getName() + " (" + inquiry.getEmail() + ", "
+                                + StringUtils.defaultString(inquiry.getPhone(), "phone not provided") + ") for unit "
+                                + unitReference + ". Open the enquiry to review the message and take action.",
+                        "/dashboard/property-listing-inquiries?inquiryId=" + savedInquiry.getId());
             }
             catch (RuntimeException ex) { log.warn("Property listing enquiry notification could not be queued for listing {}", listing.getId(), ex); }
         });
@@ -296,7 +295,7 @@ public class PropertyListingService {
     }
     private ListingCard card(PropertyListing l) { Unit u=l.getUnit(); Property p=u.getProperty(); return new ListingCard(l.getPublicSlug(),l.getListingType(),l.getHeadline(),p.getType(),readable(u.getUnitType()),u.getSize(),u.getPrice(),u.getCurrency(),approximate(p.getAddress()),publicApiPrefix+"/"+l.getPublicSlug()+"/images/0",l.getPublishedAt()); }
     private AdminListing admin(PropertyListing l) { return new AdminListing(l.getId(),l.getPublicSlug(),l.getUnitId(),l.getStatus(),l.getListingType(),l.getHeadline(),l.getPublisherUserId(),l.getPublishedAt(),l.getExpiresAt(),l.getSuspensionReason()); }
-    private InquiryView inquiryView(PropertyListingInquiry i) { PropertyListing l=i.getListing(); return new InquiryView(i.getId(),l.getId(),l.getPublicSlug(),l.getHeadline(),i.getName(),i.getEmail(),i.getPhone(),i.getMessage(),i.getStatus(),i.getCreatedOn()); }
+    private InquiryView inquiryView(PropertyListingInquiry i) { PropertyListing l=i.getListing(); Unit u=l.getUnit(); return new InquiryView(i.getId(),l.getId(),u.getPropertyId(),u.getId(),u.getRef(),l.getListingType(),l.getPublicSlug(),l.getHeadline(),i.getName(),i.getEmail(),i.getPhone(),i.getMessage(),i.getStatus(),i.getCreatedOn()); }
     private Publication publication(PropertyListing l) { return new Publication(l.getPublicSlug(),l.getStatus(),l.getPublishedAt(),l.getExpiresAt()); }
     private String defaultHeadline(Unit u) { return readable(u.getUnitType())+" at "+u.getProperty().getName()+("SALE".equals(listingType(u))?" for sale":" to rent"); }
     private String defaultDescription(Unit u) { return "Discover this "+readable(u.getUnitType()).toLowerCase(Locale.ROOT)+" in "+approximate(u.getProperty().getAddress())+". Contact the owner or appointed agent through Slickhood to arrange a viewing."; }

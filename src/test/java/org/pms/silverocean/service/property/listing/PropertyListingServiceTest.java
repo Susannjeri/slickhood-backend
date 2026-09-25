@@ -140,8 +140,9 @@ class PropertyListingServiceTest {
                         && message.contains("https://slickhood.com/property/" + listing.getPublicSlug())
                         && message.contains("Requester email") && message.contains("amina@example.com")
                         && message.contains("Requester phone") && message.contains("+254700000000")),
-                eq("PROPERTY_LISTING_INQUIRY"), contains("Open the unit"),
-                eq("/dashboard/unit/details/" + unit.getId() + "?p=" + unit.getPropertyId() + "&from=rentals"));
+                eq("PROPERTY_LISTING_INQUIRY"), argThat(summary -> summary.contains("Amina")
+                        && summary.contains("amina@example.com") && summary.contains("+254700000000")),
+                eq("/dashboard/property-listing-inquiries?inquiryId=81"));
     }
 
     @Test void estateHomeCannotBePublishedAsARental() {
