@@ -1092,8 +1092,29 @@ public class PropertyService {
     }
 
     private ResponseDTO getPropertyUnitByIdAndOwnerOrStaffOrTenant(long unitId) {
+        return loadUnitPropertiesAndMapDTO(findAccessibleUnit(unitId), true);
+    }
+
+    public ResponseDTO getUnitOverview(long unitId) {
+        return loadUnitPropertiesAndMapDTO(findAccessibleUnit(unitId), false);
+    }
+
+    public ResponseDTO getUnitImages(long unitId) {
+        Optional<DbUnitDTO> accessible = findAccessibleUnit(unitId);
+        if (accessible.isEmpty()) {
+            return new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),
+                    i18NService.getLocalizedMessage(ResponseCode.UNIT_NOT_FOUND));
+        }
+        DbUnitDTO unit = accessible.get();
+        List<String> images = StringUtils.isNotBlank(unit.imagePath())
+                ? getSliderImageUrls(unit.imagePath() + "/" + SLIDERIMAGES) : List.of();
+        return new ResponseDTO(true, ResponseCode.UNIT_DETAILS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.UNIT_DETAILS), images);
+    }
+
+    private Optional<DbUnitDTO> findAccessibleUnit(long unitId) {
         PMSRole activeRole = userDao.getActiveRole();
-        Optional<DbUnitDTO> unitFromDb = switch (activeRole) {
+        return switch (activeRole) {
             case LANDLORD, ESTATE_MANAGER, SALES_AGENT -> unitDao.findDTOByIdAndCreatedBy(unitId, userDao.getUserId());
             case TENANT -> unitDao.findByIdAndTenant(unitId, userDao.getUserId());
             case HOMEOWNER -> unitDao.findByIdAndHomeowner(unitId, userDao.getUserId());
@@ -1105,23 +1126,22 @@ public class PropertyService {
             case SUPER_ADMIN -> unitDao.findById(unitId).filter(Unit::isActive).map(DbUnitDTO::new);
             default -> Optional.empty();
         };
-        return loadUnitPropertiesAndMapDTO(unitFromDb);
     }
 
     public ResponseDTO getUnitByIDAndLoggedInUser(Long unitId) {
         Optional<DbUnitDTO> unitFromDb = unitDao.findDTOByIdAndCreatedBy(unitId, userDao.getUserId());
-        return loadUnitPropertiesAndMapDTO(unitFromDb);
+        return loadUnitPropertiesAndMapDTO(unitFromDb, true);
     }
 
     public ResponseDTO viewUnitLease(String token) {
         Optional<DbUnitDTO> unitFromDb = unitDao.findDTOByToken(token);
 
-        return loadUnitPropertiesAndMapDTO(unitFromDb);
+        return loadUnitPropertiesAndMapDTO(unitFromDb, true);
     }
 
-    private ResponseDTO loadUnitPropertiesAndMapDTO(Optional<DbUnitDTO> unitFromDb) {
+    private ResponseDTO loadUnitPropertiesAndMapDTO(Optional<DbUnitDTO> unitFromDb, boolean includeSliderImages) {
         return unitFromDb.map(unit -> {
-            List<String> images = StringUtils.isNotBlank(unit.imagePath()) ? getSliderImageUrls(unit.imagePath() + "/" + SLIDERIMAGES) : List.of();
+            List<String> images = includeSliderImages && StringUtils.isNotBlank(unit.imagePath()) ? getSliderImageUrls(unit.imagePath() + "/" + SLIDERIMAGES) : List.of();
             return new ResponseDTO(true, ResponseCode.UNIT_DETAILS.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.UNIT_DETAILS), toUnitDTO(unit, images));
         }).orElseGet(() -> new ResponseDTO(false, ResponseCode.UNIT_NOT_FOUND.getCode(),

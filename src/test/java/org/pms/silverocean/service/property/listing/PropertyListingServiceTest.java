@@ -141,7 +141,7 @@ class PropertyListingServiceTest {
                         && message.contains("Requester email") && message.contains("amina@example.com")
                         && message.contains("Requester phone") && message.contains("+254700000000")),
                 eq("PROPERTY_LISTING_INQUIRY"), contains("Open the unit"),
-                eq("/dashboard/unit/details/" + unit.getId()));
+                eq("/dashboard/unit/details/" + unit.getId() + "?p=" + unit.getPropertyId() + "&from=rentals"));
     }
 
     @Test void estateHomeCannotBePublishedAsARental() {

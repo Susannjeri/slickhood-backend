@@ -219,6 +219,18 @@ public class UnitController extends BasePropertyController {
         return ResponseEntity.ok(propertyService.listUnits(pageable, search, propertyId, unitId, leaseMode));
     }
 
+    @GetMapping("/{unitId}")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_UNIT)")
+    public ResponseEntity<ResponseDTO> getUnitOverview(@PathVariable long unitId) {
+        return ResponseEntity.ok(propertyService.getUnitOverview(unitId));
+    }
+
+    @GetMapping("/{unitId}/images")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_UNIT)")
+    public ResponseEntity<ResponseDTO> getUnitImages(@PathVariable long unitId) {
+        return ResponseEntity.ok(propertyService.getUnitImages(unitId));
+    }
+
     @GetMapping("/list/by/tenant")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_UNIT)")
     public ResponseEntity<ResponseDTO> getUnitListByTenant() {

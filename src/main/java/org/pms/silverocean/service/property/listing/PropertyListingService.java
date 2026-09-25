@@ -213,7 +213,9 @@ public class PropertyListingService {
                         NotificationType.PROPERTY_LISTING_INQUIRY_EMAIL, body, "PROPERTY_LISTING_INQUIRY",
                         "New enquiry for " + listing.getHeadline() + " (unit " + unitReference
                                 + "). Open the unit to review its listing and respond to the request.",
-                        "/dashboard/unit/details/" + listing.getUnitId());
+                        "/dashboard/unit/details/" + listing.getUnitId()
+                                + (unit == null ? "" : "?p=" + unit.getPropertyId()
+                                + "&from=" + ("SALE".equals(listing.getListingType()) ? "sale" : "rentals")));
             }
             catch (RuntimeException ex) { log.warn("Property listing enquiry notification could not be queued for listing {}", listing.getId(), ex); }
         });

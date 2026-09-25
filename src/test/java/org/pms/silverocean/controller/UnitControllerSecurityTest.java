@@ -17,4 +17,15 @@ class UnitControllerSecurityTest {
                 UnitController.class.getMethod("updateUnitTypeCatalog", String.class, java.util.Set.class,String.class)
                         .getAnnotation(PreAuthorize.class).value());
     }
+
+    @Test
+    void optimizedUnitOverviewAndGalleryRequireUnitViewPermission() throws Exception {
+        String expected = "hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_UNIT)";
+        assertEquals(expected,
+                UnitController.class.getMethod("getUnitOverview", long.class)
+                        .getAnnotation(PreAuthorize.class).value());
+        assertEquals(expected,
+                UnitController.class.getMethod("getUnitImages", long.class)
+                        .getAnnotation(PreAuthorize.class).value());
+    }
 }

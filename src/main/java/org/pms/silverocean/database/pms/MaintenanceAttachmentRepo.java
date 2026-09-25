@@ -7,5 +7,6 @@ import java.util.List;
 
 public interface MaintenanceAttachmentRepo extends JpaRepository<MaintenanceAttachment, Long> {
     List<MaintenanceAttachment> findAllByWorkOrderIdAndActiveTrueOrderByCreatedOnAsc(long workOrderId);
+    List<MaintenanceAttachment> findAllByWorkOrderIdInAndActiveTrueOrderByCreatedOnAsc(List<Long> workOrderIds);
     long countByWorkOrderIdAndActiveTrue(long workOrderId);
 }
