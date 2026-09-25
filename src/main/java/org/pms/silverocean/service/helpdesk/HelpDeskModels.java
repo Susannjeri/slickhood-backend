@@ -46,9 +46,10 @@ public final class HelpDeskModels {
     }
     public record GuestConversation(ConversationView conversation, String accessToken, LocalDateTime expiresAt) {}
     public record SupportSummary(long waitingForSupport, long unassigned, long slaBreached, long waitingForCustomer) {}
-    public record ArticleView(long id, String slug, String title, String category, String body,
+    public record ArticleView(long id, int serialNumber, String slug, String title, String category, String body,
                               String keywords, String audienceRoles, boolean published) {
-        public ArticleView(HelpArticle a) { this(a.getId(), a.getSlug(), a.getTitle(), a.getCategory(), a.getBody(), a.getKeywords(), a.getAudienceRoles(), a.isPublished()); }
+        public ArticleView(HelpArticle a) { this(a, 0); }
+        public ArticleView(HelpArticle a, int serialNumber) { this(a.getId(), serialNumber, a.getSlug(), a.getTitle(), a.getCategory(), a.getBody(), a.getKeywords(), a.getAudienceRoles(), a.isPublished()); }
     }
     public record AiAnswer(String text, String responseId, String model, boolean escalated, List<Long> articleIds) {
         public AiAnswer { articleIds = List.copyOf(articleIds); }

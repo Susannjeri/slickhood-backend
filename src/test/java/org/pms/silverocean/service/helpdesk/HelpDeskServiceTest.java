@@ -159,25 +159,32 @@ class HelpDeskServiceTest {
         assertEquals(2, new HelpDeskModels.ConversationView(c, List.of(note, publicMessage), true).messages().size());
     }
 
-    @Test void manualImportCreatesOnlyDraftsAndRetainsExistingSlugs() throws Exception {
+    @Test void manualImportCreatesMissingDraftsAndSynchronisesExistingContentWithoutPublishing() throws Exception {
         when(users.getUserId()).thenReturn(17L);
-        when(articles.existsBySlugAndIdNot(anyString(), eq(-1L))).thenAnswer(i -> "manual-start".equals(i.getArgument(0)));
+        var existing = new org.pms.silverocean.database.pms.entities.HelpArticle();
+        existing.setId(4L); existing.setSlug("manual-start"); existing.setPublished(true); existing.setActive(true);
+        when(articles.findBySlug(anyString())).thenAnswer(i -> "manual-start".equals(i.getArgument(0))
+                ? Optional.of(existing) : Optional.empty());
         when(articles.save(any())).thenAnswer(i -> { var a=(org.pms.silverocean.database.pms.entities.HelpArticle)i.getArgument(0); a.setId(9L); return a; });
         var result = service.importManualDrafts();
-        assertEquals(29, result.get("created")); assertEquals(1, result.get("retained"));
+        assertEquals(29, result.get("created")); assertEquals(1, result.get("updated"));
         var captor = ArgumentCaptor.forClass(org.pms.silverocean.database.pms.entities.HelpArticle.class);
-        verify(articles, times(29)).save(captor.capture());
-        assertTrue(captor.getAllValues().stream().noneMatch(org.pms.silverocean.database.pms.entities.HelpArticle::isPublished));
+        verify(articles, times(30)).save(captor.capture());
+        assertTrue(existing.isPublished());
+        assertTrue(captor.getAllValues().stream().filter(a -> a.getId() != 9L).allMatch(org.pms.silverocean.database.pms.entities.HelpArticle::isPublished));
         assertTrue(captor.getAllValues().stream().filter(a -> a.getSlug().equals("manual-admin")).allMatch(a -> "Superadmin".equals(a.getAudienceRoles())));
         assertTrue(org.pms.silverocean.controller.HelpDeskController.class.getMethod("importManual")
                 .getAnnotation(org.springframework.security.access.prepost.PreAuthorize.class).value().contains("manage_helpdesk_articles"));
     }
 
-    @Test void manualImportIsRepeatSafe() {
+    @Test void manualImportRepeatSynchronisesWithoutCreatingDuplicates() {
         when(users.getUserId()).thenReturn(17L);
-        when(articles.existsBySlugAndIdNot(anyString(), eq(-1L))).thenReturn(true);
+        var existing = new org.pms.silverocean.database.pms.entities.HelpArticle();
+        existing.setId(4L); existing.setSlug("manual-existing"); existing.setPublished(true); existing.setActive(true);
+        when(articles.findBySlug(anyString())).thenReturn(Optional.of(existing));
         assertEquals(0, service.importManualDrafts().get("created"));
-        verify(articles, never()).save(any());
+        verify(articles, times(30)).save(existing);
+        assertTrue(existing.isPublished());
     }
 
     @Test void guestKnowledgeCannotIncludeRestrictedStaffArticles() {
@@ -185,6 +192,19 @@ class HelpDeskServiceTest {
         var internal = new org.pms.silverocean.database.pms.entities.HelpArticle(); internal.setId(2L); internal.setAudienceRoles("Superadmin,Support");
         when(articles.findByPublishedTrueAndActiveTrueOrderByCategoryAscTitleAsc()).thenReturn(List.of(publicArticle, internal));
         assertEquals(List.of(1L), service.guestArticles().stream().map(HelpDeskModels.ArticleView::id).toList());
+    }
+
+    @Test void knowledgeArticlesUseDeclaredCatalogueSerialsInsteadOfDatabaseIds() {
+        var second = new org.pms.silverocean.database.pms.entities.HelpArticle();
+        second.setId(700L); second.setTitle("02 · Registration"); second.setPublished(true); second.setActive(true);
+        var first = new org.pms.silverocean.database.pms.entities.HelpArticle();
+        first.setId(900L); first.setTitle("01 · Getting started"); first.setPublished(true); first.setActive(true);
+        when(articles.findByPublishedTrueAndActiveTrueOrderByCategoryAscTitleAsc()).thenReturn(List.of(second, first));
+
+        var visible = service.guestArticles();
+
+        assertEquals(List.of(900L, 700L), visible.stream().map(HelpDeskModels.ArticleView::id).toList());
+        assertEquals(List.of(1, 2), visible.stream().map(HelpDeskModels.ArticleView::serialNumber).toList());
     }
 
     private HelpConversation ownedCase(String status) {
