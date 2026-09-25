@@ -18,7 +18,6 @@ import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.helpdesk.HelpDeskRateLimiter;
 import org.pms.silverocean.service.notification.NotificationService;
-import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
@@ -130,11 +129,14 @@ class PropertyListingServiceTest {
         service.inquire(listing.getPublicSlug(), new PropertyListingModels.InquiryRequest(
                 "Amina", "amina@example.com", "+254700000000", "Please arrange a viewing.", true, ""), "203.0.113.8");
 
-        var message=org.mockito.ArgumentCaptor.forClass(NotificationDTO.class);
-        verify(notifications).queueNotification(message.capture());
-        assertThat(message.getValue().formattedMessage()).contains("Atlas Court", unit.getRef(),
-                "https://slickhood.com/property/" + listing.getPublicSlug(),
-                "Requester email", "amina@example.com", "Requester phone", "+254700000000");
+        verify(notifications).queueEmailAndInAppOnce(eq("property-inquiry:null"),eq("owner@example.com"),
+                eq(org.pms.silverocean.service.notification.common.NotificationType.PROPERTY_LISTING_INQUIRY_EMAIL),
+                argThat(message -> message.contains("Atlas Court") && message.contains(unit.getRef())
+                        && message.contains("https://slickhood.com/property/" + listing.getPublicSlug())
+                        && message.contains("Requester email") && message.contains("amina@example.com")
+                        && message.contains("Requester phone") && message.contains("+254700000000")),
+                eq("PROPERTY_LISTING_INQUIRY"), contains("Open /dashboard/property/listing-enquiries"),
+                eq("/dashboard/property/listing-enquiries"));
     }
 
     @Test void estateHomeCannotBePublishedAsARental() {

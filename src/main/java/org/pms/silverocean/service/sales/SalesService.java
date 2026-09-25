@@ -254,10 +254,14 @@ public class SalesService {
                 : BigDecimal.valueOf(verifiedEscrowInvoice.getAmount());
         String milestoneReference = verifiedEscrowInvoice == null ? request.externalReference()
                 : verifiedEscrowInvoice.getRef();
-        return milestones.save(new SaleMilestone(saleId, request.type().name(), request.status().name(), milestoneAmount,
+        SaleMilestone saved = milestones.save(new SaleMilestone(saleId, request.type().name(), request.status().name(), milestoneAmount,
                 sale.getCurrency(), StringUtils.left(StringUtils.trimToNull(milestoneReference), 120),
                 request.evidenceDocumentId(),request.evidenceAttachmentId(), StringUtils.left(StringUtils.trimToNull(request.notes()), 1000),
                 java.time.ZonedDateTime.now(PMSUtils.getZoneId()), users.getUserId()));
+        notifyBuyerEvent(sale, "milestone:" + saved.getId(), "PROPERTY_SALE_MILESTONE",
+                "Sale milestone " + request.type().name().toLowerCase(Locale.ROOT).replace('_', ' ')
+                        + " is " + request.status().name().toLowerCase(Locale.ROOT) + ".");
+        return saved;
     }
 
     @Transactional public SaleMilestoneModels.EvidenceView uploadEvidence(long saleId,SaleMilestoneModels.EvidenceCategory category,MultipartFile file)throws IOException{
@@ -269,7 +273,10 @@ public class SalesService {
         garage.uploadBytes(ref,bytes,type);SaleEvidenceAttachment a=new SaleEvidenceAttachment();a.setSaleId(saleId);a.setCategory(category.name());
         a.setDisplayName(safeName(file.getOriginalFilename()));a.setFileRef(ref);a.setContentType(type);a.setFileSize(bytes.length);
         a.setChecksumSha256(hash(bytes));a.setUploadedByUserId(users.getUserId());a.setCreatedBy(users.getUserId());a.setActive(true);
-        return evidenceView(evidenceAttachments.save(a));
+        SaleEvidenceAttachment saved=evidenceAttachments.save(a);
+        notifyBuyerEvent(sale,"evidence:"+saved.getId(),"PROPERTY_SALE_EVIDENCE",
+                "New "+category.name().replace('_',' ').toLowerCase(Locale.ROOT)+" evidence was added to the sale.");
+        return evidenceView(saved);
     }
     @Transactional(readOnly=true) public List<SaleMilestoneModels.EvidenceView> evidence(long saleId){
         SaleTransaction sale=sales.findById(saleId).filter(SaleTransaction::isActive).orElseThrow(()->new PMSCustomException(ResponseCode.SALE_NOT_FOUND));
@@ -404,6 +411,15 @@ public class SalesService {
         users.findById(sale.getSalesAgentUserId()).filter(Users::isActive)
                 .filter(agent -> StringUtils.isNotBlank(agent.getEmail()))
                 .ifPresent(agent -> queueStatus(agent.getEmail(), agent.getFullName(), sale, " The buyer accepted the offer."));
+    }
+
+    private void notifyBuyerEvent(SaleTransaction sale, String eventKey, String type, String detail) {
+        String recipient = sale.getInvitedBuyerEmail();
+        if (StringUtils.isBlank(recipient)) return;
+        notifications.queueEmailAndInAppOnce("sale:" + sale.getId() + ":" + eventKey, recipient,
+                NotificationType.BUSINESS_ALERT_EMAIL,
+                "<p>" + org.springframework.web.util.HtmlUtils.htmlEscape(detail) + "</p>", type,
+                detail + " Open /dashboard/sales to review the transaction and documents.", "/dashboard/sales");
     }
 
     private void queueStatus(String recipient, String name, SaleTransaction sale, String detail) {
