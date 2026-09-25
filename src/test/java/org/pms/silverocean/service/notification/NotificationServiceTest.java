@@ -94,6 +94,27 @@ class NotificationServiceTest {
     }
 
     @Test
+    void inAppNotificationStoresSafeUnitActionPath() {
+        EncryptionService encryption = mock(EncryptionService.class);
+        NotificationDao dao = mock(NotificationDao.class);
+        UserDao users = mock(UserDao.class);
+        ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+        Users recipient = Users.builder().email("member@example.com").build();
+        recipient.setActive(true);
+        when(users.findByEmail("member@example.com")).thenReturn(java.util.Optional.of(recipient));
+        when(encryption.encrypt("Unit 17 was updated")).thenReturn(new byte[]{7, 1});
+        NotificationService service = new NotificationService(encryption, dao, users, Map.of(), events, mock(NotificationPreferenceService.class));
+
+        assertThat(service.queueInAppNotificationForExistingUser(
+                "member@example.com", "UNIT_UPDATED", "Unit 17 was updated",
+                "/dashboard/unit/details/17")).isTrue();
+
+        ArgumentCaptor<Notification> stored = ArgumentCaptor.forClass(Notification.class);
+        verify(dao).save(stored.capture());
+        assertThat(stored.getValue().getActionPath()).isEqualTo("/dashboard/unit/details/17");
+    }
+
+    @Test
     void inAppNotificationIsNotStoredForUnknownOrInactiveAccount() {
         EncryptionService encryption = mock(EncryptionService.class);
         NotificationDao dao = mock(NotificationDao.class);

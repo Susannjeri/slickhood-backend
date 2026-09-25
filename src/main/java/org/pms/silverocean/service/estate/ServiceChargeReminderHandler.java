@@ -59,7 +59,8 @@ public class ServiceChargeReminderHandler implements DomainEventHandler {
                         ? "SERVICE_CHARGE_OVERDUE" : "SERVICE_CHARGE_DUE_SOON",
                 "Service charge invoice " + invoice.getRef() + " for unit " + unitRef + " is " + phaseLabel
                         + ". Balance: " + invoice.getCurrency() + " " + amount
-                        + ". Open /dashboard/invoices to review or pay it.","/dashboard/invoices");
+                        + ". Open the unit to review the charge and payment status.",
+                "/dashboard/unit/details/" + charge.getUnitId());
         if (requested.phase() == ServiceChargeReminderEvent.Phase.OVERDUE
                 && invoice.getPayToUserId() > 0 && invoice.getPayToUserId() != invoice.getBilledUserId()) {
             users.findById(invoice.getPayToUserId()).filter(item -> item.isActive())
@@ -72,7 +73,8 @@ public class ServiceChargeReminderHandler implements DomainEventHandler {
                                 "SERVICE_CHARGE_RECEIVABLE_OVERDUE",
                                 "Homeowner invoice " + invoice.getRef() + " for unit " + unitRef + " has "
                                         + invoice.getCurrency() + " " + amount + " outstanding since " + charge.getDueDate()
-                                        + ". Open /dashboard/invoices to review it. Ownership must not be ended automatically for arrears.","/dashboard/invoices");
+                                        + ". Open the unit to review it. Ownership must not be ended automatically for arrears.",
+                                "/dashboard/unit/details/" + charge.getUnitId());
                     });
         }
     }

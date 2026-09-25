@@ -419,7 +419,8 @@ public class SalesService {
         notifications.queueEmailAndInAppOnce("sale:" + sale.getId() + ":" + eventKey, recipient,
                 NotificationType.BUSINESS_ALERT_EMAIL,
                 "<p>" + org.springframework.web.util.HtmlUtils.htmlEscape(detail) + "</p>", type,
-                detail + " Open /dashboard/sales to review the transaction and documents.", "/dashboard/sales");
+                detail + " Open unit " + sale.getUnitId() + " to review the transaction and documents.",
+                "/dashboard/unit/details/" + sale.getUnitId());
     }
 
     private void queueStatus(String recipient, String name, SaleTransaction sale, String detail) {
@@ -427,11 +428,13 @@ public class SalesService {
         String body = String.format(i18n.getLocalizedMessage(NotificationType.SALE_STATUS_EMAIL.getBody()),
                 org.springframework.web.util.HtmlUtils.htmlEscape(StringUtils.defaultIfBlank(name, "Customer")),
                 sale.getPropertyId(), sale.getUnitId(), sale.getStatus(), org.springframework.web.util.HtmlUtils.htmlEscape(suffix));
-        notifications.queueEmailAndInApp(recipient, NotificationType.SALE_STATUS_EMAIL, body,
+        notifications.queueEmailAndInAppOnce("sale-status:" + sale.getId() + ":" + sale.getStatus(), recipient,
+                NotificationType.SALE_STATUS_EMAIL, body,
                 "PROPERTY_SALE_" + sale.getStatus().name(),
                 "Property sale for unit " + sale.getUnitId() + " is now "
                         + sale.getStatus().name().toLowerCase(Locale.ROOT).replace('_', ' ')
-                        + ". Open /dashboard/sales to review the transaction, documents and next step.");
+                        + ". Open the unit to review the transaction, documents and next step.",
+                "/dashboard/unit/details/" + sale.getUnitId());
     }
 
     private Pageable bounded(Pageable pageable) { return PageRequest.of(Math.max(0, pageable.getPageNumber()), Math.min(100, Math.max(1, pageable.getPageSize()))); }

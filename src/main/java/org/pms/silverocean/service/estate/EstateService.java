@@ -97,7 +97,8 @@ public class EstateService {
                 .ifPresent(email -> notificationService.queueInAppNotificationForExistingUser(
                         email, "HOMEOWNER_INVITE_ACCEPTED",
                         String.valueOf(homeowner.getFullName())
-                                + " accepted the homeowner invitation for unit " + unit.getId() + "."));
+                                + " accepted the homeowner invitation for unit " + unit.getId() + ".",
+                        "/dashboard/unit/details/" + unit.getId()));
         return ownership;
     }
 
@@ -186,10 +187,12 @@ public class EstateService {
                             org.springframework.web.util.HtmlUtils.htmlEscape(java.util.Objects.toString(homeowner.getFullName(), "")),
                             org.springframework.web.util.HtmlUtils.htmlEscape(location), endDate,
                             org.springframework.web.util.HtmlUtils.htmlEscape(java.util.Objects.toString(reason, "")));
-                    notificationService.queueEmailAndInApp(homeowner.getEmail(), NotificationType.OWNERSHIP_ENDED_EMAIL,
-                            body, "OWNERSHIP_RECORD_ENDED",
+                    notificationService.queueEmailAndInAppOnce("ownership-ended:" + ownership.getId(),
+                            homeowner.getEmail(), NotificationType.OWNERSHIP_ENDED_EMAIL, body, "OWNERSHIP_RECORD_ENDED",
                             "Your ownership record for " + location + " ended on " + endDate
-                                    + ". Open /dashboard/estate to review the historical record. Contact estate management if this is incorrect.");
+                                    + ". Open the unit to review the historical record. Contact estate management if this is incorrect.",
+                            ownership.getUnitId() == null ? "/dashboard/estate"
+                                    : "/dashboard/unit/details/" + ownership.getUnitId());
                 });
     }
 

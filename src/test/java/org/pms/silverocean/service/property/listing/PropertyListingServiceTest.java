@@ -125,18 +125,23 @@ class PropertyListingServiceTest {
         when(listings.findPublicBySlug(eq(listing.getPublicSlug()),any())).thenReturn(Optional.of(listing));
         when(users.findById(42L)).thenReturn(Optional.of(publisher));
         when(units.findById(unit.getId())).thenReturn(Optional.of(unit));
+        when(inquiries.save(any(PropertyListingInquiry.class))).thenAnswer(invocation -> {
+            PropertyListingInquiry saved = invocation.getArgument(0);
+            saved.setId(81L);
+            return saved;
+        });
 
         service.inquire(listing.getPublicSlug(), new PropertyListingModels.InquiryRequest(
                 "Amina", "amina@example.com", "+254700000000", "Please arrange a viewing.", true, ""), "203.0.113.8");
 
-        verify(notifications).queueEmailAndInAppOnce(eq("property-inquiry:null"),eq("owner@example.com"),
+        verify(notifications).queueEmailAndInAppOnce(eq("property-inquiry:81"),eq("owner@example.com"),
                 eq(org.pms.silverocean.service.notification.common.NotificationType.PROPERTY_LISTING_INQUIRY_EMAIL),
                 argThat(message -> message.contains("Atlas Court") && message.contains(unit.getRef())
                         && message.contains("https://slickhood.com/property/" + listing.getPublicSlug())
                         && message.contains("Requester email") && message.contains("amina@example.com")
                         && message.contains("Requester phone") && message.contains("+254700000000")),
-                eq("PROPERTY_LISTING_INQUIRY"), contains("Open /dashboard/property/listing-enquiries"),
-                eq("/dashboard/property/listing-enquiries"));
+                eq("PROPERTY_LISTING_INQUIRY"), contains("Open the unit"),
+                eq("/dashboard/unit/details/" + unit.getId()));
     }
 
     @Test void estateHomeCannotBePublishedAsARental() {

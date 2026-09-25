@@ -192,7 +192,7 @@ public class PropertyListingService {
         inquiry.setConsentVersion(inquiryConsentVersion);
         inquiry.setConsentedAt(now());
         inquiry.setActive(true);
-        inquiries.save(inquiry);
+        PropertyListingInquiry savedInquiry = inquiries.save(inquiry);
         users.findById(listing.getPublisherUserId()).map(u -> u.getEmail()).filter(StringUtils::isNotBlank).ifPresent(email -> {
             Unit unit = units.findById(listing.getUnitId()).orElse(null);
             String propertyName = unit != null && unit.getProperty() != null
@@ -209,11 +209,11 @@ public class PropertyListingService {
                     "<br>Requester phone: <strong>" + HtmlUtils.htmlEscape(StringUtils.defaultString(inquiry.getPhone(), "Not provided")) + "</strong>" +
                     "<br>Message: " + HtmlUtils.htmlEscape(inquiry.getMessage());
             try {
-                notifications.queueEmailAndInAppOnce("property-inquiry:" + inquiry.getId(), email,
+                notifications.queueEmailAndInAppOnce("property-inquiry:" + savedInquiry.getId(), email,
                         NotificationType.PROPERTY_LISTING_INQUIRY_EMAIL, body, "PROPERTY_LISTING_INQUIRY",
                         "New enquiry for " + listing.getHeadline() + " (unit " + unitReference
-                                + "). Open /dashboard/property/listing-enquiries to review and respond.",
-                        "/dashboard/property/listing-enquiries");
+                                + "). Open the unit to review its listing and respond to the request.",
+                        "/dashboard/unit/details/" + listing.getUnitId());
             }
             catch (RuntimeException ex) { log.warn("Property listing enquiry notification could not be queued for listing {}", listing.getId(), ex); }
         });
