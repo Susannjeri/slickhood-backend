@@ -32,6 +32,11 @@ public class JWTFilter extends GenericFilter {
     public static final String ACTIVE_ROLE_ATTRIBUTE = "slickhood.activeRole";
     private final JwtService jwtService;
     private final I18NService i18nService;
+    private static final Set<String> ANONYMOUS_AUTHENTICATION_PATHS = Set.of(
+            "/auth/login",
+            "/auth/google",
+            "/auth/register"
+    );
 
     public JWTFilter(JwtService jwtService, I18NService i18nService) {
         this.jwtService = jwtService;
@@ -44,6 +49,15 @@ public class JWTFilter extends GenericFilter {
 
         HttpServletRequest httpRequest = (HttpServletRequest) request;
         HttpServletResponse httpResponse = (HttpServletResponse) response;
+
+        // A stale access token must never prevent a user from establishing a
+        // new session. Spring's permitAll rule is evaluated after this filter,
+        // so explicitly bypass bearer validation on credential entry points.
+        // Protected endpoints continue to reject expired or replaced tokens.
+        if (ANONYMOUS_AUTHENTICATION_PATHS.contains(httpRequest.getRequestURI())) {
+            chain.doFilter(request, response);
+            return;
+        }
         String header = httpRequest.getHeader("Authorization");
 
         if (StringUtils.isNotBlank(header) && header.startsWith(StaticStrings.BEARER_PREFIX)) {

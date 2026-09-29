@@ -78,6 +78,30 @@ class JWTFilterTest {
     }
 
     @Test
+    void staleBearerTokenCannotBlockCredentialLogin() throws Exception {
+        request.setMethod("POST");
+        request.setRequestURI("/auth/login");
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        verifyNoInteractions(jwtService);
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
+    void staleBearerTokenCannotBlockGoogleLogin() throws Exception {
+        request.setMethod("POST");
+        request.setRequestURI("/auth/google");
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        verifyNoInteractions(jwtService);
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
     void multiRoleTokenRequiresAnExplicitActiveRole() throws Exception {
         when(i18nService.getLocalizedMessage(anyString())).thenReturn("Invalid token");
         stubValidatedToken(claims("current-session", List.of(
