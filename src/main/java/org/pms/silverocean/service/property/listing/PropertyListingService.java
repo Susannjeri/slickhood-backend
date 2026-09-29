@@ -6,6 +6,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.pms.silverocean.database.pms.PropertyListingInquiryRepo;
 import org.pms.silverocean.database.pms.PropertyListingRepo;
 import org.pms.silverocean.database.pms.UnitRepo;
+import org.pms.silverocean.database.pms.UtilitiesRepo;
 import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.database.pms.entities.PropertyListing;
 import org.pms.silverocean.database.pms.entities.PropertyListingInquiry;
@@ -37,6 +38,9 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import static org.pms.silverocean.service.property.listing.PropertyListingModels.*;
 
@@ -47,6 +51,7 @@ public class PropertyListingService {
     private final PropertyListingRepo listings;
     private final PropertyListingInquiryRepo inquiries;
     private final UnitRepo units;
+    private final UtilitiesRepo utilities;
     private final UserDao users;
     private final GarageService garage;
     private final HelpDeskRateLimiter rateLimiter;
@@ -303,7 +308,33 @@ public class PropertyListingService {
                 .map(word -> Character.toUpperCase(word.charAt(0)) + word.substring(1)).reduce((a, b) -> a + " " + b).orElse("Property");
     }
     private String approximate(String address) { String clean=StringUtils.defaultIfBlank(StringUtils.trim(address),"Location available on request"); String[] parts=clean.split(","); return String.join(", ", Arrays.stream(parts).map(String::trim).filter(StringUtils::isNotBlank).limit(2).toList()); }
-    private List<String> amenities(Unit u) { if(StringUtils.isBlank(u.getUtilities())) return List.of(); return Arrays.stream(u.getUtilities().split(",")).map(String::trim).filter(StringUtils::isNotBlank).limit(12).toList(); }
+    private List<String> amenities(Unit unit) {
+        if (StringUtils.isBlank(unit.getUtilities())) return List.of();
+
+        List<String> values = Arrays.stream(unit.getUtilities().split(","))
+                .map(String::trim)
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .limit(12)
+                .toList();
+        List<Long> ids = values.stream()
+                .filter(value -> value.matches("\\d+"))
+                .map(Long::valueOf)
+                .toList();
+        var namesById = StreamSupport.stream(utilities.findAllById(ids).spliterator(), false)
+                .filter(utility -> utility.isActive() && StringUtils.isNotBlank(utility.getName()))
+                .collect(Collectors.toMap(utility -> utility.getId(), Function.identity()));
+
+        return values.stream()
+                .map(value -> {
+                    if (!value.matches("\\d+")) return readable(value);
+                    var utility = namesById.get(Long.valueOf(value));
+                    return utility == null ? null : readable(utility.getName());
+                })
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .toList();
+    }
     private String coverPath(Unit u, Property p) { if(StringUtils.isNotBlank(u.getImagePath())&&StringUtils.isNotBlank(u.getThumbnail()))return join(u.getImagePath(),u.getThumbnail()); if(StringUtils.isNotBlank(p.getImagePath())&&StringUtils.isNotBlank(p.getThumbnail()))return join(p.getImagePath(),p.getThumbnail()); return null; }
     private String buildImageManifest(Unit unit) {
         java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<>();

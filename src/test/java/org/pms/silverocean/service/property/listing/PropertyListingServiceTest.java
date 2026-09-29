@@ -8,10 +8,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.database.pms.PropertyListingInquiryRepo;
 import org.pms.silverocean.database.pms.PropertyListingRepo;
 import org.pms.silverocean.database.pms.UnitRepo;
+import org.pms.silverocean.database.pms.UtilitiesRepo;
 import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.database.pms.entities.PropertyListing;
 import org.pms.silverocean.database.pms.entities.PropertyListingInquiry;
 import org.pms.silverocean.database.pms.entities.Unit;
+import org.pms.silverocean.database.pms.entities.Utility;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.audit.AuditLogService;
@@ -23,6 +25,7 @@ import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Optional;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -35,12 +38,13 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class PropertyListingServiceTest {
     @Mock PropertyListingRepo listings; @Mock PropertyListingInquiryRepo inquiries; @Mock UnitRepo units;
+    @Mock UtilitiesRepo utilities;
     @Mock UserDao users; @Mock GarageService garage; @Mock HelpDeskRateLimiter limiter; @Mock NotificationService notifications;
     @Mock AuditLogService audit;
     PropertyListingService service;
 
     @BeforeEach void setUp() {
-        service = new PropertyListingService(listings, inquiries, units, users, garage, limiter, notifications, audit);
+        service = new PropertyListingService(listings, inquiries, units, utilities, users, garage, limiter, notifications, audit);
         ReflectionTestUtils.setField(service, "expiryDays", 90);
         ReflectionTestUtils.setField(service, "publicApiPrefix", "/public/property-listings");
         ReflectionTestUtils.setField(service, "inquiryLimit", 5);
@@ -87,6 +91,27 @@ class PropertyListingServiceTest {
         var result=service.detail(listing.getPublicSlug());
 
         assertThat(result.verified()).isTrue();
+    }
+
+    @Test void listingDetailReturnsAmenityNamesInsteadOfStoredIds() {
+        Unit unit=eligibleUnit(); unit.setAdvertise(true); unit.setUtilities("6,5,2,1");
+        PropertyListing listing=new PropertyListing(); listing.setId(9L); listing.setUnitId(unit.getId());
+        listing.setUnit(unit); listing.setPublicSlug("atlas-court-two-bedroom-1234567890abcdef1234567890abcdef");
+        listing.setListingType("RENT"); listing.setHeadline("Two bedroom at Atlas Court");
+        listing.setDescription("A managed property."); listing.setImageManifest("properties/3/units/7/cover.jpg");
+        listing.setPublisherUserId(42L); listing.setStatus("PUBLISHED"); listing.setActive(true);
+        listing.setPublishedAt(ZonedDateTime.now(ZoneOffset.UTC).minusDays(1));
+        listing.setExpiresAt(ZonedDateTime.now(ZoneOffset.UTC).plusDays(30));
+        when(listings.findPublicBySlug(eq(listing.getPublicSlug()),any())).thenReturn(Optional.of(listing));
+        when(users.findById(42L)).thenReturn(Optional.empty());
+        when(utilities.findAllById(List.of(6L,5L,2L,1L))).thenReturn(List.of(
+                utility(1L, "WATER"), utility(2L, "ELECTRICITY"),
+                utility(5L, "HEATING"), utility(6L, "COOLING")));
+
+        var result=service.detail(listing.getPublicSlug());
+
+        assertThat(result.amenities()).containsExactly("Cooling", "Heating", "Electricity", "Water");
+        assertThat(result.amenities()).noneMatch(value -> value.matches("\\d+"));
     }
 
     @Test void recordsConsentEvidenceAndAppliesEmailAndClientRateLimits() {
@@ -162,5 +187,8 @@ class PropertyListingServiceTest {
         unit.setLeaseMode("RENT");
         unit.setPrice(85000); unit.setCurrency("KES"); unit.setActive(true); unit.setImagePath("properties/3/units/7"); unit.setThumbnail("cover.jpg");
         return unit;
+    }
+    private Utility utility(long id, String name) {
+        Utility utility=new Utility(); utility.setId(id); utility.setName(name); utility.setActive(true); return utility;
     }
 }
