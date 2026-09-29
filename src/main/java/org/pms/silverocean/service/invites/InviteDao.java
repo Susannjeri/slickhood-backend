@@ -49,6 +49,10 @@ public class InviteDao {
         return inviteRepo.findPendingTenantInvites(recipient, LocalDateTime.now());
     }
 
+    public Optional<InviteUnitContextProjection> getUnitContext(long unitId) {
+        return inviteRepo.findUnitContext(unitId);
+    }
+
     public Optional<Invite> getLatestActiveTenantInviteForRecipient(String recipient) {
         return inviteRepo.findFirstByRecipientIgnoreCaseAndTypeAndActiveTrueAndExpiryDateAfterOrderByCreatedOnDesc(
                 recipient, InviteType.TENANT.name(), LocalDateTime.now());

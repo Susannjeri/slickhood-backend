@@ -341,19 +341,29 @@ public class InviteService {
             String inviteLink = formatInviteLink(
                     configService.getConfigByName(PMSConfigs.INVITE_LINK_URL).get().stringValue(),
                     invite.getToken());
+            String context = inviteUnitContext(invite, inviteType);
             notificationService.queueEmailAndInApp(
                     boundRecipient, notificationDTO.notificationType(), notificationDTO.formattedMessage(), "INVITE_RECEIVED",
-                    "You have a new " + inviteDisplayName(inviteType)
-                            + " invitation. Review it securely: " + inviteLink);
+                    "You have a new " + inviteDisplayName(inviteType) + " invitation" + context
+                            + ". Open this notification to review the details and continue securely. " + inviteLink);
             userDao.findById(invite.getCreatedBy()).map(Users::getEmail)
                     .filter(email -> email != null && !email.isBlank())
                     .ifPresent(email -> notificationService.queueInAppNotificationForExistingUser(
                             email, "INVITE_SENT",
-                            "Your " + inviteDisplayName(inviteType) + " invitation was sent to "
-                                    + boundRecipient + "."));
+                            "Your " + inviteDisplayName(inviteType) + " invitation" + context + " was sent to "
+                                    + boundRecipient + ". The recipient can sign in and open Notifications to continue."));
         } else {
             notificationService.queueNotification(notificationDTO);
         }
+    }
+
+    private String inviteUnitContext(Invite invite, InviteType inviteType) {
+        if (invite.getEntityId() == null || (inviteType != InviteType.TENANT && inviteType != InviteType.HOMEOWNER)) {
+            return "";
+        }
+        return inviteDao.getUnitContext(invite.getEntityId())
+                .map(unit -> " for " + unit.getPropertyName() + ", unit " + unit.getUnitRef())
+                .orElse("");
     }
 
     private String inviteDisplayName(InviteType inviteType) {

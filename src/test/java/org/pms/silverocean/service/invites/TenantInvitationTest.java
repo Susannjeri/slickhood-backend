@@ -66,6 +66,7 @@ class TenantInvitationTest {
         AtomicReference<Invite> saved = new AtomicReference<>();
         doAnswer(call -> { Invite invite = call.getArgument(0); invite.setId(88L); saved.set(invite); return null; }).when(invites).createInvite(any());
         when(invites.getInviteByInviteIdAndCreatedBy(88L,9L)).thenAnswer(call -> Optional.of(saved.get()));
+        when(invites.getUnitContext(77L)).thenReturn(Optional.of(unitContext("A-101", "Silverwood Court")));
         LocalDate start = LocalDate.now().plusDays(2), end = start.plusYears(1);
         service.createAndSendEmailInvite(InviteType.TENANT,77L," Tenant@Example.test ",start,end);
         assertEquals("tenant@example.test",saved.get().getRecipient());
@@ -74,7 +75,15 @@ class TenantInvitationTest {
         assertEquals(start,saved.get().getLeaseStartDate());
         assertEquals(end,saved.get().getLeaseEndDate());
         assertEquals(21L,saved.get().getAgreementTemplateId());
-        verify(notifications).queueEmailAndInApp(eq("tenant@example.test"),any(),contains("Open your unit invitation:"),eq("INVITE_RECEIVED"),contains("https://app.slickhood.test/invite"));
+        verify(notifications).queueEmailAndInApp(eq("tenant@example.test"),any(),contains("Open your unit invitation:"),eq("INVITE_RECEIVED"),
+                argThat(message -> message.contains("Silverwood Court") && message.contains("unit A-101") && message.contains("https://app.slickhood.test/invite")));
+    }
+
+    private InviteUnitContextProjection unitContext(String unitRef, String propertyName) {
+        return new InviteUnitContextProjection() {
+            public String getUnitRef() { return unitRef; }
+            public String getPropertyName() { return propertyName; }
+        };
     }
 
     @Test void existingTenantAlsoReceivesAnActionableInAppInvitation() {

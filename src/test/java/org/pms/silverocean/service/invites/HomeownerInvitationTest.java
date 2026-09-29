@@ -76,6 +76,7 @@ class HomeownerInvitationTest {
         AtomicReference<Invite> saved = new AtomicReference<>();
         doAnswer(call -> { Invite invite = call.getArgument(0); invite.setId(88L); saved.set(invite); return null; }).when(invites).createInvite(any());
         when(invites.getInviteByInviteIdAndCreatedBy(88L,9L)).thenAnswer(call -> Optional.of(saved.get()));
+        when(invites.getUnitContext(77L)).thenReturn(Optional.of(unitContext("B-204", "Greenview Estate")));
         service.createAndSendEmailInvite(InviteType.HOMEOWNER,77L," Resident@Example.test ", LocalDate.now(), null);
         verify(access).require(11L,Permission.MANAGE_ESTATE);
         assertEquals("resident@example.test",saved.get().getRecipient());
@@ -83,8 +84,15 @@ class HomeownerInvitationTest {
         assertEquals(77L,saved.get().getEntityId());
         assertEquals(LocalDate.now(),saved.get().getLeaseStartDate());
         assertEquals(41L,saved.get().getAgreementTemplateId());
-        verify(notifications).queueEmailAndInApp(eq("resident@example.test"),any(),contains("Accept your invitation:"),eq("INVITE_RECEIVED"),contains("homeowner invitation"));
+        verify(notifications).queueEmailAndInApp(eq("resident@example.test"),any(),contains("Accept your invitation:"),eq("INVITE_RECEIVED"),
+                argThat(message -> message.contains("homeowner invitation") && message.contains("Greenview Estate") && message.contains("unit B-204")));
         verify(properties,never()).getUnitByIDAndLoggedInUser(anyLong());
+    }
+    private InviteUnitContextProjection unitContext(String unitRef, String propertyName) {
+        return new InviteUnitContextProjection() {
+            public String getUnitRef() { return unitRef; }
+            public String getPropertyName() { return propertyName; }
+        };
     }
     @Test void aRentalCannotReceiveAHomeownerInvitation() {
         setupUnit(PMSLeaseMode.RENT);

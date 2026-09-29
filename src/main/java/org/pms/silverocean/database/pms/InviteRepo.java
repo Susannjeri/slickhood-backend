@@ -5,6 +5,7 @@ import org.pms.silverocean.database.pms.entities.Lease;
 import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.service.lease.LeaseInviteProjection;
 import org.pms.silverocean.service.invites.PendingTenantInviteProjection;
+import org.pms.silverocean.service.invites.InviteUnitContextProjection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -30,6 +31,10 @@ public interface InviteRepo extends JpaRepository<Invite, Long> {
             "JOIN Property p ON u.propertyId=p.id WHERE i.recipient=:recipient AND i.type='TENANT' " +
             "AND i.active AND i.expiryDate>:now AND u.active AND p.active ORDER BY i.createdOn DESC")
     List<PendingTenantInviteProjection> findPendingTenantInvites(String recipient, LocalDateTime now);
+
+    @Query("SELECT u.ref as unitRef, p.name as propertyName FROM Unit u " +
+            "JOIN Property p ON u.propertyId=p.id WHERE u.id=:unitId AND u.active AND p.active")
+    Optional<InviteUnitContextProjection> findUnitContext(long unitId);
 
     @Query("SELECT COUNT(DISTINCT i.entityId) FROM Invite i WHERE i.recipient=:recipient " +
             "AND i.type='TENANT' AND i.active AND i.expiryDate>:now")
