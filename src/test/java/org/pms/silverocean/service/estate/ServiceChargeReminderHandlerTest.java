@@ -55,7 +55,7 @@ class ServiceChargeReminderHandlerTest {
         ArgumentCaptor<String> sent = ArgumentCaptor.forClass(String.class);
         verify(notifications).queueEmailAndInAppOnce(anyString(),eq("owner@example.com"),
                 eq(NotificationType.SERVICE_CHARGE_OVERDUE_EMAIL),sent.capture(),
-                eq("SERVICE_CHARGE_OVERDUE"),anyString(),eq("/dashboard/invoices"));
+                eq("SERVICE_CHARGE_OVERDUE"),anyString(),eq("/dashboard/unit/details/77"));
         assertThat(sent.getValue()).contains("2500.00 KES", "A-101", "INV-9");
     }
 
@@ -80,7 +80,8 @@ class ServiceChargeReminderHandlerTest {
 
         verify(notifications).queueEmailAndInAppOnce(anyString(),eq("estate@example.com"),
                 eq(NotificationType.RECEIVABLE_OVERDUE_EMAIL), anyString(),
-                eq("SERVICE_CHARGE_RECEIVABLE_OVERDUE"), contains("must not be ended automatically"),eq("/dashboard/invoices"));
+                eq("SERVICE_CHARGE_RECEIVABLE_OVERDUE"), contains("must not be ended automatically"),
+                eq("/dashboard/unit/details/77"));
     }
 
     @Test

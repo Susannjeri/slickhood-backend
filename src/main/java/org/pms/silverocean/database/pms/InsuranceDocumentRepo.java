@@ -9,4 +9,6 @@ public interface InsuranceDocumentRepo extends JpaRepository<InsuranceDocument,L
  List<InsuranceDocument> findAllByClaimIdAndActiveTrueOrderByCreatedOnDesc(long claimId);
  Optional<InsuranceDocument> findByIdAndActiveTrue(long id);
  long countByCaseIdAndCategoryAndActiveTrue(long caseId,String category);
+ long countByPolicyIdAndCategoryAndActiveTrue(long policyId,String category);
+ long countByClaimIdAndCategoryAndActiveTrue(long claimId,String category);
 }

@@ -25,9 +25,9 @@ class UserManualBundleTest {
         JsonNode bundle=bundle();
         String written=Files.readString(Path.of("docs/SLICKHOOD_USER_MANUAL.md"),StandardCharsets.UTF_8)
                 .replace("\r\n","\n");
-        assertEquals("2026-09-15.1",bundle.path("version").asText());
+        assertEquals("2026-09-25.1",bundle.path("version").asText());
         assertTrue(written.contains("Version "+bundle.path("version").asText()));
-        assertTrue(bundle.path("releaseStatus").asText().contains("publish after deployment and review"));
+        assertTrue(bundle.path("releaseStatus").asText().contains("preserve publication approval"));
         assertEquals(30,bundle.path("chapters").size());
         Set<String> slugs=new HashSet<>();
         for (JsonNode chapter:bundle.path("chapters")) {
@@ -65,8 +65,8 @@ class UserManualBundleTest {
         assertTrue(daily.contains("same financial access restrictions"));
         assertTrue(daily.contains("count once"));
         assertTrue(daily.contains("not shown in the ordinary notification inbox"));
-        assertTrue(publishing.contains("locally verified but not evidence of deployment"));
-        assertTrue(publishing.contains("does not replace them with the revised packaged text"));
+        assertTrue(publishing.contains("preserves the database ID"));
+        assertTrue(publishing.contains("publication approval"));
     }
 
     @Test void insuranceGuidanceCoversMarineCargoDocumentsAndCicBoundary() throws Exception {

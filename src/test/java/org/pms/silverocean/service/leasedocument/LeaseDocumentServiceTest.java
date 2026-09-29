@@ -14,6 +14,7 @@ import org.pms.silverocean.service.lease.LeaseDao;
 import org.pms.silverocean.service.lease.LeaseService;
 import org.pms.silverocean.service.mustache.RenderService;
 import org.pms.silverocean.service.notification.email.EmailService;
+import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.sales.SaleStatus;
 import org.pms.silverocean.service.sales.SalesService;
 
@@ -45,12 +46,13 @@ class LeaseDocumentServiceTest {
     @Mock PropertyOwnershipRepo ownershipRepo;
     @Mock org.pms.silverocean.service.estate.EstateAccessService estateAccess;
     @Mock org.pms.silverocean.service.sales.SalesAccessService salesAccess;
+    @Mock NotificationService notifications;
     LeaseDocumentService service;
     Lease lease;
 
     @BeforeEach void setup() {
         service = new LeaseDocumentService(documents, templates, leases, properties, units, users, renderer, email,
-                leaseService, sales, salesService, brandingService, ownershipRepo, estateAccess, salesAccess);
+                leaseService, sales, salesService, brandingService, ownershipRepo, estateAccess, salesAccess, notifications);
         lease = new Lease(); lease.setId(11L); lease.setTenantId(12L); lease.setLeaseMode("RENT");
         lenient().when(leases.getLeaseForUpdate(11L)).thenReturn(Optional.of(lease));
         lease.setPrice(45_000); lease.setCurrency("KES"); lease.setMoveInDate(LocalDate.of(2026, 10, 1)); lease.setActive(true);

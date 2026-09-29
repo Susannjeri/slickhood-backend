@@ -128,10 +128,10 @@ public class HelpDeskService {
     }
 
     public List<HelpDeskModels.ArticleView> publicArticles() {
-        return visibleArticles(users.getActiveRole().getName()).stream().map(HelpDeskModels.ArticleView::new).toList();
+        return serializedViews(visibleArticles(users.getActiveRole().getName()));
     }
     public List<HelpDeskModels.ArticleView> guestArticles() {
-        return visibleArticles("Registration guest").stream().map(HelpDeskModels.ArticleView::new).toList();
+        return serializedViews(visibleArticles("Registration guest"));
     }
 
     public Page<HelpDeskModels.ConversationView> queue(Pageable pageable) {
@@ -199,24 +199,29 @@ public class HelpDeskService {
     }
 
     public List<HelpDeskModels.ArticleView> adminArticles() {
-        return articles.findByActiveTrueOrderByCategoryAscTitleAsc().stream().map(HelpDeskModels.ArticleView::new).toList();
+        return serializedViews(articles.findByActiveTrueOrderByCategoryAscTitleAsc());
     }
 
-    /** Import only missing, release-reviewed manual chapters. Never overwrite or auto-publish articles. */
+    /** Synchronise governed manual content while preserving publication approval and active history. */
     @Transactional
     public Map<String, Object> importManualDrafts() {
         requireUser();
         try (var stream = new org.springframework.core.io.ClassPathResource("helpdesk/user-manual.json").getInputStream()) {
             var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             var bundle = mapper.readTree(stream);
-            int created = 0, retained = 0;
+            int created = 0, updated = 0;
             for (var chapter : bundle.path("chapters")) {
                 HelpDeskModels.ArticleUpsert article = mapper.treeToValue(chapter.path("article"), HelpDeskModels.ArticleUpsert.class);
                 if (article.published()) throw new IllegalStateException("Manual imports must be drafts");
-                if (articles.existsBySlugAndIdNot(article.slug(), -1)) { retained++; continue; }
-                saveArticle(null, article); created++;
+                var existing = articles.findBySlug(article.slug());
+                if (existing.isEmpty()) { saveArticle(null, article); created++; continue; }
+                HelpArticle saved = existing.get();
+                saved.setTitle(article.title().trim()); saved.setCategory(article.category().trim());
+                saved.setBody(article.body().trim()); saved.setKeywords(article.keywords());
+                saved.setAudienceRoles(article.audienceRoles());
+                articles.save(saved); updated++;
             }
-            return Map.of("version", bundle.path("version").asText(), "created", created, "retained", retained);
+            return Map.of("version", bundle.path("version").asText(), "created", created, "updated", updated);
         } catch (java.io.IOException e) {
             throw new IllegalStateException("The packaged user manual could not be loaded", e);
         }
@@ -239,6 +244,29 @@ public class HelpDeskService {
         a.setKeywords(r.keywords()); a.setAudienceRoles(r.audienceRoles()); a.setPublished(r.published()); a.setActive(true);
         if (a.getCreatedBy() == null) a.setCreatedBy(requireUser()); HelpArticle saved = articles.save(a);
         return new HelpDeskModels.ArticleView(saved);
+    }
+
+    private List<HelpDeskModels.ArticleView> serializedViews(List<HelpArticle> source) {
+        List<HelpArticle> ordered = source.stream().sorted(java.util.Comparator
+                .comparingInt(this::declaredSerial)
+                .thenComparing(HelpArticle::getTitle, String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(HelpArticle::getId)).toList();
+        int highestDeclared = ordered.stream().mapToInt(this::declaredSerial)
+                .filter(value -> value != Integer.MAX_VALUE).max().orElse(0);
+        java.util.concurrent.atomic.AtomicInteger nextCustomSerial = new java.util.concurrent.atomic.AtomicInteger(highestDeclared + 1);
+        return ordered.stream().map(article -> {
+            int declared = declaredSerial(article);
+            return new HelpDeskModels.ArticleView(article,
+                    declared == Integer.MAX_VALUE ? nextCustomSerial.getAndIncrement() : declared);
+        }).toList();
+    }
+
+    private int declaredSerial(HelpArticle article) {
+        var matcher = java.util.regex.Pattern.compile("^(\\d{1,3})\\s*[·.-]").matcher(
+                java.util.Objects.toString(article.getTitle(), ""));
+        if (!matcher.find()) return Integer.MAX_VALUE;
+        try { return Integer.parseInt(matcher.group(1)); }
+        catch (NumberFormatException ignored) { return Integer.MAX_VALUE; }
     }
 
     @Scheduled(fixedDelayString = "${helpdesk.sla-scan-delay-ms:60000}")

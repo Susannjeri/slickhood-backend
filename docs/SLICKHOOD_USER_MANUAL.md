@@ -1,10 +1,10 @@
 # SlickHood user manual
 
-Version 2026-09-15.1 · 15 September 2026
+Version 2026-09-25.1 · 25 September 2026
 
-Draft knowledge for the audited release candidate; publish after deployment and review. This describes the existing application and pending audited corrections, not a replacement system or proof of deployment. Each chapter is also a Help Desk knowledge draft. Super Admin reviews and publishes it after verifying the deployed functionality. Import never overwrites existing articles.
+Release-reviewed knowledge for deployed SlickHood journeys. Each chapter is also a Help Desk knowledge article. Synchronisation updates the governed manual content while retaining each article's publication approval; Super Admin remains responsible for reviewing and publishing customer guidance.
 
-This edition revises chapters 01, 26, 29 and 30 for workspace selection, notifications and financial-report isolation. The latest corrections are locally verified, not yet deployed. Other chapters are retained from the 7 September edition and must still be checked against the deployed release before publication.
+This edition revises the rental and sale enquiry journeys, insurance-expiry guidance, documents and actionable notifications. It also serialises the full article catalogue independently of database IDs.
 
 ## How to use this manual
 
@@ -157,6 +157,7 @@ Before setup: choose the Landlord rental workspace, complete verification, and h
 5. To generate similar units, start from the existing unit and use the similar-unit action available to your role. Supply the requested quantity and naming/reference pattern, and inspect the generated references before confirming.
 6. Confirm the resulting unit count, references and shared characteristics. Similar-unit generation is for separate inventory records; it must not copy a tenant's identity or a signed lease into new units.
 7. Configure the landlord's own verified receiving account before invoicing or inviting a tenant into a payment-dependent process.
+8. When an interested customer submits Request to rent on the public website, the publishing landlord receives an email and an in-app alert. Open the alert to go directly to the advertised unit, then review the requester's contact details and message before responding appropriately. A request is an enquiry only; it does not reserve the unit, create a tenancy or accept payment.
 
 If unit types or properties are empty, check property classification, workspace assignment, property-type catalogue mappings and package access. Do not substitute a sale property to bypass an empty rental dropdown. Report the property reference and error to support.
 
@@ -243,9 +244,10 @@ Audience: SalesAgent,SalesCoordinator,ListingAgent,WorkspaceAdmin,Superadmin,Sup
 2. Use Sales Payment Setup for the sales recipient's verified account. SlickHood's subscription account is not automatically the seller's receiving account.
 3. Prepare the listing with accurate property details, currency, price, images and location. Follow the listing moderation process where required.
 4. Inspect the saved listing and availability. A reserved/completed unit should not still be presented as freely available inventory.
-5. Open Property Sale Management, record the prospective sale and enter the buyer's email. Send the buyer invitation.
-6. Ask the buyer to open the latest link and complete registration/KYC with that email. A buyer-addressed letter cannot be generated against an unfinished or unrelated invitation.
-7. Progress the permitted lead/viewing/offer steps and record a positive offer amount before preparing the letter of offer.
+5. When a customer submits Request to buy from the public website, the publishing sales team receives an email and an in-app alert linked directly to that unit. Review the enquiry before changing availability; an enquiry is not an accepted offer, reservation or completed sale.
+6. Open Property Sale Management, record the prospective sale and enter the buyer's email. Send the buyer invitation.
+7. Ask the buyer to open the latest link and complete registration/KYC with that email. A buyer-addressed letter cannot be generated against an unfinished or unrelated invitation.
+8. Progress the permitted lead/viewing/offer steps and record a positive offer amount before preparing the letter of offer.
 
 If properties or units are missing, confirm SALE classification, package and workspace scope. Do not create rental inventory just to populate a dropdown. If a save succeeds but the detail page fails, refresh or return to the list and inspect the saved record before trying another create.
 
@@ -406,8 +408,9 @@ Audience: All users, including registration guests.
 4. Select the intended quote through the application. Use the premium payment instructions/account linked to that transaction.
 5. Upload premium evidence only where the protected workflow requests it. Wait for payment verification; proof submitted is not proof of an issued policy.
 6. Open the issued policy and confirm policyholder, insurer, insured risk, cover period and documents.
-7. For renewal, review the expiry notice and current renewal terms, then follow Pay Now where offered. A reminder or payment initiation alone does not extend cover.
-8. For a claim, use the claim workflow and provide accurate incident details and requested evidence. Track review status and requests for further information.
+7. SlickHood sends policy-expiry reminders to the policyholder and authorised insurance operations contacts as the expiry date approaches. The notification states the actual remaining days and opens the relevant insurance record; verify the policy number and current dates before acting.
+8. For renewal, review the expiry notice and current renewal terms, then follow Pay Now where offered. A reminder or payment initiation alone does not extend cover.
+9. For a claim, use the claim workflow and provide accurate incident details and requested evidence. Track review status and requests for further information.
 
 Silverwood's authorised insurance operations team handles review and policy decisions. Insurer brands identify insurers; SlickHood's platform role is not the same as underwriting insurance.
 
@@ -508,7 +511,7 @@ Documents:
 
 Notifications:
 1. Use the notification bell in your signed-in profile or open Notifications. Its badge shows unread alerts, not the number of email copies. A matching email and in-app alert for the same event count once.
-2. Open the related record to check its current status. An accepted, cancelled or expired invitation must not be treated as a usable new invitation. Ask the sender for a current invitation if required.
+2. Open the related record to check its current status. Alerts that identify a unit open that exact unit, including public rent/buy enquiries, homeowner invitation acceptance, ownership history, service-charge reminders, maintenance updates and property-sale milestones. An accepted, cancelled or expired invitation must not be treated as a usable new invitation. Ask the sender for a current invitation if required.
 3. Reading or marking an alert as read does not accept an invitation, sign an agreement, confirm delivery or pay an invoice.
 4. If the unread count cannot load, retry or refresh; an unavailable count is not proof that there are no unread alerts. Check the intended account and profile when an expected alert is missing.
 5. Email/SMS queued, provider accepted and delivered are different states. Check your email spelling, phone and spam filtering; a saved alert does not prove mailbox or phone delivery.
@@ -587,14 +590,14 @@ Financial-report boundary: platform invoice, payment and account-statement repor
 Audience: Superadmin.
 
 1. Open Help Desk → Knowledge using an account with article-management permission.
-2. Select Import user manual drafts. This adds only missing packaged chapters. It does not overwrite existing articles, delete history or publish content automatically.
-3. Read each draft against the current deployed screens and enabled integrations. Version 2026-09-15.1 revises workspace selection, notifications, financial reports and the related administration/publishing guidance. These latest corrections are locally verified but not evidence of deployment. Publish an updated chapter only after its covered functionality is deployed and checked.
+2. Select Synchronise user manual. This creates missing packaged chapters and refreshes the governed title, category, body, keywords and audience of existing manual articles. It preserves each existing article's published/draft decision and active history; it does not publish content automatically.
+3. Read each article against the current deployed screens and enabled integrations. Version 2026-09-25.1 revises rental and sale enquiries, insurance expiry, documents and actionable notifications. Publish an updated chapter only after its covered functionality is deployed and checked.
 4. Check title, category, searchable keywords and audience. A blank audience makes the article available to all audiences, including registration guests.
 5. For restricted material, use exact role names supported by the backend, such as Landlord, Tenant, EstateManager, Homeowner, SalesAgent, Buyer, ServiceProvider, AssetPortfolioManager, Support or Superadmin. Do not use friendly sidebar labels as invented role codes.
 6. Keep administration and internal-support instructions restricted to the appropriate staff. Never put customer records or secrets in any article.
 7. Tick Publish for customers and AI grounding, then Save article. Test retrieval from an ordinary permitted role and from a role that must not see it.
 8. Search a representative customer question and verify the answer follows the published chapter and correctly hands off sensitive decisions.
-9. When a process changes, open and edit/review the existing article deliberately, or unpublish outdated guidance. Reimporting intentionally retains existing slugs, including inactive articles; it does not replace them with the revised packaged text. For this edition, review chapters 01, 26, 29 and 30, preserve their audience restrictions, and publish only after release verification.
+9. When a process changes, update the governed manual, synchronise, then review the existing article deliberately or unpublish outdated guidance. Synchronisation preserves the database ID, active history and publication approval while refreshing governed content. For this edition, review chapters 07, 12, 21, 26 and 30 and preserve their audience restrictions.
 10. Keep a release/reviewer record outside the article body where your organisation records approvals.
 
 The AI consumes only published active articles visible to its conversation role. Knowledge content is reference data, never authority to bypass security, perform payments or approve accounts.

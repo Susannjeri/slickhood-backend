@@ -17,6 +17,8 @@ import org.pms.silverocean.service.lease.LeaseDao;
 import org.pms.silverocean.service.lease.LeaseService;
 import org.pms.silverocean.service.mustache.RenderService;
 import org.pms.silverocean.service.notification.email.EmailService;
+import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.sales.SaleStatus;
 import org.pms.silverocean.service.sales.SalesService;
 import org.springframework.stereotype.Service;
@@ -51,12 +53,14 @@ public class LeaseDocumentService {
     private final PropertyOwnershipRepo ownershipRepo;
     private final EstateAccessService estateAccess;
     private final SalesAccessService salesAccess;
+    private final NotificationService notifications;
 
     public LeaseDocumentService(LeaseDocumentRepo documentRepo, LeaseDocumentTemplateRepo templateRepo,
             LeaseDao leaseDao, PropertyRepo propertyRepo, UnitRepo unitRepo, UserDao userDao,
             RenderService renderService, EmailService emailService, LeaseService leaseService,
             SaleTransactionRepo saleRepo, SalesService salesService, DocumentBrandingService brandingService,
-            PropertyOwnershipRepo ownershipRepo, EstateAccessService estateAccess, SalesAccessService salesAccess) {
+            PropertyOwnershipRepo ownershipRepo, EstateAccessService estateAccess, SalesAccessService salesAccess,
+            NotificationService notifications) {
         this.documentRepo = documentRepo;
         this.templateRepo = templateRepo;
         this.leaseDao = leaseDao;
@@ -72,6 +76,7 @@ public class LeaseDocumentService {
         this.ownershipRepo = ownershipRepo;
         this.estateAccess = estateAccess;
         this.salesAccess = salesAccess;
+        this.notifications = notifications;
     }
 
     @Transactional
@@ -198,7 +203,10 @@ public class LeaseDocumentService {
         document.setStatus(LeaseDocumentStatus.ISSUED);
         document.setDeliveryChannel("EMAIL_AND_IN_APP");
         document.setIssuedAt(LocalDateTime.now());
-        return new LeaseDocumentDTO(documentRepo.save(document));
+        LeaseDocument saved = documentRepo.save(document);
+        notifications.queueInAppNotificationForExistingUser(recipient.getEmail(), "DOCUMENT_ISSUED",
+                "A " + saved.getName() + " is ready for review. Open /dashboard/documents to acknowledge, reject or sign it.");
+        return new LeaseDocumentDTO(saved);
     }
 
     @Transactional
@@ -210,7 +218,9 @@ public class LeaseDocumentService {
         validateCurrentContext(document);
         document.setAcknowledgedAt(LocalDateTime.now());
         document.setStatus(LeaseDocumentStatus.ACKNOWLEDGED);
-        return new LeaseDocumentDTO(documentRepo.save(document));
+        LeaseDocument saved = documentRepo.save(document);
+        notifyCounterparty(saved, saved.getIssuerUserId(), "ACKNOWLEDGED", "The recipient acknowledged the document.");
+        return new LeaseDocumentDTO(saved);
     }
 
     @Transactional
@@ -230,6 +240,8 @@ public class LeaseDocumentService {
         if (saved.getDocumentType().isTenancyAgreement()) {
             leaseService.rejectGovernedAgreement(saved.getLeaseId(), saved.getRecipientUserId());
         }
+        notifyCounterparty(saved, saved.getIssuerUserId(), "REJECTED",
+                "The recipient rejected the document. Reason: " + StringUtils.abbreviate(request.reason().trim(), 240));
         return new LeaseDocumentDTO(saved);
     }
 
@@ -273,7 +285,25 @@ public class LeaseDocumentService {
                 && saved.getDocumentType() == LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER) {
             salesService.acceptSignedOffer(saved.getSaleId(), saved.getId(), saved.getAmount());
         }
+        long counterpartyId = userId == saved.getIssuerUserId() ? saved.getRecipientUserId() : saved.getIssuerUserId();
+        notifyCounterparty(saved, counterpartyId, saved.getStatus().name(),
+                saved.getStatus() == LeaseDocumentStatus.SIGNED
+                        ? "Both parties have signed the document."
+                        : "One party has signed; the other signature is still required.");
         return new LeaseDocumentDTO(saved);
+    }
+
+    private void notifyCounterparty(LeaseDocument document, long recipientUserId, String event, String detail) {
+        String documentName = StringUtils.defaultIfBlank(document.getName(), "SlickHood document");
+        userDao.findById(recipientUserId).filter(Users::isActive).map(Users::getEmail)
+                .filter(StringUtils::isNotBlank).ifPresent(email -> notifications.queueEmailAndInAppOnce(
+                        "document:" + document.getId() + ":" + event + ":" + recipientUserId,
+                        email, NotificationType.BUSINESS_ALERT_EMAIL,
+                        "<p>" + org.springframework.web.util.HtmlUtils.htmlEscape(documentName) + ": "
+                                + org.springframework.web.util.HtmlUtils.htmlEscape(detail) + "</p>",
+                        "DOCUMENT_" + event,
+                        documentName + ": " + detail + " Open /dashboard/documents to review it.",
+                        "/dashboard/documents"));
     }
 
     @Transactional

@@ -29,10 +29,11 @@ public class AlphaVantageMarketQuoteProvider implements MarketQuoteProvider {
         this.supportedMarkets=parseMarkets(supportedMarkets);
     }
     public boolean available(){return enabled&&apiKey!=null&&!apiKey.isBlank();}
+    public boolean supports(String exchange,String currency){String e=normalize(exchange),c=normalize(currency);return e!=null&&c!=null&&c.equals(supportedMarkets.get(e));}
     public Optional<Quote> quote(String exchange,String symbol,String currency){
         if(!available())return Optional.empty();
         String normalizedExchange=normalize(exchange),normalizedCurrency=normalize(currency),normalizedSymbol=normalize(symbol);
-        if(normalizedExchange==null||normalizedCurrency==null||normalizedSymbol==null||!normalizedCurrency.equals(supportedMarkets.get(normalizedExchange))){
+        if(normalizedSymbol==null||!supports(normalizedExchange,normalizedCurrency)){
             log.warn("Market quote rejected for unsupported exchange/currency pair: {}/{}",normalizedExchange,normalizedCurrency);
             return Optional.empty();
         }

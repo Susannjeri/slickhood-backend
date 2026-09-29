@@ -9,5 +9,6 @@ public interface HelpArticleRepo extends JpaRepository<HelpArticle, Long> {
     List<HelpArticle> findByPublishedTrueAndActiveTrueOrderByCategoryAscTitleAsc();
     List<HelpArticle> findByActiveTrueOrderByCategoryAscTitleAsc();
     Optional<HelpArticle> findByIdAndActiveTrue(long id);
+    Optional<HelpArticle> findBySlug(String slug);
     boolean existsBySlugAndIdNot(String slug, long id);
 }

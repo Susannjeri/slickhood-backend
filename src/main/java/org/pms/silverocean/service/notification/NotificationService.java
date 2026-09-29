@@ -69,9 +69,18 @@ public class NotificationService {
      */
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
     public boolean queueInAppNotificationForExistingUser(String recipient, String type, String message) {
+        return queueInAppNotificationForExistingUser(recipient, type, message, null);
+    }
+
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
+    public boolean queueInAppNotificationForExistingUser(String recipient, String type, String message,
+                                                          String actionPath) {
         if (recipient == null || recipient.isBlank() || !NotificationVisibility.personal(type)
                 || message == null || message.isBlank()) {
             return false;
+        }
+        if (actionPath != null && !BusinessNotificationService.safePath(actionPath)) {
+            throw new IllegalArgumentException("Unsafe notification action");
         }
         String normalizedRecipient = recipient.trim().toLowerCase(Locale.ROOT);
         if (userDao.findByEmail(normalizedRecipient).filter(Users::isActive).isEmpty()) {
@@ -82,6 +91,7 @@ public class NotificationService {
         notification.setType(type);
         notification.setRecipient(normalizedRecipient);
         notification.setMessage(encryptionService.encrypt(message));
+        notification.setActionPath(actionPath);
         notification.setChannel("IN_APP");
         notification.setDelivered(true);
         notification.setRetry(false);

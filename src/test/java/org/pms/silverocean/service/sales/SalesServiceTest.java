@@ -19,10 +19,13 @@ import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.payment.invoice.InvoiceService;
 import org.pms.silverocean.service.leasedocument.BuyerOfferDocumentService;
+import org.pms.silverocean.service.filestorage.GarageService;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.property.PMSPropertyManagementMode;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.mock.web.MockMultipartFile;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -48,6 +51,9 @@ class SalesServiceTest {
     @Mock SalesAccessService access;
     @Mock PaymentAccountRepo paymentAccounts;
     @Mock BuyerOfferDocumentService offerDocuments;
+    @Mock SaleEvidenceAttachmentRepo evidenceAttachments;
+    @Mock GarageService garage;
+    @Mock UploadMalwarePolicy malwarePolicy;
     SalesService service;
     Property property;
     Unit unit;
@@ -56,7 +62,7 @@ class SalesServiceTest {
     @BeforeEach
     void setUp() {
         service = new SalesService(sales, properties, units, users, estates, milestones, invites, notifications, i18n,
-                documents, invoices, invoiceService, access, paymentAccounts, offerDocuments);
+                documents, invoices, invoiceService, access, paymentAccounts, offerDocuments,evidenceAttachments,garage,malwarePolicy);
         property = new Property(); property.setId(11L); property.setActive(true); property.setCreatedBy(100L);
         property.setManagementMode(PMSPropertyManagementMode.SALE);
         unit = new Unit(); unit.setId(77L); unit.setPropertyId(11L); unit.setActive(true); unit.setLeaseMode("SALE"); unit.setCurrency("KES"); unit.setPrice(15000000);
@@ -242,11 +248,78 @@ class SalesServiceTest {
         when(documents.findByIdAndPropertyIdAndUnitIdAndActiveTrue(999L, 11L, 77L)).thenReturn(Optional.empty());
 
         PMSCustomException exception = assertThrows(PMSCustomException.class, () -> service.addMilestone(1L,
-                new SaleMilestoneModels.Create(SaleMilestoneModels.Type.DUE_DILIGENCE_CHECK,
-                        SaleMilestoneModels.Status.COMPLETED, null, null, 999L, null)));
+                new SaleMilestoneModels.Create(SaleMilestoneModels.Type.AGREEMENT_SIGNED,
+                        SaleMilestoneModels.Status.COMPLETED, null, null, 999L, null, null)));
 
         assertEquals(ResponseCode.INVALID_FIELD_DATA, exception.getResponseCode());
         verify(milestones, never()).save(any());
+    }
+
+    @Test
+    void managerUploadsPrivateCategorizedEvidence() throws Exception {
+        SaleTransaction sale = sale(SaleStatus.DUE_DILIGENCE);
+        when(users.getUserId()).thenReturn(300L);
+        when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        when(evidenceAttachments.save(any())).thenAnswer(invocation -> {
+            SaleEvidenceAttachment value = invocation.getArgument(0); value.setId(41L); return value;
+        });
+        when(garage.getPresignedUrlForStoredObject(anyString())).thenReturn("https://private.example/evidence");
+        byte[] pdf = "%PDF-1.7 evidence".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        SaleMilestoneModels.EvidenceView uploaded = service.uploadEvidence(1L,
+                SaleMilestoneModels.EvidenceCategory.DUE_DILIGENCE,
+                new MockMultipartFile("file", "registry.pdf", "application/pdf", pdf));
+
+        assertEquals(41L, uploaded.id());
+        assertEquals("DUE_DILIGENCE", uploaded.category());
+        assertEquals("https://private.example/evidence", uploaded.downloadUrl());
+        verify(malwarePolicy).requireSafe(pdf);
+        verify(garage).uploadBytes(startsWith("sales/11/1/"), eq(pdf), eq("application/pdf"));
+    }
+
+    @Test
+    void spoofedEvidenceContentIsRejectedBeforeStorage() {
+        SaleTransaction sale = sale(SaleStatus.DUE_DILIGENCE);
+        when(users.getUserId()).thenReturn(300L);
+        when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+
+        assertThrows(PMSCustomException.class, () -> service.uploadEvidence(1L,
+                SaleMilestoneModels.EvidenceCategory.DUE_DILIGENCE,
+                new MockMultipartFile("file", "fake.pdf", "application/pdf", "not a pdf".getBytes())));
+
+        verifyNoInteractions(garage, malwarePolicy);
+        verify(evidenceAttachments, never()).save(any());
+    }
+
+    @Test
+    void milestoneRejectsEvidenceFromTheWrongCategory() {
+        SaleTransaction sale = sale(SaleStatus.DUE_DILIGENCE);
+        SaleEvidenceAttachment evidence = new SaleEvidenceAttachment();
+        evidence.setId(41L); evidence.setSaleId(1L); evidence.setCategory("HANDOVER"); evidence.setActive(true);
+        when(users.getUserId()).thenReturn(300L);
+        when(sales.findByIdForUpdate(1L)).thenReturn(Optional.of(sale));
+        when(access.require(11L, Permission.MANAGE_SALE_PIPELINE)).thenReturn(property);
+        when(evidenceAttachments.findByIdAndSaleIdAndActiveTrue(41L, 1L)).thenReturn(Optional.of(evidence));
+
+        assertThrows(PMSCustomException.class, () -> service.addMilestone(1L,
+                new SaleMilestoneModels.Create(SaleMilestoneModels.Type.DUE_DILIGENCE_CHECK,
+                        SaleMilestoneModels.Status.COMPLETED, null, "registry-1", null, 41L, "checked")));
+
+        verify(milestones, never()).save(any());
+    }
+
+    @Test
+    void buyerCannotReadEvidenceForAnotherSale() {
+        SaleTransaction sale = sale(SaleStatus.DUE_DILIGENCE); sale.setBuyerUserId(999L);
+        when(users.getUserId()).thenReturn(200L);
+        when(users.getActiveRole()).thenReturn(PMSRole.BUYER);
+        when(sales.findById(1L)).thenReturn(Optional.of(sale));
+
+        assertThrows(PMSCustomException.class, () -> service.evidence(1L));
+
+        verifyNoInteractions(evidenceAttachments, garage);
     }
 
     @Test
@@ -299,7 +372,7 @@ class SalesServiceTest {
 
         assertThrows(PMSCustomException.class, () -> service.addMilestone(1L,
                 new SaleMilestoneModels.Create(SaleMilestoneModels.Type.ESCROW_FUNDED,
-                        SaleMilestoneModels.Status.COMPLETED, new BigDecimal("1000"), "typed-reference", null, null)));
+                        SaleMilestoneModels.Status.COMPLETED, new BigDecimal("1000"), "typed-reference", null, null, null)));
 
         verify(milestones, never()).save(any());
     }
@@ -322,7 +395,7 @@ class SalesServiceTest {
 
         SaleMilestone recorded = service.addMilestone(1L, new SaleMilestoneModels.Create(
                 SaleMilestoneModels.Type.ESCROW_FUNDED, SaleMilestoneModels.Status.COMPLETED,
-                null, null, null, null));
+                null, null, null, null, null));
 
         assertEquals("INV-1F5", recorded.getExternalReference());
         assertEquals(new BigDecimal("1400000.0"), recorded.getAmount());
@@ -344,7 +417,7 @@ class SalesServiceTest {
 
         assertThrows(PMSCustomException.class, () -> service.addMilestone(1L,
                 new SaleMilestoneModels.Create(SaleMilestoneModels.Type.ESCROW_FUNDED,
-                        SaleMilestoneModels.Status.COMPLETED, null, null, null, null)));
+                        SaleMilestoneModels.Status.COMPLETED, null, null, null, null, null)));
 
         verify(milestones, never()).save(any());
     }
@@ -383,7 +456,7 @@ class SalesServiceTest {
         draft.setDocumentType(org.pms.silverocean.service.leasedocument.LeaseDocumentType.PROPERTY_SALE_LETTER_OF_OFFER);
         when(documents.findByIdAndPropertyIdAndUnitIdAndActiveTrue(99L,11L,77L)).thenReturn(Optional.of(draft));
         assertThrows(PMSCustomException.class,()->service.addMilestone(1,new SaleMilestoneModels.Create(
-                SaleMilestoneModels.Type.AGREEMENT_SIGNED,SaleMilestoneModels.Status.COMPLETED,null,null,99L,null)));
+                SaleMilestoneModels.Type.AGREEMENT_SIGNED,SaleMilestoneModels.Status.COMPLETED,null,null,99L,null,null)));
         verify(milestones,never()).save(any());
     }
 
