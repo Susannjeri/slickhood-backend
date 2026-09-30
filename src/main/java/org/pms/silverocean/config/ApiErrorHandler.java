@@ -31,6 +31,7 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Collection;
 import java.util.HashSet;
@@ -228,6 +229,23 @@ public class ApiErrorHandler extends ResponseEntityExceptionHandler {
         return buildResponseEntity(new ResponseDTO(false, ResponseCode.INVALID_FIELD_DATA.getCode(),
                 "This record changed after you opened it. Refresh and review the latest version before saving again.",
                 Set.of("Stale record version")), CONFLICT);
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    protected ResponseEntity<ResponseDTO> handleResponseStatusException(ResponseStatusException ex) {
+        String description = ex.getReason() == null || ex.getReason().isBlank()
+                ? "The request could not be completed. Please try again."
+                : ex.getReason();
+        ResponseDTO response = new ResponseDTO(false,
+                ex.getStatusCode().value() == HttpStatus.TOO_MANY_REQUESTS.value()
+                        ? "RATE_LIMITED" : "REQUEST_REJECTED",
+                description);
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(ex.getStatusCode())
+                .contentType(MediaType.APPLICATION_JSON);
+        if (ex.getStatusCode().value() == HttpStatus.TOO_MANY_REQUESTS.value()) {
+            builder.header(HttpHeaders.RETRY_AFTER, "60");
+        }
+        return builder.body(response);
     }
 
     @ExceptionHandler(MissingRequestHeaderException.class)

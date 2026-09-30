@@ -8,6 +8,7 @@ import org.pms.silverocean.controller.wrappers.VerificationOptionsDTO;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.auth.LoginAttemptService;
 import org.pms.silverocean.service.auth.UserAuthenticationService;
+import org.pms.silverocean.service.auth.PublicEndpointRateLimiter;
 import org.pms.silverocean.service.auth.totp.TotpService;
 import org.pms.silverocean.service.auth.totp.TotpServiceFactory;
 import org.pms.silverocean.service.auth.totp.impl.OtpType;
@@ -27,13 +28,15 @@ class OtpControllerTest {
     private TotpService otp;
     private UserAuthenticationService authentication;
     private OtpController controller;
+    private PublicEndpointRateLimiter rateLimiter;
 
     @BeforeEach
     void setUp() {
         factory = mock(TotpServiceFactory.class);
         otp = mock(TotpService.class);
         authentication = mock(UserAuthenticationService.class);
-        controller = new OtpController(factory, mock(I18NService.class), mock(LoginAttemptService.class), authentication);
+        rateLimiter = mock(PublicEndpointRateLimiter.class);
+        controller = new OtpController(factory, mock(I18NService.class), mock(LoginAttemptService.class), authentication, rateLimiter);
     }
 
     @Test
@@ -112,5 +115,7 @@ class OtpControllerTest {
 
         assertEquals(200, response.getStatusCode().value());
         verify(otp).generateOTPCode("known@example.com");
+        verify(rateLimiter).check("otp-send-email", "known@example.com", 3,
+                "Too many verification codes requested. Please wait a minute before requesting another code.");
     }
 }

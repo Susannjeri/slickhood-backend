@@ -12,6 +12,7 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.LoginAttemptService;
 import org.pms.silverocean.service.auth.UserAuthenticationService;
+import org.pms.silverocean.service.auth.PublicEndpointRateLimiter;
 import org.pms.silverocean.service.auth.totp.TotpService;
 import org.pms.silverocean.service.auth.totp.TotpServiceFactory;
 import org.pms.silverocean.service.auth.totp.impl.OtpType;
@@ -40,12 +41,15 @@ public class OtpController {
     private final LoginAttemptService loginAttemptService;
 
     private final UserAuthenticationService userAuthenticationService;
+    private final PublicEndpointRateLimiter publicEndpointRateLimiter;
 
-    public OtpController(TotpServiceFactory totpServiceFactory, I18NService i18NService, LoginAttemptService loginAttemptService, UserAuthenticationService userAuthenticationService) {
+    public OtpController(TotpServiceFactory totpServiceFactory, I18NService i18NService, LoginAttemptService loginAttemptService,
+                         UserAuthenticationService userAuthenticationService, PublicEndpointRateLimiter publicEndpointRateLimiter) {
         this.totpServiceFactory = totpServiceFactory;
         this.i18NService = i18NService;
         this.loginAttemptService = loginAttemptService;
         this.userAuthenticationService = userAuthenticationService;
+        this.publicEndpointRateLimiter = publicEndpointRateLimiter;
     }
 
     @GetMapping("/qrcode")
@@ -69,6 +73,8 @@ public class OtpController {
         if (!OtpType.EMAIL.equals(channel)) {
             throw new PMSCustomException(ResponseCode.CANNOT_REGISTER_QR_CODE_WHEN_RECOVERING_ACCOUNT);
         }
+        publicEndpointRateLimiter.check("otp-send-email", email, 3,
+                "Too many verification codes requested. Please wait a minute before requesting another code.");
         // Do not send to arbitrary addresses and do not reveal whether the account
         // exists. Eligible accounts receive the message; every caller gets the same
         // generic handoff response.
@@ -84,6 +90,8 @@ public class OtpController {
 
     @PostMapping(value = "/verify")
     public ResponseEntity<ResponseDTO> verify(@Validated @RequestBody VerifyOtpDTO verifyOtpDTO) {
+        publicEndpointRateLimiter.check("otp-verify-email", verifyOtpDTO.getEmail(), 8,
+                "Too many verification attempts. Please wait a minute and request a new code if needed.");
         Optional<TotpService> totpServiceOptional = totpServiceFactory.getService(verifyOtpDTO.getChannel());
         if (totpServiceOptional.isEmpty()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ResponseDTO(false, ResponseCode.UNSUPPORTED_VERIFICATION_OPTION.getCode(),

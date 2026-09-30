@@ -9,6 +9,7 @@ import org.pms.silverocean.controller.wrappers.RefreshTokenDTO;
 import org.pms.silverocean.controller.wrappers.RegistrationDTO;
 import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.service.auth.UserAuthenticationService;
+import org.pms.silverocean.service.auth.PublicEndpointRateLimiter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,10 +25,13 @@ import org.springframework.web.bind.annotation.RestController;
 @Validated
 public class AuthController {
     private final UserAuthenticationService userAuthenticationService;
+    private final PublicEndpointRateLimiter publicEndpointRateLimiter;
 
     @Autowired
-    public AuthController(UserAuthenticationService userAuthenticationService) {
+    public AuthController(UserAuthenticationService userAuthenticationService,
+                          PublicEndpointRateLimiter publicEndpointRateLimiter) {
         this.userAuthenticationService = userAuthenticationService;
+        this.publicEndpointRateLimiter = publicEndpointRateLimiter;
     }
 
     @PostMapping("/login")
@@ -38,19 +42,29 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<ResponseDTO> signup(HttpServletRequest request, @Validated @RequestBody RegistrationDTO registrationDTO) {
-        ResponseDTO register = userAuthenticationService.register(registrationDTO, PMSUtils.getIPAddress(request));
+        String clientIp = PMSUtils.getIPAddress(request);
+        publicEndpointRateLimiter.check("register-ip", clientIp, 5,
+                "Too many registration attempts. Please wait a minute and try again.");
+        ResponseDTO register = userAuthenticationService.register(registrationDTO, clientIp);
         return register.isSuccess() ? ResponseEntity.status(HttpStatus.CREATED).body(register) : ResponseEntity.badRequest().body(register);
     }
 
     @PostMapping("/google")
     public ResponseEntity<ResponseDTO> googleLogin(HttpServletRequest request, @Validated @RequestBody GoogleLoginDTO googleLoginDTO) {
-
-        ResponseDTO login = userAuthenticationService.googleLogin(googleLoginDTO.getIdToken(), googleLoginDTO.getRoleId(), googleLoginDTO.getToken(), googleLoginDTO.getReferralCode(), googleLoginDTO.getReferralCampaign(), googleLoginDTO.getProfileType(), googleLoginDTO.getOrganizationName(), PMSUtils.getIPAddress(request));
+        String clientIp = PMSUtils.getIPAddress(request);
+        publicEndpointRateLimiter.check("google-login-ip", clientIp, 20,
+                "Too many sign-in attempts. Please wait a minute and try again.");
+        ResponseDTO login = userAuthenticationService.googleLogin(googleLoginDTO.getIdToken(), googleLoginDTO.getRoleId(), googleLoginDTO.getToken(), googleLoginDTO.getReferralCode(), googleLoginDTO.getReferralCampaign(), googleLoginDTO.getProfileType(), googleLoginDTO.getOrganizationName(), clientIp);
         return login.isSuccess() ? ResponseEntity.ok(login) : ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(login);
     }
 
     @PostMapping("/refresh")
-    public ResponseEntity<ResponseDTO> loginByRefreshToken(@Validated @RequestBody RefreshTokenDTO refreshTokenDTO) {
+    public ResponseEntity<ResponseDTO> loginByRefreshToken(HttpServletRequest request,
+                                                            @Validated @RequestBody RefreshTokenDTO refreshTokenDTO) {
+        publicEndpointRateLimiter.check("refresh-ip", PMSUtils.getIPAddress(request), 60,
+                "Too many session refresh requests. Please wait a minute and try again.");
+        publicEndpointRateLimiter.check("refresh-token", refreshTokenDTO.refreshToken(), 10,
+                "This session is receiving too many requests. Please wait a minute and try again.");
         ResponseDTO login = userAuthenticationService.loginByRefreshToken(refreshTokenDTO.refreshToken());
         return login.isSuccess() ? ResponseEntity.ok(login) : ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(login);
     }
