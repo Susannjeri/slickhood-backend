@@ -11,11 +11,13 @@ import org.pms.silverocean.database.pms.SubscriptionPlanRepo;
 import org.pms.silverocean.database.pms.entities.PlanFeature;
 import org.pms.silverocean.database.pms.entities.PlanQuota;
 import org.pms.silverocean.database.pms.entities.SubscriptionPlan;
+import org.pms.silverocean.service.subscription.enums.SubscriptionPurchaseMode;
 
 import java.math.BigDecimal;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -32,7 +34,8 @@ class LandlordPlanCatalogSeedServiceTest {
                 .code("ADMIN_EDITED").displayName("Admin price").price(new BigDecimal("1234")).build();
         when(plans.findByCode(any())).thenReturn(Optional.of(existing));
 
-        new LandlordPlanCatalogSeedService(plans, features, quotas, "KES", 14).seed();
+        new LandlordPlanCatalogSeedService(plans, features, quotas, "KES", 14,
+                new BigDecimal("300"), new BigDecimal("300")).seed();
 
         verify(plans, never()).save(any());
         verify(features, never()).save(any());
@@ -49,12 +52,38 @@ class LandlordPlanCatalogSeedServiceTest {
                 .thenReturn(Optional.empty());
         when(quotas.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        new LandlordPlanCatalogSeedService(plans, features, quotas, "KES", 14).seed();
+        new LandlordPlanCatalogSeedService(plans, features, quotas, "KES", 14,
+                new BigDecimal("300"), new BigDecimal("300")).seed();
 
         ArgumentCaptor<PlanFeature> saved = ArgumentCaptor.forClass(PlanFeature.class);
         verify(features, org.mockito.Mockito.atLeastOnce()).save(saved.capture());
         assertTrue(saved.getAllValues().stream().anyMatch(feature ->
                 "PROPERTY_LISTINGS".equals(feature.getFeatureKey())
                         && "LANDLORD_BRONZE".equals(feature.getSubscriptionPlan().getCode())));
+    }
+
+    @Test void sokoAndServicesAreConfigurablePaidMonthlyPlans() {
+        when(plans.findByCode(any())).thenReturn(Optional.empty());
+        when(plans.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(features.findTopBySubscriptionPlanAndFeatureKeyOrderByIdDesc(any(), any()))
+                .thenReturn(Optional.empty());
+        when(features.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(quotas.findTopBySubscriptionPlanAndMetricKeyOrderByIdDesc(any(), any()))
+                .thenReturn(Optional.empty());
+        when(quotas.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        new LandlordPlanCatalogSeedService(plans, features, quotas, "KES", 14,
+                new BigDecimal("325"), new BigDecimal("275")).seed();
+
+        ArgumentCaptor<SubscriptionPlan> saved = ArgumentCaptor.forClass(SubscriptionPlan.class);
+        verify(plans, org.mockito.Mockito.atLeastOnce()).save(saved.capture());
+        SubscriptionPlan services = saved.getAllValues().stream()
+                .filter(plan -> "SERVICES_MONTHLY".equals(plan.getCode())).findFirst().orElseThrow();
+        SubscriptionPlan soko = saved.getAllValues().stream()
+                .filter(plan -> "SOKO_MONTHLY".equals(plan.getCode())).findFirst().orElseThrow();
+        assertEquals(new BigDecimal("325"), services.getPrice());
+        assertEquals(new BigDecimal("275"), soko.getPrice());
+        assertEquals(SubscriptionPurchaseMode.SELF_SERVICE, services.getPurchaseMode());
+        assertEquals(SubscriptionPurchaseMode.SELF_SERVICE, soko.getPurchaseMode());
     }
 }

@@ -10,7 +10,7 @@ class DefaultFreePlanCodeResolverTest {
     @Test
     void affiliateIsAnApprovedProgrammeNotASubscriptionRole() {
         var resolver = new DefaultFreePlanCodeResolver(
-                "LANDLORD_BRONZE", "SERVICES_FREE", "WEALTH_BRONZE", "ESTATE_BRONZE", "SALE_BRONZE");
+                "LANDLORD_BRONZE", "SERVICES_MONTHLY", "WEALTH_BRONZE", "ESTATE_BRONZE", "SALE_BRONZE");
 
         assertNull(resolver.resolvePlanCode(PMSRole.AFFILIATE));
         assertFalse(resolver.isProvisioningRole(PMSRole.AFFILIATE));

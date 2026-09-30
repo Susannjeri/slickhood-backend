@@ -35,18 +35,24 @@ public class LandlordPlanCatalogSeedService {
     private final PlanQuotaRepo quotaRepo;
     private final String currency;
     private final int trialDays;
+    private final BigDecimal servicesMonthlyPrice;
+    private final BigDecimal sokoMonthlyPrice;
 
     public LandlordPlanCatalogSeedService(
             SubscriptionPlanRepo planRepo,
             PlanFeatureRepo featureRepo,
             PlanQuotaRepo quotaRepo,
             @Value("${subscription.default.currency:KES}") String currency,
-            @Value("${subscription.trial.days:14}") int trialDays) {
+            @Value("${subscription.trial.days:14}") int trialDays,
+            @Value("${subscription.services.monthly-price:300}") BigDecimal servicesMonthlyPrice,
+            @Value("${subscription.soko.monthly-price:300}") BigDecimal sokoMonthlyPrice) {
         this.planRepo = planRepo;
         this.featureRepo = featureRepo;
         this.quotaRepo = quotaRepo;
         this.currency = currency.trim().toUpperCase();
         this.trialDays = Math.max(1, trialDays);
+        this.servicesMonthlyPrice = requirePositivePrice("subscription.services.monthly-price", servicesMonthlyPrice);
+        this.sokoMonthlyPrice = requirePositivePrice("subscription.soko.monthly-price", sokoMonthlyPrice);
     }
 
     @PostConstruct
@@ -56,7 +62,7 @@ public class LandlordPlanCatalogSeedService {
         seedFamily("ESTATE", PlanCategory.ESTATE_MANAGEMENT, PMSRole.ESTATE_MANAGER);
         seedFamily("SALE", PlanCategory.PROPERTY_SALES, PMSRole.SALES_AGENT);
         seedFamily("WEALTH", PlanCategory.ASSET_PORTFOLIO_MANAGER, PMSRole.ASSET_PORTFOLIO_MANAGER);
-        seedPermanentFreeProducts();
+        seedMerchantProducts();
         seedSalesManagedAddOns();
         deactivateLegacyStarterIfUntouched();
         log.info("Canonical subscription plans are available; existing Super Admin catalogue edits were preserved.");
@@ -158,24 +164,33 @@ public class LandlordPlanCatalogSeedService {
         };
     }
 
-    private void seedPermanentFreeProducts() {
-        createFreeProduct("SERVICES_FREE", "Services", PlanCategory.SERVICE_PROVIDER, PMSRole.SERVICE_PROVIDER,
-                SubscriptionProduct.SERVICES, "SERVICE_MARKETPLACE");
-        createFreeProduct("SOKO_FREE", "Soko", PlanCategory.SERVICE_PROVIDER, PMSRole.SERVICE_PROVIDER,
-                SubscriptionProduct.SOKO, "SOKO_MARKETPLACE");
+    private void seedMerchantProducts() {
+        createMerchantProduct("SERVICES_MONTHLY", "Services", SubscriptionProduct.SERVICES,
+                "SERVICE_MARKETPLACE", servicesMonthlyPrice);
+        createMerchantProduct("SOKO_MONTHLY", "Soko", SubscriptionProduct.SOKO,
+                "SOKO_MARKETPLACE", sokoMonthlyPrice);
     }
 
-    private void createFreeProduct(String code, String name, PlanCategory category, PMSRole role,
-                                   SubscriptionProduct product, String feature) {
+    private void createMerchantProduct(String code, String name, SubscriptionProduct product,
+                                       String feature, BigDecimal price) {
         if (planRepo.findByCode(code).isPresent()) {
             return;
         }
         SubscriptionPlan plan = new SubscriptionPlan();
-        plan.setCode(code); plan.setDisplayName(name); plan.setPlanCategory(category); plan.setRoleFamily(role);
-        plan.setBillingCycle(BillingCycle.MONTHLY); plan.setPrice(BigDecimal.ZERO); plan.setCurrency(currency);
-        plan.setProductKey(product); plan.setPurchaseMode(SubscriptionPurchaseMode.FREE); plan.setTierRank(0);
+        plan.setCode(code); plan.setDisplayName(name); plan.setPlanCategory(PlanCategory.SERVICE_PROVIDER);
+        plan.setRoleFamily(PMSRole.SERVICE_PROVIDER); plan.setBillingCycle(BillingCycle.MONTHLY);
+        plan.setPrice(price); plan.setCurrency(currency);
+        plan.setProductKey(product); plan.setPurchaseMode(SubscriptionPurchaseMode.SELF_SERVICE); plan.setTierRank(10);
         plan.setCreatedBy(0L); plan.setActive(true); plan = planRepo.save(plan);
         upsertFeature(plan, feature);
+        upsertQuota(plan, "TRIAL_DAYS", trialDays);
+    }
+
+    private BigDecimal requirePositivePrice(String property, BigDecimal price) {
+        if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalStateException(property + " must be greater than zero");
+        }
+        return price;
     }
 
     private void seedSalesManagedAddOns() {
