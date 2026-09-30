@@ -123,7 +123,10 @@ public class PaystackPlatform extends PaymentPlatform {
                     String.valueOf(payment.getId()), callbackUrl, channels(), subaccountCode, subscription ? null : feeBearer);
             PaystackInitializeResponse response = restTemplateService.sendPostRequest(
                     apiUrl + INITIALIZE_PATH, request, authHeaders(), PaystackInitializeResponse.class);
-            eventService.saveEvent(response, payment.getId());
+            // The provider response also contains a reusable hosted-checkout URL
+            // and access code. They are returned to the customer for the redirect,
+            // but must not be copied into the long-lived payment event history.
+            eventService.saveEvent(response.auditEvent(), payment.getId());
             if (response == null || !response.status() || response.data() == null) {
                 throw new PaymentRequestException(ResponseCode.PAYMENT_INITIALIZATION_FAILED);
             }
@@ -315,6 +318,12 @@ public class PaystackPlatform extends PaymentPlatform {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record PaystackInitializeResponse(boolean status, String message, PaystackInitializeData data) {
+        PaystackInitializeAuditEvent auditEvent() {
+            return new PaystackInitializeAuditEvent(status, message, data == null ? null : data.reference());
+        }
+    }
+
+    record PaystackInitializeAuditEvent(boolean status, String message, String reference) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
