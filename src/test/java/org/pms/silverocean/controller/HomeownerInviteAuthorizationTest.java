@@ -34,7 +34,8 @@ class HomeownerInviteAuthorizationTest {
     static class Config {
         @Bean InviteService invitations() { return mock(InviteService.class); }
         @Bean InviteController controller(InviteService service) {
-            return new InviteController(service, mock(I18NService.class));
+            return new InviteController(service, mock(I18NService.class),
+                    mock(org.pms.silverocean.service.auth.PublicEndpointRateLimiter.class));
         }
     }
 
@@ -84,7 +85,9 @@ class HomeownerInviteAuthorizationTest {
         var expiresAt = java.time.LocalDateTime.now().plusDays(1);
         when(invitations.inspectToken("still-valid")).thenReturn(new InviteTokenInspection("TENANT", expiresAt, 86_400));
 
-        var response = controller.inspectInviteToken("still-valid");
+        jakarta.servlet.http.HttpServletRequest httpRequest = mock(jakarta.servlet.http.HttpServletRequest.class);
+        when(httpRequest.getRemoteAddr()).thenReturn("203.0.113.25");
+        var response = controller.inspectInviteToken(httpRequest, "still-valid");
 
         assertEquals(200, response.getStatusCode().value());
         assertEquals(ResponseCode.VALID_INVITE_LINK.getCode(), response.getBody().getCode());

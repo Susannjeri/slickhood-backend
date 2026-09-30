@@ -1,6 +1,8 @@
 package org.pms.silverocean.controller;
 
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
+import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.wrappers.InviteLinkDTO;
 import org.pms.silverocean.controller.wrappers.EmailOccupantInviteDTO;
@@ -10,6 +12,7 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.invites.InviteDTO;
 import org.pms.silverocean.service.invites.InviteService;
 import org.pms.silverocean.service.invites.InviteTokenInspection;
+import org.pms.silverocean.service.auth.PublicEndpointRateLimiter;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
@@ -33,10 +36,13 @@ import java.util.Optional;
 public class InviteController {
     private final InviteService inviteService;
     private final I18NService i18NService;
+    private final PublicEndpointRateLimiter publicEndpointRateLimiter;
 
-    public InviteController(InviteService inviteService, I18NService i18NService) {
+    public InviteController(InviteService inviteService, I18NService i18NService,
+                            PublicEndpointRateLimiter publicEndpointRateLimiter) {
         this.inviteService = inviteService;
         this.i18NService = i18NService;
+        this.publicEndpointRateLimiter = publicEndpointRateLimiter;
     }
 
     @GetMapping("/types")
@@ -74,13 +80,15 @@ public class InviteController {
     }
 
     @GetMapping("/validate")
-    public ResponseEntity<ResponseDTO> validateInviteToken(@RequestParam String token) {
+    public ResponseEntity<ResponseDTO> validateInviteToken(HttpServletRequest request, @RequestParam String token) {
+        protectPublicInspection(request, token);
         ResponseDTO response = inviteService.validateToken(token);
         return ResponseEntity.ok(response);
     }
 
     @GetMapping("/inspect")
-    public ResponseEntity<ResponseDTO> inspectInviteToken(@RequestParam String token) {
+    public ResponseEntity<ResponseDTO> inspectInviteToken(HttpServletRequest request, @RequestParam String token) {
+        protectPublicInspection(request, token);
         InviteTokenInspection inspection = inviteService.inspectToken(token);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.VALID_INVITE_LINK.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.VALID_INVITE_LINK), inspection));
@@ -111,6 +119,13 @@ public class InviteController {
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.USER_INVITE_LINKS.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.USER_INVITE_LINKS),
                 inviteService.getPendingTenantInvitesForCurrentUser()));
+    }
+
+    private void protectPublicInspection(HttpServletRequest request, String token) {
+        publicEndpointRateLimiter.check("invite-inspect-ip", PMSUtils.getIPAddress(request), 60,
+                "Too many invitation checks. Please wait a minute and try again.");
+        publicEndpointRateLimiter.check("invite-inspect-token", token, 15,
+                "This invitation has been checked too many times. Please wait a minute and try again.");
     }
 
 }
