@@ -8,6 +8,7 @@ import org.pms.silverocean.database.pms.DocumentBrandingRepo;
 import org.pms.silverocean.database.pms.entities.DocumentBranding;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.springframework.mock.web.MockMultipartFile;
 
 import javax.imageio.ImageIO;
@@ -23,6 +24,7 @@ import static org.mockito.Mockito.*;
 class DocumentBrandingServiceTest {
     @Mock DocumentBrandingRepo repo;
     @Mock UserDao users;
+    @Mock UploadMalwarePolicy malwarePolicy;
 
     @Test void validLogoIsValidatedHashedAndStoredForTheCurrentOwner() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -30,22 +32,23 @@ class DocumentBrandingServiceTest {
         when(users.getUserId()).thenReturn(71L);
         when(repo.findByOwnerUserIdAndActiveTrue(71L)).thenReturn(Optional.empty());
         when(repo.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        DocumentBrandingService service = new DocumentBrandingService(repo, users);
+        DocumentBrandingService service = new DocumentBrandingService(repo, users, malwarePolicy);
 
         var result = service.upload(new MockMultipartFile("logo", "owner.png", "image/png", output.toByteArray()));
 
         assertTrue(result.configured());
         assertEquals(64, result.sha256().length());
+        verify(malwarePolicy).requireSafe(argThat(bytes -> java.util.Arrays.equals(bytes, output.toByteArray())));
         verify(repo).save(argThat(value -> value.getOwnerUserId() == 71L
                 && "image/png".equals(value.getLogoMimeType()) && value.getLogoContent().length > 0));
     }
 
     @Test void oversizedOrNonImagePayloadIsRejectedBeforeStorage() {
-        DocumentBrandingService service = new DocumentBrandingService(repo, users);
+        DocumentBrandingService service = new DocumentBrandingService(repo, users, malwarePolicy);
         byte[] oversized = new byte[(int) DocumentBrandingService.MAX_LOGO_BYTES + 1];
 
         assertThrows(PMSCustomException.class, () -> service.upload(
                 new MockMultipartFile("logo", "fake.png", "image/png", oversized)));
-        verifyNoInteractions(repo, users);
+        verifyNoInteractions(repo, users, malwarePolicy);
     }
 }

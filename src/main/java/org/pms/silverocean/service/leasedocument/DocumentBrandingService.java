@@ -6,6 +6,7 @@ import org.pms.silverocean.database.pms.DocumentBrandingRepo;
 import org.pms.silverocean.database.pms.entities.DocumentBranding;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -21,10 +22,13 @@ public class DocumentBrandingService {
     static final long MAX_LOGO_BYTES = 512 * 1024;
     private final DocumentBrandingRepo branding;
     private final UserDao users;
+    private final UploadMalwarePolicy malwarePolicy;
 
-    public DocumentBrandingService(DocumentBrandingRepo branding, UserDao users) {
+    public DocumentBrandingService(DocumentBrandingRepo branding, UserDao users,
+                                   UploadMalwarePolicy malwarePolicy) {
         this.branding = branding;
         this.users = users;
+        this.malwarePolicy = malwarePolicy;
     }
 
     @Transactional
@@ -34,6 +38,7 @@ public class DocumentBrandingService {
             byte[] content = file.getBytes();
             String mime = detectMime(content);
             validateDimensions(content);
+            malwarePolicy.requireSafe(content);
             long userId = users.getUserId();
             DocumentBranding value = branding.findByOwnerUserIdAndActiveTrue(userId).orElseGet(DocumentBranding::new);
             value.setOwnerUserId(userId); value.setLogoContent(content); value.setLogoMimeType(mime);
