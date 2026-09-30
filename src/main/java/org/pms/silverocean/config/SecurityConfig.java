@@ -5,6 +5,7 @@ import org.pms.silverocean.service.auth.JwtService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -38,7 +39,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/logout").authenticated()
-                        .requestMatchers("/actuator/health/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/actuator/health/**").permitAll()
                         .requestMatchers("/actuator/**").hasRole("SUPER_ADMIN")
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/callback/**").permitAll()
@@ -47,15 +48,14 @@ public class SecurityConfig {
                         .requestMatchers("/invite/validate", "/invite/inspect").permitAll()
                         .requestMatchers("/otp/qrcode").authenticated()
                         .requestMatchers("/otp/**").permitAll()
-                        .requestMatchers("/property/unit/charges").permitAll()
-                        .requestMatchers("/property/unit/type").permitAll()
-                        .requestMatchers("/property/type").permitAll()
-                        .requestMatchers("/property/image/**").permitAll()
-                        .requestMatchers("/role/list").permitAll()
-                        .requestMatchers("/deployed-hash").permitAll()
-                        .requestMatchers("/sp/directory/**").permitAll()
-                        .requestMatchers("/soko/catalog/**").permitAll()
-                        .requestMatchers("/affiliate/public/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/property/unit/charges").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/property/unit/type").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/property/type").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/role/list").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/deployed-hash").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/sp/directory/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/soko/catalog/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/affiliate/public/**").permitAll()
                         .requestMatchers("/helpdesk/public/**").permitAll()
                         .requestMatchers("/public/property-listings/**").permitAll()
                         .requestMatchers("/public/insurance/**").permitAll()
