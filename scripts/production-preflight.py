@@ -145,18 +145,31 @@ def check_service(preflight: Preflight, unit: str) -> None:
 
 
 def request_status(url: str, *, method: str = "GET", headers: dict[str, str] | None = None,
-                   body: bytes | None = None, timeout: int = 12) -> tuple[int, bytes, dict[str, str]]:
+                   body: bytes | None = None, timeout: int = 12,
+                   attempts: int = 3) -> tuple[int, bytes, dict[str, str]]:
     request_headers = dict(headers or {})
     # Some provider edges reject urllib's implicit Python user agent before
     # evaluating otherwise valid credentials. Keep this identifier stable and
     # deliberately free of host, release or secret data.
     request_headers.setdefault("User-Agent", "slickhood-production-preflight")
-    request = urllib.request.Request(url, data=body, method=method, headers=request_headers)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout, context=ssl.create_default_context()) as response:
-            return response.status, response.read(1_048_576), dict(response.headers.items())
-    except urllib.error.HTTPError as error:
-        return error.code, error.read(1_048_576), dict(error.headers.items())
+    attempts = max(1, attempts)
+    for attempt in range(attempts):
+        request = urllib.request.Request(url, data=body, method=method, headers=request_headers)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout, context=ssl.create_default_context()) as response:
+                return response.status, response.read(1_048_576), dict(response.headers.items())
+        except urllib.error.HTTPError as error:
+            response = (error.code, error.read(1_048_576), dict(error.headers.items()))
+            if error.code < 500 or attempt == attempts - 1:
+                return response
+        except (OSError, urllib.error.URLError):
+            if attempt == attempts - 1:
+                raise
+        # Provider edges occasionally reset or return a transient 5xx while the
+        # deployment host remains healthy. Retry briefly; never retry credential
+        # failures such as 401/403 and never weaken the final gate.
+        time.sleep(2 ** attempt)
+    raise RuntimeError("provider request retry loop exhausted")
 
 
 def check_readiness(preflight: Preflight, readiness_url: str, expected_scope: set[str],
