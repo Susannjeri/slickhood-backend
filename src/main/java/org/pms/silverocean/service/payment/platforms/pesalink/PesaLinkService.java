@@ -38,6 +38,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.Optional;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.function.Supplier;
 
 @Service("PesaLink")
@@ -154,6 +156,18 @@ public class PesaLinkService extends PaymentPlatform {
         PMSPayment validatePayment = new PMSPayment(pesalinkValidatePaymentRequestDTO, TransactionCategory.PAYMENT_VALIDATION);
         validatePayment.setSourceIp(sourceIp);
 
+        if (!isValidationSignatureValid(pesalinkValidatePaymentRequestDTO, ipnPassword.get().stringValue())) {
+            validatePayment.setStatus(PesalinkStatus.INSECURE.getStatus());
+            validatePayment.setStatusDesc(PesalinkStatus.INSECURE.getDescription());
+            paymentDao.savePMSPayment(validatePayment);
+            eventService.cacheEvent(new PesalinkValidatePaymentResponseDTO(
+                    pesalinkValidatePaymentRequestDTO, null, PesalinkStatus.INSECURE), validatePayment.getId());
+            eventService.flushByTId(validatePayment.getId());
+            log.warn("Rejected unauthenticated PesaLink validation request from {}", sourceIp);
+            return new PesalinkValidatePaymentResponseDTO(
+                    pesalinkValidatePaymentRequestDTO, null, PesalinkStatus.INSECURE);
+        }
+
         Optional<PMSInvoice> paymentInvoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(pesalinkValidatePaymentRequestDTO.billRef());
         paymentInvoice.ifPresent(value -> validatePayment.setCurrencyCode(
                 org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(value.getCurrency())));
@@ -207,6 +221,32 @@ public class PesaLinkService extends PaymentPlatform {
                     && WebhookSignatureVerifier.constantTimeEquals(sb.toString(), signature.toLowerCase(java.util.Locale.ROOT));
         } catch (JsonProcessingException e) {
             log.error("Error Calculating verification signature, returning false", e);
+            return false;
+        }
+    }
+
+    /**
+     * PesaLink validation requests carry the signature in the JSON body, so the
+     * signed material is the same request with that field omitted. LinkedHashMap
+     * preserves the provider field order used by the integration contract.
+     */
+    public static boolean isValidationSignatureValid(PesalinkValidatePaymentRequestDTO request, String password) {
+        if (request == null || !StringUtils.hasText(request.signature()) || !StringUtils.hasText(password)) return false;
+        try {
+            Map<String, Object> unsigned = new LinkedHashMap<>();
+            unsigned.put("requestId", request.requestId());
+            unsigned.put("billRef", request.billRef());
+            unsigned.put("amount", request.amount());
+            String requestJson = MAPPER.writeValueAsString(unsigned);
+            byte[] signedObject = PMSUtils.signDataUsingHmacSha1(
+                    password.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    requestJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder expected = new StringBuilder();
+            for (byte b : signedObject) expected.append(String.format("%02x", b));
+            return WebhookSignatureVerifier.constantTimeEquals(
+                    expected.toString(), request.signature().toLowerCase(java.util.Locale.ROOT));
+        } catch (JsonProcessingException e) {
+            log.error("Error calculating PesaLink validation signature", e);
             return false;
         }
     }

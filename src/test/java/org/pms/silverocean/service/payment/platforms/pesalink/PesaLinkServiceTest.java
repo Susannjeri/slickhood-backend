@@ -14,6 +14,7 @@ import org.pms.silverocean.service.payment.PaymentDao;
 import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.payment.UpdatePaymentService;
 import org.pms.silverocean.service.payment.platforms.pesalink.wrappers.IPNCallbackDTO;
+import org.pms.silverocean.service.payment.platforms.pesalink.wrappers.PesalinkValidatePaymentRequestDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.payment.wrappers.PaymentPropertyKeys;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
@@ -155,6 +156,42 @@ class PesaLinkServiceTest {
         );
 
        assertTrue(PesaLinkService.isSignatureValid(testPayload, "B9F1075DE970C34577AE28F4C8B1F6211BE0550C", IPN_PASSWORD));
+    }
+
+    @Test
+    void validationSignatureAuthenticatesUnsignedRequestFields() throws Exception {
+        var unsigned = new java.util.LinkedHashMap<String, Object>();
+        unsigned.put("requestId", "REQ-1");
+        unsigned.put("billRef", "INV-9");
+        unsigned.put("amount", new BigDecimal("5.00"));
+        String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(unsigned);
+        byte[] hmac = org.pms.silverocean.common.PMSUtils.signDataUsingHmacSha1(
+                IPN_PASSWORD.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        StringBuilder signature = new StringBuilder();
+        for (byte value : hmac) signature.append(String.format("%02x", value));
+        PesalinkValidatePaymentRequestDTO request = new PesalinkValidatePaymentRequestDTO(
+                "REQ-1", signature.toString(), "INV-9", new BigDecimal("5.00"));
+
+        assertTrue(PesaLinkService.isValidationSignatureValid(request, IPN_PASSWORD));
+        assertFalse(PesaLinkService.isValidationSignatureValid(
+                new PesalinkValidatePaymentRequestDTO("REQ-1", "deadbeef", "INV-9", new BigDecimal("5.00")),
+                IPN_PASSWORD));
+    }
+
+    @Test
+    void invalidValidationSignatureCannotLookUpOrLockInvoice() {
+        PesaLinkService service = new PesaLinkService(updatePaymentService, configService,
+                i18NService, eventService, paymentDao, paramService);
+        when(configService.getConfigByName(org.pms.silverocean.service.config.enums.PMSConfigs.PESA_LINK_IPN_PASSWORD))
+                .thenReturn(() -> new org.pms.silverocean.service.config.ConfigDTO(1L, "PesaLink password", IPN_PASSWORD, 0, true));
+        service.init();
+
+        var response = service.validatePayment(new PesalinkValidatePaymentRequestDTO(
+                "REQ-2", "invalid", "INV-10", new BigDecimal("5.00")), "127.0.0.1");
+
+        assertEquals("INSECURE", ((org.pms.silverocean.service.payment.platforms.pesalink.wrappers.PesalinkValidatePaymentResponseDTO) response).status());
+        verify(updatePaymentService, times(0)).getInvoicePayToIDUsingInvoiceRef("INV-10");
     }
 
 }

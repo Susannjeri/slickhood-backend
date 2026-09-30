@@ -44,9 +44,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Collections;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/callback") @Slf4j
@@ -263,33 +261,18 @@ public class CallBackController {
     }
 
     private void handleUnknownRequestStructure(HttpServletRequest request) {
-        String parameters = request.getParameterMap().entrySet().stream()
-                .map(entry -> entry.getKey() + "=" + String.join(",", entry.getValue()))
-                .collect(Collectors.joining(", ", "{", "}"));
-
-
-        String headers = Collections.list(request.getHeaderNames()).stream()
-                .map(headerName -> headerName + ": " + Collections.list(request.getHeaders(headerName)))
-                .collect(Collectors.joining(", ", "{", "}"));
-
-
-        String body = "";
-        try {
-            body = request.getReader().lines().collect(Collectors.joining(System.lineSeparator()));
-        } catch (Exception e) {
-            body = "Could not read body: " + e.getMessage();
-        }
-
-        log.info("SMS Callback Received Details:");
-        log.info("URI: {}", request.getRequestURI());
-        log.info("Query Params: {}", parameters);
-        log.info("Headers: {}", headers);
-        log.info("Body: {}", body);
+        // Delivery callbacks can contain phone numbers, provider credentials and message
+        // content. Record only operational metadata; never copy those values into logs.
+        int headerCount = request.getHeaderNames() == null
+                ? 0 : java.util.Collections.list(request.getHeaderNames()).size();
+        log.info("Received unstructured SMS callback from {} at {} (parameters={}, headers={}, contentLength={})",
+                PMSUtils.getIPAddress(request), request.getRequestURI(), request.getParameterMap().size(),
+                headerCount, request.getContentLengthLong());
     }
 
     @PostMapping("/pesalink/ipn")
     public ResponseEntity<PaymentCallBackResponse> pesalinkPaymentNotification(HttpServletRequest request, @RequestBody String ipnCallbackPayload, @RequestHeader("X-Signature") String signature) {
-        log.debug("Received Pesalink IPN callback payload: {}", ipnCallbackPayload);
+        log.debug("Received PesaLink IPN callback from {}", PMSUtils.getIPAddress(request));
         IPNCallbackDTO ipnCallbackDTO = gson.fromJson(ipnCallbackPayload, IPNCallbackDTO.class);
         PaymentCallBackResponse paymentCallBackResponse = paymentPlatformFactory.getPlatform(PaymentChannel.PESA_LINK)
                 .handleCallBack(new PesalinkCallbackDTO(ipnCallbackDTO, null,  PMSUtils.getIPAddress(request), signature, PesalinkCallbackType.IPN));
