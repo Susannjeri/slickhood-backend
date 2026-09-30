@@ -288,7 +288,10 @@ public class SubscriptionEntitlementService {
             case SALES_AGENT -> SubscriptionProduct.PROPERTY_SALES;
             case ASSET_PORTFOLIO_MANAGER -> SubscriptionProduct.MY_WEALTH;
             case SERVICE_PROVIDER -> SubscriptionProduct.SERVICES;
-            case AFFILIATE -> SubscriptionProduct.AFFILIATE;
+            // Affiliate is a commission programme, not a subscribed product. Keep
+            // shared authenticated journeys available without manufacturing an
+            // AFFILIATE subscription requirement outside /affiliate endpoints.
+            case AFFILIATE -> null;
             default -> null;
         };
     }

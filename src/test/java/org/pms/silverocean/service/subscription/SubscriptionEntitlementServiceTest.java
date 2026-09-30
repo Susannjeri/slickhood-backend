@@ -23,6 +23,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class SubscriptionEntitlementServiceTest {
@@ -100,6 +102,16 @@ class SubscriptionEntitlementServiceTest {
     @Test void tenantMayUseSharedEndpointsWithoutBuyingLandlordSubscription() {
         when(users.getActiveRole()).thenReturn(PMSRole.TENANT);
         service.requireSessionBusinessProductIfApplicable();
+    }
+
+    @Test void affiliateMayUseSharedEndpointsWithoutBuyingASubscription() {
+        when(users.getActiveRole()).thenReturn(PMSRole.AFFILIATE);
+
+        service.requireSessionBusinessProductIfApplicable();
+
+        verify(subscriptions, never())
+                .findTopByCreatedByAndProductKeyAndStatusAndActiveTrueOrderByStartAtDesc(
+                        7L, SubscriptionProduct.AFFILIATE, SubscriptionStatus.ACTIVE);
     }
 
     @Test void anonymousSessionMayUsePublicBusinessCatalogues() {

@@ -72,6 +72,26 @@ class SubscriptionEntitlementInterceptorTest {
         verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
     }
 
+    @Test void sokoMerchantOperationsRequireOnlyTheSokoProduct() {
+        when(request.getRequestURI()).thenReturn("/soko/store/my");
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements).requireProduct(SubscriptionProduct.SOKO);
+        verify(entitlements, never()).requireProduct(SubscriptionProduct.SERVICES);
+    }
+
+    @Test void serviceProviderOperationsRequireOnlyTheServicesProduct() {
+        when(request.getRequestURI()).thenReturn("/sp/service/list");
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements).requireProduct(SubscriptionProduct.SERVICES);
+        verify(entitlements, never()).requireProduct(SubscriptionProduct.SOKO);
+    }
+
     @Test void wealthAcceptsTheFeatureBundledWithTheActiveLandlordPlan() {
         when(request.getRequestURI()).thenReturn("/wealth/assets");
         when(entitlements.sessionBusinessProduct()).thenReturn(SubscriptionProduct.LANDLORD);
