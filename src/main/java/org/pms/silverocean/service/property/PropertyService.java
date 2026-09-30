@@ -819,7 +819,7 @@ public class PropertyService {
         Long membershipId = workspaceSelection.selectedMembership(user.getId()).map(org.pms.silverocean.database.pms.entities.WorkspaceMembership::getId).orElse(null);
         Page<PropertyDTO> filteredProperty = propertyDao.findAll(searchParam, managementMode, unitLeaseMode, true,
                 user.getId(), userDao.getActiveRole(), pageable, membershipId, getUserRoleInProperty,
-                garageService::getPresignedUrl);
+                garageService::getPresignedUrlForStoredObject);
         return new ResponseDTO(true, ResponseCode.PROPERTY_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.PROPERTY_LIST), filteredProperty.toList(),
                 filteredProperty.getTotalPages(), filteredProperty.getTotalElements(), filteredProperty.getSize());
     }
@@ -857,7 +857,8 @@ public class PropertyService {
             default -> Optional.empty();
         };
         return accessible
-                .map(property -> new PropertyViewDTO(property, garageService.getPresignedUrl(property.getImagePath() + "/" + property.getThumbnail())))
+                .map(property -> new PropertyViewDTO(property, garageService.getPresignedUrlForStoredObject(
+                        Objects.toString(property.getImagePath(), "") + "/" + Objects.toString(property.getThumbnail(), ""))))
                 .map(property -> new ResponseDTO(true, ResponseCode.PROPERTY_DETAILS.getCode(),
                         i18NService.getLocalizedMessage(ResponseCode.PROPERTY_DETAILS), property)).orElseGet(() -> new ResponseDTO(false, ResponseCode.PROPERTY_NOT_FOUND.getCode(),
                         i18NService.getLocalizedMessage(ResponseCode.PROPERTY_NOT_FOUND)));
@@ -1248,7 +1249,7 @@ public class PropertyService {
         Long leaseId = leaseIdTenantSignDateDTO != null ? leaseIdTenantSignDateDTO.id() : null;
         Boolean tenantSigned = leaseIdTenantSignDateDTO != null && leaseIdTenantSignDateDTO.tenantSignedDate() != null;
         Boolean ownerSigned = leaseIdTenantSignDateDTO != null && leaseIdTenantSignDateDTO.ownerSignedDate() != null;
-        return new UnitDTO(unit, garageService.getPresignedUrl(thumbNailPath), utilities, images,
+        return new UnitDTO(unit, garageService.getPresignedUrlForStoredObject(thumbNailPath), utilities, images,
                 new MeasurementUnitsDTO(measurementUnits.getId(), i18NService.getLocalizedMessage(measurementUnits.getName())),
                 leaseId, tenantSigned, ownerSigned, unitLifecycle(unit));
     }

@@ -41,6 +41,7 @@ class PropertyServiceAuthorizationTest {
     private UnitDao unitDao;
     private UserDao userDao;
     private UnitTypeDao unitTypeDao;
+    private GarageService garageService;
     private PropertyService propertyService;
 
     @BeforeEach
@@ -49,6 +50,7 @@ class PropertyServiceAuthorizationTest {
         unitDao = mock(UnitDao.class);
         userDao = mock(UserDao.class);
         unitTypeDao=mock(UnitTypeDao.class);
+        garageService = mock(GarageService.class);
         propertyService = new PropertyService(
                 propertyDao,
                 unitDao,
@@ -60,7 +62,7 @@ class PropertyServiceAuthorizationTest {
                 mock(ConfigService.class),
                 mock(PMSMeasurementUnitsConverter.class),
                 mock(PropertyRoutines.class),
-                mock(GarageService.class),
+                garageService,
                 mock(ThreadPoolBeans.class),
                 mock(PaymentPlatformFactory.class),
                 mock(AccountDao.class),
@@ -164,5 +166,32 @@ class PropertyServiceAuthorizationTest {
         assertTrue(response.isSuccess());
         assertEquals(ResponseCode.PROPERTY_DETAILS.getCode(), response.getCode());
         verify(propertyDao, never()).findByIdAndHomeowner(99L, 7L);
+    }
+
+    @Test
+    void propertyDetailPresignsDatabaseBackedThumbnailWithoutRemoteExistenceProbe() {
+        Property property = new Property();
+        property.setId(99L);
+        property.setActive(true);
+        property.setCreatedBy(7L);
+        property.setType(PMSPropertyType.APARTMENT_BLOCK.name());
+        property.setImagePath("7/99");
+        property.setThumbnail("property-cover.jpg");
+        Users user = mock(Users.class);
+        when(user.isCompletedProfile()).thenReturn(true);
+        when(user.getId()).thenReturn(7L);
+        when(userDao.getUserObject()).thenReturn(user);
+        when(userDao.getActiveRole()).thenReturn(PMSRole.LANDLORD);
+        when(propertyDao.findByIdAndCreatedBy(99L, 7L)).thenReturn(Optional.of(property));
+        when(garageService.getPresignedUrlForStoredObject("7/99/property-cover.jpg"))
+                .thenReturn("https://files.example/property-cover.jpg");
+
+        ResponseDTO response = propertyService.listProperty(
+                org.springframework.data.domain.PageRequest.of(0, 10), Optional.empty(),
+                Optional.of(99L), Optional.empty(), Optional.empty(), (candidate, userId) -> "LANDLORD");
+
+        assertTrue(response.isSuccess());
+        verify(garageService).getPresignedUrlForStoredObject("7/99/property-cover.jpg");
+        verify(garageService, never()).getPresignedUrl(any());
     }
 }
