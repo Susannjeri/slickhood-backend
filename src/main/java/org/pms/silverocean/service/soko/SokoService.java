@@ -458,7 +458,7 @@ public class SokoService {
         return new PageImpl<>(content,page.getPageable(),page.getTotalElements());
     }
     private SokoStore ownedStore(long id){return storeRepo.findByIdAndOwnerUserIdAndActiveTrue(id,userDao.getUserId()).orElseThrow(this::notFound);}
-    private void requireMerchantRole(){if(!userDao.hasRole(PMSRole.SERVICE_PROVIDER)&&!userDao.hasRole(PMSRole.SUPER_ADMIN))throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
+    private void requireMerchantRole(){if(!userDao.hasRole(PMSRole.SERVICE_PROVIDER))throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
     private void requireSuperAdmin(){if(!userDao.hasRole(PMSRole.SUPER_ADMIN))throw forbidden();}
     private void notifyModeration(long ownerId,String name,String status,String reason){
         userDao.findById(ownerId).map(user->user.getEmail()).filter(StringUtils::isNotBlank).ifPresent(email->{

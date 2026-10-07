@@ -21,6 +21,10 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
         // SlickHood product. Endpoint role checks still protect affiliate and
         // administrator data, but neither persona may be sent through billing.
         if (path.startsWith("/affiliate")) return true;
+        // Riders are invited fulfilment participants, not Soko merchants. Their
+        // own KYC and assignment inbox must remain available without forcing
+        // them to purchase the merchant subscription.
+        if (path.startsWith("/soko/rider/kyc") || path.equals("/soko/rider/assignments")) return true;
         if (path.startsWith("/smart-gate")) {
             entitlements.requireFeatureOrAddOn(entitlements.sessionBusinessProduct(),
                     "GATE_MANAGEMENT_INCLUDED_UNITS", SubscriptionProduct.GATE_MANAGEMENT_ADDON);
@@ -50,7 +54,11 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
         }
         SubscriptionProduct product = product(path);
         if (product != null) {
-            entitlements.requireProduct(product);
+            if (product == SubscriptionProduct.SOKO) {
+                entitlements.requireFeature(product, "SOKO_MARKETPLACE");
+            } else {
+                entitlements.requireProduct(product);
+            }
         } else {
             entitlements.requireSessionBusinessProductIfApplicable();
         }

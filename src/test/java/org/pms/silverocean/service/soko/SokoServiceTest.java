@@ -272,8 +272,14 @@ class SokoServiceTest {
     }
 
     @Test void createStoreRejectsUserWithoutMerchantRole(){
-        when(users.hasRole(PMSRole.SERVICE_PROVIDER)).thenReturn(false);when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(false);
+        when(users.hasRole(PMSRole.SERVICE_PROVIDER)).thenReturn(false);
         var request=new SokoRequests.StoreUpsert("Fresh Corner",null,null,null,null,null,BigDecimal.TEN,true,false,BigDecimal.ZERO,"KES",null);
+        assertThrows(PMSCustomException.class,()->service.createStore(request));verifyNoInteractions(stores);
+    }
+
+    @Test void superadminCannotOperateACustomerSokoShop(){
+        when(users.hasRole(PMSRole.SERVICE_PROVIDER)).thenReturn(false);
+        var request=new SokoRequests.StoreUpsert("Platform Shop",null,null,null,null,null,BigDecimal.TEN,true,false,BigDecimal.ZERO,"KES",null);
         assertThrows(PMSCustomException.class,()->service.createStore(request));verifyNoInteractions(stores);
     }
 

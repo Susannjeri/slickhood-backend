@@ -72,14 +72,34 @@ class SubscriptionEntitlementInterceptorTest {
         verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
     }
 
-    @Test void sokoMerchantOperationsRequireOnlyTheSokoProduct() {
+    @Test void sokoMerchantOperationsRequireTheSokoMarketplaceFeature() {
         when(request.getRequestURI()).thenReturn("/soko/store/my");
 
         assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
                 .preHandle(request, response, new Object()));
 
-        verify(entitlements).requireProduct(SubscriptionProduct.SOKO);
+        verify(entitlements).requireFeature(SubscriptionProduct.SOKO, "SOKO_MARKETPLACE");
         verify(entitlements, never()).requireProduct(SubscriptionProduct.SERVICES);
+    }
+
+    @Test void invitedRiderKycDoesNotRequireAMerchantSubscription() {
+        when(request.getRequestURI()).thenReturn("/soko/rider/kyc");
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements, never()).requireFeature(SubscriptionProduct.SOKO, "SOKO_MARKETPLACE");
+        verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
+    }
+
+    @Test void invitedRiderAssignmentsDoNotRequireAMerchantSubscription() {
+        when(request.getRequestURI()).thenReturn("/soko/rider/assignments");
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements, never()).requireFeature(SubscriptionProduct.SOKO, "SOKO_MARKETPLACE");
+        verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
     }
 
     @Test void serviceProviderOperationsRequireOnlyTheServicesProduct() {
