@@ -35,6 +35,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,7 +51,12 @@ public class GarageService {
     private boolean bootstrapEnabled;
     @Value("${garage.presigner.duration-seconds:120}")
     private long presignerDurationSeconds;
+    @Value("${garage.file-list-cache.ttl-seconds:30}")
+    private long fileListCacheTtlSeconds = 30;
+    @Value("${garage.file-list-cache.max-entries:512}")
+    private int fileListCacheMaxEntries = 512;
     private final ResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+    private final Map<String, CachedFileList> fileListCache = new ConcurrentHashMap<>();
 
 
     public GarageService(S3Client s3Client, S3Presigner s3Presigner, UploadMalwarePolicy malwarePolicy) {
@@ -122,6 +129,7 @@ public class GarageService {
                         .serverSideEncryption("AES256")
                         .build(),
                 RequestBody.fromBytes(content));
+        invalidateFileListsForKey(key);
     }
 
     public String getPresignedUrl(String fileName) {
@@ -172,16 +180,32 @@ public class GarageService {
     public record StoredObject(byte[] bytes, String contentType, Long contentLength) { }
 
     public List<String> listFiles(String prefix) {
+        String normalizedPrefix = normalizeKey(prefix);
+        long now = System.nanoTime();
+        CachedFileList cached = fileListCache.get(normalizedPrefix);
+        if (cached != null && cached.expiresAtNanos() > now) {
+            return cached.keys();
+        }
+        if (cached != null) {
+            fileListCache.remove(normalizedPrefix, cached);
+        }
         ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
                 .bucket(bucketName)
-                .prefix(prefix) // e.g., "1/10/5/sliderImages/"
+                .prefix(normalizedPrefix) // e.g., "1/10/5/sliderImages/"
                 .build();
 
         ListObjectsV2Response res = s3Client.listObjectsV2(listRequest);
-
-        return res.contents().stream()
+        List<String> keys = res.contents().stream()
                 .map(S3Object::key)
                 .toList();
+        if (fileListCacheTtlSeconds > 0 && fileListCacheMaxEntries > 0) {
+            if (fileListCache.size() >= fileListCacheMaxEntries) {
+                fileListCache.clear();
+            }
+            long ttlNanos = Duration.ofSeconds(Math.min(fileListCacheTtlSeconds, 300)).toNanos();
+            fileListCache.put(normalizedPrefix, new CachedFileList(List.copyOf(keys), now + ttlNanos));
+        }
+        return keys;
     }
 
     public void deletePath(String prefix, boolean recursive) {
@@ -212,12 +236,31 @@ public class GarageService {
                         .build();
 
                 s3Client.deleteObjects(deleteRequest);
+                invalidateFileListsForPrefix(prefix);
                 log.info("Deleted {} files at {} (Recursive: {})", keysToDelete.size(), prefix, recursive);
             }
 
             continuationToken = listResponse.nextContinuationToken();
         } while (continuationToken != null);
     }
+
+    private void invalidateFileListsForKey(String key) {
+        String normalizedKey = normalizeKey(key);
+        fileListCache.keySet().removeIf(normalizedKey::startsWith);
+    }
+
+    private void invalidateFileListsForPrefix(String prefix) {
+        String normalizedPrefix = normalizeKey(prefix);
+        fileListCache.keySet().removeIf(cachedPrefix -> cachedPrefix.startsWith(normalizedPrefix)
+                || normalizedPrefix.startsWith(cachedPrefix));
+    }
+
+    private String normalizeKey(String value) {
+        String normalized = StringUtils.defaultString(value).replace('\\', '/');
+        return normalized.startsWith("/") ? normalized.substring(1) : normalized;
+    }
+
+    private record CachedFileList(List<String> keys, long expiresAtNanos) { }
 
     private boolean doesFileExist(String fileName) {
         if (StringUtils.isBlank(fileName))
