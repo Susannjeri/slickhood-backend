@@ -1133,7 +1133,7 @@ public class PropertyService {
         List<String> strings = garageService.listFiles(sliderPrefix);
         return strings
                 .stream()
-                .map(garageService::getPresignedUrl)
+                .map(garageService::getPresignedUrlForStoredObject)
                 .filter(url -> !url.isEmpty())
                 .toList();
     }

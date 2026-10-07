@@ -33,6 +33,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.times;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 
 class PropertyServiceAuthorizationTest {
@@ -193,5 +195,21 @@ class PropertyServiceAuthorizationTest {
         assertTrue(response.isSuccess());
         verify(garageService).getPresignedUrlForStoredObject("7/99/property-cover.jpg");
         verify(garageService, never()).getPresignedUrl(any());
+    }
+
+    @Test
+    void unitGalleryPresignsKeysReturnedByStorageWithoutRemoteExistenceProbes() {
+        when(garageService.listFiles("7/99/12/sliderImages"))
+                .thenReturn(java.util.List.of(
+                        "7/99/12/sliderImages/kitchen.jpg",
+                        "7/99/12/sliderImages/lounge.jpg"));
+        when(garageService.getPresignedUrlForStoredObject(anyString()))
+                .thenAnswer(invocation -> "https://files.example/" + invocation.getArgument(0, String.class));
+
+        var urls = propertyService.getSliderImageUrls("7/99/12/sliderImages");
+
+        assertEquals(2, urls.size());
+        verify(garageService, times(2)).getPresignedUrlForStoredObject(anyString());
+        verify(garageService, never()).getPresignedUrl(anyString());
     }
 }
