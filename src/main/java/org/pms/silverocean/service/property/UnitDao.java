@@ -361,6 +361,15 @@ public class UnitDao {
         return utilitiesCache.getUnchecked(id).filter(Utility::isActive);
     }
 
+    public Map<Long, Utility> getUtilities(Collection<Long> ids) {
+        if (ids.isEmpty()) return Map.of();
+        Map<Long, Utility> supported = new LinkedHashMap<>();
+        utilitiesRepo.findAllById(ids).forEach(utility -> {
+            if (utility.isActive()) supported.put(utility.getId(), utility);
+        });
+        return supported;
+    }
+
     public Optional<ChargeType> getChargeType(long id) {
         return chargeTypeCache.getUnchecked(id).filter(ChargeType::isActive);
     }

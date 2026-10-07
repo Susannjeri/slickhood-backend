@@ -261,7 +261,7 @@ class PropertyServiceAuthorizationTest {
         when(unitDao.findAll(any(), any(), any(), anyLong(), any(), any(), any()))
                 .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(first, second)));
         when(unitDao.getCurrentLeaseStatuses(Set.of(12L, 13L))).thenReturn(Map.of());
-        when(unitDao.getUtilities(1L)).thenReturn(Optional.of(utility));
+        when(unitDao.getUtilities(Set.of(1L))).thenReturn(Map.of(1L, utility));
         when(measurementUnitsConverter.convert("2")).thenReturn(PMSMeasurementUnits.SQUARE_METERS);
 
         var response = propertyService.listUnits(org.springframework.data.domain.PageRequest.of(0, 10),
@@ -269,6 +269,8 @@ class PropertyServiceAuthorizationTest {
 
         assertTrue(response.isSuccess());
         verify(unitDao, times(1)).getCurrentLeaseStatuses(Set.of(12L, 13L));
+        verify(unitDao, times(1)).getUtilities(Set.of(1L));
+        verify(unitDao, never()).getUtilities(1L);
         verify(unitDao, never()).getCurrentLeaseStatus(anyLong());
         verify(unitDao, never()).getLeaseIdByTenantsUserIdAndUnitId(anyLong(), anyLong());
     }

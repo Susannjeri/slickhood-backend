@@ -18,6 +18,7 @@ import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.database.pms.entities.PropertyAccount;
 import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.database.pms.entities.UnitCharge;
+import org.pms.silverocean.database.pms.entities.Utility;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.database.pms.EstateServiceChargeRepo;
 import org.pms.silverocean.database.pms.PMSInvoiceRepo;
@@ -1079,9 +1080,17 @@ public class PropertyService {
                 .map(Unit::getId)
                 .collect(Collectors.toSet());
         Map<Long, LeaseIdTenantSignDateDTO> leaseStatuses = unitDao.getCurrentLeaseStatuses(batchableRentalIds);
+        Set<Long> utilityIds = units.stream()
+                .flatMap(unit -> Arrays.stream(unit.getUtilities().split(",")))
+                .map(String::strip)
+                .filter(StringUtils::isNotBlank)
+                .map(Long::parseLong)
+                .collect(Collectors.toSet());
+        Map<Long, Utility> utilitiesById = unitDao.getUtilities(utilityIds);
         Page<UnitDTO> filteredUnits = units.map(unit -> {
             boolean leaseStatusLoaded = batchableRentalIds.contains(unit.getId());
-            return toUnitDTO(new DbUnitDTO(unit), null, leaseStatuses.get(unit.getId()), leaseStatusLoaded);
+            return toUnitDTO(new DbUnitDTO(unit), null, leaseStatuses.get(unit.getId()), leaseStatusLoaded,
+                    utilitiesById, true);
         });
         return new ResponseDTO(true, ResponseCode.UNIT_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.UNIT_LIST), filteredUnits.toList(),
                 filteredUnits.getTotalPages(), filteredUnits.getTotalElements(), filteredUnits.getSize());
@@ -1246,13 +1255,16 @@ public class PropertyService {
     }
 
     private UnitDTO toUnitDTO(DbUnitDTO unit, List<String> images) {
-        return toUnitDTO(unit, images, null, false);
+        return toUnitDTO(unit, images, null, false, Map.of(), false);
     }
 
     private UnitDTO toUnitDTO(DbUnitDTO unit, List<String> images,
-                              LeaseIdTenantSignDateDTO prefetchedLeaseStatus, boolean leaseStatusLoaded) {
+                              LeaseIdTenantSignDateDTO prefetchedLeaseStatus, boolean leaseStatusLoaded,
+                              Map<Long, Utility> utilitiesById, boolean utilitiesLoaded) {
         Set<UtilitiesDTO> utilities = Arrays.stream(unit.utilities().split(","))
-                .map(id -> unitDao.getUtilities(Long.parseLong(id.strip()))
+                .map(id -> (utilitiesLoaded
+                        ? Optional.ofNullable(utilitiesById.get(Long.parseLong(id.strip())))
+                        : unitDao.getUtilities(Long.parseLong(id.strip())))
                         .map(utility ->
                                 new UtilitiesDTO(utility.getId(), i18NService.getLocalizedMessage(utility.getName()))
                         )
