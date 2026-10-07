@@ -27,11 +27,20 @@ public class CommonPropertySpecification {
     public static <T> Specification<T> accessibleForActiveRole(Long userId, PMSRole activeRole, Long workspaceMembershipId) {
         return (root, query, cb) -> {
             if (userId == null || activeRole == PMSRole.SUPER_ADMIN) return null;
-            query.distinct(true);
 
             // 1. Landlord
             Predicate createdByPredicate =
                     cb.equal(root.get("createdBy"), userId);
+
+            // These roles own the records they operate. Returning here avoids
+            // constructing unrelated staff, tenancy, ownership and sale
+            // subqueries, and the root query does not need DISTINCT because
+            // authorization below is expressed exclusively with subqueries.
+            if (activeRole == PMSRole.LANDLORD
+                    || activeRole == PMSRole.ESTATE_MANAGER
+                    || activeRole == PMSRole.SALES_AGENT) {
+                return createdByPredicate;
+            }
 
 
             // 2. Manager Staff via subquery (PropertyManager)
@@ -89,7 +98,6 @@ public class CommonPropertySpecification {
                     cb.equal(saleRoot.get("buyerUserId"), userId), cb.isTrue(saleRoot.get("active"))));
             Predicate buyerPredicate = root.get("id").in(buyerSubquery);
             Predicate roleAccess = switch (activeRole) {
-                case LANDLORD, ESTATE_MANAGER, SALES_AGENT -> createdByPredicate;
                 case TENANT -> tenantPredicate;
                 case HOMEOWNER -> homeownerPredicate;
                 case BUYER -> buyerPredicate;
