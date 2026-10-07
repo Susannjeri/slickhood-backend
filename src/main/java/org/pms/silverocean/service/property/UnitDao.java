@@ -25,6 +25,7 @@ import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.invites.InviteType;
 import org.pms.silverocean.service.lease.wrappers.LeaseIdTenantSignDateDTO;
 import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
+import org.pms.silverocean.service.lease.wrappers.UnitLeaseStatusDTO;
 import org.pms.silverocean.service.property.wrappers.DbUnitDTO;
 import org.pms.silverocean.service.property.wrappers.PropertyNameAddressAndTypeProjection;
 import org.pms.silverocean.service.property.wrappers.TenantNameEmailPhoneAndUnitRefProjection;
@@ -40,6 +41,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -267,6 +271,14 @@ public class UnitDao {
     public Optional<LeaseIdTenantSignDateDTO> getCurrentLeaseStatus(long unitId) {
         return unitTenantRepo.findCurrentLeaseStatus(unitId, org.springframework.data.domain.PageRequest.of(0, 1))
                 .stream().findFirst();
+    }
+
+    public Map<Long, LeaseIdTenantSignDateDTO> getCurrentLeaseStatuses(Collection<Long> unitIds) {
+        if (unitIds.isEmpty()) return Map.of();
+        Map<Long, LeaseIdTenantSignDateDTO> statuses = new LinkedHashMap<>();
+        unitTenantRepo.findCurrentLeaseStatuses(unitIds).forEach(row ->
+                statuses.putIfAbsent(row.unitId(), row.leaseStatus()));
+        return statuses;
     }
 
     public boolean hasActiveTenantJourney(long unitId) {

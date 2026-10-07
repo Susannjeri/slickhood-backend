@@ -1072,7 +1072,17 @@ public class PropertyService {
             return getPropertyUnitByIdAndOwnerOrStaffOrTenant(unitId.get());
         }
         Long membershipId = workspaceSelection.selectedMembership(userDao.getUserId()).map(org.pms.silverocean.database.pms.entities.WorkspaceMembership::getId).orElse(null);
-        Page<UnitDTO> filteredUnits = unitDao.findAll(unitRef, propertyId, leaseMode, userDao.getUserId(), userDao.getActiveRole(), pageable, membershipId).map(unit -> toUnitDTO(new DbUnitDTO(unit), null));
+        PMSRole activeRole = userDao.getActiveRole();
+        Page<Unit> units = unitDao.findAll(unitRef, propertyId, leaseMode, userDao.getUserId(), activeRole, pageable, membershipId);
+        Set<Long> batchableRentalIds = activeRole == PMSRole.TENANT ? Set.of() : units.stream()
+                .filter(unit -> !unit.isOccupied() && PMSLeaseMode.RENT.name().equals(unit.getLeaseMode()))
+                .map(Unit::getId)
+                .collect(Collectors.toSet());
+        Map<Long, LeaseIdTenantSignDateDTO> leaseStatuses = unitDao.getCurrentLeaseStatuses(batchableRentalIds);
+        Page<UnitDTO> filteredUnits = units.map(unit -> {
+            boolean leaseStatusLoaded = batchableRentalIds.contains(unit.getId());
+            return toUnitDTO(new DbUnitDTO(unit), null, leaseStatuses.get(unit.getId()), leaseStatusLoaded);
+        });
         return new ResponseDTO(true, ResponseCode.UNIT_LIST.getCode(), i18NService.getLocalizedMessage(ResponseCode.UNIT_LIST), filteredUnits.toList(),
                 filteredUnits.getTotalPages(), filteredUnits.getTotalElements(), filteredUnits.getSize());
     }
@@ -1236,6 +1246,11 @@ public class PropertyService {
     }
 
     private UnitDTO toUnitDTO(DbUnitDTO unit, List<String> images) {
+        return toUnitDTO(unit, images, null, false);
+    }
+
+    private UnitDTO toUnitDTO(DbUnitDTO unit, List<String> images,
+                              LeaseIdTenantSignDateDTO prefetchedLeaseStatus, boolean leaseStatusLoaded) {
         Set<UtilitiesDTO> utilities = Arrays.stream(unit.utilities().split(","))
                 .map(id -> unitDao.getUtilities(Long.parseLong(id.strip()))
                         .map(utility ->
@@ -1245,7 +1260,8 @@ public class PropertyService {
                 .collect(Collectors.toSet());
         PMSMeasurementUnits measurementUnits = Objects.requireNonNull(measurementUnitConverter.convert(String.valueOf(unit.measurementUnits())));
         String thumbNailPath = Objects.toString(unit.imagePath(), "") + "/" + Objects.toString(unit.thumbnail(), "");
-        LeaseIdTenantSignDateDTO leaseIdTenantSignDateDTO = loadUnitLeaseIdDependingOnStatus(unit);
+        LeaseIdTenantSignDateDTO leaseIdTenantSignDateDTO = leaseStatusLoaded
+                ? prefetchedLeaseStatus : loadUnitLeaseIdDependingOnStatus(unit);
         Long leaseId = leaseIdTenantSignDateDTO != null ? leaseIdTenantSignDateDTO.id() : null;
         Boolean tenantSigned = leaseIdTenantSignDateDTO != null && leaseIdTenantSignDateDTO.tenantSignedDate() != null;
         Boolean ownerSigned = leaseIdTenantSignDateDTO != null && leaseIdTenantSignDateDTO.ownerSignedDate() != null;

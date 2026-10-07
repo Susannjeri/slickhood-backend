@@ -8,6 +8,7 @@ import org.pms.silverocean.database.pms.entities.PaymentAccount;
 import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.database.pms.entities.Utility;
+import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
@@ -25,6 +26,8 @@ import org.pms.silverocean.service.threadpooling.ThreadPoolBeans;
 
 import java.util.Optional;
 import java.util.Set;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -241,5 +244,50 @@ class PropertyServiceAuthorizationTest {
         assertTrue(response.isSuccess());
         verify(unitDao, times(1)).getCurrentLeaseStatus(12L);
         verify(unitDao, never()).getLeaseIdByTenantsUserIdAndUnitId(anyLong(), anyLong());
+    }
+
+    @Test
+    void rentalListFetchesLeaseStatusesOnceForThePage() {
+        var property = new Property();
+        property.setId(99L);
+        property.setType(PMSPropertyType.APARTMENT_BLOCK.name());
+        var first = rentalUnit(12L, "A-12", property);
+        var second = rentalUnit(13L, "A-13", property);
+        var utility = new Utility();
+        utility.setId(1L);
+        utility.setActive(true);
+        utility.setName("property.utilities.water");
+        when(userDao.getActiveRole()).thenReturn(PMSRole.LANDLORD);
+        when(unitDao.findAll(any(), any(), any(), anyLong(), any(), any(), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(first, second)));
+        when(unitDao.getCurrentLeaseStatuses(Set.of(12L, 13L))).thenReturn(Map.of());
+        when(unitDao.getUtilities(1L)).thenReturn(Optional.of(utility));
+        when(measurementUnitsConverter.convert("2")).thenReturn(PMSMeasurementUnits.SQUARE_METERS);
+
+        var response = propertyService.listUnits(org.springframework.data.domain.PageRequest.of(0, 10),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+
+        assertTrue(response.isSuccess());
+        verify(unitDao, times(1)).getCurrentLeaseStatuses(Set.of(12L, 13L));
+        verify(unitDao, never()).getCurrentLeaseStatus(anyLong());
+        verify(unitDao, never()).getLeaseIdByTenantsUserIdAndUnitId(anyLong(), anyLong());
+    }
+
+    private Unit rentalUnit(long id, String ref, Property property) {
+        var unit = new Unit();
+        unit.setId(id);
+        unit.setPropertyId(property.getId());
+        unit.setProperty(property);
+        unit.setRef(ref);
+        unit.setUnitType(PMSUnitTypes.ONE_BEDROOM.name());
+        unit.setSize(70D);
+        unit.setLeaseMode(PMSLeaseMode.RENT.name());
+        unit.setPrice(25000D);
+        unit.setCurrency("KES");
+        unit.setUtilities("1");
+        unit.setMeasurementUnits(2);
+        unit.setActive(true);
+        unit.setCreatedBy(7L);
+        return unit;
     }
 }

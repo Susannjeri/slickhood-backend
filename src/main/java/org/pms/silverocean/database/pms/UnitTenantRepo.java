@@ -4,6 +4,7 @@ import org.pms.silverocean.database.pms.entities.Unit;
 import org.pms.silverocean.database.pms.entities.UnitTenant;
 import org.pms.silverocean.service.lease.wrappers.LeaseIdTenantSignDateDTO;
 import org.pms.silverocean.service.lease.wrappers.TenancyProjection;
+import org.pms.silverocean.service.lease.wrappers.UnitLeaseStatusDTO;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -41,6 +42,11 @@ public interface UnitTenantRepo extends JpaRepository<UnitTenant, Long> {
             " FROM UnitTenant ut JOIN Lease l ON l.tenantId=ut.id WHERE ut.unitId=:unitId " +
             "AND ut.active AND l.active ORDER BY l.createdOn DESC")
     List<LeaseIdTenantSignDateDTO> findCurrentLeaseStatus(long unitId, org.springframework.data.domain.Pageable pageable);
+
+    @Query("SELECT new org.pms.silverocean.service.lease.wrappers.UnitLeaseStatusDTO(ut.unitId, l.id, l.tenantSignedDate, l.managerSignedDate)" +
+            " FROM UnitTenant ut JOIN Lease l ON l.tenantId=ut.id WHERE ut.unitId IN :unitIds " +
+            "AND ut.active AND l.active ORDER BY ut.unitId, l.createdOn DESC")
+    List<UnitLeaseStatusDTO> findCurrentLeaseStatuses(java.util.Collection<Long> unitIds);
 
     @Query("SELECT ut FROM UnitTenant ut JOIN Unit u ON u.id=ut.unitId WHERE u.propertyId=:propertyId AND u.active AND ut.active")
     List<UnitTenant> findActiveByPropertyId(long propertyId);
