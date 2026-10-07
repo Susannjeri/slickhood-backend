@@ -7,6 +7,7 @@ import org.pms.silverocean.controller.wrappers.ResponseDTO;
 import org.pms.silverocean.database.pms.entities.PaymentAccount;
 import org.pms.silverocean.database.pms.entities.Property;
 import org.pms.silverocean.database.pms.entities.Users;
+import org.pms.silverocean.database.pms.entities.Utility;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
@@ -18,6 +19,7 @@ import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.param.ParamDao;
 import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.pms.silverocean.service.property.wrappers.UnitDTO;
+import org.pms.silverocean.service.property.wrappers.DbUnitDTO;
 import org.pms.silverocean.service.lease.wrappers.PMSLeaseMode;
 import org.pms.silverocean.service.threadpooling.ThreadPoolBeans;
 
@@ -34,6 +36,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.times;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 
@@ -44,6 +47,7 @@ class PropertyServiceAuthorizationTest {
     private UserDao userDao;
     private UnitTypeDao unitTypeDao;
     private GarageService garageService;
+    private PMSMeasurementUnitsConverter measurementUnitsConverter;
     private PropertyService propertyService;
 
     @BeforeEach
@@ -53,6 +57,7 @@ class PropertyServiceAuthorizationTest {
         userDao = mock(UserDao.class);
         unitTypeDao=mock(UnitTypeDao.class);
         garageService = mock(GarageService.class);
+        measurementUnitsConverter = mock(PMSMeasurementUnitsConverter.class);
         propertyService = new PropertyService(
                 propertyDao,
                 unitDao,
@@ -62,7 +67,7 @@ class PropertyServiceAuthorizationTest {
                 mock(ParamDao.class),
                 mock(AuditLogService.class),
                 mock(ConfigService.class),
-                mock(PMSMeasurementUnitsConverter.class),
+                measurementUnitsConverter,
                 mock(PropertyRoutines.class),
                 garageService,
                 mock(ThreadPoolBeans.class),
@@ -211,5 +216,30 @@ class PropertyServiceAuthorizationTest {
         assertEquals(2, urls.size());
         verify(garageService, times(2)).getPresignedUrlForStoredObject(anyString());
         verify(garageService, never()).getPresignedUrl(anyString());
+    }
+
+    @Test
+    void rentalDetailReusesCurrentLeaseStatusForDtoAndLifecycle() {
+        var unit = new DbUnitDTO(99L, "A-12", PMSUnitTypes.ONE_BEDROOM,
+                PMSPropertyType.APARTMENT_BLOCK, 70D, PMSLeaseMode.RENT.name(),
+                25000D, "KES", false, true, null, null, "1", 2, 12L, null);
+        var utility = new Utility();
+        utility.setId(1L);
+        utility.setActive(true);
+        utility.setName("property.utilities.water");
+        when(userDao.getActiveRole()).thenReturn(PMSRole.LANDLORD);
+        when(unitDao.findDTOByIdAndCreatedBy(12L, 7L)).thenReturn(Optional.of(unit));
+        when(unitDao.getUtilities(1L)).thenReturn(Optional.of(utility));
+        when(measurementUnitsConverter.convert("2")).thenReturn(PMSMeasurementUnits.SQUARE_METERS);
+        when(unitDao.getCurrentLeaseStatus(12L)).thenReturn(Optional.empty());
+        when(unitDao.getActiveInvite(12L, org.pms.silverocean.service.invites.InviteType.TENANT))
+                .thenReturn(Optional.empty());
+
+        var response = propertyService.listUnits(org.springframework.data.domain.PageRequest.of(0, 10),
+                Optional.empty(), Optional.empty(), Optional.of(12L), Optional.empty());
+
+        assertTrue(response.isSuccess());
+        verify(unitDao, times(1)).getCurrentLeaseStatus(12L);
+        verify(unitDao, never()).getLeaseIdByTenantsUserIdAndUnitId(anyLong(), anyLong());
     }
 }

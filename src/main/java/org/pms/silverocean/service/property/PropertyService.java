@@ -1251,7 +1251,7 @@ public class PropertyService {
         Boolean ownerSigned = leaseIdTenantSignDateDTO != null && leaseIdTenantSignDateDTO.ownerSignedDate() != null;
         return new UnitDTO(unit, garageService.getPresignedUrlForStoredObject(thumbNailPath), utilities, images,
                 new MeasurementUnitsDTO(measurementUnits.getId(), i18NService.getLocalizedMessage(measurementUnits.getName())),
-                leaseId, tenantSigned, ownerSigned, unitLifecycle(unit));
+                leaseId, tenantSigned, ownerSigned, unitLifecycle(unit, leaseIdTenantSignDateDTO));
     }
 
     /** Locks the inventory row so two simultaneous invitation requests cannot both pass the lifecycle check. */
@@ -1259,15 +1259,15 @@ public class PropertyService {
         unitDao.lockUnitForInvitation(unitId);
     }
 
-    private UnitLifecycleDTO unitLifecycle(DbUnitDTO unit) {
+    private UnitLifecycleDTO unitLifecycle(DbUnitDTO unit, LeaseIdTenantSignDateDTO leaseStatus) {
         return switch (PMSLeaseMode.valueOf(unit.leaseMode())) {
-            case RENT -> rentalLifecycle(unit);
+            case RENT -> rentalLifecycle(unit, leaseStatus);
             case SERVICE_CHARGE -> homeownerLifecycle(unit);
             case SALE -> saleLifecycle(unit);
         };
     }
 
-    private UnitLifecycleDTO rentalLifecycle(DbUnitDTO unit) {
+    private UnitLifecycleDTO rentalLifecycle(DbUnitDTO unit, LeaseIdTenantSignDateDTO leaseStatus) {
         if (Boolean.TRUE.equals(unit.occupied())) {
             boolean paymentDue = invoiceRepo.existsOutstandingForUnit(unit.unitId(), "RENTAL");
             return paymentDue
@@ -1276,7 +1276,7 @@ public class PropertyService {
                     : lifecycle("OCCUPIED", "Occupied · payments current",
                     "The lease is fully signed and there is no outstanding rental invoice.", true, null, null);
         }
-        Optional<LeaseIdTenantSignDateDTO> lease = unitDao.getCurrentLeaseStatus(unit.unitId());
+        Optional<LeaseIdTenantSignDateDTO> lease = Optional.ofNullable(leaseStatus);
         if (lease.isPresent()) {
             LeaseIdTenantSignDateDTO current = lease.get();
             if (current.tenantSignedDate() != null && current.ownerSignedDate() != null) {
@@ -1372,6 +1372,9 @@ public class PropertyService {
     }
 
     private LeaseIdTenantSignDateDTO loadUnitLeaseIdDependingOnStatus(DbUnitDTO unit) {
+        if (PMSLeaseMode.valueOf(unit.leaseMode()) != PMSLeaseMode.RENT) {
+            return null;
+        }
         if (unit.occupied()) {
             //get leaseId from unitTenant Object
             return unitDao.getSignedLeaseIdByUnitId(unit.unitId())
@@ -1380,7 +1383,10 @@ public class PropertyService {
         if (userDao.getUserId() == null) {
             return null;
         }
-        return unitDao.getLeaseIdByTenantsUserIdAndUnitId(userDao.getUserId(), unit.unitId()).orElse(null);
+        if (userDao.getActiveRole() == PMSRole.TENANT) {
+            return unitDao.getLeaseIdByTenantsUserIdAndUnitId(userDao.getUserId(), unit.unitId()).orElse(null);
+        }
+        return unitDao.getCurrentLeaseStatus(unit.unitId()).orElse(null);
     }
 
     public void loadIncompleteDuplicateUnitJobs() {
