@@ -209,19 +209,14 @@ public class PaystackPlatform extends PaymentPlatform {
             throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);
         }
 
-        PMSPayment authorised = paymentDao.findPaymentByIDAndUserId(paymentId, userDao.getUserId())
-                .filter(candidate -> PaymentChannel.PAYSTACK.getName().equals(candidate.getChannel()))
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED));
-        PMSPayment payment = paymentDao.findPaymentByIDForUpdate(authorised.getId())
+        PMSPayment payment = paymentDao.findPaymentByIDAndUserIdForUpdate(paymentId, userDao.getUserId())
                 .filter(candidate -> PaymentChannel.PAYSTACK.getName().equals(candidate.getChannel()))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED));
 
         PMSInvoice invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED));
         if (!invoice.isPaid() && payment.isInProgress()) {
-            verifyAndSettle(payment, sourceIp);
-            invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference())
-                    .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED));
+            verifyAndSettle(payment, invoice, sourceIp);
         }
         boolean paymentConfirmed = invoice.isPaid()
                 || TransactionCategory.CARD_PAYMENT.getSuccessString().equals(payment.getStatus());
@@ -238,6 +233,11 @@ public class PaystackPlatform extends PaymentPlatform {
     }
 
     private void verifyAndSettle(PMSPayment payment, String sourceIp) {
+        PMSInvoice invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference()).orElse(null);
+        verifyAndSettle(payment, invoice, sourceIp);
+    }
+
+    private void verifyAndSettle(PMSPayment payment, PMSInvoice invoice, String sourceIp) {
         PaystackVerifyResponse response = restTemplateService.sendGetRequest(
                 apiUrl + VERIFY_PATH + payment.getId(), authHeaders(), PaystackVerifyResponse.class);
         eventService.saveEvent(response, payment.getId());
@@ -250,7 +250,6 @@ public class PaystackPlatform extends PaymentPlatform {
                 && MonetaryPolicy.toMinorUnits(payment.moneyAmount(), data.currency()) == data.amount()
                 && destinationMatches(payment, data);
 
-        PMSInvoice invoice = updatePaymentService.getInvoicePayToIDUsingInvoiceRef(payment.getBillReference()).orElse(null);
         matchingTransaction = matchingTransaction && invoice != null && StringUtils.equalsIgnoreCase(invoice.getCurrency(), data.currency());
 
         // Browser returns can precede final provider completion (for example mobile-money OTP).

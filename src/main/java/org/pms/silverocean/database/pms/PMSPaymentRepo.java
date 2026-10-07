@@ -19,6 +19,10 @@ public interface PMSPaymentRepo extends JpaRepository<PMSPayment, Long>, JpaSpec
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM PMSPayment p WHERE p.id=:paymentId")
     Optional<PMSPayment> findByIdForUpdate(long paymentId);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM PMSPayment p JOIN PMSInvoice i ON p.billReference=i.ref " +
+            "WHERE p.id=:paymentId AND i.active=true AND i.billedUserId=:userId")
+    Optional<PMSPayment> findByIdAndUserIdForUpdate(long paymentId, long userId);
     Optional<PMSPayment> findFirstByBillReferenceAndChannelAndInProgressTrueOrderByCreatedOnDesc(
             String billReference, String channel);
     boolean existsByBillReferenceAndInProgressTrue(String billReference);

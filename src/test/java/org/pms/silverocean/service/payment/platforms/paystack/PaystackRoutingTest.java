@@ -29,7 +29,7 @@ class PaystackRoutingTest {
     void pendingBrowserVerificationMustAllowLaterSuccessfulCallback(String state) {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);
-        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDAndUserIdForUpdate(601L, 22L)).thenReturn(Optional.of(payment));
         when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
         when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
@@ -140,8 +140,7 @@ class PaystackRoutingTest {
     @Test void browserReturnReportsTheVerifiedPaymentEvenBeforeTheInvoiceReadModelRefreshes() {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);
-        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
-        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDAndUserIdForUpdate(601L, 22L)).thenReturn(Optional.of(payment));
         when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test")))
@@ -151,13 +150,16 @@ class PaystackRoutingTest {
         assertTrue(result.paid());
         assertEquals("INV-TEST", result.invoiceRef());
         verify(updater).setInvoiceToPaid(eq(invoice), eq("123"), eq(new BigDecimal("100.00")));
-        verify(payments).findPaymentByIDAndUserId(601L, 22L);
+        verify(payments).findPaymentByIDAndUserIdForUpdate(601L, 22L);
+        verify(payments, never()).findPaymentByIDAndUserId(601L, 22L);
+        verify(payments, never()).findPaymentByIDForUpdate(601L);
+        verify(updater, times(1)).getInvoicePayToIDUsingInvoiceRef("INV-TEST");
         verify(http).sendGetRequest(contains("/transaction/verify/601"), any(),
                 eq(PaystackPlatform.PaystackVerifyResponse.class));
     }
 
     @Test void browserReturnCannotReconcileAnotherUsersPayment() {
-        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.empty());
+        when(payments.findPaymentByIDAndUserIdForUpdate(601L, 22L)).thenReturn(Optional.empty());
         assertThrows(PMSCustomException.class,
                 () -> platform.confirmBrowserReturn("601", "127.0.0.1"));
         verifyNoInteractions(http);
@@ -175,8 +177,7 @@ class PaystackRoutingTest {
     @Test void failedProviderVerificationUnlocksCheckoutWithoutMarkingTheInvoicePaid() {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);
-        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
-        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDAndUserIdForUpdate(601L, 22L)).thenReturn(Optional.of(payment));
         when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, "failed", "601", 10000L, "KES", "Declined", "test")))
@@ -194,8 +195,7 @@ class PaystackRoutingTest {
     @Test void subscriptionAcceptsPaystackEmptySubaccountObjectAsMainIntegration() throws Exception {
         invoice.setSubscriptionPlanCode("BRONZE");
         platform.processPayment(invoice, null, 71L);
-        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
-        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDAndUserIdForUpdate(601L, 22L)).thenReturn(Optional.of(payment));
         when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test",
@@ -214,8 +214,7 @@ class PaystackRoutingTest {
         invoice.setPropertyId(44L);
         when(params.getParamByAccountIdAndType(eq(71L), any(), eq(44L))).thenReturn("ACCT_expected");
         platform.processPayment(invoice, null, 71L);
-        when(payments.findPaymentByIDAndUserId(601L, 22L)).thenReturn(Optional.of(payment));
-        when(payments.findPaymentByIDForUpdate(601L)).thenReturn(Optional.of(payment));
+        when(payments.findPaymentByIDAndUserIdForUpdate(601L, 22L)).thenReturn(Optional.of(payment));
         when(updater.getInvoicePayToIDUsingInvoiceRef("INV-TEST")).thenReturn(Optional.of(invoice));
         doReturn(new PaystackPlatform.PaystackVerifyResponse(true, "Verified",
                 new PaystackPlatform.PaystackTransaction(123L, "success", "601", 10000L, "KES", "Approved", "test",

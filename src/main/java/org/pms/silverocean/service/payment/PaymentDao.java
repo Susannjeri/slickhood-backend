@@ -58,6 +58,10 @@ public class PaymentDao {
         return pmsPaymentRepo.findByIdForUpdate(paymentId);
     }
 
+    public Optional<PMSPayment> findPaymentByIDAndUserIdForUpdate(long paymentId, long userId) {
+        return pmsPaymentRepo.findByIdAndUserIdForUpdate(paymentId, userId);
+    }
+
     public Optional<PMSPayment> findPaymentByIDAndUserId(long paymentId, long userId) {
         return pmsPaymentRepo.findByIdAndUserId(paymentId, userId);
     }
