@@ -5,6 +5,10 @@ server:
   # authentication filter can validate them.
   max-http-request-header-size: 32KB
 
+observability:
+  # Requests at or above this duration are counted and logged with privacy-safe route templates.
+  slow-request-threshold-ms: ${SLOW_REQUEST_THRESHOLD_MS:750}
+
 management:
   endpoints:
     web:
