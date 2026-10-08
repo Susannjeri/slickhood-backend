@@ -120,7 +120,7 @@ public class ServiceBookingService {
                 || !profile.isActive() || !"ACTIVE".equals(profile.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND);
         }
-        PMSInvoice invoice = createMarketplaceInvoice(booking, providerService, profile.getUserId());
+        PMSInvoice invoice = createMarketplaceInvoice(booking, providerService, profile.getUserId(), account.getId());
         booking.setPaymentAccountId(account.getId());
         booking.setPaymentChannel(account.getChannel().name());
         booking.setInvoiceRef(invoice.getRef());
@@ -275,7 +275,8 @@ public class ServiceBookingService {
         }
     }
 
-    private PMSInvoice createMarketplaceInvoice(ServiceBooking booking, ProviderService service, long providerUserId) {
+    private PMSInvoice createMarketplaceInvoice(ServiceBooking booking, ProviderService service, long providerUserId,
+                                                long paymentAccountId) {
         Users customer = userDao.findById(booking.getCreatedBy())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
         String serviceName = service.getCategoryName() == null ? "Service booking" : service.getCategoryName();
@@ -290,6 +291,7 @@ public class ServiceBookingService {
         invoice.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(booking.getCurrency()));
         invoice.setBilledUserId(booking.getCreatedBy());
         invoice.setPayToUserId(providerUserId);
+        invoice.setPaymentAccountId(paymentAccountId);
         invoice.setCustomerPhoneNumber(customer.getPhoneNumber());
         invoice.setCustomerEmail(customer.getEmail());
         invoice.setBillingType("SERVICE_MARKETPLACE");

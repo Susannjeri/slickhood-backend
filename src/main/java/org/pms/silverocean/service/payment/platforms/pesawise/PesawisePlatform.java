@@ -212,13 +212,26 @@ public class PesawisePlatform extends PaymentPlatform {
         }
         PaymentAccount account = accountDao.getAccountById(accountId);
         boolean subscription = StringUtils.isNotBlank(invoice.getSubscriptionPlanCode());
+        boolean marketplace = isMarketplaceInvoice(invoice);
+        boolean validCategory = subscription
+                ? account.getCategory() == AccountCategory.SLICKHOOD
+                : marketplace
+                    ? account.getCategory() == AccountCategory.MERCHANT
+                    : account.getCategory() != AccountCategory.SLICKHOOD;
         if (!account.isActive() || !account.isVerified() || account.getChannel() != PaymentChannel.PESAWISE
                 || !Objects.equals(account.getCreatedBy(), invoice.getPayToUserId())
-                || subscription != (account.getCategory() == AccountCategory.SLICKHOOD)
-                || !subscription && !accountDao.isAttachedToProperty(accountId, invoice.getPropertyId())) {
+                || !validCategory
+                || (marketplace && !Objects.equals(invoice.getPaymentAccountId(), accountId))
+                || (!subscription && !marketplace
+                    && !accountDao.isAttachedToProperty(accountId, invoice.getPropertyId()))) {
             throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
         }
         return account;
+    }
+
+    private boolean isMarketplaceInvoice(PMSInvoice invoice) {
+        return "SOKO".equals(invoice.getBillingType())
+                || "SERVICE_MARKETPLACE".equals(invoice.getBillingType());
     }
 
     private HttpHeaders credentials(long accountId, long propertyId) {

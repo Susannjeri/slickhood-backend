@@ -212,7 +212,7 @@ class ServiceBookingServiceTest {
     }
 
     @Test
-    void confirmBooking_setsStatusCONFIRMED_onSuccess() {
+    void confirmBooking_pinsReceivingAccountOnInvoice_andAwaitsPayment() {
         when(userDao.getUserId()).thenReturn(1L);
         ServiceBooking b = makeBooking(20L, 10L, BookingStatus.PENDING.name());
         when(bookingDao.findByIdAndServiceCreatedByForUpdate(20L, 1L)).thenReturn(Optional.of(b));
@@ -237,6 +237,11 @@ class ServiceBookingServiceTest {
         verify(bookingDao).save(captor.capture(), anyString());
         assertEquals(BookingStatus.AWAITING_PAYMENT.name(), captor.getValue().getStatus());
         assertEquals("INV-1", captor.getValue().getInvoiceRef());
+        ArgumentCaptor<PMSInvoice> invoiceCaptor = ArgumentCaptor.forClass(PMSInvoice.class);
+        verify(invoiceDao).createInvoice(invoiceCaptor.capture());
+        assertEquals(30L, invoiceCaptor.getValue().getPaymentAccountId());
+        assertEquals(99L, invoiceCaptor.getValue().getPayToUserId());
+        assertEquals("SERVICE_MARKETPLACE", invoiceCaptor.getValue().getBillingType());
     }
 
     // --- completeBooking ---

@@ -3,6 +3,8 @@ package org.pms.silverocean.service.payment.invoice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.common.ResponseCode;
@@ -19,10 +21,12 @@ import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.pms.silverocean.service.payment.PaymentDao;
 import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
+import org.pms.silverocean.service.payment.wrappers.PaymentChannelDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
 import org.pms.silverocean.service.property.UnitDao;
 
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -269,6 +273,109 @@ class InvoiceServiceSubscriptionPaymentTest {
                 () -> service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 12L));
 
         verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.MPESA);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SOKO", "SERVICE_MARKETPLACE"})
+    void initializesMarketplaceOnlyThroughPinnedMerchantAccountWithoutPropertyAttachment(String billingType) {
+        PMSInvoice invoice = propertyInvoice(billingType, 12L);
+        PaymentAccount account = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.PESAWISE, 99L);
+        PaymentResponse expected = new PaymentResponse(true, ResponseCode.MPESA_PAYMENT_INITIALIZED);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", billingType)).thenReturn(Optional.of(12L));
+        when(accountDao.getAccountById(12L)).thenReturn(account);
+        when(paymentPlatformFactory.getPlatform(PaymentChannel.PESAWISE)).thenReturn(paymentPlatform);
+        when(paymentPlatform.processPayment(invoice, null, 12L)).thenReturn(expected);
+
+        assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.PESAWISE, null, 12L));
+
+        verify(accountDao, never()).isAttachedToProperty(12L, 0L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SOKO", "SERVICE_MARKETPLACE"})
+    void rejectsMarketplaceCheckoutThroughAccountOtherThanPinnedDestination(String billingType) {
+        PMSInvoice invoice = propertyInvoice(billingType, 12L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+
+        assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.PESAWISE, null, 13L));
+
+        verify(accountDao, never()).getAccountById(13L);
+        verify(accountDao, never()).isAttachedToProperty(13L, 0L);
+        verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PESAWISE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SOKO", "SERVICE_MARKETPLACE"})
+    void rejectsMarketplaceCheckoutWhenInvoicePinDiffersFromSourceTransaction(String billingType) {
+        PMSInvoice invoice = propertyInvoice(billingType, 12L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", billingType)).thenReturn(Optional.of(13L));
+
+        assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.PESAWISE, null, 12L));
+
+        verify(accountDao, never()).getAccountById(12L);
+        verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PESAWISE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SOKO", "SERVICE_MARKETPLACE"})
+    void rejectsMarketplaceCheckoutWhenSourceIsCancelledExpiredOrOtherwiseNoLongerPayable(String billingType) {
+        PMSInvoice invoice = propertyInvoice(billingType, 12L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", billingType)).thenReturn(Optional.empty());
+
+        assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.PESAWISE, null, 12L));
+
+        verify(accountDao, never()).getAccountById(12L);
+        verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PESAWISE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SOKO", "SERVICE_MARKETPLACE"})
+    void listsOnlyPinnedValidMarketplaceAccountWithoutPropertyLookup(String billingType) {
+        PMSInvoice invoice = propertyInvoice(billingType, 12L);
+        PaymentAccount account = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.PESAWISE, 99L);
+        account.setId(12L);
+        account.setName("Marketplace PesaWise");
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView(41L, 7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", billingType)).thenReturn(Optional.of(12L));
+        when(accountDao.getAccountById(12L)).thenReturn(account);
+        when(paymentPlatformFactory.getPaymentTypes()).thenReturn(Set.of(
+                new PaymentChannelDTO("PESAWISE", "PesaWise", "", "")));
+        when(paymentPlatformFactory.getChannelImage(PaymentChannel.PESAWISE)).thenReturn("pesawise.png");
+
+        var result = service.getInvoicePaymentAccounts(41L);
+
+        assertEquals(1, result.size());
+        assertEquals(12L, result.getFirst().id());
+        assertEquals(AccountCategory.MERCHANT, result.getFirst().category());
+        verify(accountDao, never()).listByPropertyAndOwner(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
+        verify(accountDao, never()).isAttachedToProperty(12L, 0L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SOKO", "SERVICE_MARKETPLACE"})
+    void hidesMarketplaceAccountWhenInvoicePinDiffersFromSourceTransaction(String billingType) {
+        PMSInvoice invoice = propertyInvoice(billingType, 12L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView(41L, 7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", billingType)).thenReturn(Optional.of(13L));
+
+        assertEquals(0, service.getInvoicePaymentAccounts(41L).size());
+
+        verify(accountDao, never()).getAccountById(12L);
+        verify(accountDao, never()).listByPropertyAndOwner(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
     }
 
     private static PMSInvoice subscriptionInvoice(long billedUserId, long payeeUserId) {

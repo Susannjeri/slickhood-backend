@@ -413,14 +413,18 @@ public class InvoiceService {
         PMSInvoice invoice=accessibleInvoice(invoiceId);
         List<PaymentAccount> candidates = invoice.getSubscriptionPlanCode()!=null
                 ? accountDao.getActiveAndVerifiedSlickHoodAccount(Pageable.unpaged()).getContent()
-                : accountDao.listByPropertyAndOwner(Pageable.unpaged(),invoice.getPropertyId(),invoice.getPayToUserId()).getContent();
+                : isMarketplaceInvoice(invoice)
+                    ? pinnedMarketplaceAccount(invoice)
+                    : accountDao.listByPropertyAndOwner(Pageable.unpaged(),invoice.getPropertyId(),invoice.getPayToUserId()).getContent();
         AccountCategory expectedCategory=expectedAccountCategory(invoice);
         Set<String> activeChannels=paymentPlatformFactory.getPaymentTypes().stream()
                 .map(PaymentChannelDTO::id).collect(Collectors.toSet());
         return candidates.stream()
                 .filter(account->account.isActive()&&account.isVerified())
-                .filter(account->account.getCreatedBy()==invoice.getPayToUserId())
-                .filter(account->account.getChannel()!=PaymentChannel.FLUTTER_WAVE)
+                .filter(account->java.util.Objects.equals(account.getCreatedBy(),invoice.getPayToUserId()))
+                .filter(account->!isMarketplaceInvoice(invoice)
+                        || java.util.Objects.equals(account.getId(),invoice.getPaymentAccountId()))
+                .filter(account->account.getChannel()!=null&&account.getChannel()!=PaymentChannel.FLUTTER_WAVE)
                 .filter(account->activeChannels.contains(account.getChannel().name()))
                 .filter(account->expectedCategory==null||account.getCategory()==expectedCategory)
                 .sorted(Comparator
@@ -429,6 +433,16 @@ public class InvoiceService {
                         .thenComparing(PaymentAccount::getName))
                 .map(account->new AccountSummaryDTO(account,paymentPlatformFactory.getChannelImage(account.getChannel())))
                 .toList();
+    }
+
+    private List<PaymentAccount> pinnedMarketplaceAccount(PMSInvoice invoice) {
+        if (!marketplaceDestinationMatchesSource(invoice)) return List.of();
+        try {
+            return List.of(accountDao.getAccountById(invoice.getPaymentAccountId()));
+        } catch (PMSCustomException exception) {
+            if (exception.getResponseCode() == ResponseCode.ACCOUNT_NOT_FOUND) return List.of();
+            throw exception;
+        }
     }
 
     @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
@@ -475,6 +489,20 @@ public class InvoiceService {
     }
 
     private void validateSubscriptionPaymentAccount(PMSInvoice invoice, PaymentChannel paymentChannel, long accountId) {
+        if (isMarketplaceInvoice(invoice)) {
+            if (!java.util.Objects.equals(invoice.getPaymentAccountId(),accountId)
+                    || !marketplaceDestinationMatchesSource(invoice)) {
+                throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+            }
+            PaymentAccount account = accountDao.getAccountById(accountId);
+            if (!account.isActive() || !account.isVerified()
+                    || account.getCategory() != AccountCategory.MERCHANT
+                    || !java.util.Objects.equals(account.getCreatedBy(),invoice.getPayToUserId())
+                    || account.getChannel() != paymentChannel) {
+                throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+            }
+            return;
+        }
         if (StringUtils.isBlank(invoice.getSubscriptionPlanCode())) {
             PaymentAccount account = accountDao.getAccountById(accountId);
             AccountCategory expectedCategory = expectedAccountCategory(invoice);
@@ -499,6 +527,18 @@ public class InvoiceService {
         if (!validPlatformAccount) {
             throw new PaymentRequestException(ResponseCode.PAYMENT_INITIALIZATION_FAILED);
         }
+    }
+
+    private boolean isMarketplaceInvoice(PMSInvoice invoice) {
+        return "SOKO".equals(invoice.getBillingType())
+                || "SERVICE_MARKETPLACE".equals(invoice.getBillingType());
+    }
+
+    private boolean marketplaceDestinationMatchesSource(PMSInvoice invoice) {
+        if (invoice.getPaymentAccountId() == null || StringUtils.isBlank(invoice.getRef())) return false;
+        return invoiceDao.getMarketplaceSourcePaymentAccountId(invoice.getRef(), invoice.getBillingType())
+                .filter(invoice.getPaymentAccountId()::equals)
+                .isPresent();
     }
 
     private AccountCategory expectedAccountCategory(PMSInvoice invoice) {

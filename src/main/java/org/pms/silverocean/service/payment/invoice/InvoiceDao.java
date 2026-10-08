@@ -50,6 +50,10 @@ public class InvoiceDao {
         return pmsInvoiceRepo.findByRef(ref);
     }
 
+    public Optional<Long> getMarketplaceSourcePaymentAccountId(String invoiceRef, String billingType) {
+        return pmsInvoiceRepo.findMarketplaceSourcePaymentAccountId(invoiceRef, billingType);
+    }
+
     public Optional<PMSInvoice> getInvoiceByRefForOwnerOrPropertyManager(String ref, long ownerOrManagerId) {
         return pmsInvoiceRepo.findByRefAndPayToUserIdAndActiveTrue(ref, ownerOrManagerId);
 

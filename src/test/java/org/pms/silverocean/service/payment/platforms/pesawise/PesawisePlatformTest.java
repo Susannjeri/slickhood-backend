@@ -111,6 +111,37 @@ class PesawisePlatformTest {
         verify(updater, never()).setInvoiceToPaid(any(PMSInvoice.class), anyString(), anyDouble());
     }
 
+    @Test void sokoPaymentUsesOnlyPinnedMerchantAccountWithoutPropertyAttachment() {
+        PMSInvoice invoice=invoice();invoice.setSubscriptionPlanCode(null);invoice.setBillingType("SOKO");invoice.setPaymentAccountId(91L);
+        PaymentAccount account=account();account.setCategory(AccountCategory.MERCHANT);
+        when(accounts.getAccountById(91L)).thenReturn(account);
+        when(params.getParamByAccountIdAndType(eq(91L),any(AccountPropertyDefinition.class),eq(0L)))
+                .thenAnswer(call->switch(((AccountPropertyDefinition)call.getArgument(1)).key()){
+                    case "pesawise_api_key"->"test-api-key";
+                    case "pesawise_api_secret"->"test-api-secret";
+                    case "pesawise_balance_id"->"100121";
+                    default->throw new AssertionError("Unexpected property");
+                });
+        when(http.sendPostRequest(eq("https://api.pesawise.xyz/api/payments/stk-push"),any(),any(HttpHeaders.class),eq(PesawisePlatform.PesawisePaymentResponse.class)))
+                .thenReturn(new PesawisePlatform.PesawisePaymentResponse("payment-1",true,"STK sent","INV-SUB-1"));
+
+        assertThat(platform.processPayment(invoice,"+254712345678",91L).success()).isTrue();
+
+        verify(accounts,never()).isAttachedToProperty(anyLong(),anyLong());
+    }
+
+    @Test void sokoPaymentRejectsAnOtherwiseValidMerchantAccountWhenItIsNotPinned() {
+        PMSInvoice invoice=invoice();invoice.setSubscriptionPlanCode(null);invoice.setBillingType("SOKO");invoice.setPaymentAccountId(90L);
+        PaymentAccount account=account();account.setCategory(AccountCategory.MERCHANT);
+        when(accounts.getAccountById(91L)).thenReturn(account);
+
+        assertThatThrownBy(()->platform.processPayment(invoice,"+254712345678",91L))
+                .isInstanceOf(org.pms.silverocean.service.payment.PaymentRequestException.class);
+
+        verify(accounts,never()).isAttachedToProperty(anyLong(),anyLong());
+        verifyNoInteractions(params,http);
+    }
+
     private static PMSInvoice invoice() {
         PMSInvoice i=new PMSInvoice(); i.setRef("INV-SUB-1"); i.setSubscriptionPlanCode("BRONZE");
         // The invoice may have been issued with a different default rail. The

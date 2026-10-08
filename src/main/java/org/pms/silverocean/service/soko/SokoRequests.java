@@ -2,6 +2,7 @@ package org.pms.silverocean.service.soko;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -24,7 +25,7 @@ public final class SokoRequests {
             @Size(max=500) String address,
             Double latitude,
             Double longitude,
-            @DecimalMin("1.00") BigDecimal serviceRadiusKm,
+            @DecimalMin("1.00") @DecimalMax("100.00") BigDecimal serviceRadiusKm,
             boolean pickupEnabled,
             boolean deliveryEnabled,
             @DecimalMin("0.00") BigDecimal deliveryFee,
@@ -63,7 +64,14 @@ public final class SokoRequests {
             @Size(max=500) String deliveryAddress,
             @NotBlank @Size(max=30) String customerPhone,
             @Size(max=1000) String notes,
-            Long destinationUnitId) {}
+            Long destinationUnitId,
+            @DecimalMin("-90.0") @DecimalMax("90.0") Double deliveryLatitude,
+            @DecimalMin("-180.0") @DecimalMax("180.0") Double deliveryLongitude) {
+        public Checkout(Long storeId,List<CheckoutItem> items,String deliveryMethod,String deliveryAddress,
+                        String customerPhone,String notes,Long destinationUnitId){
+            this(storeId,items,deliveryMethod,deliveryAddress,customerPhone,notes,destinationUnitId,null,null);
+        }
+    }
 
     public record Dispatch(
             Long riderId,
@@ -92,6 +100,13 @@ public final class SokoRequests {
             String code) {}
 
     public record DeliveryConfirmation(@NotBlank @Pattern(regexp="\\d{6}") String code,@Size(max=160) String recipientName,@Size(max=500) String proofReference) { public DeliveryConfirmation(String code){this(code,null,null);} }
+    public record PickupConfirmation(
+            @NotBlank(message="Enter the buyer's six-digit pickup code.")
+            @Pattern(regexp="\\d{6}",message="The pickup code must contain six digits.")
+            String code,
+            @Size(max=160) String recipientName) {
+        public PickupConfirmation(String code){this(code,null);}
+    }
     public record Cancellation(@NotBlank @Size(max=1000) String reason) {}
     public enum FinanceType { REFUND, SETTLEMENT }
     public enum FinanceStatus { REQUESTED, PROCESSING, CONFIRMED, FAILED }
