@@ -19,6 +19,7 @@ public class SokoRider extends BaseCreatorEntity implements Auditable {
     private String riderType;
     private String displayName;
     private String phoneNumber;
+    private String nationalIdNumber;
     private String email;
     private String vehicleType;
     private String vehiclePlate;

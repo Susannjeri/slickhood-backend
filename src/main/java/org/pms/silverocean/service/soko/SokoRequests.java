@@ -77,6 +77,7 @@ public final class SokoRequests {
             @NotBlank @Size(max=30) String riderType,
             @NotBlank @Size(max=150) String displayName,
             @NotBlank @Size(max=30) String phoneNumber,
+            @NotBlank @Size(min=5,max=40) @Pattern(regexp="[A-Za-z0-9-]+") String nationalIdNumber,
             @Size(max=180) String email,
             @Size(max=60) String vehicleType,
             @Size(max=20) String vehiclePlate,
