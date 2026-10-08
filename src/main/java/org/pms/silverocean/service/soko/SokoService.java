@@ -130,7 +130,9 @@ public class SokoService {
     @Transactional
     public SokoStore createStore(SokoRequests.StoreUpsert request) {
         requireMerchantRole();
-        SokoStore s=new SokoStore(); s.setOwnerUserId(userDao.getUserId()); s.setCreatedBy(userDao.getUserId()); s.setActive(true); s.setStatus(DRAFT);
+        long ownerUserId=userDao.getUserId();
+        if(storeRepo.existsByOwnerUserIdAndActiveTrue(ownerUserId))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Your Soko workspace already has a shop. Edit that shop instead of creating another one.");
+        SokoStore s=new SokoStore(); s.setOwnerUserId(ownerUserId); s.setCreatedBy(ownerUserId); s.setActive(true); s.setStatus(DRAFT);
         applyStore(s,request); return storeRepo.save(s);
     }
 

@@ -266,10 +266,16 @@ class SokoServiceTest {
     }
 
     @Test void createStoreCreatesDraftOwnedByMerchant(){
-        when(users.hasRole(PMSRole.SERVICE_PROVIDER)).thenReturn(true);when(users.getUserId()).thenReturn(7L);when(stores.save(any())).thenAnswer(i->i.getArgument(0));
+        when(users.hasRole(PMSRole.SERVICE_PROVIDER)).thenReturn(true);when(users.getUserId()).thenReturn(7L);when(stores.existsByOwnerUserIdAndActiveTrue(7L)).thenReturn(false);when(stores.save(any())).thenAnswer(i->i.getArgument(0));
         var request=new SokoRequests.StoreUpsert("Fresh Corner",null,"0712345678","Nairobi",-1.28,36.82,BigDecimal.valueOf(20),true,true,BigDecimal.valueOf(150),"kes",3L);
         SokoStore result=service.createStore(request);
         assertEquals("DRAFT",result.getStatus());assertEquals(7L,result.getOwnerUserId());assertEquals("KES",result.getCurrency());assertTrue(result.isDeliveryEnabled());
+    }
+
+    @Test void createStoreRejectsSecondActiveShopForMerchant(){
+        when(users.hasRole(PMSRole.SERVICE_PROVIDER)).thenReturn(true);when(users.getUserId()).thenReturn(7L);when(stores.existsByOwnerUserIdAndActiveTrue(7L)).thenReturn(true);
+        var request=new SokoRequests.StoreUpsert("Second Shop","Fresh produce","0712345678","Nairobi",-1.28,36.82,BigDecimal.valueOf(20),true,true,BigDecimal.valueOf(150),"KES",3L);
+        assertThrows(PMSCustomException.class,()->service.createStore(request));verify(stores,never()).save(any());
     }
 
     @Test void createStoreRejectsUserWithoutMerchantRole(){

@@ -11,6 +11,7 @@ import org.springframework.data.domain.Pageable;
 public interface SokoStoreRepo extends JpaRepository<SokoStore, Long> {
     Optional<SokoStore> findByIdAndActiveTrue(long id);
     Optional<SokoStore> findByIdAndOwnerUserIdAndActiveTrue(long id, long ownerUserId);
+    boolean existsByOwnerUserIdAndActiveTrue(long ownerUserId);
     List<SokoStore> findAllByOwnerUserIdAndActiveTrueOrderByName(long ownerUserId);
     Page<SokoStore> findAllByActiveTrue(Pageable pageable);
     Page<SokoStore> findAllByStatusAndActiveTrue(String status,Pageable pageable);
