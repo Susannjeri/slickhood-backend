@@ -418,7 +418,11 @@ public class SokoService {
     private String imageExtension(String type){return switch(type){case "image/png"->"png";case "image/webp"->"webp";default->"jpg";};}
     private record PendingImage(byte[] bytes,String contentType,String extension){}
     private void applyRider(SokoRider rider,SokoRequests.RiderUpsert r){String type=r.riderType().trim().toUpperCase(Locale.ROOT);if(!List.of("INDIVIDUAL","DELIVERY_COMPANY").contains(type))throw invalid();rider.setRiderType(type);rider.setDisplayName(r.displayName().trim());rider.setPhoneNumber(r.phoneNumber().trim());rider.setNationalIdNumber(r.nationalIdNumber().trim().toUpperCase(Locale.ROOT));rider.setEmail(StringUtils.trimToNull(r.email()));rider.setVehicleType(StringUtils.trimToNull(r.vehicleType()));rider.setVehiclePlate(StringUtils.trimToNull(r.vehiclePlate()));rider.setNotes(StringUtils.trimToNull(r.notes()));}
-    private void linkRiderUser(SokoRider rider){rider.setUserId(StringUtils.isBlank(rider.getEmail())?null:userDao.findByEmail(rider.getEmail().trim().toLowerCase(Locale.ROOT)).map(u->u.getId()).orElse(null));}
+    private void linkRiderUser(SokoRider rider){
+        var user=StringUtils.isBlank(rider.getEmail())?java.util.Optional.<org.pms.silverocean.database.pms.entities.Users>empty():userDao.findByEmail(rider.getEmail().trim().toLowerCase(Locale.ROOT));
+        if(user.isEmpty())user=userDao.findByPhone(rider.getPhoneNumber());
+        rider.setUserId(user.map(u->u.getId()).orElse(null));
+    }
     private ProfileType profileType(long userId){return userDao.findById(userId).map(u->{try{return ProfileType.valueOf(u.getProfileType());}catch(Exception ignored){return ProfileType.INDIVIDUAL;}}).orElse(ProfileType.INDIVIDUAL);}
     private void validatePublishable(SokoStore s){if(s.getPaymentAccountId()==null)throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);PaymentAccount a=accountDao.getAccountByIdAndCreatedBy(s.getPaymentAccountId(),s.getOwnerUserId());if(!a.isVerified()||!a.isActive()||a.getCategory()!=AccountCategory.MERCHANT||a.getChannel()==null)throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);}
     private void validateDelivery(SokoStore s,SokoRequests.Checkout r){if("DELIVERY".equalsIgnoreCase(r.deliveryMethod())){if(!s.isDeliveryEnabled()||StringUtils.isBlank(r.deliveryAddress()))throw invalid();}else if("PICKUP".equalsIgnoreCase(r.deliveryMethod())){if(!s.isPickupEnabled())throw invalid();}else throw invalid();}
