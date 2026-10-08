@@ -61,8 +61,15 @@ def main():
     if len(rows) != 1 or len(rows[0]) != 3:
         raise RuntimeError("Unexpected V114 Flyway history records; refusing repair")
     installed_rank, description, success = rows[0]
-    if description != DESCRIPTION or success != "0":
-        raise RuntimeError("V114 is not the expected failed migration; refusing repair")
+    normalized_description = " ".join(description.replace("_", " ").lower().split())
+    normalized_success = success.strip().lower()
+    failed_values = {"0", "false", "\x00", "b'0'", "b'\\x00'"}
+    if normalized_description != DESCRIPTION or normalized_success not in failed_values:
+        raise RuntimeError(
+            "V114 is not the expected failed migration; refusing repair "
+            f"(records={len(rows)}, description={normalized_description!r}, "
+            f"success={normalized_success!r})"
+        )
 
     delete = (
         "DELETE FROM flyway_schema_history "
