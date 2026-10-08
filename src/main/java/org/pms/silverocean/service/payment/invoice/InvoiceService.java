@@ -324,6 +324,11 @@ public class InvoiceService {
         }
     }
 
+    /** Loads one invoice through the same participant boundary as PDF and payment actions. */
+    public InvoiceDTO getInvoice(long invoiceId) {
+        return mapInvoiceEntityToDTO(accessibleInvoice(invoiceId));
+    }
+
     private InvoiceDTO mapInvoiceEntityToDTO(PMSInvoice invoice) {
         if (StringUtils.isNotBlank(invoice.getSubscriptionPlanCode())) {
             Users billed = userDao.findById(invoice.getBilledUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));

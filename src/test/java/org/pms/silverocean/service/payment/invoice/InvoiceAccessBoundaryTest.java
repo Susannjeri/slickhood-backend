@@ -162,6 +162,30 @@ class InvoiceAccessBoundaryTest {
     }
 
     @Test
+    void directInvoiceDeepLinkUsesIndexedParticipantLookup() {
+        PMSInvoice invoice = rentalInvoice(185L, 175L);
+        Unit unit = new Unit();
+        unit.setId(512L); unit.setRef("GT009"); unit.setPropertyId(78L);
+        Users tenant = new Users();
+        tenant.setId(185L); tenant.setFullName("Tenant Customer");
+        PropertyNameAddressAndTypeProjection property = mock(PropertyNameAddressAndTypeProjection.class);
+        when(users.getUserId()).thenReturn(185L);
+        when(users.getActiveRole()).thenReturn(PMSRole.TENANT);
+        when(invoices.getInvoiceForOwnerOrTenantView(501L, 185L)).thenReturn(Optional.of(invoice));
+        when(units.getPropertyDetailsFromUnitId(512L)).thenReturn(Optional.of(property));
+        when(property.getName()).thenReturn("GTC Centre");
+        when(units.findById(512L)).thenReturn(Optional.of(unit));
+        when(users.findById(185L)).thenReturn(Optional.of(tenant));
+        when(users.findById(175L)).thenReturn(Optional.of(new Users()));
+
+        var result = service.getInvoice(501L);
+
+        assertEquals("GT009", result.unitRef());
+        verify(invoices).getInvoiceForOwnerOrTenantView(501L, 185L);
+        verify(invoices, never()).getInvoiceById(501L);
+    }
+
+    @Test
     void lateFeeInvoicePreservesTheOriginalPaymentAndWorkspaceBoundary() {
         PMSInvoice source = rentalInvoice(185L, 175L);
         source.setPaymentAccountId(91L);

@@ -32,6 +32,11 @@ public class KycController {
     @GetMapping("/current")
     public ResponseEntity<ResponseDTO> current() { return ok(ResponseCode.KYC_DETAILS, service.current()); }
 
+    @GetMapping("/access-status")
+    public ResponseEntity<ResponseDTO> accessStatus() {
+        return ok(ResponseCode.KYC_DETAILS, service.accessStatus());
+    }
+
     @PostMapping("/start")
     public ResponseEntity<ResponseDTO> start(@Valid @RequestBody StartKycRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(response(ResponseCode.KYC_STARTED, service.start(request)));

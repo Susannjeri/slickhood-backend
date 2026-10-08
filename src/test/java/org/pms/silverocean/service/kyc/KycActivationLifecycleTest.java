@@ -36,6 +36,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class KycActivationLifecycleTest {
@@ -674,6 +675,20 @@ class KycActivationLifecycleTest {
         KycCaseView view = service.current();
 
         assertThat(view.phoneVerified()).isTrue();
+    }
+
+    @Test void accessStatusDoesNotLoadOrDecryptKycDocuments() {
+        Users subject = customer(12);
+        subject.setAccountStatus(AccountStatus.ACTIVE.name());
+        KycCase kycCase = submittedCase(40, 12, KycStatus.APPROVED);
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+
+        KycService.AccessStatusView view = service.accessStatus();
+
+        assertThat(view.accountStatus()).isEqualTo(AccountStatus.ACTIVE.name());
+        assertThat(view.pendingRoleId()).isNull();
+        verifyNoInteractions(documents, encryption, requirements);
     }
 
     @Test void cleanReplacementSupersedesRejectedAlternativesWithoutFalseIdentityConflict() throws Exception {

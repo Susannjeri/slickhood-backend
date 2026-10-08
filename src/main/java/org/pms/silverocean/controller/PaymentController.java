@@ -31,6 +31,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -119,6 +120,14 @@ public class PaymentController extends OutputStreamErrorHandler {
         responseDTO.setTotalPages(invoiceList.getTotalPages());
         responseDTO.setSize(invoiceList.getSize());
         return ResponseEntity.ok(responseDTO);
+    }
+
+    @GetMapping("/invoice/{invoiceId}")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_INVOICE_LIST)")
+    public ResponseEntity<ResponseDTO> getInvoice(@PathVariable long invoiceId) {
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.INVOICE_LIST.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.INVOICE_LIST.getDescription()),
+                invoiceService.getInvoice(invoiceId)));
     }
 
     @GetMapping("/invoice/payment-account")

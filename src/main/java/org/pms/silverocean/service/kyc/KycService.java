@@ -100,6 +100,22 @@ public class KycService {
     }
 
     /**
+     * Lightweight dashboard access decision. Unlike {@link #current()}, this
+     * deliberately avoids loading, decrypting and re-evaluating every KYC
+     * document. Operational navigation only needs the account state and the
+     * role (if any) whose additional KYC is still pending.
+     */
+    public AccessStatusView accessStatus() {
+        Users user = currentUser();
+        return caseRepo.findByUserId(user.getId())
+                .map(kycCase -> new AccessStatusView(user.getAccountStatus(), kycCase.getPendingRoleId(),
+                        pendingRoleName(kycCase)))
+                .orElse(new AccessStatusView(user.getAccountStatus(), null, null));
+    }
+
+    public record AccessStatusView(String accountStatus, Long pendingRoleId, String pendingRoleName) {}
+
+    /**
      * Re-evaluates the approved evidence after a self-service role is added.
      * Existing documents remain available, but a role whose requirements are
      * not yet covered reopens KYC for that role only. Existing approved roles
