@@ -55,9 +55,8 @@ jobs:
         run: |
           install -m 0755 scripts/production-preflight.py target/production-preflight.py
           install -m 0755 scripts/production-backup.py target/production-backup.py
-          install -m 0755 scripts/repair-failed-soko-rider-migration.py target/repair-failed-soko-rider-migration.py
           cd target
-          sha256sum -- *.jar production-preflight.py production-backup.py repair-failed-soko-rider-migration.py > release.sha256
+          sha256sum -- *.jar production-preflight.py production-backup.py > release.sha256
 
       - name: Copy JAR to EC2
         uses: appleboy/scp-action@v0.1.7
@@ -65,7 +64,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "target/*.jar,target/release.sha256,target/production-preflight.py,target/production-backup.py,target/repair-failed-soko-rider-migration.py"
+          source: "target/*.jar,target/release.sha256,target/production-preflight.py,target/production-backup.py"
           target: /tmp/slickhood-backend-release
           strip_components: 1
 
@@ -215,10 +214,6 @@ jobs:
             run_preflight 96
             # Backup contents never leave the host or appear in workflow logs.
             sudo python3 /tmp/slickhood-backend-release/production-backup.py
-            # The initial V114 attempt used MariaDB-only DDL. Remove only its
-            # known failed history row after the protected backup, allowing the
-            # corrected MySQL-compatible migration to run.
-            sudo python3 /tmp/slickhood-backend-release/repair-failed-soko-rider-migration.py
             test -n "$PAYSTACK_TEST_SECRET_KEY"
             paystack_curl_config="$(mktemp)"
             paystack_probe="$(mktemp)"
