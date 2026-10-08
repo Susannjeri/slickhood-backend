@@ -139,6 +139,25 @@ class JWTFilterTest {
     }
 
     @Test
+    void accountAccessCheckRecoversFromAStaleBrowserRoleWithoutRelaxingOtherEndpoints() throws Exception {
+        stubValidatedToken(claims("current-session", List.of(
+                role("ServiceProvider", "view_account"),
+                role("Landlord", "view_property")
+        )), true);
+        request.setRequestURI("/kyc/access-status");
+        request.addHeader(JWTFilter.ACTIVE_ROLE_HEADER, "RemovedRole");
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(request.getAttribute(JWTFilter.ACTIVE_ROLE_ATTRIBUTE)).isEqualTo("ServiceProvider");
+        assertThat(SecurityContextHolder.getContext().getAuthentication().getAuthorities())
+                .extracting("authority").contains("ROLE_SERVICEPROVIDER", "ROLE_SERVICE_PROVIDER", "view_account")
+                .doesNotContain("view_property");
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
     void singleRoleTokenRemainsBackwardCompatibleWithoutAHeader() throws Exception {
         stubValidatedToken(claims("current-session", List.of(role("Tenant", "view_active_lease"))), true);
 

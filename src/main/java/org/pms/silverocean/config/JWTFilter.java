@@ -61,6 +61,15 @@ public class JWTFilter extends GenericFilter {
                 if (!CollectionUtils.isEmpty(roles)) {
                     String requestedRole = httpRequest.getHeader(ACTIVE_ROLE_HEADER);
                     Map<String, Object> selectedRole = selectActiveRole(roles, requestedRole);
+                    // This read-only account-state check is role agnostic. A
+                    // refreshed token may no longer contain the role persisted
+                    // by an older browser tab; authenticate it with an assigned
+                    // role so the client can reconcile instead of misreporting
+                    // the valid session as an expired token. All operational
+                    // endpoints continue to require an explicitly assigned role.
+                    if (selectedRole == null && isRoleAgnosticAccessCheck(httpRequest)) {
+                        selectedRole = roles.getFirst();
+                    }
                     if (selectedRole == null) {
                         throw new IllegalArgumentException("A valid active role is required");
                     }
@@ -116,6 +125,10 @@ public class JWTFilter extends GenericFilter {
                 .filter(role -> normalizeRole(role.get("title").toString()).equals(normalizedRequested))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private boolean isRoleAgnosticAccessCheck(HttpServletRequest request) {
+        return "/kyc/access-status".equals(request.getRequestURI());
     }
 
     private String normalizeRole(String role) {
