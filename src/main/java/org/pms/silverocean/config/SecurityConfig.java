@@ -54,7 +54,7 @@ public class SecurityConfig {
                         .requestMatchers("/role/list").permitAll()
                         .requestMatchers("/deployed-hash").permitAll()
                         .requestMatchers("/sp/directory/**").permitAll()
-                        .requestMatchers("/soko/catalog/**").permitAll()
+                        .requestMatchers("/soko/catalog/**", "/soko/categories").permitAll()
                         .requestMatchers("/affiliate/public/**").permitAll()
                         .requestMatchers("/helpdesk/public/**").permitAll()
                         .requestMatchers("/public/property-listings/**").permitAll()
