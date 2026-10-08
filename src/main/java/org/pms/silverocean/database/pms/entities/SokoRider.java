@@ -31,6 +31,19 @@ public class SokoRider extends BaseCreatorEntity implements Auditable {
     private java.time.ZonedDateTime verifiedAt;
     private Long verifiedByUserId;
     @jakarta.persistence.Column(length=1000) private String verificationNotes;
+    private boolean phoneConfirmed;
+    private String phoneConfirmationStatus;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private byte[] phoneConfirmationOtp;
+    private java.time.ZonedDateTime phoneConfirmationExpiresAt;
+    private java.time.ZonedDateTime phoneConfirmationRequestedAt;
+    private java.time.ZonedDateTime phoneConfirmationConfirmedAt;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private java.time.ZonedDateTime phoneConfirmationWindowStartedAt;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private int phoneConfirmationRequestCount;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private int phoneConfirmationAttempts;
     private int completedDeliveries;
     private String notes;
     @Override public String toAuditJSON(){return "{\"id\":"+getId()+",\"storeId\":"+storeId+",\"userId\":"+userId+",\"status\":\""+status+"\",\"verificationStatus\":\""+verificationStatus+"\"}";}

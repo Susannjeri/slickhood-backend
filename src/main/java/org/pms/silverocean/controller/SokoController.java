@@ -44,6 +44,8 @@ public class SokoController {
     @GetMapping("/product/{id}/images") public ResponseEntity<ResponseDTO> productImages(@PathVariable long id){return ok(service.productImages(id));}
     @PostMapping("/rider") public ResponseEntity<ResponseDTO> createRider(@RequestBody @Valid SokoRequests.RiderUpsert r){return ok(service.createRider(r));}
     @PutMapping("/rider/{id}") public ResponseEntity<ResponseDTO> updateRider(@PathVariable long id,@RequestBody @Valid SokoRequests.RiderUpsert r){return ok(service.updateRider(id,r));}
+    @PutMapping("/rider/{id}/verification/send") public ResponseEntity<ResponseDTO> sendRiderVerification(@PathVariable long id){return ok(service.requestRiderPhoneConfirmation(id));}
+    @PutMapping("/rider/{id}/verification/confirm") public ResponseEntity<ResponseDTO> confirmRiderVerification(@PathVariable long id,@RequestBody @Valid SokoRequests.RiderVerificationConfirm request){return ok(service.confirmRiderPhone(id,request));}
     @GetMapping("/rider/my") public ResponseEntity<ResponseDTO> myRiders(@RequestParam long storeId){return ok(service.myRiders(storeId));}
     @PutMapping("/rider/{id}/availability") public ResponseEntity<ResponseDTO> riderAvailability(@PathVariable long id,@RequestParam String availability){return ok(service.setRiderAvailability(id,availability));}
     @DeleteMapping("/rider/{id}") public ResponseEntity<ResponseDTO> removeRider(@PathVariable long id){service.removeRider(id);return ok(null);}

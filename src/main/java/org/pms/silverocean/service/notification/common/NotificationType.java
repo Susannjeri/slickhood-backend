@@ -85,6 +85,7 @@ public enum NotificationType {
     INSURANCE_DOCUMENT_EMAIL("email.insurance.document.subject", "email.insurance.document.body", true, NotificationChannel.EMAIL),
     SOKO_MODERATION_EMAIL("email.soko.moderation.subject", "email.soko.moderation.body", true, NotificationChannel.EMAIL),
     SOKO_ORDER_STATUS_EMAIL("email.soko.order.status.subject", "email.soko.order.status.body", true, NotificationChannel.EMAIL),
+    SOKO_RIDER_CONFIRMATION_SMS("sms.soko.rider.confirmation", false, NotificationChannel.SMS),
     SOKO_DELIVERY_CODE_EMAIL("email.soko.delivery.code.subject", "email.soko.delivery.code.body", true, NotificationChannel.EMAIL),
     SOKO_DELIVERY_RECOVERY_EMAIL("email.soko.delivery.recovery.subject", "email.soko.delivery.recovery.body", true, NotificationChannel.EMAIL),
     BUSINESS_ALERT_EMAIL("email.business.alert.subject", "email.business.alert.body", true, NotificationChannel.EMAIL),

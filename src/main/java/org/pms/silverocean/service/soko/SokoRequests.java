@@ -77,11 +77,19 @@ public final class SokoRequests {
             @NotBlank @Size(max=30) String riderType,
             @NotBlank @Size(max=150) String displayName,
             @NotBlank @Size(max=30) String phoneNumber,
-            @NotBlank @Size(min=5,max=40) @Pattern(regexp="[A-Za-z0-9-]+") String nationalIdNumber,
+            @NotBlank(message="Enter the rider ID or company registration number.")
+            @Size(max=40,message="The rider ID or company registration number must be 40 characters or fewer.")
+            @Pattern(regexp="[A-Za-z0-9-]+",message="Use only letters, numbers and hyphens for the rider ID or company registration number.")
+            String nationalIdNumber,
             @Size(max=180) String email,
             @Size(max=60) String vehicleType,
             @Size(max=20) String vehiclePlate,
             @Size(max=1000) String notes) {}
+
+    public record RiderVerificationConfirm(
+            @NotBlank(message="Enter the six-digit rider confirmation code.")
+            @Pattern(regexp="\\d{6}",message="The rider confirmation code must contain six digits.")
+            String code) {}
 
     public record DeliveryConfirmation(@NotBlank @Pattern(regexp="\\d{6}") String code,@Size(max=160) String recipientName,@Size(max=500) String proofReference) { public DeliveryConfirmation(String code){this(code,null,null);} }
     public record Cancellation(@NotBlank @Size(max=1000) String reason) {}

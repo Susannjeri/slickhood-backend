@@ -27,6 +27,7 @@ import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.pms.silverocean.service.security.DecryptDTO;
 import org.pms.silverocean.service.notification.NotificationService;
+import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.kyc.MarketplaceKycGate;
 import org.pms.silverocean.service.visitor.VisitorService;
@@ -130,15 +131,15 @@ class SokoServiceTest {
         verifyNoInteractions(notifications);
     }
 
-    private SokoRider existingRider(){SokoRider r=new SokoRider();r.setId(3L);r.setStoreId(2L);r.setActive(true);r.setRiderType("INDIVIDUAL");r.setDisplayName("Jane Rider");r.setPhoneNumber("0712345678");r.setNationalIdNumber("12345678");r.setEmail("jane@example.test");r.setVehicleType("Motorbike");r.setVehiclePlate("KDA 123A");r.setVerified(true);r.setStatus("ACTIVE");r.setAvailability("AVAILABLE");return r;}
+    private SokoRider existingRider(){SokoRider r=new SokoRider();r.setId(3L);r.setStoreId(2L);r.setActive(true);r.setRiderType("INDIVIDUAL");r.setDisplayName("Jane Rider");r.setPhoneNumber("0712345678");r.setNationalIdNumber("12345678");r.setEmail("jane@example.test");r.setVehicleType("Motorbike");r.setVehiclePlate("KDA 123A");r.setPhoneConfirmed(true);r.setPhoneConfirmationStatus("CONFIRMED");r.setVerified(true);r.setStatus("ACTIVE");r.setAvailability("AVAILABLE");return r;}
     private void merchant(){SokoStore s=new SokoStore();s.setId(2L);s.setOwnerUserId(7L);when(users.getUserId()).thenReturn(7L);when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(s));}
     private SokoRequests.RiderUpsert riderUpdate(String name){return new SokoRequests.RiderUpsert(2L,"INDIVIDUAL",name,"0712345678","12345678","jane@example.test","Motorbike","KDA 123A","Updated notes");}
     @Test void busyRiderCannotBeEdited(){merchant();SokoRider r=existingRider();r.setAvailability("BUSY");when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(r));assertThrows(PMSCustomException.class,()->service.updateRider(3L,riderUpdate("Changed Name")));assertEquals("BUSY",r.getAvailability());verify(riders,never()).save(any());}
     @Test void activeAssignmentBlocksEditEvenIfLegacyAvailabilityIsWrong(){merchant();SokoRider r=existingRider();when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(r));when(orders.existsByRiderIdAndStatusInAndActiveTrue(eq(3L),anyList())).thenReturn(true);assertThrows(PMSCustomException.class,()->service.updateRider(3L,riderUpdate("Changed Name")));verify(riders,never()).save(any());}
-    @Test void notesOnlyEditPreservesVerification(){merchant();SokoRider r=existingRider();when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(r));when(riders.save(any())).thenAnswer(i->i.getArgument(0));service.updateRider(3L,riderUpdate("Jane Rider"));assertTrue(r.isVerified());assertEquals("ACTIVE",r.getStatus());assertEquals("AVAILABLE",r.getAvailability());}
-    @Test void identityEditRequiresVerificationAgain(){merchant();SokoRider r=existingRider();when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(r));when(riders.save(any())).thenAnswer(i->i.getArgument(0));service.updateRider(3L,riderUpdate("Changed Name"));assertFalse(r.isVerified());assertEquals("PENDING_VERIFICATION",r.getStatus());assertEquals("OFFLINE",r.getAvailability());}
+    @Test void notesOnlyEditPreservesVerification(){merchant();SokoRider r=existingRider();when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(r));when(riders.save(any())).thenAnswer(i->i.getArgument(0));var result=service.updateRider(3L,riderUpdate("Jane Rider"));assertTrue(r.isVerified());assertEquals("ACTIVE",r.getStatus());assertEquals("AVAILABLE",r.getAvailability());assertEquals("CONFIRMED",result.confirmationStatus());}
+    @Test void identityEditRequiresVerificationAgain(){merchant();SokoRider r=existingRider();when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(r));when(riders.save(any())).thenAnswer(i->i.getArgument(0));when(encryption.encrypt(anyString())).thenReturn(new byte[]{1});when(i18n.getLocalizedMessage(NotificationType.SOKO_RIDER_CONFIRMATION_SMS.getBody())).thenReturn("Code %s expires in %s minutes");var result=service.updateRider(3L,riderUpdate("Changed Name"));assertFalse(r.isVerified());assertFalse(r.isPhoneConfirmed());assertEquals("PENDING_VERIFICATION",r.getStatus());assertEquals("OFFLINE",r.getAvailability());assertEquals("CODE_QUEUED",result.confirmationStatus());verify(notifications).queueNotification(any());}
     @Test void adminCannotResetBusyRiderThroughVerifyOrReject(){when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);SokoRider r=existingRider();r.setAvailability("BUSY");when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(r));assertThrows(PMSCustomException.class,()->service.riderDecision(3L,new SokoRequests.RiderDecision("VERIFY",null)));assertThrows(PMSCustomException.class,()->service.riderDecision(3L,new SokoRequests.RiderDecision("REJECT","Reason")));assertEquals("BUSY",r.getAvailability());verify(riders,never()).save(any());}
-    @Test void verificationLinksAnAccountCreatedAfterMerchantAddedRider(){when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);SokoRider r=existingRider();r.setUserId(null);r.setVerified(false);when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(r));var u=new org.pms.silverocean.database.pms.entities.Users();u.setId(8L);u.setActive(true);u.setVerified(true);u.setEmailVerified(true);u.setAccountStatus("ACTIVE");when(users.findByEmail("jane@example.test")).thenReturn(Optional.of(u));when(users.findById(8L)).thenReturn(Optional.of(u));when(riders.save(any())).thenAnswer(i->i.getArgument(0));service.riderDecision(3L,new SokoRequests.RiderDecision("VERIFY",null));assertEquals(8L,r.getUserId());assertTrue(r.isVerified());verify(marketplaceKycGate).require(eq(8L),eq("PROVIDER_TYPE"),eq("DELIVERY_RIDER"),any());}
+    @Test void verificationLinksAnAccountCreatedAfterMerchantAddedRider(){when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);SokoRider r=existingRider();r.setUserId(null);r.setVerified(false);when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(r));var u=new org.pms.silverocean.database.pms.entities.Users();u.setId(8L);u.setActive(true);u.setVerified(true);u.setEmailVerified(true);u.setAccountStatus("ACTIVE");when(users.findByPhone("+254712345678")).thenReturn(Optional.of(u));when(users.findById(8L)).thenReturn(Optional.of(u));when(riders.save(any())).thenAnswer(i->i.getArgument(0));service.riderDecision(3L,new SokoRequests.RiderDecision("VERIFY",null));assertEquals(8L,r.getUserId());assertTrue(r.isVerified());verify(users,never()).findByEmail(anyString());verify(marketplaceKycGate).require(eq(8L),eq("PROVIDER_TYPE"),eq("DELIVERY_RIDER"),any());}
 
     @BeforeEach void setup(){service=new SokoService(stores,products,productImages,variations,orders,items,riders,invoices,accounts,users,visitors,garage,malwarePolicy,encryption,notifications,businessAlerts,i18n,marketplaceKycGate);}
 
@@ -176,10 +177,73 @@ class SokoServiceTest {
     }
 
     @Test void createRiderRequiresVerificationBeforeAssignments(){
-        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);when(users.getUserId()).thenReturn(7L);when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(riders.save(any())).thenAnswer(i->i.getArgument(0));
-        SokoRider rider=service.createRider(new SokoRequests.RiderUpsert(2L,"individual","Jane Rider","0712345678","12345678",null,"Motorbike","KDA 123A",null));
-        assertEquals("12345678",rider.getNationalIdNumber());
-        assertEquals("OFFLINE",rider.getAvailability());assertEquals("PENDING_VERIFICATION",rider.getStatus());assertFalse(rider.isVerified());assertEquals("INDIVIDUAL",rider.getRiderType());
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);when(users.getUserId()).thenReturn(7L);when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(riders.save(any())).thenAnswer(i->i.getArgument(0));when(encryption.encrypt(anyString())).thenReturn(new byte[]{1,2,3});when(i18n.getLocalizedMessage(NotificationType.SOKO_RIDER_CONFIRMATION_SMS.getBody())).thenReturn("Code %s expires in %s minutes");
+        var result=service.createRider(new SokoRequests.RiderUpsert(2L,"individual","Jane Rider","254111379961","4567","untrusted@example.test","Motorbike","KDA 123A",null));
+        SokoRider rider=result.rider();
+        assertEquals("4567",rider.getNationalIdNumber());assertEquals("+254111379961",rider.getPhoneNumber());
+        assertEquals("OFFLINE",rider.getAvailability());assertEquals("PENDING_VERIFICATION",rider.getStatus());assertFalse(rider.isVerified());assertNull(rider.getUserId());assertEquals("INDIVIDUAL",rider.getRiderType());verify(users,never()).findByEmail(anyString());verify(users,never()).findByPhone(anyString());
+        assertEquals("CODE_QUEUED",result.confirmationStatus());assertNotNull(rider.getPhoneConfirmationExpiresAt());assertArrayEquals(new byte[]{1,2,3},rider.getPhoneConfirmationOtp());
+        var queued=org.mockito.ArgumentCaptor.forClass(org.pms.silverocean.service.notification.NotificationDTO.class);verify(notifications).queueNotification(queued.capture());assertEquals("+254111379961",queued.getValue().recipient());assertEquals(NotificationType.SOKO_RIDER_CONFIRMATION_SMS,queued.getValue().notificationType());assertFalse(result.message().matches(".*\\b\\d{6}\\b.*"));
+    }
+
+    @Test void correctRiderPhoneCodeActivatesUnlinkedRiderForMerchantManagedDelivery(){
+        merchant();SokoRider rider=existingRider();rider.setUserId(null);rider.setPhoneConfirmed(false);rider.setVerified(false);rider.setStatus("PENDING_VERIFICATION");rider.setAvailability("OFFLINE");rider.setPhoneConfirmationStatus("CODE_QUEUED");rider.setPhoneConfirmationOtp(new byte[]{4,5,6});rider.setPhoneConfirmationExpiresAt(ZonedDateTime.now().plusMinutes(5));
+        when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(rider));when(riders.save(any())).thenAnswer(i->i.getArgument(0));when(encryption.decrypt(rider.getPhoneConfirmationOtp())).thenReturn(new DecryptDTO(false,"123456"));
+        var result=service.confirmRiderPhone(3L,new SokoRequests.RiderVerificationConfirm("123456"));
+        assertEquals("CONFIRMED",result.confirmationStatus());assertTrue(rider.isPhoneConfirmed());assertTrue(rider.isVerified());assertEquals("VERIFIED",rider.getVerificationStatus());assertEquals("ACTIVE",rider.getStatus());assertEquals("AVAILABLE",rider.getAvailability());assertNull(rider.getUserId());assertNull(rider.getPhoneConfirmationOtp());assertNotNull(rider.getPhoneConfirmationConfirmedAt());verifyNoInteractions(marketplaceKycGate);
+    }
+
+    @Test void confirmedPhoneNeverLinksMerchantSuppliedMismatchedEmailAccount(){
+        merchant();SokoRider rider=existingRider();rider.setUserId(null);rider.setEmail("unrelated@example.test");rider.setPhoneNumber("+254712345678");rider.setPhoneConfirmed(false);rider.setVerified(false);rider.setStatus("PENDING_VERIFICATION");rider.setAvailability("OFFLINE");rider.setPhoneConfirmationStatus("CODE_QUEUED");rider.setPhoneConfirmationOtp(new byte[]{4,5,6});rider.setPhoneConfirmationExpiresAt(ZonedDateTime.now().plusMinutes(5));
+        var phoneOwner=new org.pms.silverocean.database.pms.entities.Users();phoneOwner.setId(9L);var emailOwner=new org.pms.silverocean.database.pms.entities.Users();emailOwner.setId(8L);
+        when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(rider));when(riders.save(any())).thenAnswer(i->i.getArgument(0));when(encryption.decrypt(rider.getPhoneConfirmationOtp())).thenReturn(new DecryptDTO(false,"123456"));when(users.findByPhone("+254712345678")).thenReturn(Optional.of(phoneOwner));lenient().when(users.findByEmail("unrelated@example.test")).thenReturn(Optional.of(emailOwner));
+        service.confirmRiderPhone(3L,new SokoRequests.RiderVerificationConfirm("123456"));
+        assertEquals(9L,rider.getUserId());verify(users,never()).findByEmail(anyString());verifyNoInteractions(marketplaceKycGate);
+    }
+
+    @Test void riderPhoneConfirmationLocksAfterBoundedIncorrectAttempts(){
+        merchant();org.springframework.test.util.ReflectionTestUtils.setField(service,"riderPhoneConfirmationMaxAttempts",5);SokoRider rider=existingRider();rider.setPhoneConfirmed(false);rider.setVerified(false);rider.setStatus("PENDING_VERIFICATION");rider.setPhoneConfirmationStatus("CODE_QUEUED");rider.setPhoneConfirmationOtp(new byte[]{4,5,6});rider.setPhoneConfirmationExpiresAt(ZonedDateTime.now().plusMinutes(5));
+        when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(rider));when(riders.save(any())).thenAnswer(i->i.getArgument(0));when(encryption.decrypt(any())).thenReturn(new DecryptDTO(false,"123456"));
+        for(int attempt=1;attempt<=5;attempt++)assertThrows(PMSCustomException.class,()->service.confirmRiderPhone(3L,new SokoRequests.RiderVerificationConfirm("000000")));
+        assertEquals("LOCKED",rider.getPhoneConfirmationStatus());assertNull(rider.getPhoneConfirmationOtp());assertNull(rider.getPhoneConfirmationExpiresAt());assertFalse(rider.isVerified());
+    }
+
+    @Test void riderPhoneConfirmationResendHonorsCooldownWithoutReplacingUsableCode(){
+        merchant();SokoRider rider=existingRider();rider.setPhoneConfirmed(false);rider.setVerified(false);rider.setStatus("PENDING_VERIFICATION");rider.setAvailability("OFFLINE");rider.setPhoneConfirmationStatus("CODE_QUEUED");rider.setPhoneConfirmationOtp(new byte[]{4,5,6});rider.setPhoneConfirmationRequestedAt(ZonedDateTime.now());rider.setPhoneConfirmationExpiresAt(ZonedDateTime.now().plusMinutes(5));
+        when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(rider));
+        var result=service.requestRiderPhoneConfirmation(3L);
+        assertEquals("CODE_ALREADY_QUEUED",result.confirmationStatus());assertArrayEquals(new byte[]{4,5,6},rider.getPhoneConfirmationOtp());verify(notifications,never()).queueNotification(any());verify(encryption,never()).encrypt(anyString());
+    }
+
+    @Test void lockedRiderConfirmationCannotBypassResendCooldown(){
+        merchant();SokoRider rider=existingRider();rider.setPhoneConfirmed(false);rider.setVerified(false);rider.setStatus("PENDING_VERIFICATION");rider.setAvailability("OFFLINE");rider.setPhoneConfirmationStatus("LOCKED");rider.setPhoneConfirmationOtp(null);rider.setPhoneConfirmationRequestedAt(ZonedDateTime.now());rider.setPhoneConfirmationExpiresAt(null);
+        when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(rider));
+        assertThrows(PMSCustomException.class,()->service.requestRiderPhoneConfirmation(3L));verify(notifications,never()).queueNotification(any());verify(encryption,never()).encrypt(anyString());
+    }
+
+    @Test void expiredRiderPhoneCodeIsInvalidatedAndMustBeResent(){
+        merchant();SokoRider rider=existingRider();rider.setPhoneConfirmed(false);rider.setVerified(false);rider.setStatus("PENDING_VERIFICATION");rider.setPhoneConfirmationStatus("CODE_QUEUED");rider.setPhoneConfirmationOtp(new byte[]{4,5,6});rider.setPhoneConfirmationExpiresAt(ZonedDateTime.now().minusSeconds(1));
+        when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(rider));when(riders.save(any())).thenAnswer(i->i.getArgument(0));
+        assertThrows(PMSCustomException.class,()->service.confirmRiderPhone(3L,new SokoRequests.RiderVerificationConfirm("123456")));
+        assertEquals("EXPIRED",rider.getPhoneConfirmationStatus());assertNull(rider.getPhoneConfirmationOtp());verify(encryption,never()).decrypt(any());
+    }
+
+    @Test void draftShopProductPublishReturnsActionableReason(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("DRAFT");store.setActive(true);SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setActive(true);product.setStatus("DRAFT");
+        when(users.getUserId()).thenReturn(7L);when(products.findById(5L)).thenReturn(Optional.of(product));when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));
+        PMSCustomException failure=assertThrows(PMSCustomException.class,()->service.publishProduct(5L));assertTrue(String.valueOf(failure.getData()).contains("approval"));verify(products,never()).save(any());
+    }
+
+    @Test void productPublishNormalizesLegacyGroceryLabelAndWorksForApprovedShop(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setName("Carrots");product.setCategory("Fresh produce");product.setImageUrl("https://images.example.test/carrots.jpg");product.setStockQuantity(1000);product.setActive(true);product.setStatus("DRAFT");
+        when(users.getUserId()).thenReturn(7L);when(products.findById(5L)).thenReturn(Optional.of(product));when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(products.save(any())).thenAnswer(i->i.getArgument(0));
+        SokoProduct published=service.publishProduct(5L);assertEquals("FRESH_PRODUCE",published.getCategory());assertEquals("PUBLISHED",published.getStatus());verify(marketplaceKycGate).require(eq(7L),eq("SOKO_CATEGORY"),eq("FRESH_PRODUCE"),any());
+    }
+
+    @Test void legacyNonGroceryDraftCannotBePublished(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setName("Headphones");product.setCategory("Electronics & accessories");product.setImageUrl("https://images.example.test/headphones.jpg");product.setStockQuantity(2);product.setActive(true);product.setStatus("DRAFT");
+        when(users.getUserId()).thenReturn(7L);when(products.findById(5L)).thenReturn(Optional.of(product));when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));
+        assertThrows(PMSCustomException.class,()->service.publishProduct(5L));verifyNoInteractions(marketplaceKycGate);verify(products,never()).save(any());
     }
 
     @Test void productImageUploadUsesServerGeneratedStorageKey() throws Exception {
@@ -205,16 +269,25 @@ class SokoServiceTest {
     }
 
     @Test void dispatchAssignsOnlyVerifiedRiderAndWaitsForCollectionBeforeIssuingCode(){
-        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("PACKED");order.setDeliveryMethod("DELIVERY");order.setActive(true);SokoRider rider=new SokoRider();rider.setId(3L);rider.setStoreId(2L);rider.setUserId(8L);rider.setVerified(true);rider.setStatus("ACTIVE");rider.setAvailability("AVAILABLE");rider.setDisplayName("Jane Rider");rider.setPhoneNumber("0712345678");rider.setVehiclePlate("KDA 123A");rider.setActive(true);
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("PACKED");order.setDeliveryMethod("DELIVERY");order.setActive(true);SokoRider rider=new SokoRider();rider.setId(3L);rider.setStoreId(2L);rider.setPhoneConfirmed(true);rider.setVerified(true);rider.setStatus("ACTIVE");rider.setAvailability("AVAILABLE");rider.setDisplayName("Jane Rider");rider.setPhoneNumber("0712345678");rider.setVehiclePlate("KDA 123A");rider.setActive(true);
         when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of());
         var result=service.transition(9L,"DISPATCHED",new SokoRequests.Dispatch(3L,null,null,null,
                 java.time.LocalDateTime.now(java.time.ZoneId.of("Africa/Nairobi")).plusHours(1)));
-        assertEquals("DELIVERY_ASSIGNED",result.order().getStatus());assertEquals("BUSY",rider.getAvailability());assertEquals(3L,result.order().getRiderId());assertEquals("Jane Rider",result.order().getCourierName());assertNull(order.getEncryptedDeliveryCode());assertNull(order.getDeliveryCodeExpiresAt());
+        assertEquals("DELIVERY_ASSIGNED",result.order().getStatus());assertEquals("BUSY",rider.getAvailability());assertEquals(3L,result.order().getRiderId());assertEquals("Jane Rider",result.order().getCourierName());assertNull(order.getEncryptedDeliveryCode());assertNull(order.getDeliveryCodeExpiresAt());verifyNoInteractions(marketplaceKycGate);
+    }
+
+    @Test void merchantCanAdvancePhoneConfirmedUnlinkedRiderWithoutRiderAccountOrKyc(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setName("Fresh Corner");store.setActive(true);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setOrderNumber("SOKO-9");order.setStatus("DELIVERY_ASSIGNED");order.setDeliveryMethod("DELIVERY");order.setRiderId(3L);order.setActive(true);
+        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of());when(encryption.encrypt(anyString())).thenReturn(new byte[]{1,2,3});
+        assertEquals("ASSIGNMENT_ACCEPTED",service.transition(9L,"ASSIGNMENT_ACCEPTED",null).order().getStatus());
+        assertEquals("DISPATCHED",service.transition(9L,"DISPATCHED",null).order().getStatus());
+        assertNotNull(order.getAssignmentAcceptedAt());assertNotNull(order.getCollectedAt());assertNotNull(order.getDispatchedAt());assertArrayEquals(new byte[]{1,2,3},order.getEncryptedDeliveryCode());assertNotNull(order.getDeliveryCodeExpiresAt());verifyNoInteractions(marketplaceKycGate);
     }
 
     @Test void deliveryCodeCompletesOrderAndReleasesPreferredRider(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");order.setDeliveryCode("123456");order.setDeliveryCodeExpiresAt(ZonedDateTime.now().plusHours(1));order.setDeliveryProofReference("soko/delivery-proof/9/proof.jpg");order.setRiderId(3L);order.setActive(true);SokoRider rider=new SokoRider();rider.setId(3L);rider.setStoreId(2L);rider.setUserId(8L);rider.setStatus("ACTIVE");rider.setAvailability("BUSY");rider.setActive(true);
-        rider.setVerified(true);
+        rider.setPhoneConfirmed(true);rider.setVerified(true);
         when(users.getUserId()).thenReturn(8L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of());
         var result=service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("123456"));
         assertEquals("COMPLETED",result.order().getStatus());assertTrue(result.order().isDeliveryCodeVerified());assertEquals("AVAILABLE",rider.getAvailability());assertEquals(1,rider.getCompletedDeliveries());
