@@ -7,6 +7,7 @@ import org.pms.silverocean.service.auth.JwtService;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.soko.SokoService;
 import org.pms.silverocean.service.subscription.SubscriptionEntitlementService;
+import org.springframework.data.domain.Page;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -16,6 +17,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.when;
 
 @WebMvcTest(org.pms.silverocean.controller.SokoController.class)
 @Import({SecurityConfig.class, SimpleCorsFilter.class, AccountActivationFilter.class})
@@ -34,6 +38,20 @@ class SecurityConfigSokoPublicTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data[0].code").value("FRESH_PRODUCE"));
+    }
+
+    @Test
+    void anonymousCallerCanBrowseSellerDirectory() throws Exception {
+        when(sokoService.sellers(any(),isNull(),isNull())).thenReturn(Page.empty());
+        mvc.perform(get("/soko/catalog/sellers"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void anonymousCallerCannotReadPrivateDeliveryDestinations() throws Exception {
+        mvc.perform(get("/soko/delivery-destinations"))
+                .andExpect(status().isForbidden());
     }
 
     @Test

@@ -12,6 +12,7 @@ import org.pms.silverocean.database.pms.SokoProductImageRepo;
 import org.pms.silverocean.database.pms.SokoProductVariationRepo;
 import org.pms.silverocean.database.pms.SokoRiderRepo;
 import org.pms.silverocean.database.pms.SokoStoreRepo;
+import org.pms.silverocean.database.pms.UnitRepo;
 import org.pms.silverocean.database.pms.entities.SokoOrder;
 import org.pms.silverocean.database.pms.entities.SokoOrderItem;
 import org.pms.silverocean.database.pms.entities.SokoProduct;
@@ -111,7 +112,7 @@ class SokoServiceTest {
     }
     @Mock SokoStoreRepo stores; @Mock SokoProductRepo products; @Mock SokoOrderRepo orders;
     @Mock SokoOrderItemRepo items; @Mock InvoiceDao invoices; @Mock AccountDao accounts;
-    @Mock SokoProductVariationRepo variations; @Mock SokoRiderRepo riders; @Mock UserDao users; @Mock VisitorService visitors;
+    @Mock SokoProductVariationRepo variations; @Mock SokoRiderRepo riders; @Mock UnitRepo units; @Mock UserDao users; @Mock VisitorService visitors;
     @Mock SokoProductImageRepo productImages; @Mock GarageService garage; @Mock UploadMalwarePolicy malwarePolicy; @Mock EncryptionService encryption; @Mock NotificationService notifications; @Mock I18NService i18n; @Mock MarketplaceKycGate marketplaceKycGate;
     @Mock org.pms.silverocean.service.notification.BusinessNotificationService businessAlerts;
     SokoService service;
@@ -166,7 +167,16 @@ class SokoServiceTest {
     @Test void adminCannotResetBusyRiderThroughVerifyOrReject(){when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);SokoRider r=existingRider();r.setAvailability("BUSY");when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(r));assertThrows(PMSCustomException.class,()->service.riderDecision(3L,new SokoRequests.RiderDecision("VERIFY",null)));assertThrows(PMSCustomException.class,()->service.riderDecision(3L,new SokoRequests.RiderDecision("REJECT","Reason")));assertEquals("BUSY",r.getAvailability());verify(riders,never()).save(any());}
     @Test void verificationLinksAnAccountCreatedAfterMerchantAddedRider(){when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);SokoRider r=existingRider();r.setUserId(null);r.setVerified(false);when(riders.findByIdForUpdate(3L)).thenReturn(Optional.of(r));var u=new org.pms.silverocean.database.pms.entities.Users();u.setId(8L);u.setActive(true);u.setVerified(true);u.setEmailVerified(true);u.setAccountStatus("ACTIVE");when(users.findByPhone("+254712345678")).thenReturn(Optional.of(u));when(users.findById(8L)).thenReturn(Optional.of(u));when(riders.save(any())).thenAnswer(i->i.getArgument(0));service.riderDecision(3L,new SokoRequests.RiderDecision("VERIFY",null));assertEquals(8L,r.getUserId());assertTrue(r.isVerified());verify(users,never()).findByEmail(anyString());verify(marketplaceKycGate).require(eq(8L),eq("PROVIDER_TYPE"),eq("DELIVERY_RIDER"),any());}
 
-    @BeforeEach void setup(){service=new SokoService(stores,products,productImages,variations,orders,items,riders,invoices,accounts,users,visitors,garage,malwarePolicy,encryption,notifications,businessAlerts,i18n,marketplaceKycGate);}
+    @BeforeEach void setup(){service=new SokoService(stores,products,productImages,variations,orders,items,riders,units,invoices,accounts,users,visitors,garage,malwarePolicy,encryption,notifications,businessAlerts,i18n,marketplaceKycGate);}
+
+    private SokoDeliveryDestinationProjection destination(long unitId,long propertyId,String unitRef,
+                                                           String propertyName,String address,String mapLocation){
+        SokoDeliveryDestinationProjection row=mock(SokoDeliveryDestinationProjection.class);
+        when(row.getUnitId()).thenReturn(unitId);when(row.getPropertyId()).thenReturn(propertyId);
+        when(row.getUnitRef()).thenReturn(unitRef);when(row.getPropertyName()).thenReturn(propertyName);
+        when(row.getAddress()).thenReturn(address);when(row.getMapLocation()).thenReturn(mapLocation);
+        return row;
+    }
 
     @Test void publicStoreDetailIncludesCustomerContactButNotOwnershipPaymentOrModerationData() throws Exception {
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(77L);store.setName("Fresh Corner");store.setPhoneNumber("0712345678");store.setAddress("Market Road, Nairobi");store.setPaymentAccountId(33L);store.setStatus("PUBLISHED");store.setActive(true);store.setReviewedByUserId(99L);store.setReviewReason("internal review note");
@@ -480,6 +490,96 @@ class SokoServiceTest {
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY","Kenyatta Avenue","0712345678",null,null,-1.2900,36.8200);
         var result=service.checkout(request,"delivery-pin-1");
         assertEquals(-1.2900,result.order().deliveryLatitude());assertEquals(36.8200,result.order().deliveryLongitude());assertEquals("Kenyatta Avenue",result.order().deliveryAddress());assertEquals("Fresh Corner",result.storeName());assertEquals("Market Road",result.storeAddress());assertEquals(-1.286389,result.storeLatitude());assertEquals(36.817223,result.storeLongitude());verify(invoices).createInvoice(any());
+    }
+
+    @Test void deliveryDestinationsUseOnlyCurrentUsersActiveResidencesAndPreferLatestCompletedAddress(){
+        var tenancy=destination(11L,21L,"A-11","Alpha Court","Alpha Road","-1.2862,36.8174");
+        SokoDeliveryDestinationProjection malformed=mock(SokoDeliveryDestinationProjection.class);
+        when(malformed.getUnitRef()).thenReturn("C-13");when(malformed.getPropertyName()).thenReturn("Corrupt Court");
+        when(malformed.getAddress()).thenReturn("Unknown Road");when(malformed.getMapLocation()).thenReturn("not coordinates");
+        var ownership=destination(12L,22L,"B-12","Beta Court","Beta Road","-1.2870,36.8180");
+        when(users.getUserId()).thenReturn(4L);
+        when(units.findAcceptedTenancyDeliveryDestinations(4L)).thenReturn(List.of(tenancy,malformed));
+        when(units.findHomeownerDeliveryDestinations(4L)).thenReturn(List.of(ownership));
+        when(orders.findRecentCompletedDestinationUnitIds(eq(4L),eq(List.of(11L,12L)),any())).thenReturn(List.of(12L));
+
+        var result=service.deliveryDestinations();
+
+        assertEquals(2,result.size());
+        var first=result.getFirst();var second=result.get(1);
+        assertEquals(11L,first.unitId());assertEquals("TENANCY",first.source());assertFalse(first.preferred());
+        assertEquals("Alpha Court — A-11",first.label());assertEquals("Alpha Road, A-11",first.address());
+        assertEquals(12L,second.unitId());assertEquals("HOMEOWNERSHIP",second.source());assertTrue(second.preferred());
+        assertEquals(-1.2870,second.latitude());assertEquals(36.8180,second.longitude());
+    }
+
+    @Test void soleValidDeliveryDestinationIsPreferredWithoutOrderHistoryLookup(){
+        var tenancy=destination(11L,21L,"A-11","Alpha Court","Alpha Road","-1.2862,36.8174");
+        when(users.getUserId()).thenReturn(4L);
+        when(units.findAcceptedTenancyDeliveryDestinations(4L)).thenReturn(List.of(tenancy));
+        when(units.findHomeownerDeliveryDestinations(4L)).thenReturn(List.of());
+
+        var result=service.deliveryDestinations();
+
+        assertEquals(1,result.size());assertTrue(result.getFirst().preferred());
+        verify(orders,never()).findRecentCompletedDestinationUnitIds(anyLong(),anyList(),any());
+    }
+
+    @Test void deliveryCheckoutRejectsArbitrarySystemUnitBeforeReadingShopOrMutatingStock(){
+        when(users.getUserId()).thenReturn(4L);
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"unknown-home")).thenReturn(Optional.empty());
+        when(units.findAcceptedTenancyDeliveryDestinations(4L)).thenReturn(List.of());
+        when(units.findHomeownerDeliveryDestinations(4L)).thenReturn(List.of());
+        var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY",
+                "Spoofed address","0712345678",null,999L,-1.2900,36.8200);
+
+        assertThrows(PMSCustomException.class,()->service.checkout(request,"unknown-home"));
+
+        verifyNoInteractions(stores,products,accounts,invoices);
+        verify(orders,never()).save(any());
+    }
+
+    @Test void deliveryCheckoutUsesServerOwnedDestinationInsteadOfClientAddressAndCoordinates(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setName("Fresh Corner");store.setStatus("PUBLISHED");store.setActive(true);store.setDeliveryEnabled(true);store.setAddress("Market Road");store.setLatitude(-1.286389);store.setLongitude(36.817223);store.setServiceRadiusKm(new BigDecimal("5"));store.setDeliveryFee(new BigDecimal("100"));store.setCurrency("KES");store.setPaymentAccountId(3L);
+        var account=new org.pms.silverocean.database.pms.entities.PaymentAccount();account.setActive(true);account.setVerified(true);account.setCreatedBy(7L);account.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);account.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);
+        SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setName("Milk");product.setUnit("litre");product.setPrice(new BigDecimal("120"));product.setCurrency("KES");product.setStockQuantity(3);product.setStatus("PUBLISHED");product.setActive(true);
+        var home=destination(12L,22L,"B-12","Beta Court","Beta Road","-1.2870,36.8180");
+        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"saved-home")).thenReturn(Optional.empty());when(units.findAcceptedTenancyDeliveryDestinations(4L)).thenReturn(List.of(home));when(units.findHomeownerDeliveryDestinations(4L)).thenReturn(List.of());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(accounts.getAccountByIdAndCreatedBy(3L,7L)).thenReturn(account);when(accounts.getAccountById(3L)).thenReturn(account);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));when(variations.findAllByProductIdAndActiveTrueOrderByNameAscValueAsc(5L)).thenReturn(List.of());when(orders.save(any())).thenAnswer(invocation->{SokoOrder saved=invocation.getArgument(0);if(saved.getId()==null)saved.setId(9L);return saved;});when(items.save(any())).thenAnswer(invocation->invocation.getArgument(0));doAnswer(invocation->{org.pms.silverocean.database.pms.entities.PMSInvoice invoice=invocation.getArgument(0);invoice.setRef("INV-9");return null;}).when(invoices).createInvoice(any());
+        var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY",
+                "Attacker supplied address","0712345678",null,12L,40.0000,-70.0000);
+
+        var result=service.checkout(request,"saved-home");
+
+        assertEquals(12L,result.order().destinationUnitId());assertEquals("Beta Road, B-12",result.order().deliveryAddress());
+        assertEquals(-1.2870,result.order().deliveryLatitude());assertEquals(36.8180,result.order().deliveryLongitude());
+        assertEquals(2,product.getStockQuantity());verify(invoices).createInvoice(any());
+    }
+
+    @Test void pickupRejectsSavedDestinationBeforeShopOrStockAccess(){
+        when(users.getUserId()).thenReturn(4L);
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"pickup-home")).thenReturn(Optional.empty());
+        var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",
+                null,"0712345678",null,12L,null,null);
+
+        assertThrows(PMSCustomException.class,()->service.checkout(request,"pickup-home"));
+
+        verifyNoInteractions(units,stores,products,accounts,invoices);
+        verify(orders,never()).save(any());
+    }
+
+    @Test void savedDestinationReplayIgnoresClientAddressButRejectsChangedUnit(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setName("Fresh Corner");
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setCheckoutIdempotencyKey("saved-replay");order.setDeliveryMethod("DELIVERY");order.setDeliveryAddress("Beta Road, B-12");order.setDeliveryLatitude(-1.2870);order.setDeliveryLongitude(36.8180);order.setDestinationUnitId(12L);order.setCustomerPhone("0712345678");order.setActive(true);
+        SokoOrderItem item=new SokoOrderItem();item.setOrderId(9L);item.setProductId(5L);item.setQuantity(1);item.setActive(true);
+        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"saved-replay")).thenReturn(Optional.of(order));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
+        var sameUnit=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY",
+                "Spoofed but ignored","0712345678",null,12L,40.0000,-70.0000);
+        var changedUnit=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY",
+                "Beta Road, B-12","0712345678",null,13L,-1.2870,36.8180);
+
+        assertEquals(9L,service.checkout(sameUnit,"saved-replay").order().id());
+        assertThrows(PMSCustomException.class,()->service.checkout(changedUnit,"saved-replay"));
+        verifyNoInteractions(units,products,invoices);
     }
 
     @Test void deliveryCheckoutRejectsMissingOrOutsideLocationBeforeStockAndInvoice(){

@@ -25,6 +25,10 @@ public interface SokoOrderRepo extends JpaRepository<SokoOrder, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<SokoOrder> findByInvoiceRefAndActiveTrue(String invoiceRef);
     Optional<SokoOrder> findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(long customerUserId,String checkoutIdempotencyKey);
+    @Query("SELECT o.destinationUnitId FROM SokoOrder o WHERE o.customerUserId=:customerUserId AND o.active=true " +
+            "AND o.deliveryMethod='DELIVERY' AND o.status='COMPLETED' AND o.destinationUnitId IN :unitIds " +
+            "ORDER BY o.completedAt DESC,o.id DESC")
+    List<Long> findRecentCompletedDestinationUnitIds(long customerUserId,List<Long> unitIds,Pageable pageable);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from SokoOrder o where o.id=:id and o.active=true")
     Optional<SokoOrder> findByIdForUpdate(long id);

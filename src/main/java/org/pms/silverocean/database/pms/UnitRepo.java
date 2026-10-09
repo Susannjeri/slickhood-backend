@@ -9,6 +9,7 @@ import org.pms.silverocean.service.property.wrappers.TenantNameEmailPhoneAndUnit
 import org.pms.silverocean.service.property.wrappers.UnitTenantProjection;
 import org.pms.silverocean.service.visitor.projections.PropertyIdUnitRefPropertyNameProjection;
 import org.pms.silverocean.service.visitor.projections.GuardHostOptionProjection;
+import org.pms.silverocean.service.soko.SokoDeliveryDestinationProjection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -126,6 +127,20 @@ public interface UnitRepo extends JpaRepository<Unit, Long>, JpaSpecificationExe
             "(po.unitId IS NULL OR po.unitId=u.id) AND po.homeownerUserId=:userId AND po.active)) " +
             "ORDER BY p.name,u.ref")
     List<PropertyIdUnitRefPropertyNameProjection> getAllByUserIdIsResident(long userId);
+
+    @Query("SELECT DISTINCT u.id as unitId, p.id as propertyId, u.ref as unitRef, p.name as propertyName, " +
+            "p.address as address, p.mapLocation as mapLocation FROM UnitTenant ut JOIN Unit u ON ut.unitId=u.id " +
+            "JOIN Property p ON u.propertyId=p.id WHERE ut.userId=:userId AND ut.active AND ut.leaseAccepted " +
+            "AND u.active AND p.active ORDER BY p.name,u.ref,u.id")
+    List<SokoDeliveryDestinationProjection> findAcceptedTenancyDeliveryDestinations(long userId);
+
+    @Query("SELECT DISTINCT u.id as unitId, p.id as propertyId, u.ref as unitRef, p.name as propertyName, " +
+            "p.address as address, p.mapLocation as mapLocation FROM PropertyOwnership po JOIN Property p ON po.propertyId=p.id " +
+            "JOIN Unit u ON u.propertyId=p.id WHERE po.homeownerUserId=:userId AND po.active " +
+            "AND po.ownershipStart<=CURRENT_DATE " +
+            "AND (po.ownershipEnd IS NULL OR po.ownershipEnd>=CURRENT_DATE) " +
+            "AND (po.unitId IS NULL OR po.unitId=u.id) AND u.active AND p.active ORDER BY p.name,u.ref,u.id")
+    List<SokoDeliveryDestinationProjection> findHomeownerDeliveryDestinations(long userId);
 
     @Query("SELECT u.id as unitId, u.ref as unitRef, p.id as propertyId, p.name as propertyName, " +
             "host.id as hostUserId, host.fullName as hostName FROM Unit u JOIN Property p ON u.propertyId=p.id " +

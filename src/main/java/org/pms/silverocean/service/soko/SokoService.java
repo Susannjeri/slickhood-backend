@@ -12,6 +12,7 @@ import org.pms.silverocean.database.pms.SokoProductImageRepo;
 import org.pms.silverocean.database.pms.SokoProductVariationRepo;
 import org.pms.silverocean.database.pms.SokoRiderRepo;
 import org.pms.silverocean.database.pms.SokoStoreRepo;
+import org.pms.silverocean.database.pms.UnitRepo;
 import org.pms.silverocean.database.pms.entities.PMSInvoice;
 import org.pms.silverocean.database.pms.entities.PaymentAccount;
 import org.pms.silverocean.database.pms.entities.SokoOrder;
@@ -38,6 +39,8 @@ import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.soko.SokoModels.CatalogProduct;
 import org.pms.silverocean.service.soko.SokoModels.OrderDetail;
+import org.pms.silverocean.service.soko.SokoModels.DeliveryDestination;
+import org.pms.silverocean.service.soko.SokoModels.SellerSummary;
 import org.pms.silverocean.service.soko.SokoModels.StoreDetail;
 import org.pms.silverocean.service.visitor.VisitorService;
 import org.pms.silverocean.service.visitor.enums.VisitorCategory;
@@ -89,6 +92,7 @@ public class SokoService {
     private final SokoOrderRepo orderRepo;
     private final SokoOrderItemRepo itemRepo;
     private final SokoRiderRepo riderRepo;
+    private final UnitRepo unitRepo;
     private final InvoiceDao invoiceDao;
     private final AccountDao accountDao;
     private final UserDao userDao;
@@ -142,6 +146,29 @@ public class SokoService {
                     s!=null&&s.isPickupEnabled(),s==null?null:distanceKm(latitude,longitude,s.getLatitude(),s.getLongitude()),
                     s==null?null:s.getServiceRadiusKm(),images.getOrDefault(p.getId(),legacyImage(p)),s==null?BigDecimal.ZERO:zero(s.getDeliveryFee()));
         });
+    }
+
+    public Page<SellerSummary> sellers(Pageable pageable,String query,String fulfilment) {
+        String cleanQuery=StringUtils.trimToNull(query);
+        if(cleanQuery!=null&&cleanQuery.length()>160)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Search text cannot exceed 160 characters.");
+        String cleanFulfilment=catalogOption(fulfilment,"ALL",CATALOG_FULFILMENT,"Choose all, delivery or pickup fulfilment.");
+        return storeRepo.searchPublicSellers(cleanQuery,cleanFulfilment,catalogPageable(pageable)).map(SellerSummary::from);
+    }
+
+    public List<DeliveryDestination> deliveryDestinations() {
+        long userId=userDao.getUserId();
+        List<SystemDestination> destinations=authorizedSystemDestinations(userId);
+        Long preferredUnitId=null;
+        if(destinations.size()==1)preferredUnitId=destinations.getFirst().unitId();
+        else if(!destinations.isEmpty()){
+            List<Long> recent=orderRepo.findRecentCompletedDestinationUnitIds(userId,
+                    destinations.stream().map(SystemDestination::unitId).toList(),PageRequest.of(0,1));
+            if(!recent.isEmpty())preferredUnitId=recent.getFirst();
+        }
+        final Long preferred=preferredUnitId;
+        return destinations.stream().map(destination->new DeliveryDestination(destination.unitId(),destination.propertyId(),
+                destination.label(),destination.address(),destination.latitude(),destination.longitude(),
+                destination.source(),java.util.Objects.equals(destination.unitId(),preferred))).toList();
     }
 
     public StoreDetail storeDetail(long id) {
@@ -400,8 +427,9 @@ public class SokoService {
         if(request.items().stream().map(line->line.productId()+":"+String.valueOf(line.variationId())).distinct().count()!=request.items().size())throw invalid();
         var existing=orderRepo.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(customerUserId,cleanKey);
         if(existing.isPresent())return existingCheckout(existing.get(),request);
+        CheckoutDestination destination=resolveCheckoutDestination(request,customerUserId);
         SokoStore store=storeRepo.findByIdAndActiveTrue(request.storeId()).filter(s->PUBLISHED.equals(s.getStatus())).orElseThrow(this::notFound);
-        validateDelivery(store,request);
+        validateDelivery(store,request.deliveryMethod(),destination);
         validatePublishable(store);
         List<SokoRequests.CheckoutItem> checkoutLines=request.items().stream()
                 .sorted(java.util.Comparator.comparingLong(SokoRequests.CheckoutItem::productId)
@@ -418,7 +446,7 @@ public class SokoService {
             subtotal=subtotal.add(unitPrice.multiply(BigDecimal.valueOf(line.quantity())));
         }
         BigDecimal fee="DELIVERY".equalsIgnoreCase(request.deliveryMethod())?zero(store.getDeliveryFee()):BigDecimal.ZERO;
-        SokoOrder o=new SokoOrder(); o.setOrderNumber("SOKO-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(Locale.ROOT)); o.setStoreId(store.getId()); o.setStoreNameSnapshot(store.getName());o.setStoreAddressSnapshot(store.getAddress());o.setStorePhoneSnapshot(store.getPhoneNumber());o.setStoreLatitudeSnapshot(store.getLatitude());o.setStoreLongitudeSnapshot(store.getLongitude()); o.setCustomerUserId(customerUserId); o.setCreatedBy(customerUserId); o.setCheckoutIdempotencyKey(cleanKey); o.setActive(true); o.setStatus("PENDING_PAYMENT"); o.setPaymentStatus("UNPAID");o.setRefundStatus("NOT_REQUIRED");o.setSettlementStatus("PENDING");o.setReservationExpiresAt(now().plusMinutes(reservationMinutes)); o.setDeliveryMethod(request.deliveryMethod().toUpperCase(Locale.ROOT)); o.setDeliveryAddress(StringUtils.trimToNull(request.deliveryAddress()));o.setDeliveryLatitude(request.deliveryLatitude());o.setDeliveryLongitude(request.deliveryLongitude()); o.setCustomerPhone(request.customerPhone()); o.setNotes(StringUtils.trimToNull(request.notes())); o.setDestinationUnitId(request.destinationUnitId()); o.setSubtotal(subtotal); o.setDeliveryFee(fee); o.setTotal(subtotal.add(fee)); o.setCurrency(store.getCurrency());o.setPaymentAccountId(store.getPaymentAccountId());o.setPaymentChannel(accountDao.getAccountById(store.getPaymentAccountId()).getChannel().name()); o.setPlacedAt(now()); orderRepo.save(o);
+        SokoOrder o=new SokoOrder(); o.setOrderNumber("SOKO-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(Locale.ROOT)); o.setStoreId(store.getId()); o.setStoreNameSnapshot(store.getName());o.setStoreAddressSnapshot(store.getAddress());o.setStorePhoneSnapshot(store.getPhoneNumber());o.setStoreLatitudeSnapshot(store.getLatitude());o.setStoreLongitudeSnapshot(store.getLongitude()); o.setCustomerUserId(customerUserId); o.setCreatedBy(customerUserId); o.setCheckoutIdempotencyKey(cleanKey); o.setActive(true); o.setStatus("PENDING_PAYMENT"); o.setPaymentStatus("UNPAID");o.setRefundStatus("NOT_REQUIRED");o.setSettlementStatus("PENDING");o.setReservationExpiresAt(now().plusMinutes(reservationMinutes)); o.setDeliveryMethod(request.deliveryMethod().toUpperCase(Locale.ROOT)); o.setDeliveryAddress(destination.address());o.setDeliveryLatitude(destination.latitude());o.setDeliveryLongitude(destination.longitude()); o.setCustomerPhone(request.customerPhone()); o.setNotes(StringUtils.trimToNull(request.notes())); o.setDestinationUnitId(destination.unitId()); o.setSubtotal(subtotal); o.setDeliveryFee(fee); o.setTotal(subtotal.add(fee)); o.setCurrency(store.getCurrency());o.setPaymentAccountId(store.getPaymentAccountId());o.setPaymentChannel(accountDao.getAccountById(store.getPaymentAccountId()).getChannel().name()); o.setPlacedAt(now()); orderRepo.save(o);
         List<SokoOrderItem> items=new ArrayList<>();
         for(int i=0;i<products.size();i++){SokoProduct p=products.get(i);SokoProductVariation v=selectedVariations.get(i);BigDecimal unitPrice=unitPrices.get(i);int qty=checkoutLines.get(i).quantity();SokoOrderItem it=new SokoOrderItem();it.setOrderId(o.getId());it.setProductId(p.getId());it.setProductName(p.getName());if(v!=null){it.setVariationId(v.getId());it.setVariationName(v.getName());it.setVariationValue(v.getValue());}it.setUnit(p.getUnit());it.setUnitPrice(unitPrice);it.setQuantity(qty);it.setLineTotal(unitPrice.multiply(BigDecimal.valueOf(qty)));it.setCreatedBy(userDao.getUserId());it.setActive(true);items.add(itemRepo.save(it));}
         PMSInvoice invoice=createInvoice(o,store,items);o.setInvoiceRef(invoice.getRef());orderRepo.save(o);notifyOrder(o,"Awaiting payment","");return detail(o,store,items);
@@ -615,27 +643,75 @@ public class SokoService {
         return new SokoModels.RiderVerificationResult(rider,status,message);
     }
     private ProfileType profileType(long userId){return userDao.findById(userId).map(u->{try{return ProfileType.valueOf(u.getProfileType());}catch(Exception ignored){return ProfileType.INDIVIDUAL;}}).orElse(ProfileType.INDIVIDUAL);}
+    private List<SystemDestination> authorizedSystemDestinations(long userId){
+        Map<Long,SystemDestination> destinations=new java.util.LinkedHashMap<>();
+        for(SokoDeliveryDestinationProjection row:unitRepo.findAcceptedTenancyDeliveryDestinations(userId)){
+            parseSystemDestination(row,"TENANCY").ifPresent(destination->destinations.putIfAbsent(destination.unitId(),destination));
+        }
+        for(SokoDeliveryDestinationProjection row:unitRepo.findHomeownerDeliveryDestinations(userId)){
+            // Active ownership is the stronger source if the same unit is also an accepted tenancy.
+            parseSystemDestination(row,"HOMEOWNERSHIP").ifPresent(destination->destinations.put(destination.unitId(),destination));
+        }
+        return destinations.values().stream().sorted(java.util.Comparator.comparing(SystemDestination::label,
+                String.CASE_INSENSITIVE_ORDER).thenComparingLong(SystemDestination::unitId)).toList();
+    }
+    private java.util.Optional<SystemDestination> parseSystemDestination(SokoDeliveryDestinationProjection row,String source){
+        String address=StringUtils.trimToNull(row.getAddress()),unitRef=StringUtils.trimToNull(row.getUnitRef());
+        String propertyName=StringUtils.trimToNull(row.getPropertyName()),mapLocation=StringUtils.trimToNull(row.getMapLocation());
+        if(address==null||propertyName==null||mapLocation==null)return java.util.Optional.empty();
+        String[] coordinates=mapLocation.split(",",-1);if(coordinates.length!=2)return java.util.Optional.empty();
+        try{
+            Double latitude=Double.valueOf(coordinates[0].trim()),longitude=Double.valueOf(coordinates[1].trim());
+            if(!validLatitude(latitude)||!validLongitude(longitude))return java.util.Optional.empty();
+            String label=unitRef==null?propertyName:propertyName+" — "+unitRef;
+            String fullAddress=unitRef==null?address:address+", "+unitRef;
+            return java.util.Optional.of(new SystemDestination(row.getUnitId(),row.getPropertyId(),label,fullAddress,
+                    latitude,longitude,source));
+        }catch(NumberFormatException invalidCoordinates){return java.util.Optional.empty();}
+    }
+    private CheckoutDestination resolveCheckoutDestination(SokoRequests.Checkout request,long customerUserId){
+        String method=StringUtils.upperCase(StringUtils.trimToEmpty(request.deliveryMethod()),Locale.ROOT);
+        if("PICKUP".equals(method)){
+            if(request.destinationUnitId()!=null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "A SlickHood delivery address cannot be used for pickup. Remove it or choose delivery.");
+            return new CheckoutDestination(null,null,null,null);
+        }
+        if(!"DELIVERY".equals(method))throw invalid();
+        if(request.destinationUnitId()==null)return new CheckoutDestination(StringUtils.trimToNull(request.deliveryAddress()),
+                request.deliveryLatitude(),request.deliveryLongitude(),null);
+        SystemDestination saved=authorizedSystemDestinations(customerUserId).stream()
+                .filter(destination->destination.unitId()==request.destinationUnitId()).findFirst()
+                .orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                        "Choose a delivery address linked to your SlickHood account, or ship to a different location."));
+        return new CheckoutDestination(saved.address(),saved.latitude(),saved.longitude(),saved.unitId());
+    }
     private void validatePublishable(SokoStore s){validateFulfilmentLocation(s);if(s.getPaymentAccountId()==null)throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);PaymentAccount a=accountDao.getAccountByIdAndCreatedBy(s.getPaymentAccountId(),s.getOwnerUserId());if(!a.isVerified()||!a.isActive()||a.getCategory()!=AccountCategory.MERCHANT||a.getChannel()==null)throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);}
     private void validateFulfilmentLocation(SokoStore s){if((s.isPickupEnabled()||s.isDeliveryEnabled())&&(StringUtils.isBlank(s.getAddress())||!validLatitude(s.getLatitude())||!validLongitude(s.getLongitude())))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Add the shop address and choose its location on the map before publishing.");if(s.isDeliveryEnabled()&&(s.getServiceRadiusKm()==null||s.getServiceRadiusKm().compareTo(BigDecimal.ONE)<0||s.getServiceRadiusKm().compareTo(BigDecimal.valueOf(100))>0))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Set a delivery radius between 1 km and 100 km before publishing.");}
-    private void validateDelivery(SokoStore s,SokoRequests.Checkout r){
-        if("DELIVERY".equalsIgnoreCase(r.deliveryMethod())){
+    private void validateDelivery(SokoStore s,String deliveryMethod,CheckoutDestination destination){
+        if("DELIVERY".equalsIgnoreCase(deliveryMethod)){
             if(!s.isDeliveryEnabled())throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This shop does not offer delivery. Choose pickup or another shop.");
-            if(StringUtils.isBlank(r.deliveryAddress())||r.deliveryLatitude()==null||r.deliveryLongitude()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Enter the delivery address and choose its location on the map.");
-            if(!validLatitude(r.deliveryLatitude())||!validLongitude(r.deliveryLongitude()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Choose a valid delivery location on the map.");
+            if(StringUtils.isBlank(destination.address())||destination.latitude()==null||destination.longitude()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Enter the delivery address and choose its location on the map.");
+            if(!validLatitude(destination.latitude())||!validLongitude(destination.longitude()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Choose a valid delivery location on the map.");
             if(!validLatitude(s.getLatitude())||!validLongitude(s.getLongitude())||s.getServiceRadiusKm()==null||s.getServiceRadiusKm().signum()<=0)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This shop has not configured a delivery area. Choose pickup or contact the shop.");
-            double distance=exactDistanceKm(r.deliveryLatitude(),r.deliveryLongitude(),s.getLatitude(),s.getLongitude());
+            double distance=exactDistanceKm(destination.latitude(),destination.longitude(),s.getLatitude(),s.getLongitude());
             if(distance>s.getServiceRadiusKm().doubleValue()+0.000001)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This location is outside the shop's "+s.getServiceRadiusKm().stripTrailingZeros().toPlainString()+" km delivery area. Choose pickup or another shop.");
-        }else if("PICKUP".equalsIgnoreCase(r.deliveryMethod())){if(!s.isPickupEnabled())throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This shop does not offer pickup. Choose delivery or another shop.");if(StringUtils.isBlank(s.getAddress())||!validLatitude(s.getLatitude())||!validLongitude(s.getLongitude()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This shop has not configured a pickup location. Choose another shop.");}else throw invalid();
+        }else if("PICKUP".equalsIgnoreCase(deliveryMethod)){if(!s.isPickupEnabled())throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This shop does not offer pickup. Choose delivery or another shop.");if(StringUtils.isBlank(s.getAddress())||!validLatitude(s.getLatitude())||!validLongitude(s.getLongitude()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This shop has not configured a pickup location. Choose another shop.");}else throw invalid();
     }
     private OrderDetail existingCheckout(SokoOrder existing,SokoRequests.Checkout request){
         List<SokoOrderItem> savedItems=itemRepo.findAllByOrderIdAndActiveTrueOrderById(existing.getId());
         Map<String,Integer> requestedItems=request.items().stream().collect(Collectors.toMap(line->line.productId()+":"+String.valueOf(line.variationId()),SokoRequests.CheckoutItem::quantity));
         Map<String,Integer> persistedItems=savedItems.stream().collect(Collectors.toMap(line->line.getProductId()+":"+String.valueOf(line.getVariationId()),SokoOrderItem::getQuantity));
-        boolean matches=existing.getStoreId()==request.storeId()
-                &&java.util.Objects.equals(existing.getDeliveryMethod(),request.deliveryMethod().toUpperCase(Locale.ROOT))
+        String requestedMethod=StringUtils.upperCase(StringUtils.trimToEmpty(request.deliveryMethod()),Locale.ROOT);
+        boolean destinationMatches;
+        if("PICKUP".equals(existing.getDeliveryMethod()))destinationMatches=request.destinationUnitId()==null;
+        else if(existing.getDestinationUnitId()!=null)destinationMatches=java.util.Objects.equals(existing.getDestinationUnitId(),request.destinationUnitId());
+        else destinationMatches=request.destinationUnitId()==null
                 &&java.util.Objects.equals(StringUtils.trimToNull(existing.getDeliveryAddress()),StringUtils.trimToNull(request.deliveryAddress()))
                 &&java.util.Objects.equals(existing.getDeliveryLatitude(),request.deliveryLatitude())
-                &&java.util.Objects.equals(existing.getDeliveryLongitude(),request.deliveryLongitude())
+                &&java.util.Objects.equals(existing.getDeliveryLongitude(),request.deliveryLongitude());
+        boolean matches=existing.getStoreId()==request.storeId()
+                &&java.util.Objects.equals(existing.getDeliveryMethod(),requestedMethod)
+                &&destinationMatches
                 &&java.util.Objects.equals(StringUtils.trimToNull(existing.getCustomerPhone()),StringUtils.trimToNull(request.customerPhone()))
                 &&java.util.Objects.equals(StringUtils.trimToNull(existing.getNotes()),StringUtils.trimToNull(request.notes()))
                 &&java.util.Objects.equals(existing.getDestinationUnitId(),request.destinationUnitId())
@@ -765,6 +841,8 @@ public class SokoService {
     private static boolean validLongitude(Double value){return value!=null&&Double.isFinite(value)&&value>=-180&&value<=180;}
     private static boolean sameCurrency(String first,String second){try{return org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(first).equals(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(second));}catch(IllegalArgumentException invalid){return false;}}
     private static double exactDistanceKm(double lat1,double lng1,double lat2,double lng2){double latDelta=Math.toRadians(lat2-lat1),lngDelta=Math.toRadians(lng2-lng1);double a=Math.sin(latDelta/2)*Math.sin(latDelta/2)+Math.cos(Math.toRadians(lat1))*Math.cos(Math.toRadians(lat2))*Math.sin(lngDelta/2)*Math.sin(lngDelta/2);return 6371.0088*2*Math.atan2(Math.sqrt(a),Math.sqrt(Math.max(0,1-a)));}
+    private record SystemDestination(long unitId,long propertyId,String label,String address,double latitude,double longitude,String source) {}
+    private record CheckoutDestination(String address,Double latitude,Double longitude,Long unitId) {}
     private record GeoBounds(Double minLatitude,Double maxLatitude,Double minLongitude,Double maxLongitude,boolean wrapLongitude){
         private static GeoBounds of(Double latitude,Double longitude,Double radiusKm){
             if(latitude==null||longitude==null||radiusKm==null)return new GeoBounds(null,null,null,null,false);

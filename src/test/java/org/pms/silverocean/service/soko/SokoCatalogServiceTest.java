@@ -13,6 +13,7 @@ import org.pms.silverocean.database.pms.SokoProductRepo;
 import org.pms.silverocean.database.pms.SokoProductVariationRepo;
 import org.pms.silverocean.database.pms.SokoRiderRepo;
 import org.pms.silverocean.database.pms.SokoStoreRepo;
+import org.pms.silverocean.database.pms.UnitRepo;
 import org.pms.silverocean.database.pms.entities.SokoProduct;
 import org.pms.silverocean.database.pms.entities.SokoStore;
 import org.pms.silverocean.service.I18NService;
@@ -38,6 +39,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -54,6 +56,7 @@ class SokoCatalogServiceTest {
     @Mock SokoOrderRepo orders;
     @Mock SokoOrderItemRepo items;
     @Mock SokoRiderRepo riders;
+    @Mock UnitRepo units;
     @Mock InvoiceDao invoices;
     @Mock AccountDao accounts;
     @Mock UserDao users;
@@ -70,7 +73,7 @@ class SokoCatalogServiceTest {
 
     @BeforeEach
     void setUp() {
-        service=new SokoService(stores,products,productImages,variations,orders,items,riders,invoices,accounts,users,
+        service=new SokoService(stores,products,productImages,variations,orders,items,riders,units,invoices,accounts,users,
                 visitors,garage,malwarePolicy,encryption,notifications,businessAlerts,i18n,marketplaceKycGate);
     }
 
@@ -128,5 +131,43 @@ class SokoCatalogServiceTest {
         assertThrows(PMSCustomException.class,()->service.catalog(PageRequest.of(0,20),null,null,null,-1.2,36.8,.5d,"RELEVANCE","ALL"));
         assertThrows(PMSCustomException.class,()->service.catalog(PageRequest.of(0,20),null,null,null,-1.2,36.8,101d,"RELEVANCE","ALL"));
         verifyNoInteractions(products);
+    }
+
+    @Test
+    void sellerDirectoryBoundsPaginationAndReturnsOnlyPublicSummaryFields() throws Exception {
+        SokoStore store=new SokoStore();
+        store.setId(7L);store.setName("Neighbourhood Grocer");store.setAddress("Market Road, Nairobi");
+        store.setPickupEnabled(true);store.setDeliveryEnabled(true);store.setDeliveryFee(new BigDecimal("75"));
+        store.setCurrency("KES");store.setOwnerUserId(77L);store.setPhoneNumber("0712345678");
+        store.setPaymentAccountId(33L);store.setReviewedByUserId(99L);store.setReviewReason("private moderation note");
+        Pageable repositoryPageable=PageRequest.of(3,100);
+        when(stores.searchPublicSellers(eq("Fresh"),eq("DELIVERY"),any()))
+                .thenReturn(new PageImpl<>(List.of(store),repositoryPageable,401));
+
+        var result=service.sellers(PageRequest.of(3,500,Sort.by("ownerUserId").descending())," Fresh ","delivery");
+
+        ArgumentCaptor<Pageable> pageable=ArgumentCaptor.forClass(Pageable.class);
+        verify(stores).searchPublicSellers(eq("Fresh"),eq("DELIVERY"),pageable.capture());
+        assertEquals(3,pageable.getValue().getPageNumber());
+        assertEquals(100,pageable.getValue().getPageSize());
+        assertFalse(pageable.getValue().getSort().isSorted());
+        assertEquals(401,result.getTotalElements());
+        String json=new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result.getContent().getFirst());
+        assertTrue(json.contains("\"name\":\"Neighbourhood Grocer\""));
+        assertTrue(json.contains("\"address\":\"Market Road, Nairobi\""));
+        assertFalse(json.contains("ownerUserId"));
+        assertFalse(json.contains("phoneNumber"));
+        assertFalse(json.contains("paymentAccountId"));
+        assertFalse(json.contains("reviewedByUserId"));
+        assertFalse(json.contains("reviewReason"));
+        assertFalse(json.contains("latitude"));
+        assertFalse(json.contains("longitude"));
+    }
+
+    @Test
+    void sellerDirectoryRejectsInvalidSearchBeforeRepositoryAccess() {
+        assertThrows(PMSCustomException.class,()->service.sellers(PageRequest.of(0,20),"x".repeat(161),"ALL"));
+        assertThrows(PMSCustomException.class,()->service.sellers(PageRequest.of(0,20),null,"COURIER"));
+        verifyNoInteractions(stores);
     }
 }

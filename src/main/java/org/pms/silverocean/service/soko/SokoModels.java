@@ -39,6 +39,18 @@ public final class SokoModels {
     public record CatalogProduct(PublicProduct product, String storeName, String storeAddress, String storePhoneNumber,
                                  boolean deliveryEnabled, boolean pickupEnabled, Double distanceKm,
                                  BigDecimal serviceRadiusKm, List<String> imageUrls, BigDecimal deliveryFee) {}
+    /** Public directory entry. Exact coordinates, contacts and all ownership/payment fields stay private. */
+    public record SellerSummary(long id, String name, String address, boolean pickupEnabled,
+                                boolean deliveryEnabled, BigDecimal deliveryFee, String currency) {
+        public static SellerSummary from(SokoStore store) {
+            return new SellerSummary(store.getId(),store.getName(),store.getAddress(),store.isPickupEnabled(),
+                    store.isDeliveryEnabled(),store.getDeliveryFee()==null?BigDecimal.ZERO:store.getDeliveryFee(),
+                    store.getCurrency());
+        }
+    }
+    /** An authenticated customer's system-linked, server-authoritative delivery destination. */
+    public record DeliveryDestination(long unitId, long propertyId, String label, String address,
+                                      double latitude, double longitude, String source, boolean preferred) {}
     public record ProductImages(long productId, List<String> imageUrls) {}
     public record StoreDetail(PublicStore store, List<PublicProduct> products) {}
     public record RiderVerificationResult(SokoRider rider, String confirmationStatus, String message) {}

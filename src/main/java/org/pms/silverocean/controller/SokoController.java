@@ -28,8 +28,10 @@ public class SokoController {
 
     private ResponseEntity<ResponseDTO> ok(Object data){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),data));}
     @GetMapping("/catalog") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> catalog(Pageable pageable,@RequestParam(required=false)Long storeId,@RequestParam(required=false)String category,@RequestParam(required=false)String query,@RequestParam(required=false)Double latitude,@RequestParam(required=false)Double longitude,@RequestParam(required=false)Double radiusKm,@RequestParam(required=false)String sortMode,@RequestParam(required=false)String fulfilment){var p=service.catalog(pageable,storeId,category,query,latitude,longitude,radiusKm,sortMode,fulfilment);return page(p);}
+    @GetMapping("/catalog/sellers") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> sellers(Pageable pageable,@RequestParam(required=false)String query,@RequestParam(required=false)String fulfilment){return page(service.sellers(pageable,query,fulfilment));}
     @GetMapping("/catalog/{storeId}") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> store(@PathVariable long storeId){return ok(service.storeDetail(storeId));}
     @GetMapping("/categories") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> categories(){return ok(org.pms.silverocean.service.soko.SokoGroceryCategory.views());}
+    @GetMapping("/delivery-destinations") public ResponseEntity<ResponseDTO> deliveryDestinations(){return ok(service.deliveryDestinations());}
     @PostMapping("/store") public ResponseEntity<ResponseDTO> createStore(@RequestBody @Valid SokoRequests.StoreUpsert r){return ok(service.createStore(r));}
     @PutMapping("/store/{id}") public ResponseEntity<ResponseDTO> updateStore(@PathVariable long id,@RequestBody @Valid SokoRequests.StoreUpsert r){return ok(service.updateStore(id,r));}
     @PutMapping("/store/{id}/publish") public ResponseEntity<ResponseDTO> publishStore(@PathVariable long id){return ok(service.publishStore(id));}

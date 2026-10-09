@@ -36,6 +36,12 @@ class SokoProductRepoCatalogQueryTest {
     }
 
     @Test
+    void anExplicitSellerFiltersBothThePageAndItsCount() {
+        assertThat(normalized(query.value())).contains("(:STOREID IS NULL OR P.STORE_ID = :STOREID)");
+        assertThat(normalized(query.countQuery())).contains("(:STOREID IS NULL OR P.STORE_ID = :STOREID)");
+    }
+
+    @Test
     void priceAndNearestOrderingAreStableAndAppliedByTheRepository() {
         String pageSql=normalized(query.value());
 
