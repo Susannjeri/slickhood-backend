@@ -1,3 +1,11 @@
+server:
+  # Browser access tokens carry the user's authorised roles and property scope.
+  # Keep the connector limit bounded, but large enough for the frontend's
+  # explicitly capped 14 KB secure-session token plus ordinary request headers.
+  # Without this setting Tomcat's 8 KB aggregate default rejects legitimate
+  # users before the JWT/security filters can return a structured response.
+  max-http-request-header-size: 32KB
+
 management:
   endpoints:
     web:
