@@ -55,8 +55,9 @@ jobs:
         run: |
           install -m 0755 scripts/production-preflight.py target/production-preflight.py
           install -m 0755 scripts/production-backup.py target/production-backup.py
+          install -m 0644 config/nginx/00-slickhood-client-headers.conf target/00-slickhood-client-headers.conf
           cd target
-          sha256sum -- *.jar production-preflight.py production-backup.py > release.sha256
+          sha256sum -- *.jar production-preflight.py production-backup.py 00-slickhood-client-headers.conf > release.sha256
 
       - name: Copy JAR to EC2
         uses: appleboy/scp-action@v0.1.7
@@ -64,7 +65,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "target/*.jar,target/release.sha256,target/production-preflight.py,target/production-backup.py"
+          source: "target/*.jar,target/release.sha256,target/production-preflight.py,target/production-backup.py,target/00-slickhood-client-headers.conf"
           target: /tmp/slickhood-backend-release
           strip_components: 1
 
@@ -88,10 +89,16 @@ jobs:
             stamp="$(date -u +%Y%m%dT%H%M%SZ)"
             live=/home/silverocean/backend/silverocean-0.0.1-SNAPSHOT.jar
             candidate=/tmp/slickhood-backend-release/silverocean-0.0.1-SNAPSHOT.jar
-            rollback="/home/silverocean/backups/backend-$stamp.jar"
+            backup_dir=/var/backups/slickhood
+            rollback=""
             health_url='${{ secrets.BACKEND_HEALTHCHECK_URL }}'
             preflight=/tmp/slickhood-backend-release/production-preflight.py
             public_origin=https://app.slickhood.com
+            nginx_dir=/etc/nginx/conf.d
+            nginx_live=/etc/nginx/conf.d/00-slickhood-client-headers.conf
+            nginx_candidate=/tmp/slickhood-backend-release/00-slickhood-client-headers.conf
+            nginx_rollback=""
+            nginx_staged=""
             expected_bucket=slickhood-production-documents-603455138904-ca-central-1-an
             expected_region=ca-central-1
             whatsapp_env=""
@@ -100,6 +107,8 @@ jobs:
             paystack_dropin=""
             paystack_curl_config=""
             paystack_probe=""
+            nginx_installed=false
+            nginx_had_previous=false
             test -n "$health_url"
             test -f "$preflight"
             case "$health_url" in
@@ -152,34 +161,156 @@ jobs:
                 | tail -n 80 || true
             }
             restore_previous_release() {
-              if [ "$installed" = "true" ] && sudo test -f "$rollback"; then
-                sudo install -o silverocean -g silverocean -m 0644 "$rollback" "$live"
-                sudo systemctl restart pms.service
-                if ! wait_for_health; then
-                  echo "Rollback release failed to become healthy" >&2
-                  sudo systemctl status pms.service --no-pager || true
+              if [ "$installed" != "true" ]; then
+                return 0
+              fi
+              if [ -z "$rollback" ] || sudo test -L "$rollback" || ! sudo test -f "$rollback"; then
+                echo "Previous backend release backup is missing or unsafe" >&2
+                return 1
+              fi
+              if ! sudo install -o silverocean -g silverocean -m 0644 "$rollback" "$live"; then
+                echo "Previous backend release could not be restored" >&2
+                return 1
+              fi
+              if ! sudo systemctl restart pms.service; then
+                echo "Restored backend release could not be restarted" >&2
+                return 1
+              fi
+              if ! wait_for_health; then
+                echo "Rollback release failed to become healthy" >&2
+                sudo systemctl status pms.service --no-pager || true
+                return 1
+              fi
+              installed=false
+              echo "Previous release restored and healthy"
+              return 0
+            }
+            restore_previous_nginx() {
+              if [ "$nginx_installed" != "true" ]; then
+                return 0
+              fi
+              rollback_warning=false
+              if sudo test -L "$nginx_live"; then
+                echo "Refusing to archive a symlink at the managed Nginx path" >&2
+                if ! sudo rm -f -- "$nginx_live"; then
+                  echo "Unsafe managed Nginx path could not be removed" >&2
                   return 1
                 fi
-                echo "Previous release restored and healthy"
+                rollback_warning=true
+              elif sudo test -e "$nginx_live"; then
+                if ! sudo test -f "$nginx_live"; then
+                  echo "Managed Nginx path is not a regular file" >&2
+                  if ! sudo rm -f -- "$nginx_live"; then
+                    echo "Unsafe managed Nginx path could not be removed" >&2
+                    return 1
+                  fi
+                  rollback_warning=true
+                else
+                  if ! failed_config="$(sudo mktemp -p "$backup_dir" "nginx-client-headers-$stamp.failed.XXXXXXXX")"; then
+                    echo "Failed Nginx configuration archive could not be allocated" >&2
+                    if ! sudo rm -f -- "$nginx_live"; then
+                      echo "Failed Nginx client-header configuration could not be deactivated" >&2
+                      return 1
+                    fi
+                    rollback_warning=true
+                  elif ! sudo mv -- "$nginx_live" "$failed_config"; then
+                    echo "Failed Nginx client-header configuration could not be archived" >&2
+                    if ! sudo rm -f -- "$nginx_live"; then
+                      echo "Failed Nginx client-header configuration could not be deactivated" >&2
+                      return 1
+                    fi
+                    rollback_warning=true
+                  fi
+                fi
               fi
+              if [ "$nginx_had_previous" = "true" ]; then
+                if [ -z "$nginx_rollback" ] || sudo test -L "$nginx_rollback" || ! sudo test -f "$nginx_rollback"; then
+                  echo "Previous Nginx configuration backup is missing or unsafe" >&2
+                  return 1
+                fi
+                if ! nginx_staged="$(sudo mktemp -p "$nginx_dir" '.slickhood-client-headers-rollback.XXXXXXXX')"; then
+                  echo "Previous Nginx configuration stage could not be allocated" >&2
+                  return 1
+                fi
+                if ! sudo install -o root -g root -m 0644 "$nginx_rollback" "$nginx_staged"; then
+                  echo "Previous Nginx client-header configuration could not be staged" >&2
+                  return 1
+                fi
+                if ! sudo mv -- "$nginx_staged" "$nginx_live"; then
+                  echo "Previous Nginx client-header configuration could not be activated" >&2
+                  return 1
+                fi
+                nginx_staged=""
+              fi
+              if ! sudo nginx -t; then
+                echo "Previous Nginx configuration could not be validated" >&2
+                return 1
+              fi
+              if ! sudo systemctl reload nginx; then
+                echo "Previous Nginx configuration could not be reloaded" >&2
+                return 1
+              fi
+              if ! sudo systemctl is-active --quiet nginx; then
+                echo "Nginx was not active after restoring its previous configuration" >&2
+                return 1
+              fi
+              nginx_installed=false
+              echo "Previous Nginx client-header configuration restored"
+              if [ "$rollback_warning" = "true" ]; then
+                echo "Nginx was restored, but one rollback preservation check failed" >&2
+                return 1
+              fi
+              return 0
+            }
+            cleanup_nginx_stage() {
+              if [ -n "$nginx_staged" ] && sudo test -e "$nginx_staged"; then
+                if ! sudo rm -f -- "$nginx_staged"; then
+                  echo "Staged Nginx configuration could not be cleaned up" >&2
+                  return 1
+                fi
+              fi
+              nginx_staged=""
+              return 0
             }
             cleanup() {
               status=$?
               trap - EXIT
-              test -z "$whatsapp_env" || rm -f "$whatsapp_env"
-              test -z "$whatsapp_dropin" || rm -f "$whatsapp_dropin"
-              test -z "$paystack_env" || rm -f "$paystack_env"
-              test -z "$paystack_dropin" || rm -f "$paystack_dropin"
-              test -z "$paystack_curl_config" || rm -f "$paystack_curl_config"
-              test -z "$paystack_probe" || rm -f "$paystack_probe"
               if [ "$status" -ne 0 ]; then
-                restore_previous_release || status=1
+                if ! restore_previous_nginx; then
+                  status=1
+                fi
+                if ! restore_previous_release; then
+                  status=1
+                fi
               fi
+              if ! cleanup_nginx_stage; then
+                status=1
+              fi
+              for temporary_file in \
+                "$whatsapp_env" \
+                "$whatsapp_dropin" \
+                "$paystack_env" \
+                "$paystack_dropin" \
+                "$paystack_curl_config" \
+                "$paystack_probe"; do
+                if [ -n "$temporary_file" ] && ! rm -f -- "$temporary_file"; then
+                  echo "Temporary deployment file could not be cleaned up" >&2
+                  status=1
+                fi
+              done
               release_staging=/tmp/slickhood-backend-release
-              test "$release_staging" = /tmp/slickhood-backend-release
+              if [ "$release_staging" != /tmp/slickhood-backend-release ]; then
+                echo "Unexpected release staging path; refusing cleanup" >&2
+                status=1
+              fi
               if [ -e "$release_staging" ]; then
-                test ! -L "$release_staging"
-                sudo rm -rf -- "$release_staging"
+                if [ -L "$release_staging" ]; then
+                  echo "Release staging path is a symlink; refusing recursive cleanup" >&2
+                  status=1
+                elif ! sudo rm -rf -- "$release_staging"; then
+                  echo "Release staging directory could not be cleaned up" >&2
+                  status=1
+                fi
               fi
               exit "$status"
             }
@@ -202,10 +333,66 @@ jobs:
                 --expected-region "$expected_region" \
                 $whatsapp_args $insurance_args
             }
+            verify_large_authorization_header() {
+              probe_correlation="slickhood-header-probe-$stamp"
+              python3 - "$public_origin/api/kyc/access-status" "$probe_correlation" <<'PY'
+            import json
+            import ssl
+            import sys
+            import urllib.error
+            import urllib.request
+
+            url, correlation_id = sys.argv[1:]
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "Authorization": "Bearer " + ("A" * 14_000),
+                    "X-Correlation-ID": correlation_id,
+                    "User-Agent": "slickhood-release-header-probe",
+                },
+            )
+            try:
+                with urllib.request.urlopen(
+                    request, timeout=20, context=ssl.create_default_context()
+                ) as response:
+                    status = response.status
+                    headers = response.headers
+                    body = response.read(1_048_576)
+            except urllib.error.HTTPError as error:
+                status = error.code
+                headers = error.headers
+                body = error.read(1_048_576)
+            except (OSError, urllib.error.URLError):
+                raise SystemExit("large Authorization-header probe could not reach production")
+
+            if status != 401:
+                raise SystemExit(f"large Authorization-header probe returned HTTP {status}, expected 401")
+            if "application/json" not in headers.get("Content-Type", "").lower():
+                raise SystemExit("large Authorization-header probe did not return JSON")
+            try:
+                payload = json.loads(body)
+            except (TypeError, ValueError, UnicodeError):
+                raise SystemExit("large Authorization-header probe returned invalid JSON")
+            if payload.get("success") is not False or payload.get("code") != "S0020":
+                raise SystemExit("large Authorization-header probe returned the wrong API error contract")
+            if headers.get("X-Correlation-ID") != correlation_id:
+                raise SystemExit("large Authorization-header probe did not traverse the correlation filter")
+            print("PASS  bounded large Authorization header reaches the backend error contract")
+            PY
+            }
             trap cleanup EXIT
             cd /tmp/slickhood-backend-release
             sha256sum -c release.sha256
             test -f "$candidate"
+            test -f "$nginx_candidate"
+            if ! sudo nginx -t; then
+              echo "Existing Nginx configuration is invalid; refusing to change it" >&2
+              exit 1
+            fi
+            if ! sudo systemctl is-active --quiet nginx; then
+              echo "Nginx is not active; refusing to change its configuration" >&2
+              exit 1
+            fi
             # Validate the already-deployed compatibility baseline before the
             # candidate JAR has had a chance to apply its new migrations.
             # V117 may already be present after a rollback because Flyway
@@ -318,14 +505,93 @@ jobs:
             rm -f "$whatsapp_dropin"
             whatsapp_dropin=""
             sudo systemctl daemon-reload
-            sudo mkdir -p /home/silverocean/backups
-            sudo cp "$live" "$rollback"
-            sudo install -o silverocean -g silverocean -m 0644 "$candidate" "$live"
+            if sudo test -L "$backup_dir"; then
+              echo "Backup directory must not be a symlink" >&2
+              exit 1
+            fi
+            if ! sudo install -d -o root -g root -m 0700 "$backup_dir"; then
+              echo "Secure backup directory could not be created" >&2
+              exit 1
+            fi
+            if sudo test -L "$backup_dir" || ! sudo test -d "$backup_dir"; then
+              echo "Backup directory is not a safe directory" >&2
+              exit 1
+            fi
+            if ! backup_dir_state="$(sudo stat -c '%u:%g:%a' "$backup_dir")"; then
+              echo "Backup directory ownership could not be verified" >&2
+              exit 1
+            fi
+            if [ "$backup_dir_state" != "0:0:700" ]; then
+              echo "Backup directory must be owned by root with mode 0700" >&2
+              exit 1
+            fi
+            if ! rollback="$(sudo mktemp -p "$backup_dir" "backend-$stamp.XXXXXXXX.jar")"; then
+              echo "Backend rollback file could not be allocated" >&2
+              exit 1
+            fi
+            if ! sudo install -o root -g root -m 0600 "$live" "$rollback"; then
+              echo "Backend rollback release could not be preserved" >&2
+              exit 1
+            fi
+            if sudo test -L "$nginx_live"; then
+              echo "Managed Nginx target must not be a symlink" >&2
+              exit 1
+            fi
+            if sudo test -e "$nginx_live" && ! sudo test -f "$nginx_live"; then
+              echo "Managed Nginx target must be a regular file" >&2
+              exit 1
+            fi
+            if sudo test -f "$nginx_live"; then
+              if ! nginx_rollback="$(sudo mktemp -p "$backup_dir" "nginx-client-headers-$stamp.XXXXXXXX.conf")"; then
+                echo "Nginx rollback file could not be allocated" >&2
+                exit 1
+              fi
+              if ! sudo install -o root -g root -m 0600 "$nginx_live" "$nginx_rollback"; then
+                echo "Nginx rollback configuration could not be preserved" >&2
+                exit 1
+              fi
+              nginx_had_previous=true
+            fi
+            if ! nginx_staged="$(sudo mktemp -p "$nginx_dir" '.slickhood-client-headers.XXXXXXXX')"; then
+              echo "Nginx candidate stage could not be allocated" >&2
+              exit 1
+            fi
+            if ! sudo install -o root -g root -m 0644 "$nginx_candidate" "$nginx_staged"; then
+              echo "Nginx candidate could not be staged" >&2
+              exit 1
+            fi
+            if ! sudo mv -- "$nginx_staged" "$nginx_live"; then
+              echo "Nginx candidate could not be activated" >&2
+              exit 1
+            fi
+            nginx_staged=""
+            nginx_installed=true
+            if ! sudo nginx -t; then
+              echo "Nginx candidate configuration is invalid" >&2
+              exit 1
+            fi
+            if ! sudo systemctl reload nginx; then
+              echo "Nginx candidate configuration could not be reloaded" >&2
+              exit 1
+            fi
+            if ! sudo systemctl is-active --quiet nginx; then
+              echo "Nginx is not active after reload" >&2
+              exit 1
+            fi
             installed=true
-            sudo systemctl restart pms.service
+            if ! sudo install -o silverocean -g silverocean -m 0644 "$candidate" "$live"; then
+              echo "Backend candidate could not be installed" >&2
+              exit 1
+            fi
+            if ! sudo systemctl restart pms.service; then
+              echo "Backend candidate could not be restarted" >&2
+              exit 1
+            fi
             if wait_for_health; then
               run_preflight 120 enabled require-insurance
+              verify_large_authorization_header
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
+              nginx_installed=false
               installed=false
               exit 0
             fi
