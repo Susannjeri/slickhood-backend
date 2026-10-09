@@ -67,6 +67,7 @@ class KycActivationLifecycleTest {
         when(requirements.resolve(any())).thenReturn(Set.of());
         when(requirements.resolve(any(), any())).thenReturn(Set.of());
         when(users.isValidIDAndTaxPin(anyLong(), any(), any(), any())).thenReturn(true);
+        when(users.conflictingIdentityFields(anyLong(), any(), any(), any())).thenReturn(List.of());
         service = new KycService(cases, documents, roles, users, requirements,
                 quality, ocr, garage,
                 encryption, new ObjectMapper());
@@ -156,6 +157,47 @@ class KycActivationLifecycleTest {
         assertThat(subject.getIdentificationNumber()).isEqualTo("12345678");
         assertThat(subject.getTaxPin()).isEqualTo("A123456789B");
         verify(users).save(subject);
+    }
+
+    @Test void duplicateIdentityStopsApprovalBeforeAnyReviewStateIsPersisted() {
+        Users reviewer = customer(1); Users subject = customer(12);
+        subject.setCountry("KE");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.SUBMITTED);
+        KycDocument identity = document(81, 12); identity.setCaseId(40);
+        identity.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        identity.setEncryptedExtractedData(new byte[]{1});
+        KycDocument tax = document(82, 12); tax.setCaseId(40);
+        tax.setDocumentType(KycDocumentType.KRA_PIN_CERTIFICATE.name());
+        tax.setEncryptedExtractedData(new byte[]{2});
+        when(users.getUserObject()).thenReturn(reviewer);
+        when(users.findById(12)).thenReturn(Optional.of(subject));
+        when(cases.findById(40L)).thenReturn(Optional.of(kycCase));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(identity, tax));
+        when(encryption.decrypt(new byte[]{1})).thenReturn(new DecryptDTO(false,
+                "{\"documentNumber\":\"12345678\"}"));
+        when(encryption.decrypt(new byte[]{2})).thenReturn(new DecryptDTO(false,
+                "{\"taxPin\":\"A123456789B\"}"));
+        when(users.conflictingIdentityFields(12L, "KE", "12345678", "A123456789B"))
+                .thenReturn(List.of("taxPin"));
+
+        assertThatThrownBy(() -> service.review(40, new KycReviewRequest(
+                KycStatus.APPROVED, "Documents matched", List.of(
+                new KycDocumentReviewRequest(81, true, null),
+                new KycDocumentReviewRequest(82, true, null)))))
+                .isInstanceOfSatisfying(PMSCustomException.class, error -> {
+                    assertThat(error.getResponseCode()).isEqualTo(ResponseCode.DUPLICATED_PROFILE_DETAILS);
+                    assertThat(error.getData()).isEqualTo(Map.of(
+                            "conflictingFields", List.of("taxPin")));
+                });
+
+        assertThat(kycCase.getStatus()).isEqualTo(KycStatus.SUBMITTED.name());
+        assertThat(kycCase.getReviewedAt()).isNull();
+        assertThat(subject.isVerified()).isFalse();
+        assertThat(identity.getReviewedAt()).isNull();
+        assertThat(tax.getReviewedAt()).isNull();
+        verify(cases, never()).save(any());
+        verify(users, never()).save(subject);
+        verify(documents, never()).save(any());
     }
 
     @Test void rejectionKeepsCustomerOutsideOperationalWorkspace() {

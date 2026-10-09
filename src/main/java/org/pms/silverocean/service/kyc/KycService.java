@@ -416,18 +416,17 @@ public class KycService {
             reviewNotes = "Replace the rejected documents and submit the corrected evidence for review.";
         }
         final String recordedReviewNotes = reviewNotes;
-        kycCase.setStatus(request.decision().name()); kycCase.setReviewNotes(recordedReviewNotes);
-        kycCase.setReviewedBy(reviewer); kycCase.setReviewedAt(ZonedDateTime.now()); caseRepo.save(kycCase);
         if (request.decision() == KycStatus.APPROVED) {
             String identificationNumber = null;
             String taxPin = null;
+            Map<Long, Map<String, String>> correctionsByDocument = new LinkedHashMap<>();
             for (KycDocument document : currentDocuments) {
                 KycDocumentReviewRequest decision = documentDecisions.get(document.getId());
                 Map<String, String> originalFields = decrypt(document);
                 Map<String, String> registrantFields = decryptRegistrantConfirmed(document);
                 Map<String, String> reviewBase = effectiveFields(originalFields, registrantFields);
                 Map<String, String> corrections = validateReviewerCorrections(document, decision, reviewBase);
-                persistReviewerCorrections(document, corrections, decision.correctionReason(), reviewer);
+                correctionsByDocument.put(document.getId(), corrections);
                 Map<String, String> fields = effectiveFields(reviewBase, corrections);
                 if (identificationNumber == null) identificationNumber = cleanVerifiedValue(fields.get("documentNumber"));
                 if (taxPin == null) taxPin = cleanVerifiedValue(fields.get("taxPin"));
@@ -436,23 +435,40 @@ public class KycService {
             if (identificationNumber == null || (taxRequired && taxPin == null)) {
                 throw new PMSCustomException(ResponseCode.KYC_OCR_EVIDENCE_REQUIRED);
             }
-            if (!userDao.isValidIDAndTaxPin(subject.getId(), subject.getCountry(), identificationNumber, taxPin)) {
-                throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+            List<String> conflictingFields = userDao.conflictingIdentityFields(
+                    subject.getId(), subject.getCountry(), identificationNumber, taxPin);
+            if (!conflictingFields.isEmpty()) {
+                log.warn("KYC approval blocked by identity conflict caseId={} subjectUserId={} reviewerUserId={} conflictingFields={}",
+                        caseId, subject.getId(), reviewer, conflictingFields);
+                throw new PMSCustomException(ResponseCode.DUPLICATED_PROFILE_DETAILS,
+                        Map.of("conflictingFields", conflictingFields));
             }
+            ZonedDateTime reviewedAt = ZonedDateTime.now();
+            kycCase.setStatus(request.decision().name());
+            kycCase.setReviewNotes(recordedReviewNotes);
+            kycCase.setReviewedBy(reviewer);
+            kycCase.setReviewedAt(reviewedAt);
             subject.setIdentificationNumber(identificationNumber.toUpperCase(Locale.ROOT));
             if (taxPin != null) subject.setTaxPin(taxPin.toUpperCase(Locale.ROOT));
             subject.setVerified(true);
             subject.setAccountStatus(AccountStatus.ACTIVE.name());
             kycCase.setPendingRoleId(null);
             currentDocuments.forEach(document -> {
+                KycDocumentReviewRequest decision = documentDecisions.get(document.getId());
+                persistReviewerCorrections(document, correctionsByDocument.get(document.getId()),
+                        decision.correctionReason(), reviewer);
                 if (!DocumentStatus.REJECTED.name().equals(document.getStatus())) {
                     document.setStatus(DocumentStatus.VERIFIED.name());
                 }
                 document.setReviewedBy(reviewer);
-                document.setReviewedAt(ZonedDateTime.now());
+                document.setReviewedAt(reviewedAt);
                 documentRepo.save(document);
             });
         } else {
+            kycCase.setStatus(request.decision().name());
+            kycCase.setReviewNotes(recordedReviewNotes);
+            kycCase.setReviewedBy(reviewer);
+            kycCase.setReviewedAt(ZonedDateTime.now());
             if (kycCase.getPendingRoleId() == null) {
                 subject.setVerified(false);
                 subject.setAccountStatus(AccountStatus.KYC_REJECTED.name());

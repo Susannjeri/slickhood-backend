@@ -184,8 +184,9 @@ public class SilverOceanUserService {
         loggedInUser.setFullName(updateUserDetailsDTO.name());
         loggedInUser.setProfileType(updateUserDetailsDTO.profileType().name());
         if (manualIdentityEntryEnabled) {
-            loggedInUser.setIdentificationNumber(updateUserDetailsDTO.identificationNumber());
-            loggedInUser.setTaxPin(updateUserDetailsDTO.taxPin());
+            loggedInUser.setIdentificationNumber(
+                    userDao.normalizeIdentityValue(updateUserDetailsDTO.identificationNumber()));
+            loggedInUser.setTaxPin(userDao.normalizeIdentityValue(updateUserDetailsDTO.taxPin()));
         }
         loggedInUser.setLastModifiedDate(LocalDateTime.now());
         userDao.save(loggedInUser);

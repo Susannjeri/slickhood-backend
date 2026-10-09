@@ -65,8 +65,23 @@ public interface UserRepo extends JpaRepository<Users, Long>, JpaSpecificationEx
     """)
     void deleteRefreshToken(@Param("username") String username);
 
-    @Query("SELECT u.id FROM Users u WHERE u.country=:country AND u.id<>:userId AND (u.taxPin=:taxPin OR u.identificationNumber=:nationalId)")
-    List<Long> findFirstByUserIdCountryNationalIdAndTaxPin(long userId, String country, String nationalId, String taxPin);
+    @Query("""
+        SELECT COUNT(u) FROM Users u
+        WHERE u.id<>:userId AND UPPER(u.country)=UPPER(:country)
+          AND FUNCTION('REPLACE', UPPER(u.identificationNumber), ' ', '')=UPPER(:nationalId)
+    """)
+    long countOtherUsersWithIdentificationNumber(@Param("userId") long userId,
+                                                   @Param("country") String country,
+                                                   @Param("nationalId") String nationalId);
+
+    @Query("""
+        SELECT COUNT(u) FROM Users u
+        WHERE u.id<>:userId AND UPPER(u.country)=UPPER(:country)
+          AND FUNCTION('REPLACE', UPPER(u.taxPin), ' ', '')=UPPER(:taxPin)
+    """)
+    long countOtherUsersWithTaxPin(@Param("userId") long userId,
+                                    @Param("country") String country,
+                                    @Param("taxPin") String taxPin);
 
     @Query("SELECT u FROM Users u JOIN UserRole ur ON u.id=ur.userId JOIN Role r ON ur.roleId=r.id WHERE r.name='Superadmin' AND r.active AND u.active")
     Set<Users> findSuperAdminAccounts();

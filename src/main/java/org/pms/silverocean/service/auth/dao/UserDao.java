@@ -18,9 +18,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Optional;
 import java.util.Set;
 import java.util.List;
+import java.util.Locale;
 
 import static org.pms.silverocean.service.users.UserSpecifications.searchUsers;
 
@@ -151,7 +153,38 @@ public class UserDao {
     }
 
     public boolean isValidIDAndTaxPin(long userId, String country, String nationalId, String taxPin) {
-        return userRepo.findFirstByUserIdCountryNationalIdAndTaxPin(userId, country, nationalId, taxPin).isEmpty();
+        return conflictingIdentityFields(userId, country, nationalId, taxPin).isEmpty();
+    }
+
+    /**
+     * Returns only the names of identity fields already claimed by another account.
+     * The conflicting account is deliberately not exposed to callers.
+     */
+    public List<String> conflictingIdentityFields(long userId, String country, String nationalId, String taxPin) {
+        String normalizedNationalId = normalizeIdentityValue(nationalId);
+        String normalizedTaxPin = normalizeIdentityValue(taxPin);
+        if (normalizedNationalId == null && normalizedTaxPin == null) return List.of();
+
+        String normalizedCountry = StringUtils.trimToNull(country);
+        if (normalizedCountry == null) {
+            throw new PMSCustomException(ResponseCode.INCOMPLETE_USER_PROFILE);
+        }
+
+        List<String> conflicts = new ArrayList<>(2);
+        if (normalizedNationalId != null
+                && userRepo.countOtherUsersWithIdentificationNumber(userId, normalizedCountry, normalizedNationalId) > 0) {
+            conflicts.add("identificationNumber");
+        }
+        if (normalizedTaxPin != null
+                && userRepo.countOtherUsersWithTaxPin(userId, normalizedCountry, normalizedTaxPin) > 0) {
+            conflicts.add("taxPin");
+        }
+        return List.copyOf(conflicts);
+    }
+
+    public String normalizeIdentityValue(String value) {
+        if (StringUtils.isBlank(value)) return null;
+        return value.replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
     }
 
     public Page<Users> searchAllUsers(Pageable pageable, Optional<String> searchParam) {

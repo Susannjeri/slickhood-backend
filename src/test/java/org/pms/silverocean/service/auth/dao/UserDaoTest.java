@@ -6,6 +6,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.database.pms.UserRepo;
 import org.pms.silverocean.database.pms.entities.Users;
+import org.pms.silverocean.common.ResponseCode;
+import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.kyc.AccountStatus;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -17,7 +19,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 
+import java.util.List;
 import java.util.Optional;
 
 @ExtendWith(MockitoExtension.class)
@@ -144,6 +148,74 @@ class UserDaoTest {
                 .findAuthoritativeAccessState("legacy@example.com").orElseThrow();
 
         assertEquals(AccountStatus.ACTIVE.name(), state.accountStatus());
+    }
+
+    @Test
+    void identityConflictReportsOnlyTheFieldsClaimedByAnotherAccount() {
+        when(userRepo.countOtherUsersWithIdentificationNumber(51L, "Kenya", "12345678"))
+                .thenReturn(1L);
+        when(userRepo.countOtherUsersWithTaxPin(51L, "Kenya", "A123456789B"))
+                .thenReturn(0L);
+
+        List<String> conflicts = new UserDao(userRepo).conflictingIdentityFields(
+                51L, " Kenya ", " 1234 5678 ", "a123456789b");
+
+        assertEquals(List.of("identificationNumber"), conflicts);
+    }
+
+    @Test
+    void taxPinConflictIsDetectedIndependentlyOfTheNationalId() {
+        when(userRepo.countOtherUsersWithIdentificationNumber(51L, "Kenya", "12345678"))
+                .thenReturn(0L);
+        when(userRepo.countOtherUsersWithTaxPin(51L, "Kenya", "A123456789B"))
+                .thenReturn(1L);
+
+        List<String> conflicts = new UserDao(userRepo).conflictingIdentityFields(
+                51L, "Kenya", "12345678", "A123456789B");
+
+        assertEquals(List.of("taxPin"), conflicts);
+    }
+
+    @Test
+    void missingOptionalTaxPinDoesNotRunATaxConflictLookup() {
+        when(userRepo.countOtherUsersWithIdentificationNumber(51L, "Kenya", "P1234567"))
+                .thenReturn(0L);
+
+        assertTrue(new UserDao(userRepo).isValidIDAndTaxPin(51L, "Kenya", "P1234567", null));
+
+        verify(userRepo, never()).countOtherUsersWithTaxPin(51L, "Kenya", null);
+    }
+
+    @Test
+    void missingCountryFailsClosedInsteadOfSkippingIdentityConflictChecks() {
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> new UserDao(userRepo).conflictingIdentityFields(
+                        51L, " ", "12345678", "A123456789B"));
+
+        assertEquals(ResponseCode.INCOMPLETE_USER_PROFILE, error.getResponseCode());
+    }
+
+    @Test
+    void missingCountryDoesNotBlockAProfileWithNoIdentityValues() {
+        assertTrue(new UserDao(userRepo).conflictingIdentityFields(
+                51L, null, null, " ").isEmpty());
+    }
+
+    @Test
+    void identityConflictQueriesExcludeTheSubjectAndRemainCountryScoped() throws Exception {
+        String identityQuery = UserRepo.class
+                .getMethod("countOtherUsersWithIdentificationNumber", long.class, String.class, String.class)
+                .getAnnotation(org.springframework.data.jpa.repository.Query.class).value();
+        String taxQuery = UserRepo.class
+                .getMethod("countOtherUsersWithTaxPin", long.class, String.class, String.class)
+                .getAnnotation(org.springframework.data.jpa.repository.Query.class).value();
+
+        assertTrue(identityQuery.contains("u.id<>:userId"));
+        assertTrue(identityQuery.contains("UPPER(u.country)=UPPER(:country)"));
+        assertTrue(identityQuery.contains("FUNCTION('REPLACE', UPPER(u.identificationNumber), ' ', '')"));
+        assertTrue(taxQuery.contains("u.id<>:userId"));
+        assertTrue(taxQuery.contains("UPPER(u.country)=UPPER(:country)"));
+        assertTrue(taxQuery.contains("FUNCTION('REPLACE', UPPER(u.taxPin), ' ', '')"));
     }
 
     private UserRepo.AccountAccessStateRow accessRow(long id, boolean active, String accountStatus) {
