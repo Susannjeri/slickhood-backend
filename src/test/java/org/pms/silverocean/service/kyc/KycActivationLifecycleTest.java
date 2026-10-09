@@ -678,10 +678,9 @@ class KycActivationLifecycleTest {
     }
 
     @Test void accessStatusDoesNotLoadOrDecryptKycDocuments() {
-        Users subject = customer(12);
-        subject.setAccountStatus(AccountStatus.ACTIVE.name());
         KycCase kycCase = submittedCase(40, 12, KycStatus.APPROVED);
-        when(users.getUserObject()).thenReturn(subject);
+        when(users.getCurrentAccessState()).thenReturn(Optional.of(
+                new UserDao.AccountAccessState(12, true, AccountStatus.ACTIVE.name())));
         when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
 
         KycService.AccessStatusView view = service.accessStatus();
@@ -689,6 +688,28 @@ class KycActivationLifecycleTest {
         assertThat(view.accountStatus()).isEqualTo(AccountStatus.ACTIVE.name());
         assertThat(view.pendingRoleId()).isNull();
         verifyNoInteractions(documents, encryption, requirements);
+    }
+
+    @Test void accessStatusUsesAuthoritativeKycStateInsteadOfCachedActiveUser() {
+        Users staleCachedUser = customer(12);
+        staleCachedUser.setAccountStatus(AccountStatus.ACTIVE.name());
+        when(users.getUserObject()).thenReturn(staleCachedUser);
+        when(users.getCurrentAccessState()).thenReturn(Optional.of(
+                new UserDao.AccountAccessState(12, true, AccountStatus.KYC_REJECTED.name())));
+
+        KycService.AccessStatusView view = service.accessStatus();
+
+        assertThat(view.accountStatus()).isEqualTo(AccountStatus.KYC_REJECTED.name());
+        verify(users, never()).getUserObject();
+    }
+
+    @Test void accessStatusDoesNotReportADeactivatedLegacyAccountAsActive() {
+        when(users.getCurrentAccessState()).thenReturn(Optional.of(
+                new UserDao.AccountAccessState(12, false, AccountStatus.ACTIVE.name())));
+
+        KycService.AccessStatusView view = service.accessStatus();
+
+        assertThat(view.accountStatus()).isEqualTo(AccountStatus.SUSPENDED.name());
     }
 
     @Test void cleanReplacementSupersedesRejectedAlternativesWithoutFalseIdentityConflict() throws Exception {

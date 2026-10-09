@@ -18,6 +18,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.dao.DataAccessException;
 import org.springframework.util.CollectionUtils;
 
 import java.io.IOException;
@@ -67,7 +68,7 @@ public class JWTFilter extends GenericFilter {
                     // role so the client can reconcile instead of misreporting
                     // the valid session as an expired token. All operational
                     // endpoints continue to require an explicitly assigned role.
-                    if (selectedRole == null && isRoleAgnosticAccessCheck(httpRequest)) {
+                    if (selectedRole == null && isRoleAgnosticRecoveryRead(httpRequest)) {
                         selectedRole = roles.getFirst();
                     }
                     if (selectedRole == null) {
@@ -101,15 +102,30 @@ public class JWTFilter extends GenericFilter {
 
                 var auth = new UsernamePasswordAuthenticationToken(user, null, authorities);
                 SecurityContextHolder.getContext().setAuthentication(auth);
+            } catch (DataAccessException e) {
+                // A valid session must not be reported as an expired token just
+                // because the authoritative session lookup temporarily failed.
+                // 503 keeps the browser session intact and allows a bounded retry.
+                httpResponse.setHeader("Retry-After", "3");
+                writeFailure(httpResponse, HttpServletResponse.SC_SERVICE_UNAVAILABLE,
+                        ResponseCode.SOMETHING_WENT_WRONG);
+                return;
             } catch (Exception e) {
-                httpResponse.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                httpResponse.setContentType("application/json;charset=utf-8");
-                httpResponse.getWriter().write("{\"success\": false, \"code\":\"" + ResponseCode.INVALID_OR_EXPIRED_TOKEN.getCode() + "\", \"description\":\"" + i18nService.getLocalizedMessage(ResponseCode.INVALID_OR_EXPIRED_TOKEN.getDescription()) + "\", \"data\":[]}");
+                writeFailure(httpResponse, HttpServletResponse.SC_UNAUTHORIZED,
+                        ResponseCode.INVALID_OR_EXPIRED_TOKEN);
                 return;
             }
         }
 
         chain.doFilter(request, response);
+    }
+
+    private void writeFailure(HttpServletResponse response, int status, ResponseCode code) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/json;charset=utf-8");
+        response.getWriter().write("{\"success\": false, \"code\":\"" + code.getCode()
+                + "\", \"description\":\"" + i18nService.getLocalizedMessage(code.getDescription())
+                + "\", \"data\":[]}");
     }
 
     private Map<String, Object> selectActiveRole(List<Map<String, Object>> roles, String requestedRole) {
@@ -127,8 +143,14 @@ public class JWTFilter extends GenericFilter {
                 .orElse(null);
     }
 
-    private boolean isRoleAgnosticAccessCheck(HttpServletRequest request) {
-        return "/kyc/access-status".equals(request.getRequestURI());
+    private boolean isRoleAgnosticRecoveryRead(HttpServletRequest request) {
+        String path = request.getServletPath();
+        if (StringUtils.isBlank(path)) path = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (StringUtils.isNotBlank(contextPath) && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        return Set.of("/kyc/access-status", "/kyc/current").contains(path);
     }
 
     private String normalizeRole(String role) {

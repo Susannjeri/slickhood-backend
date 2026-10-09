@@ -9,6 +9,7 @@ import org.pms.silverocean.database.pms.UserRepo;
 import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
+import org.pms.silverocean.service.kyc.AccountStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.Authentication;
@@ -31,11 +32,12 @@ public class UserDao {
             .expireAfterAccess(Duration.ofMinutes(7)).build(new CacheLoader<>() {
                 @Override
                 public Optional<Users> load(Object key) {
-                    try {
-                        return key instanceof String ? loadUserByEmail((String) key) : loadUserById((long) key);
-                    } catch (Exception e) {
-                        return Optional.empty();
-                    }
+                    // A legitimate repository miss may be cached, but a database
+                    // timeout or connection failure must propagate. Converting an
+                    // infrastructure error into Optional.empty() poisons the cache
+                    // with "user not found" for seven minutes and makes every
+                    // authenticated recovery request fail until that entry expires.
+                    return key instanceof String ? loadUserByEmail((String) key) : loadUserById((long) key);
                 }
             });
 
@@ -45,11 +47,11 @@ public class UserDao {
         this.userRepo = userRepo;
     }
 
-    private Optional<Users> loadUserByEmail(String email) throws Exception {
+    private Optional<Users> loadUserByEmail(String email) {
         return userRepo.findByEmail(email);
     }
 
-    private Optional<Users> loadUserById(long id) throws Exception {
+    private Optional<Users> loadUserById(long id) {
         return userRepo.findById(id);
     }
 
@@ -63,6 +65,46 @@ public class UserDao {
 
     public Optional<Users> findByRefreshTokenForUpdate(String refreshToken) {
         return userRepo.findByRefreshTokenForUpdate(refreshToken);
+    }
+
+    /**
+     * Session binding is security-sensitive mutable state and must not come
+     * from the local user cache. In a multi-instance deployment another node
+     * may have rotated the refresh token, while this node still has an older
+     * Users entity cached.
+     */
+    public Optional<String> findCurrentSessionToken(String email) {
+        return userRepo.findRefreshTokenByEmail(email);
+    }
+
+    /**
+     * An uncached snapshot used only for authorization and onboarding routing.
+     * The active flag deliberately remains separate from accountStatus because
+     * legacy rows may still say ACTIVE after a technical account deactivation.
+     */
+    public record AccountAccessState(long userId, boolean active, String accountStatus) {
+        public String operationalAccountStatus() {
+            return active ? accountStatus : AccountStatus.SUSPENDED.name();
+        }
+    }
+
+    public Optional<AccountAccessState> findAuthoritativeAccessState(String email) {
+        if (StringUtils.isBlank(email)) return Optional.empty();
+        return userRepo.findAccountAccessStateByEmail(email).map(row -> new AccountAccessState(
+                row.getUserId(), row.isActive(), effectiveAccountStatus(row)));
+    }
+
+    public Optional<AccountAccessState> getCurrentAccessState() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getPrincipal() == null) return Optional.empty();
+        return findAuthoritativeAccessState(authentication.getPrincipal().toString());
+    }
+
+    private String effectiveAccountStatus(UserRepo.AccountAccessStateRow row) {
+        if (StringUtils.isNotBlank(row.getAccountStatus())) return row.getAccountStatus();
+        if (row.isVerified()) return AccountStatus.ACTIVE.name();
+        return row.isEmailVerified() ? AccountStatus.PENDING_KYC.name()
+                : AccountStatus.PENDING_EMAIL_VERIFICATION.name();
     }
 
     public Optional<Users> findByPhone(String phoneNumber) {

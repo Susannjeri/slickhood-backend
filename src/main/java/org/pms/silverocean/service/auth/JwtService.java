@@ -6,7 +6,6 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
-import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.RoleService;
 import org.pms.silverocean.service.auth.wrappers.RoleWrapper;
@@ -60,8 +59,7 @@ public class JwtService {
     }
 
     private String generateToken(String subject, Set<RoleWrapper> roles) {
-        String sessionId = userDao.findByEmail(subject)
-                .map(Users::getRefreshToken)
+        String sessionId = userDao.findCurrentSessionToken(subject)
                 .filter(value -> !value.isBlank())
                 .orElseThrow(() -> new IllegalStateException("An active session is required before issuing an access token"));
         List<Map<String, Object>> rolesClaim = roles.stream()
@@ -94,7 +92,7 @@ public class JwtService {
     }
 
     public boolean checkIfRefreshTokenIsPresent(String email) {
-        return userDao.findByEmail(email).map(Users::getRefreshToken).isPresent();
+        return userDao.findCurrentSessionToken(email).isPresent();
     }
 
     /**
@@ -103,8 +101,7 @@ public class JwtService {
      */
     public boolean isCurrentSession(String email, String sessionId) {
         if (sessionId == null || sessionId.isBlank()) return false;
-        return userDao.findByEmail(email)
-                .map(Users::getRefreshToken)
+        return userDao.findCurrentSessionToken(email)
                 .filter(value -> !value.isBlank())
                 .map(current -> MessageDigest.isEqual(current.getBytes(StandardCharsets.UTF_8),
                         sessionId.getBytes(StandardCharsets.UTF_8)))

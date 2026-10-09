@@ -14,6 +14,7 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.auth.JwtService;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.List;
@@ -74,6 +75,23 @@ class JWTFilterTest {
         filter.doFilter(request, response, chain);
 
         assertThat(response.getStatus()).isEqualTo(401);
+        verifyNoInteractions(chain);
+    }
+
+    @Test
+    void sessionLookupOutageIsRetryableAndDoesNotMisreportAnExpiredToken() throws Exception {
+        when(i18nService.getLocalizedMessage(anyString())).thenReturn("Please try again");
+        Claims claims = claims("current-session", List.of(role("Landlord", "create_property")));
+        when(jwtService.validateToken("access-token")).thenReturn(parsedToken);
+        when(parsedToken.getBody()).thenReturn(claims);
+        when(jwtService.isCurrentSession("owner@example.com", "current-session"))
+                .thenThrow(new DataAccessResourceFailureException("temporary outage"));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(response.getHeader("Retry-After")).isEqualTo("3");
+        assertThat(response.getContentAsString()).contains("S0039").doesNotContain("S0020");
         verifyNoInteractions(chain);
     }
 
@@ -155,6 +173,35 @@ class JWTFilterTest {
                 .extracting("authority").contains("ROLE_SERVICEPROVIDER", "ROLE_SERVICE_PROVIDER", "view_account")
                 .doesNotContain("view_property");
         verify(chain).doFilter(request, response);
+    }
+
+    @Test
+    void ownKycRecoveryDetailsRemainAvailableWithAStaleBrowserRole() throws Exception {
+        stubValidatedToken(claims("current-session", List.of(
+                role("Landlord", "view_property"),
+                role("ServiceProvider", "view_account")
+        )), true);
+        request.setRequestURI("/kyc/current");
+        request.addHeader(JWTFilter.ACTIVE_ROLE_HEADER, "RoleAwaitingKyc");
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(request.getAttribute(JWTFilter.ACTIVE_ROLE_ATTRIBUTE)).isEqualTo("Landlord");
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
+    void roleFallbackDoesNotApplyToKycAdministration() throws Exception {
+        when(i18nService.getLocalizedMessage(anyString())).thenReturn("Invalid token");
+        stubValidatedToken(claims("current-session", List.of(role("Landlord", "view_property"))), true);
+        request.setRequestURI("/kyc/admin/queue");
+        request.addHeader(JWTFilter.ACTIVE_ROLE_HEADER, "RemovedRole");
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        verify(chain, never()).doFilter(request, response);
     }
 
     @Test

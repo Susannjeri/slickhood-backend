@@ -106,11 +106,13 @@ public class KycService {
      * role (if any) whose additional KYC is still pending.
      */
     public AccessStatusView accessStatus() {
-        Users user = currentUser();
-        return caseRepo.findByUserId(user.getId())
-                .map(kycCase -> new AccessStatusView(user.getAccountStatus(), kycCase.getPendingRoleId(),
+        UserDao.AccountAccessState accessState = userDao.getCurrentAccessState()
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
+        String accountStatus = accessState.operationalAccountStatus();
+        return caseRepo.findByUserId(accessState.userId())
+                .map(kycCase -> new AccessStatusView(accountStatus, kycCase.getPendingRoleId(),
                         pendingRoleName(kycCase)))
-                .orElse(new AccessStatusView(user.getAccountStatus(), null, null));
+                .orElse(new AccessStatusView(accountStatus, null, null));
     }
 
     public record AccessStatusView(String accountStatus, Long pendingRoleId, String pendingRoleName) {}

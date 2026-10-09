@@ -14,6 +14,7 @@ import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.database.pms.WorkspaceMembershipRepo;
 import org.pms.silverocean.service.teamaccess.TeamMembershipRole;
 import org.pms.silverocean.service.teamaccess.TeamMembershipStatus;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -56,27 +57,42 @@ public class AccountActivationFilter extends OncePerRequestFilter {
             return;
         }
 
-        var user = userDao.getUserObject();
-        PMSRole activeRole = userDao.getActiveRole();
-        var membershipRole = TeamMembershipRole.fromPlatformRole(activeRole);
-        if (user != null && membershipRole.isPresent()
-                && workspaceMembershipRepo.findFirstByUserIdAndMembershipRoleAndStatusAndActiveTrue(
-                user.getId(), membershipRole.get(), TeamMembershipStatus.ACTIVE).isEmpty()) {
-            deny(response, ResponseCode.FORBIDDEN_ACCESS,
-                    "This workspace membership is not active. Ask the workspace owner to review your access.", user);
+        UserDao.AccountAccessState accessState;
+        try {
+            accessState = userDao.getCurrentAccessState().orElse(null);
+        } catch (DataAccessException exception) {
+            unavailable(response);
             return;
         }
-        if (user != null && (AccountStatus.ACTIVE.name().equals(user.getAccountStatus())
-                || INTERNAL_ROLES.contains(activeRole))) {
-            filterChain.doFilter(request, response);
+        PMSRole activeRole = userDao.getActiveRole();
+        if (accessState == null || !accessState.active()) {
+            deny(response, ResponseCode.KYC_ACCOUNT_RESTRICTED,
+                    "Your account is not active. Sign in again or contact support.",
+                    accessState == null ? null : accessState.operationalAccountStatus());
+            return;
+        }
+        if (!AccountStatus.ACTIVE.name().equals(accessState.accountStatus())
+                && !INTERNAL_ROLES.contains(activeRole)) {
+            deny(response, ResponseCode.KYC_ACCOUNT_RESTRICTED,
+                    "Complete identity verification before using this feature.",
+                    accessState.operationalAccountStatus());
             return;
         }
 
-        deny(response, ResponseCode.KYC_ACCOUNT_RESTRICTED,
-                "Complete identity verification before using this feature.", user);
+        var membershipRole = TeamMembershipRole.fromPlatformRole(activeRole);
+        if (membershipRole.isPresent()
+                && workspaceMembershipRepo.findFirstByUserIdAndMembershipRoleAndStatusAndActiveTrue(
+                accessState.userId(), membershipRole.get(), TeamMembershipStatus.ACTIVE).isEmpty()) {
+            deny(response, ResponseCode.FORBIDDEN_ACCESS,
+                    "This workspace membership is not active. Ask the workspace owner to review your access.",
+                    accessState.operationalAccountStatus());
+            return;
+        }
+        filterChain.doFilter(request, response);
     }
 
-    private void deny(HttpServletResponse response, ResponseCode code, String fallback, Object userObject) throws IOException {
+    private void deny(HttpServletResponse response, ResponseCode code, String fallback,
+                      String accountStatus) throws IOException {
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         response.setContentType("application/json;charset=utf-8");
         String description = i18NService.getLocalizedMessage(code);
@@ -84,13 +100,29 @@ public class AccountActivationFilter extends OncePerRequestFilter {
             description = fallback;
         }
         Map<String, Object> data = new LinkedHashMap<>();
-        if (userObject instanceof org.pms.silverocean.database.pms.entities.Users user) data.put("accountStatus", user.getAccountStatus());
+        if (accountStatus != null) data.put("accountStatus", accountStatus);
         if (code == ResponseCode.KYC_ACCOUNT_RESTRICTED) data.put("destination", "/kyc");
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("success", false);
         body.put("code", code.getCode());
         body.put("description", description);
         body.put("data", data);
+        objectMapper.writeValue(response.getWriter(), body);
+    }
+
+    private void unavailable(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+        response.setHeader("Retry-After", "3");
+        response.setContentType("application/json;charset=utf-8");
+        String description = i18NService.getLocalizedMessage(ResponseCode.SOMETHING_WENT_WRONG);
+        if (description == null || description.isBlank()) {
+            description = "We could not confirm your account access. Please try again.";
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("success", false);
+        body.put("code", ResponseCode.SOMETHING_WENT_WRONG.getCode());
+        body.put("description", description);
+        body.put("data", Map.of());
         objectMapper.writeValue(response.getWriter(), body);
     }
 

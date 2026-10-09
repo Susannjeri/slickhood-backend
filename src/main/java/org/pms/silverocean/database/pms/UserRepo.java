@@ -28,6 +28,30 @@ public interface UserRepo extends JpaRepository<Users, Long>, JpaSpecificationEx
     Optional<Users> findFirstByPhoneNumber(String phoneNumber);
     Optional<Users> findFirstByRefreshToken(String refreshToken);
 
+    @Query("SELECT u.refreshToken FROM Users u WHERE u.email=:email AND u.active=true")
+    Optional<String> findRefreshTokenByEmail(@Param("email") String email);
+
+    interface AccountAccessStateRow {
+        Long getUserId();
+        boolean isActive();
+        String getAccountStatus();
+        boolean isVerified();
+        boolean isEmailVerified();
+    }
+
+    /**
+     * Security-sensitive account state must remain an uncached, narrow read.
+     * A full Users entity may be stale in a node-local cache after another
+     * application instance suspends the account or changes its KYC state.
+     */
+    @Query("""
+        SELECT u.id AS userId, u.active AS active, u.accountStatus AS accountStatus,
+               u.verified AS verified, u.emailVerified AS emailVerified
+        FROM Users u
+        WHERE u.email=:email
+    """)
+    Optional<AccountAccessStateRow> findAccountAccessStateByEmail(@Param("email") String email);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT u FROM Users u WHERE u.refreshToken=:refreshToken")
     Optional<Users> findByRefreshTokenForUpdate(@Param("refreshToken") String refreshToken);
