@@ -588,7 +588,7 @@ jobs:
               exit 1
             fi
             if wait_for_health; then
-              run_preflight 120 enabled require-insurance
+              run_preflight 121 enabled require-insurance
               verify_large_authorization_header
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
               nginx_installed=false

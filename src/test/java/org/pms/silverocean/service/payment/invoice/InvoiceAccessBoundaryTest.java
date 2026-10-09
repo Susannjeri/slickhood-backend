@@ -186,6 +186,56 @@ class InvoiceAccessBoundaryTest {
     }
 
     @Test
+    void serviceProviderCanOpenMarketplaceInvoiceAsPayee() {
+        PMSInvoice invoice = marketplaceInvoice(185L, 175L);
+        Users customer = new Users();
+        customer.setId(185L); customer.setFullName("Marketplace Customer");
+        when(users.getUserId()).thenReturn(175L);
+        when(users.getActiveRole()).thenReturn(PMSRole.SERVICE_PROVIDER);
+        when(invoices.getInvoiceForOwnerOrTenantView(3594L, 175L)).thenReturn(Optional.of(invoice));
+        when(users.findById(185L)).thenReturn(Optional.of(customer));
+
+        var result = service.getInvoice(3594L);
+
+        assertEquals("INV-SERVICE-3594", result.ref());
+        assertEquals("Marketplace Customer", result.tenantName());
+        verify(invoices).getInvoiceForOwnerOrTenantView(3594L, 175L);
+        verify(invoices, never()).getInvoiceById(3594L);
+    }
+
+    @Test
+    void serviceProviderCanOpenOwnSubscriptionInvoice() {
+        PMSInvoice invoice = marketplaceInvoice(175L, 1L);
+        invoice.setBillingType(null);
+        invoice.setSubscriptionPlanCode("SERVICES_MONTHLY");
+        Users provider = new Users();
+        provider.setId(175L); provider.setFullName("Service Provider");
+        when(users.getUserId()).thenReturn(175L);
+        when(users.getActiveRole()).thenReturn(PMSRole.SERVICE_PROVIDER);
+        when(invoices.getInvoiceForOwnerOrTenantView(3594L, 175L)).thenReturn(Optional.of(invoice));
+        when(users.findById(175L)).thenReturn(Optional.of(provider));
+
+        var result = service.getInvoice(3594L);
+
+        assertEquals("SERVICES_MONTHLY", result.unitRef());
+        assertEquals("Service Provider", result.tenantName());
+        verify(invoices).getInvoiceForOwnerOrTenantView(3594L, 175L);
+    }
+
+    @Test
+    void unrelatedServiceProviderCannotOpenInvoice() {
+        when(users.getUserId()).thenReturn(999L);
+        when(users.getActiveRole()).thenReturn(PMSRole.SERVICE_PROVIDER);
+        when(invoices.getInvoiceForOwnerOrTenantView(3594L, 999L)).thenReturn(Optional.empty());
+
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> service.getInvoice(3594L));
+
+        assertEquals(ResponseCode.INVALID_INVOICE_NUMBER, error.getResponseCode());
+        verify(invoices, never()).getInvoiceById(3594L);
+    }
+
+    @Test
     void lateFeeInvoicePreservesTheOriginalPaymentAndWorkspaceBoundary() {
         PMSInvoice source = rentalInvoice(185L, 175L);
         source.setPaymentAccountId(91L);
@@ -238,6 +288,16 @@ class InvoiceAccessBoundaryTest {
         invoice.setCurrency("KES");
         invoice.setActive(true);
         invoice.setCreatedOn(ZonedDateTime.now());
+        return invoice;
+    }
+
+    private static PMSInvoice marketplaceInvoice(long billedUserId, long payToUserId) {
+        PMSInvoice invoice = rentalInvoice(billedUserId, payToUserId);
+        invoice.setId(3594L);
+        invoice.setRef("INV-SERVICE-3594");
+        invoice.setUnitId(0L);
+        invoice.setPropertyId(0L);
+        invoice.setBillingType("SERVICE_MARKETPLACE");
         return invoice;
     }
 }

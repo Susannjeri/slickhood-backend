@@ -150,7 +150,7 @@ class NginxReleaseContractTest {
                 "nginx_installed=true",
                 "sudo systemctl reload nginx",
                 "sudo systemctl restart pms.service",
-                "run_preflight 120 enabled require-insurance",
+                "run_preflight 121 enabled require-insurance",
                 "verify_large_authorization_header",
                 "nginx_installed=false",
                 "installed=false");
