@@ -208,10 +208,10 @@ jobs:
             test -f "$candidate"
             # Validate the already-deployed compatibility baseline before the
             # candidate JAR has had a chance to apply its new migrations.
-            # V96 may already be present after a rollback because Flyway
+            # V117 may already be present after a rollback because Flyway
             # migrations are forward-only. Validate the current production
             # baseline before replacing the application binary.
-            run_preflight 96
+            run_preflight 117
             # Backup contents never leave the host or appear in workflow logs.
             sudo python3 /tmp/slickhood-backend-release/production-backup.py
             test -n "$PAYSTACK_TEST_SECRET_KEY"
@@ -324,7 +324,7 @@ jobs:
             installed=true
             sudo systemctl restart pms.service
             if wait_for_health; then
-              run_preflight 97 enabled require-insurance
+              run_preflight 120 enabled require-insurance
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
               installed=false
               exit 0
