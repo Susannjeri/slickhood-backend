@@ -28,6 +28,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.util.Collections;
 import java.util.HashSet;
@@ -38,6 +41,10 @@ import java.util.Set;
 @Service
 @Slf4j
 public class UserAuthenticationService {
+    static final Duration REFRESH_TOKEN_REPLAY_WINDOW = Duration.ofSeconds(60);
+    private static final int MIN_REFRESH_REQUEST_ID_LENGTH = 32;
+    private static final int MAX_REFRESH_REQUEST_ID_LENGTH = 128;
+
     private final UserDao userDao;
     private final PasswordEncoder passwordEncoder;
     private final GeoLocationService geolocationService;
@@ -52,10 +59,11 @@ public class UserAuthenticationService {
 
     private final TotpService totpService;
     private final AffiliateService affiliateService;
+    private final RefreshTokenReplayService refreshTokenReplayService;
     private final Set<String> signUpCache = Collections.synchronizedSet(new HashSet<>());
 
     @Autowired
-    public UserAuthenticationService(UserDao userDao, PasswordEncoder passwordEncoder, GeoLocationService geolocationService, RoleService roleService, GoogleAuthService googleAuthService, I18NService i18NService, LoginAttemptService loginAttemptService, JwtService jwtService, TotpServiceFactory totpServiceFactory, AffiliateService affiliateService) {
+    public UserAuthenticationService(UserDao userDao, PasswordEncoder passwordEncoder, GeoLocationService geolocationService, RoleService roleService, GoogleAuthService googleAuthService, I18NService i18NService, LoginAttemptService loginAttemptService, JwtService jwtService, TotpServiceFactory totpServiceFactory, AffiliateService affiliateService, RefreshTokenReplayService refreshTokenReplayService) {
         this.userDao = userDao;
         this.passwordEncoder = passwordEncoder;
         this.geolocationService = geolocationService;
@@ -66,6 +74,7 @@ public class UserAuthenticationService {
         this.jwtService = jwtService;
         this.totpService = totpServiceFactory.getService(OtpType.EMAIL).orElseThrow();
         this.affiliateService = affiliateService;
+        this.refreshTokenReplayService = refreshTokenReplayService;
     }
 
     public ResponseDTO register(RegistrationDTO registrationDTO, String ipAddress) {
@@ -209,14 +218,14 @@ public class UserAuthenticationService {
             } else {
                 recoverPendingTenantRole(users);
             }
-            String refreshToken = PMSUtils.randomMask();
+            RefreshTokenReplayService.Replacement refreshSession = issueFreshRefreshSession(users);
             users.setLastLogin(ZonedDateTime.now());
-            users.setRefreshToken(PMSUtils.hashToken(refreshToken));
             userDao.save(users);
             loginAttemptService.loginSuccess(normalizedEmail);
             return new ResponseDTO(true, ResponseCode.LOGIN_SUCCESS.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_SUCCESS),
                     new LoginResponseDTO(!PMSUtils.isByteArrayEmpty(users.getTotpSecret()),
-                    users.isMfaSetup(), jwtService.generateJWT(users.getEmail()), refreshToken));
+                    users.isMfaSetup(), jwtService.generateJWT(users.getEmail()),
+                            refreshSession.refreshToken(), refreshSession.requestId()));
         }
         loginAttemptService.loginFailed(normalizedEmail);
         return new ResponseDTO(false, ResponseCode.LOGIN_FAILURE_INCORRECT_PASSWORD.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_FAILURE_INCORRECT_PASSWORD));
@@ -234,13 +243,12 @@ public class UserAuthenticationService {
             throw new PMSCustomException(ResponseCode.LOGIN_FAILURE_INACTIVE_USER);
         }
         roleService.completeDeferredInvite(user);
-        String refreshToken = PMSUtils.randomMask();
-        user.setRefreshToken(PMSUtils.hashToken(refreshToken));
+        RefreshTokenReplayService.Replacement refreshSession = issueFreshRefreshSession(user);
         user.setLastLogin(ZonedDateTime.now());
         userDao.save(user);
         loginAttemptService.loginSuccess(email);
         return new LoginResponseDTO(!PMSUtils.isByteArrayEmpty(user.getTotpSecret()), user.isMfaSetup(),
-                jwtService.generateJWT(user.getEmail()), refreshToken);
+                jwtService.generateJWT(user.getEmail()), refreshSession.refreshToken(), refreshSession.requestId());
     }
 
     /**
@@ -263,7 +271,7 @@ public class UserAuthenticationService {
                 }
                 signUpCache.add(googleUser.getEmail());
                 checkIfUserExists = userDao.findByEmail(googleUser.getEmail());
-                String refreshToken = PMSUtils.randomMask();
+                RefreshTokenReplayService.Replacement refreshSession = newFreshRefreshCredentials();
                 if (checkIfUserExists.isEmpty()) {
                     if (roleId == null && StringUtils.isBlank(token)) {
                         log.error("Could not register new user, missing role id");
@@ -279,7 +287,7 @@ public class UserAuthenticationService {
                         googleUser.setEmailVerified(true);
                         googleUser.setActive(true);
                         googleUser.setAccountStatus(AccountStatus.PENDING_KYC.name());
-                        googleUser.setRefreshToken(PMSUtils.hashToken(refreshToken));
+                        replaceRefreshSession(googleUser, refreshSession);
                         googleUser.setLastLogin(ZonedDateTime.now());
                         setLocationDetailsBasedOnIP(googleUser);
                         saveAndAssignRole(roleId, googleUser, token);
@@ -291,7 +299,7 @@ public class UserAuthenticationService {
                     }
                 } else {
                     googleUser = checkIfUserExists.get();
-                    googleUser.setRefreshToken(PMSUtils.hashToken(refreshToken));
+                    replaceRefreshSession(googleUser, refreshSession);
                     googleUser.setLastLogin(ZonedDateTime.now());
                     if (!googleUser.isActive()) {
                         googleUser.setEmailVerified(true);
@@ -310,7 +318,8 @@ public class UserAuthenticationService {
                 signUpCache.remove(googleUser.getEmail());
                 return new ResponseDTO(true, ResponseCode.LOGIN_SUCCESS.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_SUCCESS),
                         new LoginResponseDTO(!PMSUtils.isByteArrayEmpty(googleUser.getTotpSecret()), googleUser.isMfaSetup(),
-                                jwtService.generateJWT(googleUser.getEmail()), refreshToken));
+                                jwtService.generateJWT(googleUser.getEmail()), refreshSession.refreshToken(),
+                                refreshSession.requestId()));
             } catch (Exception e) {
                 log.error("Failed running SQL to find user", e);
                 return new ResponseDTO(false, ResponseCode.LOGIN_ERROR.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_ERROR));
@@ -360,31 +369,179 @@ public class UserAuthenticationService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ResponseDTO loginByRefreshToken(String refreshToken) {
+        return loginByRefreshToken(refreshToken, null);
+    }
+
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public ResponseDTO loginByRefreshToken(String refreshToken, String requestId) {
         String hashedToken = PMSUtils.hashToken(refreshToken);
         // Serialize refresh-token rotation. Without a row lock, concurrent browser
         // requests can both consume one token and leave the client with a mismatched
-        // access/refresh pair.
-        Optional<Users> checkIfUserExists = userDao.findByRefreshTokenForUpdate(hashedToken);
+        // access/refresh pair. The same lock also serializes an exact idempotent
+        // retry against the one retained predecessor.
+        Optional<Users> checkIfUserExists = userDao.findByCurrentOrReplayRefreshTokenForUpdate(hashedToken);
         if (checkIfUserExists.isEmpty()) {
-            return new ResponseDTO(false, ResponseCode.SESSION_REPLACED_OR_EXPIRED.getCode(),
-                    i18NService.getLocalizedMessage(ResponseCode.SESSION_REPLACED_OR_EXPIRED));
+            return replacedOrExpiredSession();
         }
         Users users = checkIfUserExists.get();
         if (!users.isActive()) {
             return new ResponseDTO(false, ResponseCode.LOGIN_FAILURE_INACTIVE_USER.getCode(),
                     i18NService.getLocalizedMessage(ResponseCode.LOGIN_FAILURE_INACTIVE_USER));
         }
-        String newRefreshToken = PMSUtils.randomMask();
-        users.setRefreshToken(PMSUtils.hashToken(newRefreshToken));
+        String normalizedRequestId = normalizeReplayRequestId(requestId);
+        if (!constantTimeEquals(hashedToken, users.getRefreshToken())) {
+            return replayRefreshResponse(users, hashedToken, refreshToken, normalizedRequestId);
+        }
+
+        boolean replayProtectedSession = StringUtils.isNotBlank(users.getRefreshTokenRequestHash());
+        if (requestId != null && normalizedRequestId == null) {
+            // A caller that sends a companion id is claiming support for the
+            // paired protocol. Never reinterpret a malformed id as a legacy
+            // request because that would silently bypass replay protection.
+            return replacedOrExpiredSession();
+        }
+        if (replayProtectedSession && normalizedRequestId != null
+                && !constantTimeEquals(PMSUtils.hashToken(normalizedRequestId),
+                users.getRefreshTokenRequestHash())) {
+            // An older API instance can rotate the current token while leaving
+            // companion-id columns (unknown to that binary) unchanged. Only
+            // the deterministic id derived from the *new current token* may
+            // repair that mixed-version state; arbitrary mismatches still fail.
+            if (!refreshTokenReplayService.isLegacyTransitionRequestId(refreshToken,
+                    normalizedRequestId)) {
+                return replacedOrExpiredSession();
+            }
+        }
+        if (normalizedRequestId == null) {
+            // Rolling-deploy compatibility for clients released before the
+            // companion request id existed. Possession of the current refresh
+            // token still authorizes one rotation, but the replacement remains
+            // explicitly legacy/unpaired. This lets an old client keep working
+            // across repeated refreshes without pretending its response can be
+            // replayed after an ambiguous network failure.
+            return rotateLegacyRefreshSession(users);
+        }
+        // A legacy session has no stored companion-id hash. If an upgraded
+        // client supplies a valid stable id, use it for this transition so the
+        // first post-deploy rotation is also recoverable after a lost response.
+        RefreshTokenReplayService.Replacement replacement =
+                refreshTokenReplayService.issue(refreshToken, normalizedRequestId);
+        rememberRefreshResponse(users, hashedToken, normalizedRequestId);
+        setCurrentRefreshSession(users, replacement);
         users.setLastLogin(ZonedDateTime.now());
         userDao.save(users);
-        return new ResponseDTO(true, ResponseCode.LOGIN_SUCCESS.getCode(), i18NService.getLocalizedMessage(ResponseCode.LOGIN_SUCCESS),
-                new LoginResponseDTO(!PMSUtils.isByteArrayEmpty(users.getTotpSecret()), users.isMfaSetup(),
-                        jwtService.generateJWT(users.getEmail()), newRefreshToken));
+        return successfulRefresh(users, replacement);
     }
 
     public void logout() {
         userDao.logoutUserByUserId();
+    }
+
+    private ResponseDTO replayRefreshResponse(Users user, String consumedTokenHash,
+                                              String consumedToken, String requestId) {
+        ZonedDateTime expiresAt = user.getRefreshTokenReplayExpiresAt();
+        String requestHash = replayRequestHash(requestId);
+        if (!constantTimeEquals(consumedTokenHash, user.getRefreshTokenReplayHash())) {
+            return replacedOrExpiredSession();
+        }
+        if (expiresAt == null || !expiresAt.isAfter(ZonedDateTime.now())) {
+            clearRefreshReplay(user);
+            userDao.save(user);
+            return replacedOrExpiredSession();
+        }
+        if (requestHash == null
+                || !constantTimeEquals(requestHash, user.getRefreshTokenReplayRequestHash())) {
+            return replacedOrExpiredSession();
+        }
+        try {
+            return refreshTokenReplayService.recover(consumedToken, requestId, user.getRefreshToken(),
+                            user.getRefreshTokenRequestHash())
+                    .map(replacement -> successfulRefresh(user, replacement))
+                    .orElseGet(this::replacedOrExpiredSession);
+        } catch (RuntimeException replayReadFailure) {
+            log.warn("Could not recover the bounded refresh response for user {}", user.getId(), replayReadFailure);
+            return replacedOrExpiredSession();
+        }
+    }
+
+    private void rememberRefreshResponse(Users user, String consumedTokenHash, String requestId) {
+        String requestHash = replayRequestHash(requestId);
+        if (requestHash == null) {
+            clearRefreshReplay(user);
+            return;
+        }
+        user.setRefreshTokenReplayHash(consumedTokenHash);
+        user.setRefreshTokenReplayRequestHash(requestHash);
+        user.setRefreshTokenReplayExpiresAt(ZonedDateTime.now().plus(REFRESH_TOKEN_REPLAY_WINDOW));
+    }
+
+    private ResponseDTO successfulRefresh(Users user, RefreshTokenReplayService.Replacement replacement) {
+        return new ResponseDTO(true, ResponseCode.LOGIN_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.LOGIN_SUCCESS),
+                new LoginResponseDTO(!PMSUtils.isByteArrayEmpty(user.getTotpSecret()), user.isMfaSetup(),
+                        jwtService.generateJWT(user.getEmail()), replacement.refreshToken(),
+                        replacement.requestId()));
+    }
+
+    private ResponseDTO rotateLegacyRefreshSession(Users user) {
+        String replacement = PMSUtils.randomMask();
+        user.setRefreshToken(PMSUtils.hashToken(replacement));
+        user.setRefreshTokenRequestHash(null);
+        clearRefreshReplay(user);
+        user.setLastLogin(ZonedDateTime.now());
+        userDao.save(user);
+        return new ResponseDTO(true, ResponseCode.LOGIN_SUCCESS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.LOGIN_SUCCESS),
+                new LoginResponseDTO(!PMSUtils.isByteArrayEmpty(user.getTotpSecret()), user.isMfaSetup(),
+                        jwtService.generateJWT(user.getEmail()), replacement, null));
+    }
+
+    private ResponseDTO replacedOrExpiredSession() {
+        return new ResponseDTO(false, ResponseCode.SESSION_REPLACED_OR_EXPIRED.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.SESSION_REPLACED_OR_EXPIRED));
+    }
+
+    private RefreshTokenReplayService.Replacement issueFreshRefreshSession(Users user) {
+        RefreshTokenReplayService.Replacement credentials = newFreshRefreshCredentials();
+        replaceRefreshSession(user, credentials);
+        return credentials;
+    }
+
+    private RefreshTokenReplayService.Replacement newFreshRefreshCredentials() {
+        return new RefreshTokenReplayService.Replacement(PMSUtils.randomMask(), PMSUtils.randomMask());
+    }
+
+    private void replaceRefreshSession(Users user, RefreshTokenReplayService.Replacement credentials) {
+        setCurrentRefreshSession(user, credentials);
+        clearRefreshReplay(user);
+    }
+
+    private void setCurrentRefreshSession(Users user, RefreshTokenReplayService.Replacement credentials) {
+        user.setRefreshToken(PMSUtils.hashToken(credentials.refreshToken()));
+        user.setRefreshTokenRequestHash(PMSUtils.hashToken(credentials.requestId()));
+    }
+
+    private void clearRefreshReplay(Users user) {
+        user.setRefreshTokenReplayHash(null);
+        user.setRefreshTokenReplayRequestHash(null);
+        user.setRefreshTokenReplayExpiresAt(null);
+    }
+
+    private String replayRequestHash(String requestId) {
+        String normalized = normalizeReplayRequestId(requestId);
+        return normalized == null ? null : PMSUtils.hashToken(normalized);
+    }
+
+    private String normalizeReplayRequestId(String requestId) {
+        String normalized = StringUtils.trimToNull(requestId);
+        return normalized == null || normalized.length() < MIN_REFRESH_REQUEST_ID_LENGTH
+                || normalized.length() > MAX_REFRESH_REQUEST_ID_LENGTH ? null : normalized;
+    }
+
+    private boolean constantTimeEquals(String left, String right) {
+        if (left == null || right == null) return false;
+        return MessageDigest.isEqual(left.getBytes(StandardCharsets.UTF_8),
+                right.getBytes(StandardCharsets.UTF_8));
     }
 
     private void setLocationDetailsBasedOnIP(Users user) {

@@ -51,7 +51,8 @@ public class AuthController {
 
     @PostMapping("/refresh")
     public ResponseEntity<ResponseDTO> loginByRefreshToken(@Validated @RequestBody RefreshTokenDTO refreshTokenDTO) {
-        ResponseDTO login = userAuthenticationService.loginByRefreshToken(refreshTokenDTO.refreshToken());
+        ResponseDTO login = userAuthenticationService.loginByRefreshToken(
+                refreshTokenDTO.refreshToken(), refreshTokenDTO.requestId());
         return login.isSuccess() ? ResponseEntity.ok(login) : ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(login);
     }
 

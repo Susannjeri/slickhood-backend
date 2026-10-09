@@ -63,8 +63,8 @@ public class UserDao {
         return userRepo.findFirstByRefreshToken(refreshToken);
     }
 
-    public Optional<Users> findByRefreshTokenForUpdate(String refreshToken) {
-        return userRepo.findByRefreshTokenForUpdate(refreshToken);
+    public Optional<Users> findByCurrentOrReplayRefreshTokenForUpdate(String refreshToken) {
+        return userRepo.findByCurrentOrReplayRefreshTokenForUpdate(refreshToken);
     }
 
     /**

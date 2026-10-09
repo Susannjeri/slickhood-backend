@@ -38,13 +38,14 @@ class VerifiedSessionServiceTest {
     @Mock TotpServiceFactory totpFactory;
     @Mock TotpService emailOtp;
     @Mock AffiliateService affiliates;
+    @Mock RefreshTokenReplayService refreshTokenReplayService;
     UserAuthenticationService service;
 
     @BeforeEach
     void setUp() {
         when(totpFactory.getService(OtpType.EMAIL)).thenReturn(Optional.of(emailOtp));
         service = new UserAuthenticationService(users, passwords, locations, roles, google, i18n,
-                attempts, jwt, totpFactory, affiliates);
+                attempts, jwt, totpFactory, affiliates, refreshTokenReplayService);
     }
 
     @Test
@@ -58,10 +59,13 @@ class VerifiedSessionServiceTest {
 
         assertEquals("access-jwt", session.jwt());
         assertNotNull(session.refreshToken());
+        assertNotNull(session.refreshRequestId());
         ArgumentCaptor<Users> saved = ArgumentCaptor.forClass(Users.class);
         verify(users).save(saved.capture());
         assertNotNull(saved.getValue().getRefreshToken());
+        assertNotNull(saved.getValue().getRefreshTokenRequestHash());
         assertNotEquals(session.refreshToken(), saved.getValue().getRefreshToken());
+        assertNotEquals(session.refreshRequestId(), saved.getValue().getRefreshTokenRequestHash());
         verify(attempts).loginSuccess(user.getEmail());
         verify(roles).completeDeferredInvite(user);
     }

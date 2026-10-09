@@ -53,11 +53,16 @@ public interface UserRepo extends JpaRepository<Users, Long>, JpaSpecificationEx
     Optional<AccountAccessStateRow> findAccountAccessStateByEmail(@Param("email") String email);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT u FROM Users u WHERE u.refreshToken=:refreshToken")
-    Optional<Users> findByRefreshTokenForUpdate(@Param("refreshToken") String refreshToken);
+    @Query("SELECT u FROM Users u WHERE u.refreshToken=:refreshToken OR u.refreshTokenReplayHash=:refreshToken")
+    Optional<Users> findByCurrentOrReplayRefreshTokenForUpdate(@Param("refreshToken") String refreshToken);
 
     @Modifying
-    @Query("UPDATE Users  u SET u.refreshToken=null WHERE u.email=:username")
+    @Query("""
+        UPDATE Users u SET u.refreshToken=null, u.refreshTokenRequestHash=null,
+            u.refreshTokenReplayHash=null, u.refreshTokenReplayRequestHash=null,
+            u.refreshTokenReplayExpiresAt=null
+        WHERE u.email=:username
+    """)
     void deleteRefreshToken(@Param("username") String username);
 
     @Query("SELECT u.id FROM Users u WHERE u.country=:country AND u.id<>:userId AND (u.taxPin=:taxPin OR u.identificationNumber=:nationalId)")

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -78,6 +79,30 @@ class UserDaoTest {
         assertEquals("session-one", users.findCurrentSessionToken("owner@example.com").orElseThrow());
         assertEquals("session-two", users.findCurrentSessionToken("owner@example.com").orElseThrow());
         verify(userRepo, times(2)).findRefreshTokenByEmail("owner@example.com");
+    }
+
+    @Test
+    void refreshLookupLocksCurrentOrReplayCredential() throws Exception {
+        var method = UserRepo.class.getMethod(
+                "findByCurrentOrReplayRefreshTokenForUpdate", String.class);
+        var lock = method.getAnnotation(org.springframework.data.jpa.repository.Lock.class);
+        var query = method.getAnnotation(org.springframework.data.jpa.repository.Query.class).value();
+
+        assertEquals(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE, lock.value());
+        assertTrue(query.contains("u.refreshToken=:refreshToken"));
+        assertTrue(query.contains("u.refreshTokenReplayHash=:refreshToken"));
+    }
+
+    @Test
+    void logoutRevokesBothCurrentAndReplayCredentialPairs() throws Exception {
+        var method = UserRepo.class.getMethod("deleteRefreshToken", String.class);
+        String query = method.getAnnotation(org.springframework.data.jpa.repository.Query.class).value();
+
+        assertTrue(query.contains("u.refreshToken=null"));
+        assertTrue(query.contains("u.refreshTokenRequestHash=null"));
+        assertTrue(query.contains("u.refreshTokenReplayHash=null"));
+        assertTrue(query.contains("u.refreshTokenReplayRequestHash=null"));
+        assertTrue(query.contains("u.refreshTokenReplayExpiresAt=null"));
     }
 
     @Test

@@ -1,6 +1,7 @@
 package org.pms.silverocean.database.pms.entities;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.Column;
 import jakarta.persistence.Index;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
@@ -60,6 +61,14 @@ public class Users extends BaseActiveEntity {
     private String taxPin;
     private LocalDateTime lastModifiedDate;
     private String refreshToken;
+    @Column(name = "refresh_token_request_hash", length = 64)
+    private String refreshTokenRequestHash;
+    @Column(name = "refresh_token_replay_hash", length = 64)
+    private String refreshTokenReplayHash;
+    @Column(name = "refresh_token_replay_request_hash", length = 64)
+    private String refreshTokenReplayRequestHash;
+    @Column(name = "refresh_token_replay_expires_at")
+    private ZonedDateTime refreshTokenReplayExpiresAt;
 
     public String getProfileType() {
         return StringUtils.isBlank(profileType) ? ProfileType.INDIVIDUAL.name() : profileType;
