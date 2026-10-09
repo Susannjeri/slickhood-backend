@@ -74,6 +74,7 @@ class KycActivationLifecycleTest {
         ReflectionTestUtils.setField(service, "maxFileBytes", 10_485_760L);
         ReflectionTestUtils.setField(service, "rejectImageQualityFailures", true);
         ReflectionTestUtils.setField(service, "minOcrConfidence", 75D);
+        ReflectionTestUtils.setField(service, "duplicatePrecheckMinConfidence", 90D);
         ReflectionTestUtils.setField(service, "rejectOcrValidationWarnings", true);
     }
 
@@ -312,6 +313,139 @@ class KycActivationLifecycleTest {
         assertThat(result.status()).isEqualTo(DocumentStatus.REJECTED.name());
         assertThat(result.rejectionReason()).contains("document number");
         verify(garage).uploadBytes(any(), any(), any());
+        verify(users, never()).conflictingIdentityFields(anyLong(), any(), any(), any());
+    }
+
+    @Test void trustedDuplicateIdentityIsRejectedAtUploadBeforeStorageOrDatabaseMutation() throws Exception {
+        Users subject = customer(12);
+        subject.setCountry("KE");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        KycDocument current = document(79, 12);
+        current.setCaseId(40);
+        current.setDocumentType(KycDocumentType.NATIONAL_ID_FRONT.name());
+        current.setStatus(DocumentStatus.OCR_COMPLETE.name());
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(documents.findByCaseIdAndActiveTrueOrderByCreatedOnDesc(40L)).thenReturn(List.of(current));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("IDENTITY", "Identity document", true,
+                        Set.of(KycDocumentType.NATIONAL_ID_FRONT))));
+        when(quality.inspect(image, "image/jpeg"))
+                .thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT)).thenReturn(
+                new OcrResult("TEST_OCR", 98,
+                        Map.of("documentNumber", "12345678", "fullName", "Test Customer",
+                                "_confidence.documentNumber", "98.0")));
+        when(users.conflictingIdentityFields(12L, "KE", "12345678", null))
+                .thenReturn(List.of("identificationNumber"));
+
+        assertThatThrownBy(() -> service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "id.jpg", "image/jpeg", image)))
+                .isInstanceOfSatisfying(PMSCustomException.class, error -> {
+                    assertThat(error.getResponseCode()).isEqualTo(ResponseCode.DUPLICATED_PROFILE_DETAILS);
+                    assertThat(error.getData()).isEqualTo(Map.of(
+                            "conflictingFields", List.of("identificationNumber")));
+                });
+
+        verify(garage, never()).uploadBytes(any(), any(), any());
+        verify(documents, never()).save(any());
+        verify(cases, never()).save(any());
+        verify(encryption, never()).encrypt(any());
+        assertThat(current.isActive()).isTrue();
+        assertThat(current.getStatus()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
+    }
+
+    @Test void lowIdentityFieldConfidenceNeverTriggersTheUploadDuplicateOracle() throws Exception {
+        Users subject = customer(12);
+        subject.setCountry("KE");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("IDENTITY", "Identity document", true,
+                        Set.of(KycDocumentType.NATIONAL_ID_FRONT))));
+        when(quality.inspect(image, "image/jpeg"))
+                .thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT)).thenReturn(
+                new OcrResult("TEST_OCR", 98,
+                        Map.of("documentNumber", "12345678", "fullName", "Test Customer",
+                                "_confidence.documentNumber", "52.0")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        KycDocumentView result = service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "id.jpg", "image/jpeg", image));
+
+        assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
+        verify(users, never()).conflictingIdentityFields(anyLong(), any(), any(), any());
+        verify(garage).uploadBytes(any(), any(), any());
+        verify(documents).save(any());
+    }
+
+    @Test void trustedDuplicateTaxPinIsRejectedAtUploadWithoutExposingAnotherAccount() throws Exception {
+        Users subject = customer(12);
+        subject.setCountry("KE");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("TAX", "KRA PIN certificate", true,
+                        Set.of(KycDocumentType.KRA_PIN_CERTIFICATE))));
+        when(quality.inspect(image, "image/jpeg"))
+                .thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.KRA_PIN_CERTIFICATE)).thenReturn(
+                new OcrResult("TEST_OCR", 97,
+                        Map.of("taxPin", "A123456789B", "fullName", "Test Customer",
+                                "_confidence.taxPin", "96.5")));
+        when(users.conflictingIdentityFields(12L, "KE", null, "A123456789B"))
+                .thenReturn(List.of("taxPin"));
+
+        assertThatThrownBy(() -> service.upload(KycDocumentType.KRA_PIN_CERTIFICATE,
+                new MockMultipartFile("file", "kra.jpg", "image/jpeg", image)))
+                .isInstanceOfSatisfying(PMSCustomException.class, error -> {
+                    assertThat(error.getResponseCode()).isEqualTo(ResponseCode.DUPLICATED_PROFILE_DETAILS);
+                    assertThat(error.getData()).isEqualTo(Map.of(
+                            "conflictingFields", List.of("taxPin")));
+                });
+
+        verify(garage, never()).uploadBytes(any(), any(), any());
+        verify(documents, never()).save(any());
+        verify(cases, never()).save(any());
+        verify(encryption, never()).encrypt(any());
+    }
+
+    @Test void trustedSameUserIdentityProceedsWhenNoOtherAccountClaimsIt() throws Exception {
+        Users subject = customer(12);
+        subject.setCountry("KE");
+        KycCase kycCase = submittedCase(40, 12, KycStatus.IN_PROGRESS);
+        byte[] image = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1};
+        when(users.getUserObject()).thenReturn(subject);
+        when(cases.findByUserId(12)).thenReturn(Optional.of(kycCase));
+        when(requirements.resolve(any(), any())).thenReturn(Set.of(
+                new KycRequirement("IDENTITY", "Identity document", true,
+                        Set.of(KycDocumentType.NATIONAL_ID_FRONT))));
+        when(quality.inspect(image, "image/jpeg"))
+                .thenReturn(new ImageQualityResult(true, 1200, 800, 90, null));
+        when(ocr.enabled()).thenReturn(true);
+        when(ocr.extract(image, "image/jpeg", KycDocumentType.NATIONAL_ID_FRONT)).thenReturn(
+                new OcrResult("TEST_OCR", 98,
+                        Map.of("documentNumber", "12345678", "fullName", "Test Customer",
+                                "_confidence.documentNumber", "98.0")));
+        when(encryption.encrypt(any())).thenReturn(new byte[]{9});
+
+        KycDocumentView result = service.upload(KycDocumentType.NATIONAL_ID_FRONT,
+                new MockMultipartFile("file", "id.jpg", "image/jpeg", image));
+
+        assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
+        verify(users).conflictingIdentityFields(12L, "KE", "12345678", null);
+        verify(garage).uploadBytes(any(), any(), any());
+        verify(documents).save(any());
+        verify(cases).save(kycCase);
     }
 
     @Test void testingModeAcceptsModerateOcrEvidenceForControlledReview() throws Exception {
@@ -522,6 +656,7 @@ class KycActivationLifecycleTest {
 
         assertThat(result.status()).isEqualTo(DocumentStatus.OCR_COMPLETE.name());
         verify(garage).uploadBytes(any(), any(), any());
+        verify(users, never()).conflictingIdentityFields(anyLong(), any(), any(), any());
     }
 
     @Test void browserGenericMimeTypeIsNormalizedFromVerifiedFileSignature() throws Exception {

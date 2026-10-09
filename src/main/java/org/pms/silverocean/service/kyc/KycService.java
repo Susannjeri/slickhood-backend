@@ -61,6 +61,8 @@ public class KycService {
     @Value("${kyc.max-file-bytes:10485760}") private long maxFileBytes;
     @Value("${kyc.image.reject-quality-failures:true}") private boolean rejectImageQualityFailures = true;
     @Value("${kyc.ocr.min-confidence:75}") private double minOcrConfidence = 75;
+    @Value("${kyc.ocr.duplicate-precheck-min-confidence:90}")
+    private double duplicatePrecheckMinConfidence = 90;
     @Value("${kyc.ocr.reject-validation-warnings:true}") private boolean rejectOcrValidationWarnings = true;
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -228,6 +230,9 @@ public class KycService {
                 ocr.fields(), user, kycCase, supersededIds, documentType);
         if (!quality.accepted()) {
             addValidationWarning(extractedFields, "Image quality: " + quality.reason());
+        }
+        if (trustedForUploadIdentityPrecheck(documentType, extractedFields)) {
+            rejectConflictingIdentity(user, documentType, extractedFields);
         }
         document.setOcrProvider(ocr.provider()); document.setOcrConfidence(ocr.confidence());
         document.setEncryptedExtractedData(encryptionService.encrypt(objectMapper.writeValueAsString(extractedFields)));
@@ -762,6 +767,54 @@ public class KycService {
                 || type == KycDocumentType.NATIONAL_ID_BACK
                 || type == KycDocumentType.ALIEN_ID_FRONT
                 || type == KycDocumentType.ALIEN_ID_BACK;
+    }
+
+    /**
+     * Upload-time duplicate checks are limited to OCR evidence that is safe to trust. A low-confidence
+     * or otherwise warned extraction must remain correctable instead of being treated as another
+     * account's confirmed identity. The approval-time preflight remains the final enforcement point.
+     */
+    private boolean trustedForUploadIdentityPrecheck(KycDocumentType type, Map<String, String> fields) {
+        if (!identityClaimDocument(type) || fields.containsKey("_validationWarnings")) return false;
+        String identityField = type == KycDocumentType.KRA_PIN_CERTIFICATE
+                ? "taxPin" : "documentNumber";
+        String confidence = fields.get("_confidence." + identityField);
+        if (confidence == null) return false;
+        try {
+            double parsed = Double.parseDouble(confidence);
+            return Double.isFinite(parsed) && parsed >= duplicatePrecheckMinConfidence;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+    }
+
+    private boolean identityClaimDocument(KycDocumentType type) {
+        return type == KycDocumentType.KRA_PIN_CERTIFICATE
+                || type == KycDocumentType.PASSPORT
+                || type == KycDocumentType.NATIONAL_ID_FRONT
+                || type == KycDocumentType.NATIONAL_ID_BACK
+                || type == KycDocumentType.ALIEN_ID_FRONT
+                || type == KycDocumentType.ALIEN_ID_BACK;
+    }
+
+    private void rejectConflictingIdentity(Users user, KycDocumentType type,
+                                           Map<String, String> fields) {
+        String identificationNumber = type == KycDocumentType.KRA_PIN_CERTIFICATE
+                ? null : cleanVerifiedValue(fields.get("documentNumber"));
+        String taxPin = type == KycDocumentType.KRA_PIN_CERTIFICATE
+                ? cleanVerifiedValue(fields.get("taxPin")) : null;
+        if (identificationNumber == null && taxPin == null) return;
+
+        List<String> conflicts = userDao.conflictingIdentityFields(
+                user.getId(), user.getCountry(), identificationNumber, taxPin);
+        if (conflicts.isEmpty()) return;
+
+        // Record only the field names required for operational diagnosis. Identity values and the
+        // other account are intentionally excluded from both the log and the client response.
+        log.warn("KYC identity conflict detected at upload userId={} documentType={} conflictingFields={}",
+                user.getId(), type, conflicts);
+        throw new PMSCustomException(ResponseCode.DUPLICATED_PROFILE_DETAILS,
+                Map.of("conflictingFields", conflicts));
     }
 
     private String ocrRejectionReason(Map<String, String> fields) {
