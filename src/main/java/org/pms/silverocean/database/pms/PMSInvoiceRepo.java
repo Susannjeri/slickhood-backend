@@ -96,6 +96,52 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
     Optional<Long> findMarketplaceSourcePaymentAccountId(@Param("invoiceRef") String invoiceRef,
                                                           @Param("billingType") String billingType);
 
+    @Query(value = """
+            SELECT o.invoice_ref
+            FROM pms_soko_order o
+            JOIN pms_invoice i ON i.ref = o.invoice_ref
+            JOIN pms_soko_store s ON s.id = o.store_id
+            JOIN pms_payment_account a ON a.id = o.payment_account_id
+            WHERE o.invoice_ref IN (:invoiceRefs)
+              AND i.billing_type = 'SOKO'
+              AND i.payment_account_id = o.payment_account_id
+              AND o.customer_user_id = i.billed_user_id
+              AND s.owner_user_id = i.pay_to_user_id
+              AND o.active = 1
+              AND o.status = 'PENDING_PAYMENT'
+              AND o.payment_status IN ('UNPAID', 'PARTIALLY_PAID')
+              AND o.stock_released = 0
+              AND o.reservation_expires_at > UTC_TIMESTAMP(6)
+              AND a.active = 1
+              AND a.verified = 1
+              AND a.category = 'MERCHANT'
+              AND a.created_by = i.pay_to_user_id
+              AND a.channel IS NOT NULL
+              AND (o.payment_channel IS NULL OR o.payment_channel = a.channel)
+            UNION
+            SELECT b.invoice_ref
+            FROM pms_sp_booking b
+            JOIN pms_invoice i ON i.ref = b.invoice_ref
+            JOIN pms_sp_service s ON s.id = b.service_id
+            JOIN pms_sp_profile p ON p.id = s.profile_id
+            JOIN pms_payment_account a ON a.id = b.payment_account_id
+            WHERE b.invoice_ref IN (:invoiceRefs)
+              AND i.billing_type = 'SERVICE_MARKETPLACE'
+              AND i.payment_account_id = b.payment_account_id
+              AND b.created_by = i.billed_user_id
+              AND p.user_id = i.pay_to_user_id
+              AND b.active = 1
+              AND b.status = 'AWAITING_PAYMENT'
+              AND b.payment_status = 'UNPAID'
+              AND a.active = 1
+              AND a.verified = 1
+              AND a.category = 'MERCHANT'
+              AND a.created_by = i.pay_to_user_id
+              AND a.channel IS NOT NULL
+              AND (b.payment_channel IS NULL OR b.payment_channel = a.channel)
+            """, nativeQuery = true)
+    List<String> findPayableMarketplaceInvoiceRefs(@Param("invoiceRefs") Collection<String> invoiceRefs);
+
     Page<PMSInvoice> findByBilledUserIdAndSubscriptionPlanCodeIsNotNullOrderByCreatedOnDesc(
             long billedUserId, Pageable pageable);
 

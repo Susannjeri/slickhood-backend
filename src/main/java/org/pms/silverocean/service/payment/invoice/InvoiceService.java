@@ -63,6 +63,7 @@ public class InvoiceService {
     private final SokoService sokoService;
     private final org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents;
     private static final String INVOICE_TEMPLATE = "invoice";
+    private static final String MARKETPLACE_INVOICE_NOT_PAYABLE = "MARKETPLACE_INVOICE_NOT_PAYABLE";
 
     public InvoiceService(InvoiceDao invoiceDao, UnitDao unitDao, UserDao userDao, AccountDao accountDao,
                           RenderService renderService, @Qualifier("EMAIL") EmailService emailService,
@@ -311,9 +312,9 @@ public class InvoiceService {
     public Page<InvoiceDTO> getInvoiceList(Pageable pageable, Long tenantId, Long landlordId, Long propertyId, Long unitId) {
         Long userId = userDao.getUserId();
         if (userDao.getActiveRole() == PMSRole.SUPER_ADMIN) {
-            return invoiceDao.getPlatformInvoices(pageable, tenantId).map(this::mapInvoiceEntityToDTO);
+            return mapInvoicePage(invoiceDao.getPlatformInvoices(pageable, tenantId));
         }
-        return invoiceDao.getInvoicesForOwnerAndTenantView(pageable, userId, propertyId, unitId).map(this::mapInvoiceEntityToDTO);
+        return mapInvoicePage(invoiceDao.getInvoicesForOwnerAndTenantView(pageable, userId, propertyId, unitId));
     }
 
     public Page<InvoiceDTO> getInvoiceList(Pageable pageable, Long tenantId, Long landlordId, Long propertyId, Long unitId, Long invoiceId) {
@@ -322,9 +323,9 @@ public class InvoiceService {
         if (userDao.getActiveRole() == PMSRole.SUPER_ADMIN) {
             // Platform administrators operate SlickHood subscription billing. They
             // must not inherit visibility into customer-to-customer invoices.
-            return invoiceDao.getPlatformInvoices(pageable, tenantId, invoiceId).map(this::mapInvoiceEntityToDTO);
+            return mapInvoicePage(invoiceDao.getPlatformInvoices(pageable, tenantId, invoiceId));
         } else {
-            return invoiceDao.getInvoicesForOwnerAndTenantView(pageable, userId, propertyId, unitId, invoiceId).map(this::mapInvoiceEntityToDTO);
+            return mapInvoicePage(invoiceDao.getInvoicesForOwnerAndTenantView(pageable, userId, propertyId, unitId, invoiceId));
         }
     }
 
@@ -333,18 +334,41 @@ public class InvoiceService {
         return mapInvoiceEntityToDTO(accessibleInvoice(invoiceId));
     }
 
+    private Page<InvoiceDTO> mapInvoicePage(Page<PMSInvoice> invoicePage) {
+        long currentUserId = userDao.getUserId();
+        Set<String> marketplaceRefs = invoicePage.stream()
+                .filter(this::isMarketplaceInvoice)
+                .filter(invoice -> invoice.isActive() && !invoice.isPaid()
+                        && invoice.getBilledUserId() == currentUserId)
+                .map(PMSInvoice::getRef)
+                .filter(StringUtils::isNotBlank)
+                .collect(Collectors.toSet());
+        Set<String> payableMarketplaceRefs = marketplaceRefs.isEmpty()
+                ? Set.of()
+                : invoiceDao.getPayableMarketplaceInvoiceRefs(marketplaceRefs);
+        return invoicePage.map(invoice -> mapInvoiceEntityToDTO(invoice, payableMarketplaceRefs));
+    }
+
     private InvoiceDTO mapInvoiceEntityToDTO(PMSInvoice invoice) {
+        return mapInvoiceEntityToDTO(invoice, null);
+    }
+
+    /**
+     * @param payableMarketplaceRefs the page-level batch result, or {@code null}
+     *                               when mapping one invoice through a direct lookup
+     */
+    private InvoiceDTO mapInvoiceEntityToDTO(PMSInvoice invoice, Set<String> payableMarketplaceRefs) {
         if (StringUtils.isNotBlank(invoice.getSubscriptionPlanCode())) {
             Users billed = userDao.findById(invoice.getBilledUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
             return buildInvoiceDTO(invoice, "Subscription plan: " + invoice.getSubscriptionPlanCode(),
-                    null, "Subscription", invoice.getSubscriptionPlanCode(), billed.getFullName());
+                    null, "Subscription", invoice.getSubscriptionPlanCode(), billed.getFullName(), payableMarketplaceRefs);
         }
         if ("SOKO".equals(invoice.getBillingType()) || "SERVICE_MARKETPLACE".equals(invoice.getBillingType())) {
             Users billed = userDao.findById(invoice.getBilledUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
             String label = "SERVICE_MARKETPLACE".equals(invoice.getBillingType()) ? "Slickhood service booking" : "Slickhood Soko order";
             return buildInvoiceDTO(invoice, label, null,
                     "SERVICE_MARKETPLACE".equals(invoice.getBillingType()) ? "SlickHood Services" : "SlickHood Soko",
-                    invoice.getRef(), billed.getFullName());
+                    invoice.getRef(), billed.getFullName(), payableMarketplaceRefs);
         }
         PropertyNameAddressAndTypeProjection propertyDetails = unitDao.getPropertyDetailsFromUnitId(invoice.getUnitId()).orElseThrow();
         if ("SERVICE_CHARGE".equals(invoice.getBillingType()) || "SALE".equals(invoice.getBillingType()) || "COMMUNITY_FUND".equals(invoice.getBillingType())) {
@@ -352,7 +376,7 @@ public class InvoiceService {
             Users billed = userDao.findById(invoice.getBilledUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
             return buildInvoiceDTO(invoice, String.format("%s: %s - Unit: %s",
                     invoice.getBillingType().replace('_', ' '), propertyDetails.getName(), unit.getRef()),
-                    invoice.getPropertyId(), propertyDetails.getName(), unit.getRef(), billed.getFullName());
+                    invoice.getPropertyId(), propertyDetails.getName(), unit.getRef(), billed.getFullName(), payableMarketplaceRefs);
         }
         // Invoice presentation must survive a later tenancy change. The immutable
         // billed user and unit on the invoice are the financial source of truth;
@@ -364,20 +388,34 @@ public class InvoiceService {
 
         return buildInvoiceDTO(invoice, String.format("Property: %s - Unit: %s",
                 propertyDetails.getName(), unit.getRef()), invoice.getPropertyId(),
-                propertyDetails.getName(), unit.getRef(), billed.getFullName());
+                propertyDetails.getName(), unit.getRef(), billed.getFullName(), payableMarketplaceRefs);
     }
 
     private InvoiceDTO buildInvoiceDTO(PMSInvoice invoice, String propertyDetails, Long propertyId,
-                                       String propertyName, String unitRef, String tenantName) {
+                                       String propertyName, String unitRef, String tenantName,
+                                       Set<String> payableMarketplaceRefs) {
+        boolean billedToCurrentUser = invoice.getBilledUserId() == userDao.getUserId();
+        boolean basePayable = !invoice.isPaid() && invoice.isActive() && billedToCurrentUser;
+        boolean marketplaceCheckoutOpen = true;
+        if (basePayable && isMarketplaceInvoice(invoice)) {
+            marketplaceCheckoutOpen = payableMarketplaceRefs == null
+                    ? marketplaceDestinationMatchesSource(invoice)
+                    : payableMarketplaceRefs.contains(invoice.getRef());
+        }
+        boolean payableByCurrentUser = basePayable && marketplaceCheckoutOpen;
+        String paymentUnavailableReason = basePayable && isMarketplaceInvoice(invoice) && !marketplaceCheckoutOpen
+                ? MARKETPLACE_INVOICE_NOT_PAYABLE
+                : null;
         return new InvoiceDTO(invoice.getId(), invoice.getCreatedOn(), propertyDetails, propertyId,
                 propertyName, unitRef, tenantName, invoice.getRef(), invoice.getCurrency(), invoice.getAmount(),
                 invoice.getPendingAmount(), invoice.isPaid(), invoice.getPaymentAccountId(),
                 resolveBillingType(invoice), invoice.getDueDate(), resolveIssuerName(invoice),
                 resolveIssuerType(invoice), isSlickHoodInvoice(invoice) ? "/slicklogo.svg" : null,
-                !invoice.isPaid() && invoice.isActive() && invoice.getBilledUserId() == userDao.getUserId(),
+                payableByCurrentUser,
                 !invoice.isPaid() && invoice.isActive()
                         && userDao.hasPermission(org.pms.silverocean.service.auth.roles.enums.Permission.RECORD_MANUAL_PAYMENT)
-                        && invoice.getBilledUserId() != userDao.getUserId());
+                        && !billedToCurrentUser,
+                paymentUnavailableReason);
     }
 
     private String resolveBillingType(PMSInvoice invoice) {
@@ -415,6 +453,9 @@ public class InvoiceService {
 
     public List<AccountSummaryDTO> getInvoicePaymentAccounts(long invoiceId){
         PMSInvoice invoice=accessibleInvoice(invoiceId);
+        if (isMarketplaceInvoice(invoice) && !marketplaceDestinationMatchesSource(invoice)) {
+            throw new PMSCustomException(ResponseCode.MARKETPLACE_INVOICE_NOT_PAYABLE);
+        }
         List<PaymentAccount> candidates = invoice.getSubscriptionPlanCode()!=null
                 ? accountDao.getActiveAndVerifiedSlickHoodAccount(Pageable.unpaged()).getContent()
                 : isSokoInvoice(invoice)
@@ -440,12 +481,10 @@ public class InvoiceService {
     }
 
     private List<PaymentAccount> selectableSokoAccounts(PMSInvoice invoice) {
-        if (!marketplaceDestinationMatchesSource(invoice)) return List.of();
         return accountDao.listReadyMerchantAccounts(invoice.getPayToUserId());
     }
 
     private List<PaymentAccount> pinnedMarketplaceAccount(PMSInvoice invoice) {
-        if (!marketplaceDestinationMatchesSource(invoice)) return List.of();
         try {
             return List.of(accountDao.getAccountById(invoice.getPaymentAccountId()));
         } catch (PMSCustomException exception) {

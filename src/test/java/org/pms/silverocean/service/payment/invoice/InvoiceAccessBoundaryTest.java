@@ -32,6 +32,7 @@ import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -203,6 +204,80 @@ class InvoiceAccessBoundaryTest {
         assertEquals("Marketplace Customer", result.tenantName());
         verify(invoices).getInvoiceForOwnerOrTenantView(3594L, 175L);
         verify(invoices, never()).getInvoiceById(3594L);
+    }
+
+    @Test
+    void expiredSokoInvoiceRemainsVisibleButDoesNotOfferPayment() {
+        PMSInvoice invoice = marketplaceInvoice(185L, 175L);
+        invoice.setBillingType("SOKO");
+        invoice.setPaymentAccountId(91L);
+        Users customer = new Users();
+        customer.setId(185L); customer.setFullName("Soko Customer");
+        when(users.getUserId()).thenReturn(185L);
+        when(users.getActiveRole()).thenReturn(PMSRole.TENANT);
+        when(invoices.getInvoiceForOwnerOrTenantView(3594L, 185L)).thenReturn(Optional.of(invoice));
+        when(invoices.getMarketplaceSourcePaymentAccountId("INV-SERVICE-3594", "SOKO"))
+                .thenReturn(Optional.empty());
+        when(users.findById(185L)).thenReturn(Optional.of(customer));
+
+        var result = service.getInvoice(3594L);
+
+        assertEquals(false, result.payableByCurrentUser());
+        assertEquals("MARKETPLACE_INVOICE_NOT_PAYABLE", result.paymentUnavailableReason());
+        assertEquals("SOKO", result.billingType());
+    }
+
+    @Test
+    void currentSokoReservationOffersPaymentToItsBuyer() {
+        PMSInvoice invoice = marketplaceInvoice(185L, 175L);
+        invoice.setBillingType("SOKO");
+        invoice.setPaymentAccountId(91L);
+        Users customer = new Users();
+        customer.setId(185L); customer.setFullName("Soko Customer");
+        when(users.getUserId()).thenReturn(185L);
+        when(users.getActiveRole()).thenReturn(PMSRole.TENANT);
+        when(invoices.getInvoiceForOwnerOrTenantView(3594L, 185L)).thenReturn(Optional.of(invoice));
+        when(invoices.getMarketplaceSourcePaymentAccountId("INV-SERVICE-3594", "SOKO"))
+                .thenReturn(Optional.of(91L));
+        when(users.findById(185L)).thenReturn(Optional.of(customer));
+
+        var result = service.getInvoice(3594L);
+
+        assertEquals(true, result.payableByCurrentUser());
+        assertEquals(null, result.paymentUnavailableReason());
+    }
+
+    @Test
+    void marketplaceInvoiceListChecksCheckoutStateOnceForTheWholePage() {
+        PMSInvoice closed = marketplaceInvoice(185L, 175L);
+        closed.setBillingType("SOKO");
+        closed.setPaymentAccountId(91L);
+        PMSInvoice open = marketplaceInvoice(185L, 175L);
+        open.setId(3595L);
+        open.setRef("INV-SOKO-3595");
+        open.setBillingType("SOKO");
+        open.setPaymentAccountId(92L);
+        Users customer = new Users();
+        customer.setId(185L); customer.setFullName("Soko Customer");
+        when(users.getUserId()).thenReturn(185L);
+        when(users.getActiveRole()).thenReturn(PMSRole.TENANT);
+        when(invoices.getInvoicesForOwnerAndTenantView(any(), eq(185L), isNull(), isNull()))
+                .thenReturn(new PageImpl<>(List.of(closed, open)));
+        when(invoices.getPayableMarketplaceInvoiceRefs(
+                Set.of("INV-SERVICE-3594", "INV-SOKO-3595")))
+                .thenReturn(Set.of("INV-SOKO-3595"));
+        when(users.findById(185L)).thenReturn(Optional.of(customer));
+
+        var result = service.getInvoiceList(PageRequest.of(0, 10), null, null, null, null);
+
+        assertEquals(false, result.getContent().get(0).payableByCurrentUser());
+        assertEquals("MARKETPLACE_INVOICE_NOT_PAYABLE",
+                result.getContent().get(0).paymentUnavailableReason());
+        assertEquals(true, result.getContent().get(1).payableByCurrentUser());
+        assertEquals(null, result.getContent().get(1).paymentUnavailableReason());
+        verify(invoices).getPayableMarketplaceInvoiceRefs(
+                Set.of("INV-SERVICE-3594", "INV-SOKO-3595"));
+        verify(invoices, never()).getMarketplaceSourcePaymentAccountId(anyString(), anyString());
     }
 
     @Test

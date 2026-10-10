@@ -70,6 +70,11 @@ public class InvoiceDao {
         return pmsInvoiceRepo.findMarketplaceSourcePaymentAccountId(invoiceRef, billingType);
     }
 
+    public Set<String> getPayableMarketplaceInvoiceRefs(Collection<String> invoiceRefs) {
+        if (invoiceRefs == null || invoiceRefs.isEmpty()) return Set.of();
+        return Set.copyOf(pmsInvoiceRepo.findPayableMarketplaceInvoiceRefs(invoiceRefs));
+    }
+
     public Optional<PMSInvoice> getInvoiceByRefForOwnerOrPropertyManager(String ref, long ownerOrManagerId) {
         return pmsInvoiceRepo.findByRefAndPayToUserIdAndActiveTrue(ref, ownerOrManagerId);
 

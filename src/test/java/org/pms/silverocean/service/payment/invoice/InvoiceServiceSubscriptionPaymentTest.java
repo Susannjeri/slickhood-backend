@@ -488,15 +488,18 @@ class InvoiceServiceSubscriptionPaymentTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"SOKO", "SERVICE_MARKETPLACE"})
-    void hidesMarketplaceAccountWhenInvoicePinDiffersFromSourceTransaction(String billingType) {
+    void returnsTypedNonPayableErrorWhenMarketplaceSourceNoLongerMatches(String billingType) {
         PMSInvoice invoice = propertyInvoice(billingType, 12L);
         when(userDao.getUserId()).thenReturn(7L);
         when(invoiceDao.getInvoiceForOwnerOrTenantView(41L, 7L)).thenReturn(Optional.of(invoice));
         when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", billingType)).thenReturn(Optional.of(13L));
 
-        assertEquals(0, service.getInvoicePaymentAccounts(41L).size());
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> service.getInvoicePaymentAccounts(41L));
 
+        assertEquals(ResponseCode.MARKETPLACE_INVOICE_NOT_PAYABLE, error.getResponseCode());
         verify(accountDao, never()).getAccountById(12L);
+        verify(accountDao, never()).listReadyMerchantAccounts(org.mockito.ArgumentMatchers.anyLong());
         verify(accountDao, never()).listByPropertyAndOwner(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
     }

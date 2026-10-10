@@ -8,5 +8,6 @@ public record InvoiceDTO(long id, ZonedDateTime createdOn, String propertyDetail
                          String currency, double amount, double pendingAmount, boolean paid,
                          Long paymentAccountId, String billingType, LocalDate dueDate,
                          String issuerName, String issuerType, String issuerLogoUrl,
-                         boolean payableByCurrentUser, boolean recordableByCurrentUser) {
+                         boolean payableByCurrentUser, boolean recordableByCurrentUser,
+                         String paymentUnavailableReason) {
 }
