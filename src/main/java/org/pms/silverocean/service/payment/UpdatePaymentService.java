@@ -8,6 +8,7 @@ import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher;
 import org.pms.silverocean.service.payment.contract.InvoicePaidEvent;
+import org.pms.silverocean.service.payment.contract.InvoicePaymentAppliedEvent;
 import org.pms.silverocean.service.payment.ledger.FinancialLedgerService;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
@@ -78,6 +79,7 @@ public class UpdatePaymentService {
             invoice.setPaid(true);
         }
         invoiceDao.saveInvoice(invoice);
+        publishPaymentApplied(invoice, thirdPartyId, appliedAmount);
 
         if (invoice.getCustomerEmail() != null && !invoice.getCustomerEmail().isBlank()) {
             BigDecimal balance = invoice.moneyPendingAmount();
@@ -150,5 +152,16 @@ public class UpdatePaymentService {
         if(invoice.getId()==null)return;InvoicePaidEvent event=new InvoicePaidEvent(invoice.getId(),invoice.getRef(),providerReference,
                 MonetaryPolicy.amount(paidAmount),invoice.getCurrency(),LocalDateTime.now());
         eventPublisher.publish(InvoicePaidEvent.TYPE,"INVOICE",Long.toString(invoice.getId()),event.dedupeKey(),event);
+    }
+
+    private void publishPaymentApplied(PMSInvoice invoice, String providerReference, BigDecimal appliedAmount) {
+        if (invoice.getId() == null) return;
+        BigDecimal outstanding = MonetaryPolicy.amount(invoice.moneyPendingAmount());
+        BigDecimal collected = MonetaryPolicy.amount(invoice.moneyAmount().subtract(outstanding).max(BigDecimal.ZERO));
+        InvoicePaymentAppliedEvent event = new InvoicePaymentAppliedEvent(invoice.getId(), invoice.getRef(),
+                providerReference, MonetaryPolicy.amount(appliedAmount), collected, outstanding,
+                invoice.getCurrency(), LocalDateTime.now());
+        eventPublisher.publish(InvoicePaymentAppliedEvent.TYPE, "INVOICE", Long.toString(invoice.getId()),
+                event.dedupeKey(), event);
     }
 }

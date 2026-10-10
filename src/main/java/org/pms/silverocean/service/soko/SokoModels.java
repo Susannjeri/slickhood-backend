@@ -98,6 +98,12 @@ public final class SokoModels {
     public record OrderDetail(OrderView order, String storeName, String storeAddress, String storePhoneNumber,
                               Double storeLatitude, Double storeLongitude,
                               Long paymentAccountId, String paymentChannel, List<OrderItemView> items) {}
+    /** Least-privilege Finance work item; customer contact and delivery secrets are intentionally omitted. */
+    public record RefundQueueItem(long orderId,String orderNumber,String storeName,String invoiceRef,
+                                  String orderStatus,String paymentStatus,String refundStatus,String currency,
+                                  BigDecimal orderTotal,BigDecimal refundedAmount,BigDecimal refundRequestedAmount,
+                                  BigDecimal remainingRefundableAmount,String reason,ZonedDateTime requestedAt,
+                                  java.time.LocalDateTime lastUpdatedAt) {}
     /** Least-privilege delivery view: riders never receive payment, settlement or recovery-control fields. */
     public record RiderOrder(long id, String orderNumber, long storeId, String status, String deliveryMethod,
                              String deliveryAddress, Double deliveryLatitude, Double deliveryLongitude,

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.*;
 import org.pms.silverocean.database.pms.entities.*;
 import org.pms.silverocean.service.PMSCustomException;
@@ -38,14 +39,42 @@ class SokoRiderKycServiceTest {
         verify(businessAlerts).publish(20L,"rider-credential:4:submitted","SOKO_RIDER_REVIEW_REQUIRED","A rider requirement is awaiting review.","/dashboard/rider-verification");
         verifyNoMoreInteractions(businessAlerts);verify(cases,never()).save(any());
     }
-    @BeforeEach void setup(){service=new SokoRiderKycService(riders,credentials,cases,releases,requirements,users,gate,garage,malware,audit,businessAlerts);user=new Users();user.setId(9L);user.setEmail("rider@example.test");user.setActive(true);user.setVerified(true);user.setEmailVerified(true);user.setAccountStatus("ACTIVE");}
-    void registered(){when(users.getUserId()).thenReturn(9L);when(users.findById(9L)).thenReturn(Optional.of(user));when(riders.findAllByEmailIgnoreCaseAndActiveTrue(user.getEmail())).thenReturn(List.of(new SokoRider()));}
+    @BeforeEach void setup(){service=new SokoRiderKycService(riders,credentials,cases,releases,requirements,users,gate,garage,malware,audit,businessAlerts);user=new Users();user.setId(9L);user.setEmail("rider@example.test");user.setProfileType("INDIVIDUAL");user.setActive(true);user.setVerified(true);user.setEmailVerified(true);user.setAccountStatus("ACTIVE");}
+    void registered(){SokoRider rider=new SokoRider();rider.setUserId(9L);rider.setPhoneConfirmed(true);when(users.getUserId()).thenReturn(9L);when(users.findById(9L)).thenReturn(Optional.of(user));when(riders.findAllByUserIdAndActiveTrue(9L)).thenReturn(List.of(rider));}
     void approved(){KycCase c=new KycCase();c.setId(1L);c.setActive(true);c.setStatus("APPROVED");when(cases.findByUserId(9L)).thenReturn(Optional.of(c));}
     void uploadReady(){registered();approved();when(cases.findByUserIdForUpdate(9L)).thenReturn(Optional.of(new KycCase()));matrix();}
     void matrix(){KycMatrixRelease live=new KycMatrixRelease();live.setId(1L);when(releases.findFirstByStatusAndActiveTrueOrderByVersionNoDesc("PUBLISHED")).thenReturn(Optional.of(live));KycMatrixRequirement req=new KycMatrixRequirement();req.setProfileScope("INDIVIDUAL");req.setAcceptedDocumentTypes("GOOD_CONDUCT_CERTIFICATE");when(requirements.findAllByReleaseIdAndActiveTrueAndScopeTypeAndScopeKeyOrderByRequirementLabel(1L,"PROVIDER_TYPE","DELIVERY_RIDER")).thenReturn(List.of(req));}
 
     @Test void nonRiderCannotReadPrivateChecklist(){when(users.getUserId()).thenReturn(9L);when(users.findById(9L)).thenReturn(Optional.of(user));assertThrows(PMSCustomException.class,()->service.myChecklist());verifyNoInteractions(credentials,garage);}
     @Test void merchantCannotReadAnotherRidersKyc(){assertThrows(PMSCustomException.class,()->service.adminChecklist(7L));verifyNoInteractions(riders,credentials,garage);}
+    @Test void merchantEnteredEmailDoesNotAuthorizeRiderKyc(){
+        when(users.getUserId()).thenReturn(9L);when(users.findById(9L)).thenReturn(Optional.of(user));
+        assertThrows(PMSCustomException.class,()->service.myChecklist());
+        verify(riders).findAllByUserIdAndActiveTrue(9L);
+        verify(riders,never()).findAllByEmailIgnoreCaseAndActiveTrue(anyString());
+        verifyNoInteractions(credentials,garage);
+    }
+    @Test void adminChecklistRejectsUnconfirmedEmailOnlyRiderWithoutLookingUpEmail(){
+        when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);
+        SokoRider rider=new SokoRider();rider.setActive(true);rider.setEmail("victim@example.test");
+        when(riders.findById(7L)).thenReturn(Optional.of(rider));
+        PMSCustomException error=assertThrows(PMSCustomException.class,()->service.adminChecklist(7L));
+        assertEquals(ResponseCode.INVALID_FIELD_DATA,error.getResponseCode());
+        assertEquals("This rider does not yet have a phone-confirmed linked SlickHood account.",error.getData());
+        verify(users,never()).findByEmail(anyString());
+        verify(users,never()).findById(anyLong());
+        verifyNoInteractions(credentials,garage);
+    }
+    @Test void adminChecklistUsesOnlyPhoneConfirmedLinkedUserId(){
+        when(users.hasRole(PMSRole.SUPER_ADMIN)).thenReturn(true);
+        SokoRider rider=new SokoRider();rider.setActive(true);rider.setPhoneConfirmed(true);rider.setUserId(9L);rider.setEmail("victim@example.test");
+        when(riders.findById(7L)).thenReturn(Optional.of(rider));when(users.findById(9L)).thenReturn(Optional.of(user));
+        var result=service.adminChecklist(7L);
+        assertFalse(result.commonKycApproved());
+        verify(users).findById(9L);
+        verify(users,never()).findByEmail(anyString());
+        verify(credentials).findAllByUserIdAndActiveTrueOrderByCreatedOnDesc(9L);
+    }
     @Test void checklistReusesAccountKycWithoutChangingAccountOrCase(){registered();approved();var result=service.myChecklist();assertTrue(result.commonKycApproved());verify(users,never()).save(any());verify(cases,never()).save(any());assertEquals("ACTIVE",user.getAccountStatus());}
     @Test void spoofedUploadIsRejectedBeforeStorage(){uploadReady();assertThrows(PMSCustomException.class,()->service.upload("GOOD_CONDUCT_CERTIFICATE",new MockMultipartFile("file","fake.pdf","application/pdf","not a PDF".getBytes())));verifyNoInteractions(garage,malware);}
     @Test void identityUploadsStayInExistingCommonKyc(){uploadReady();assertThrows(PMSCustomException.class,()->service.upload("NATIONAL_ID_FRONT",new MockMultipartFile("file","id.pdf","application/pdf","%PDF-test".getBytes())));verifyNoInteractions(garage);}

@@ -94,4 +94,41 @@ class SubscriptionEntitlementInterceptorTest {
         verify(entitlements).requireFeatureOrAddOn(SubscriptionProduct.MY_WEALTH,
                 "WEALTH_INCLUDED_UNITS", SubscriptionProduct.MY_WEALTH);
     }
+
+    @Test void financeAndRiderOperationsDoNotRequireAMerchantSubscription() {
+        var interceptor = new SubscriptionEntitlementInterceptor(entitlements);
+        for (String path : new String[]{"/soko/finance/refunds", "/soko/order/42/finance",
+                "/soko/order/42/finance-hold/return", "/soko/rider/assignments",
+                "/soko/rider/kyc", "/soko/order/42/rider/accept"}) {
+            when(request.getRequestURI()).thenReturn(path);
+            assertTrue(interceptor.preHandle(request, response, new Object()));
+        }
+
+        verify(entitlements, never()).requireProduct(SubscriptionProduct.SOKO);
+        verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
+    }
+
+    @Test void merchantSokoMutationsStillRequireSokoSubscription() {
+        when(request.getRequestURI()).thenReturn("/soko/product/42/publish");
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements).requireProduct(SubscriptionProduct.SOKO);
+    }
+
+    @Test void sokoShoppingAndExistingOrderFulfilmentAreSubscriptionNeutral() {
+        var interceptor=new SubscriptionEntitlementInterceptor(entitlements);
+        for(String path:new String[]{"/soko/catalog","/soko/catalog/sellers","/soko/categories",
+                "/soko/delivery-destinations","/soko/order/checkout","/soko/order/my",
+                "/soko/order/merchant","/soko/order/42/status","/soko/order/42/delivery/confirm",
+                "/soko/order/42/pickup/confirm","/soko/order/42/delivery-code/recovery/request"}){
+            when(request.getRequestURI()).thenReturn(path);
+            assertTrue(interceptor.preHandle(request,response,new Object()));
+        }
+
+        verify(entitlements,never()).requireProduct(SubscriptionProduct.SOKO);
+        verify(entitlements,never()).requireProduct(SubscriptionProduct.SERVICES);
+        verify(entitlements,never()).requireSessionBusinessProductIfApplicable();
+    }
 }

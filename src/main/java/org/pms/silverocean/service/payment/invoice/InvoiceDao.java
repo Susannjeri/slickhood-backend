@@ -50,6 +50,10 @@ public class InvoiceDao {
         return pmsInvoiceRepo.findByRef(ref);
     }
 
+    public Optional<PMSInvoice> getInvoiceByRefForUpdate(String ref) {
+        return pmsInvoiceRepo.findByRefForUpdate(ref);
+    }
+
     public Optional<Long> getMarketplaceSourcePaymentAccountId(String invoiceRef, String billingType) {
         return pmsInvoiceRepo.findMarketplaceSourcePaymentAccountId(invoiceRef, billingType);
     }

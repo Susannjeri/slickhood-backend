@@ -17,7 +17,7 @@ public class DefaultFreePlanCodeResolver {
 
     public DefaultFreePlanCodeResolver(
             @Value("${subscription.tier.landlord.starter:LANDLORD_BRONZE}") String landlordStarter,
-            @Value("${subscription.tier.serviceprovider.standard:SERVICES_FREE}") String serviceProviderStandard,
+            @Value("${subscription.tier.serviceprovider.standard:SERVICES_MONTHLY}") String serviceProviderStandard,
             @Value("${subscription.tier.assetmanager.basic:WEALTH_BRONZE}") String assetManagerBasic,
             @Value("${subscription.tier.estate.starter:ESTATE_BRONZE}") String estateStarter,
             @Value("${subscription.tier.sales.starter:SALE_BRONZE}") String salesStarter
@@ -43,7 +43,7 @@ public class DefaultFreePlanCodeResolver {
     }
 
     /**
-     * Roles that participate in billed subscription tiers (receive default free tier on onboarding).
+     * Roles that participate in billed subscription tiers.
      */
     public boolean isProvisioningRole(PMSRole role) {
         return switch (role) {

@@ -8,6 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.database.pms.SokoOrderItemRepo;
 import org.pms.silverocean.database.pms.SokoOrderRepo;
+import org.pms.silverocean.database.pms.SokoFinanceOperationRepo;
 import org.pms.silverocean.database.pms.SokoProductImageRepo;
 import org.pms.silverocean.database.pms.SokoProductRepo;
 import org.pms.silverocean.database.pms.SokoProductVariationRepo;
@@ -23,6 +24,7 @@ import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.kyc.MarketplaceKycGate;
+import org.pms.silverocean.service.subscription.SubscriptionEntitlementService;
 import org.pms.silverocean.service.notification.BusinessNotificationService;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
@@ -54,6 +56,7 @@ class SokoCatalogServiceTest {
     @Mock SokoProductImageRepo productImages;
     @Mock SokoProductVariationRepo variations;
     @Mock SokoOrderRepo orders;
+    @Mock SokoFinanceOperationRepo financeOperations;
     @Mock SokoOrderItemRepo items;
     @Mock SokoRiderRepo riders;
     @Mock UnitRepo units;
@@ -68,13 +71,14 @@ class SokoCatalogServiceTest {
     @Mock BusinessNotificationService businessAlerts;
     @Mock I18NService i18n;
     @Mock MarketplaceKycGate marketplaceKycGate;
+    @Mock SubscriptionEntitlementService subscriptionEntitlements;
 
     private SokoService service;
 
     @BeforeEach
     void setUp() {
-        service=new SokoService(stores,products,productImages,variations,orders,items,riders,units,invoices,accounts,users,
-                visitors,garage,malwarePolicy,encryption,notifications,businessAlerts,i18n,marketplaceKycGate);
+        service=new SokoService(stores,products,productImages,variations,orders,financeOperations,items,riders,units,invoices,accounts,users,
+                visitors,garage,malwarePolicy,encryption,notifications,businessAlerts,i18n,marketplaceKycGate,subscriptionEntitlements);
     }
 
     @Test

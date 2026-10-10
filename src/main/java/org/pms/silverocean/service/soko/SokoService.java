@@ -7,6 +7,7 @@ import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.SokoOrderItemRepo;
 import org.pms.silverocean.database.pms.SokoOrderRepo;
+import org.pms.silverocean.database.pms.SokoFinanceOperationRepo;
 import org.pms.silverocean.database.pms.SokoProductRepo;
 import org.pms.silverocean.database.pms.SokoProductImageRepo;
 import org.pms.silverocean.database.pms.SokoProductVariationRepo;
@@ -16,6 +17,7 @@ import org.pms.silverocean.database.pms.UnitRepo;
 import org.pms.silverocean.database.pms.entities.PMSInvoice;
 import org.pms.silverocean.database.pms.entities.PaymentAccount;
 import org.pms.silverocean.database.pms.entities.SokoOrder;
+import org.pms.silverocean.database.pms.entities.SokoFinanceOperation;
 import org.pms.silverocean.database.pms.entities.SokoOrderItem;
 import org.pms.silverocean.database.pms.entities.SokoProduct;
 import org.pms.silverocean.database.pms.entities.SokoProductImage;
@@ -33,6 +35,8 @@ import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.kyc.MarketplaceKycGate;
+import org.pms.silverocean.service.subscription.SubscriptionEntitlementService;
+import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 import org.pms.silverocean.service.users.ProfileType;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
@@ -81,6 +85,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 @Slf4j
 public class SokoService {
     private static final String DRAFT="DRAFT", PENDING_REVIEW="PENDING_REVIEW", PUBLISHED="PUBLISHED", REJECTED="REJECTED", SUSPENDED="SUSPENDED", OUT_OF_STOCK="OUT_OF_STOCK";
+    private static final int MAX_CHECKOUT_LINES=25, MAX_CHECKOUT_QUANTITY=100;
     private static final Set<String> CATALOG_SORT_MODES=Set.of("RELEVANCE","PRICE","NEAREST");
     private static final Set<String> CATALOG_FULFILMENT=Set.of("ALL","DELIVERY","PICKUP");
     private static final SecureRandom SECURE_RANDOM=new SecureRandom();
@@ -90,6 +95,7 @@ public class SokoService {
     private final SokoProductImageRepo productImageRepo;
     private final SokoProductVariationRepo productVariationRepo;
     private final SokoOrderRepo orderRepo;
+    private final SokoFinanceOperationRepo financeOperationRepo;
     private final SokoOrderItemRepo itemRepo;
     private final SokoRiderRepo riderRepo;
     private final UnitRepo unitRepo;
@@ -104,6 +110,7 @@ public class SokoService {
     private final org.pms.silverocean.service.notification.BusinessNotificationService businessAlerts;
     private final I18NService i18n;
     private final MarketplaceKycGate marketplaceKycGate;
+    private final SubscriptionEntitlementService subscriptionEntitlements;
     @Value("${soko.stock-reservation-minutes:20}") private long reservationMinutes;
     @Value("${soko.delivery-code-valid-hours:24}") private long deliveryCodeValidHours;
     @Value("${soko.delivery-recovery-otp-valid-minutes:10}") private long deliveryRecoveryOtpValidMinutes;
@@ -208,12 +215,12 @@ public class SokoService {
 
     @Transactional
     public SokoProduct updateProduct(long id,SokoRequests.ProductUpsert request){
-        SokoProduct p=productRepo.findById(id).filter(SokoProduct::isActive).orElseThrow(this::notFound); SokoStore store=ownedStore(p.getStoreId()); if(store.getId()!=request.storeId())throw invalid();if(productIsInOpenOrder(id))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This product is part of an open order. Finish or cancel that order before changing product stock or variations.");applyProduct(p,request,store);if(request.variations()!=null)syncVariations(p,request.variations());return productRepo.save(p);
+        SokoProduct p=productRepo.findByIdForUpdate(id).orElseThrow(this::notFound); SokoStore store=ownedStore(p.getStoreId()); if(store.getId()!=request.storeId())throw invalid();if(productIsInOpenOrder(id))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This product is part of an open order. Finish or cancel that order before changing product stock or variations.");applyProduct(p,request,store);if(request.variations()!=null)syncVariations(p,request.variations());return productRepo.save(p);
     }
 
     @Transactional
     public SokoProduct publishProduct(long id){
-        SokoProduct p=productRepo.findById(id).filter(SokoProduct::isActive).orElseThrow(this::notFound);
+        SokoProduct p=productRepo.findByIdForUpdate(id).orElseThrow(this::notFound);
         SokoStore store=ownedStore(p.getStoreId());
         if(SUSPENDED.equals(p.getStatus()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
                 "This product is suspended and cannot be published until its moderation issue is resolved.");
@@ -232,10 +239,10 @@ public class SokoService {
     }
 
     @Transactional
-    public SokoProduct pauseProduct(long id){SokoProduct p=productRepo.findById(id).filter(SokoProduct::isActive).orElseThrow(this::notFound);ownedStore(p.getStoreId());if(!List.of(PUBLISHED,OUT_OF_STOCK).contains(p.getStatus()))throw invalid();p.setStatus("PAUSED");p=productRepo.save(p);audit(p,"SOKO_PRODUCT_PAUSED");return p;}
+    public SokoProduct pauseProduct(long id){SokoProduct p=productRepo.findByIdForUpdate(id).orElseThrow(this::notFound);ownedStore(p.getStoreId());if(!List.of(PUBLISHED,OUT_OF_STOCK).contains(p.getStatus()))throw invalid();p.setStatus("PAUSED");p=productRepo.save(p);audit(p,"SOKO_PRODUCT_PAUSED");return p;}
 
     @Transactional
-    public void removeProduct(long id){SokoProduct p=productRepo.findById(id).filter(SokoProduct::isActive).orElseThrow(this::notFound);ownedStore(p.getStoreId());if(productIsInOpenOrder(id))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This product is part of an open order. Pause it instead.");p.setActive(false);p.setStatus("REMOVED");productRepo.save(p);audit(p,"SOKO_PRODUCT_REMOVED");}
+    public void removeProduct(long id){SokoProduct p=productRepo.findByIdForUpdate(id).orElseThrow(this::notFound);ownedStore(p.getStoreId());if(productIsInOpenOrder(id))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This product is part of an open order. Pause it instead.");p.setActive(false);p.setStatus("REMOVED");productRepo.save(p);audit(p,"SOKO_PRODUCT_REMOVED");}
 
     public List<SokoProduct> myProducts(long storeId){ownedStore(storeId);List<SokoProduct> products=productRepo.findAllByStoreIdAndActiveTrueOrderByName(storeId);hydrateVariationStock(products);return products;}
 
@@ -244,11 +251,11 @@ public class SokoService {
     public Page<SokoProduct> adminProducts(Pageable pageable){requireSuperAdmin();return productRepo.findAllByActiveTrue(bounded(pageable));}
     public Page<OrderDetail> adminOrders(Pageable pageable){requireSuperAdmin();return hydrate(orderRepo.findAllByActiveTrue(bounded(pageable)));}
     @Transactional public SokoStore moderateStore(long id,SokoRequests.ModerationDecision request){requireSuperAdmin();SokoStore store=storeRepo.findByIdAndActiveTrue(id).orElseThrow(this::notFound);String decision=request.decision().toUpperCase(Locale.ROOT);if(("REJECT".equals(decision)||"SUSPEND".equals(decision))&&StringUtils.isBlank(request.reason()))throw invalid();switch(decision){case "APPROVE"->{if(!PENDING_REVIEW.equals(store.getStatus()))throw invalid();validatePublishable(store);marketplaceKycGate.require(store.getOwnerUserId(),"PROVIDER_TYPE","SOKO_MERCHANT",profileType(store.getOwnerUserId()));store.setStatus(PUBLISHED);}case "REJECT"->{if(!PENDING_REVIEW.equals(store.getStatus()))throw invalid();store.setStatus(REJECTED);}case "SUSPEND"->{if(!PUBLISHED.equals(store.getStatus()))throw invalid();store.setStatus(SUSPENDED);}case "REACTIVATE"->{if(!SUSPENDED.equals(store.getStatus()))throw invalid();validatePublishable(store);marketplaceKycGate.require(store.getOwnerUserId(),"PROVIDER_TYPE","SOKO_MERCHANT",profileType(store.getOwnerUserId()));store.setStatus(PUBLISHED);}default->throw invalid();}store.setReviewedAt(now());store.setReviewedByUserId(userDao.getUserId());store.setReviewReason(StringUtils.left(StringUtils.trimToNull(request.reason()),1000));store=storeRepo.save(store);notifyModeration(store.getOwnerUserId(),store.getName(),store.getStatus(),store.getReviewReason());return store;}
-    @Transactional public SokoProduct moderateProduct(long id,SokoRequests.ModerationDecision request){requireSuperAdmin();SokoProduct product=productRepo.findById(id).filter(SokoProduct::isActive).orElseThrow(this::notFound);String decision=request.decision().toUpperCase(Locale.ROOT);if("SUSPEND".equals(decision)){if(StringUtils.isBlank(request.reason())||!List.of(PUBLISHED,OUT_OF_STOCK).contains(product.getStatus()))throw invalid();product.setStatus(SUSPENDED);}else if("REACTIVATE".equals(decision)){if(!SUSPENDED.equals(product.getStatus()))throw invalid();SokoStore store=storeRepo.findByIdAndActiveTrue(product.getStoreId()).orElseThrow(this::notFound);if(!PUBLISHED.equals(store.getStatus()))throw invalid();marketplaceKycGate.require(store.getOwnerUserId(),"SOKO_CATEGORY",product.getCategory(),profileType(store.getOwnerUserId()));product.setStatus(product.getStockQuantity()>0?PUBLISHED:OUT_OF_STOCK);}else throw invalid();product.setModeratedAt(now());product.setModeratedByUserId(userDao.getUserId());product.setModerationReason(StringUtils.left(StringUtils.trimToNull(request.reason()),1000));product=productRepo.save(product);SokoStore owner=storeRepo.findByIdAndActiveTrue(product.getStoreId()).orElseThrow(this::notFound);notifyModeration(owner.getOwnerUserId(),product.getName(),product.getStatus(),product.getModerationReason());return product;}
+    @Transactional public SokoProduct moderateProduct(long id,SokoRequests.ModerationDecision request){requireSuperAdmin();SokoProduct product=productRepo.findByIdForUpdate(id).orElseThrow(this::notFound);String decision=request.decision().toUpperCase(Locale.ROOT);if("SUSPEND".equals(decision)){if(StringUtils.isBlank(request.reason())||!List.of(PUBLISHED,OUT_OF_STOCK).contains(product.getStatus()))throw invalid();product.setStatus(SUSPENDED);}else if("REACTIVATE".equals(decision)){if(!SUSPENDED.equals(product.getStatus()))throw invalid();SokoStore store=storeRepo.findByIdAndActiveTrue(product.getStoreId()).orElseThrow(this::notFound);if(!PUBLISHED.equals(store.getStatus()))throw invalid();marketplaceKycGate.require(store.getOwnerUserId(),"SOKO_CATEGORY",product.getCategory(),profileType(store.getOwnerUserId()));product.setStatus(product.getStockQuantity()>0?PUBLISHED:OUT_OF_STOCK);}else throw invalid();product.setModeratedAt(now());product.setModeratedByUserId(userDao.getUserId());product.setModerationReason(StringUtils.left(StringUtils.trimToNull(request.reason()),1000));product=productRepo.save(product);SokoStore owner=storeRepo.findByIdAndActiveTrue(product.getStoreId()).orElseThrow(this::notFound);notifyModeration(owner.getOwnerUserId(),product.getName(),product.getStatus(),product.getModerationReason());return product;}
 
     @Transactional
     public SokoModels.ProductImages replaceProductImages(long productId, List<MultipartFile> images) throws IOException {
-        SokoProduct product=productRepo.findById(productId).filter(SokoProduct::isActive).orElseThrow(this::notFound);
+        SokoProduct product=productRepo.findByIdForUpdate(productId).orElseThrow(this::notFound);
         ownedStore(product.getStoreId());
         if(images==null||images.isEmpty()||images.size()>5)throw new PMSCustomException(ResponseCode.INVALID_IMAGE);
         List<PendingImage> pending=new ArrayList<>(images.size());
@@ -372,7 +379,7 @@ public class SokoService {
 
     public List<SokoRider> myRiders(long storeId){ownedStore(storeId);return riderRepo.findAllByStoreIdAndActiveTrueOrderByDisplayName(storeId);}
 
-    public Page<SokoModels.RiderAssignment> riderAssignments(Pageable pageable){List<Long> ids=riderRepo.findAllByUserIdAndActiveTrue(userDao.getUserId()).stream().filter(r->r.isPhoneConfirmed()&&r.isVerified()&&"ACTIVE".equals(r.getStatus())).map(SokoRider::getId).toList();return ids.isEmpty()?Page.empty(bounded(pageable)):hydrateRiderAssignments(orderRepo.findAllByRiderIdInAndActiveTrue(ids,bounded(pageable)));}
+    public Page<SokoModels.RiderAssignment> riderAssignments(Pageable pageable){List<Long> ids=riderRepo.findAllByUserIdAndActiveTrue(userDao.getUserId()).stream().filter(r->r.isPhoneConfirmed()&&r.isVerified()&&"ACTIVE".equals(r.getStatus())).map(SokoRider::getId).toList();return ids.isEmpty()?Page.empty(bounded(pageable)):hydrateRiderAssignments(orderRepo.findAllByRiderIdInAndStatusNotInAndActiveTrue(ids,List.of("PACKED","FINANCE_HOLD"),bounded(pageable)));}
     public Page<SokoRider> adminRiders(Pageable pageable){requireSuperAdmin();return riderRepo.findAllByActiveTrue(bounded(pageable));}
 
     @Transactional public SokoRider riderDecision(long id,SokoRequests.RiderDecision request){
@@ -383,9 +390,14 @@ public class SokoService {
             case "VERIFY","ACTIVATE"->{
                 if(!r.isPhoneConfirmed())throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"The rider must confirm the SMS code before activation.");
                 linkRiderUser(r);
-                if(r.getUserId()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Ask the rider to register or sign in using the confirmed phone number, then retry verification.");
-                var riderUser=userDao.findById(r.getUserId()).filter(u->u.isActive()&&u.isVerified()&&u.isEmailVerified()&&"ACTIVE".equals(u.getAccountStatus())).orElseThrow(()->new PMSCustomException(ResponseCode.KYC_MISSING_DOCUMENTS,"The rider must complete their existing account KYC and verify their email before activation."));
-                marketplaceKycGate.require(r.getUserId(),"PROVIDER_TYPE","DELIVERY_RIDER",profileType(r.getUserId()));
+                // A rider can remain merchant-managed after confirming the phone.
+                // Only expose self-service rider access when the matching account is
+                // fully active; an incomplete/suspended phone owner must not block
+                // the merchant from assigning the rider.
+                if(r.getUserId()!=null){
+                    userDao.findById(r.getUserId()).filter(u->u.isActive()&&u.isVerified()&&u.isEmailVerified()&&"ACTIVE".equals(u.getAccountStatus())).orElseThrow(()->new PMSCustomException(ResponseCode.KYC_MISSING_DOCUMENTS,"The rider must complete their existing account KYC and verify their email before self-service access."));
+                    marketplaceKycGate.require(r.getUserId(),"PROVIDER_TYPE","DELIVERY_RIDER",profileType(r.getUserId()));
+                }
                 r.setVerified(true);r.setVerificationStatus("VERIFIED");r.setStatus("ACTIVE");r.setAvailability("AVAILABLE");r.setVerifiedAt(now());r.setVerifiedByUserId(userDao.getUserId());
             }
             case "SUSPEND"->{r.setStatus("SUSPENDED");r.setAvailability("OFFLINE");}
@@ -400,7 +412,7 @@ public class SokoService {
         return r;
     }
 
-    private void requireRiderIdle(SokoRider rider){if("BUSY".equals(rider.getAvailability())||orderRepo.existsByRiderIdAndStatusInAndActiveTrue(rider.getId(),List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED","DISPATCHED")))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Finish the rider's active delivery before editing, verifying, suspending or removing this rider.");}
+    private void requireRiderIdle(SokoRider rider){if("BUSY".equals(rider.getAvailability())||orderRepo.existsByRiderIdAndStatusInAndActiveTrue(rider.getId(),List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED","DISPATCHED","DELIVERY_RETURN_REQUIRED","FINANCE_HOLD_RETURN_REQUIRED")))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Finish the rider's active delivery before editing, verifying, suspending or removing this rider.");}
 
     @Transactional
     public SokoRider setRiderAvailability(long id,String requested){
@@ -424,11 +436,25 @@ public class SokoService {
         String cleanKey=StringUtils.trimToNull(idempotencyKey);
         if(cleanKey==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"A checkout idempotency key is required. Refresh your cart and try again.");
         if(cleanKey.length()>80||!cleanKey.matches("[A-Za-z0-9._:-]+"))throw invalid();
+        if(request==null||request.storeId()==null||request.items()==null||request.items().isEmpty())throw invalid();
+        if(request.items().size()>MAX_CHECKOUT_LINES)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"A Soko order can contain at most 25 product lines.");
+        if(request.items().stream().anyMatch(line->line==null||line.productId()==null||line.quantity()<1||line.quantity()>MAX_CHECKOUT_QUANTITY))
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Choose a quantity between 1 and 100 for each product.");
         if(request.items().stream().map(line->line.productId()+":"+String.valueOf(line.variationId())).distinct().count()!=request.items().size())throw invalid();
         var existing=orderRepo.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(customerUserId,cleanKey);
         if(existing.isPresent())return existingCheckout(existing.get(),request);
         CheckoutDestination destination=resolveCheckoutDestination(request,customerUserId);
-        SokoStore store=storeRepo.findByIdAndActiveTrue(request.storeId()).filter(s->PUBLISHED.equals(s.getStatus())).orElseThrow(this::notFound);
+        SokoStore store=storeRepo.findByIdForCheckout(request.storeId()).filter(s->PUBLISHED.equals(s.getStatus())).orElseThrow(this::notFound);
+        existing=orderRepo.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(customerUserId,cleanKey);
+        if(existing.isPresent())return existingCheckout(existing.get(),request);
+        if(store.getOwnerUserId()==customerUserId)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"You cannot place an order with your own Soko shop.");
+        subscriptionEntitlements.requireActiveProductForOwner(store.getOwnerUserId(),SubscriptionProduct.SOKO);
+        List<SokoOrder> pending=orderRepo.findPendingCheckoutForUpdate(customerUserId,store.getId(),PageRequest.of(0,1));
+        if(!pending.isEmpty()){
+            SokoOrder unpaid=pending.getFirst();
+            if(unpaid.getReservationExpiresAt()!=null&&!unpaid.getReservationExpiresAt().isAfter(now()))expirePendingCheckout(unpaid);
+            else throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"You already have an unpaid order from this shop. Complete or cancel it before starting another checkout.");
+        }
         validateDelivery(store,request.deliveryMethod(),destination);
         validatePublishable(store);
         List<SokoRequests.CheckoutItem> checkoutLines=request.items().stream()
@@ -454,21 +480,29 @@ public class SokoService {
 
     public Page<OrderDetail> myOrders(Pageable pageable){return hydrate(orderRepo.findAllByCustomerUserIdAndActiveTrue(userDao.getUserId(),bounded(pageable)));}
     public Page<OrderDetail> merchantOrders(Pageable pageable){List<Long> ids=myStores().stream().map(SokoStore::getId).toList();if(ids.isEmpty())return Page.empty(bounded(pageable));return hydrate(orderRepo.findAllByStoreIdInAndActiveTrue(ids,bounded(pageable)));}
+    public Page<SokoModels.RefundQueueItem> refundQueue(Pageable pageable,String requestedStatus){
+        requireFinanceRole();
+        List<String> statuses=StringUtils.isBlank(requestedStatus)?List.of("REQUESTED","PROCESSING","FAILED"):
+                List.of(StringUtils.upperCase(requestedStatus.trim(),Locale.ROOT));
+        if(!List.of("REQUESTED","PROCESSING","FAILED").containsAll(statuses))throw invalid();
+        return orderRepo.findAllByRefundStatusInAndActiveTrue(statuses,bounded(pageable)).map(this::refundQueueItem);
+    }
 
     public String deliveryCode(long orderId){SokoOrder o=orderRepo.findById(orderId).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId())throw forbidden();if(!"DELIVERY".equals(o.getDeliveryMethod())||!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified()||codeExpired(o)||o.getDeliveryCodeLockedAt()!=null)throw invalid();String code=decryptDeliveryCode(o);if(StringUtils.isBlank(code))throw invalid();return code;}
 
     public String pickupCode(long orderId){SokoOrder o=orderRepo.findById(orderId).filter(SokoOrder::isActive).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId())throw forbidden();if(!"PICKUP".equals(o.getDeliveryMethod())||!"READY_FOR_PICKUP".equals(o.getStatus())||o.isDeliveryCodeVerified()||codeExpired(o)||o.getDeliveryCodeLockedAt()!=null)throw invalid();String code=decryptDeliveryCode(o);if(StringUtils.isBlank(code))throw invalid();return code;}
 
-    @Transactional public SokoModels.OrderAction uploadDeliveryProof(long orderId,MultipartFile proof)throws IOException{SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);requireMerchantOrAssignedRider(o);if(!"DISPATCHED".equals(o.getStatus())||StringUtils.isNotBlank(o.getDeliveryProofReference())||proof==null||proof.isEmpty()||proof.getSize()>5L*1024*1024)throw invalid();String type=StringUtils.defaultString(proof.getContentType()).toLowerCase(Locale.ROOT);byte[] bytes=proof.getBytes();if(!validProof(type,bytes))throw new PMSCustomException(ResponseCode.INVALID_IMAGE);malwarePolicy.requireSafe(bytes);String extension="image/png".equals(type)?"png":"jpg";String ref="soko/delivery-proof/"+o.getId()+"/"+UUID.randomUUID()+"."+extension;garageService.uploadBytes(ref,bytes,type);o.setDeliveryProofReference(ref);o.setDeliveryProofContentType(type);o.setDeliveryProofSize((long)bytes.length);o.setDeliveryProofAt(now());orderRepo.save(o);return SokoModels.OrderAction.from(o);}
+    @Transactional public SokoModels.OrderAction uploadDeliveryProof(long orderId,MultipartFile proof)throws IOException{SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);requireMerchantOrAssignedRider(o);if(StringUtils.isNotBlank(o.getDeliveryProofReference()))return SokoModels.OrderAction.from(o);if(!"DISPATCHED".equals(o.getStatus())||proof==null||proof.isEmpty()||proof.getSize()>5L*1024*1024)throw invalid();String type=StringUtils.defaultString(proof.getContentType()).toLowerCase(Locale.ROOT);byte[] bytes=proof.getBytes();if(!validProof(type,bytes))throw new PMSCustomException(ResponseCode.INVALID_IMAGE);malwarePolicy.requireSafe(bytes);String extension="image/png".equals(type)?"png":"jpg";String ref="soko/delivery-proof/"+o.getId()+"/"+UUID.randomUUID()+"."+extension;garageService.uploadBytes(ref,bytes,type);o.setDeliveryProofReference(ref);o.setDeliveryProofContentType(type);o.setDeliveryProofSize((long)bytes.length);o.setDeliveryProofAt(now());orderRepo.save(o);return SokoModels.OrderAction.from(o);}
     public String deliveryProof(long orderId){SokoOrder o=orderRepo.findById(orderId).filter(x->x.isActive()).orElseThrow(this::notFound);SokoStore store=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId()&&store.getOwnerUserId()!=userDao.getUserId())throw forbidden();if(StringUtils.isBlank(o.getDeliveryProofReference()))throw notFound();return garageService.getPresignedUrlForStoredObject(o.getDeliveryProofReference());}
 
     @Transactional(noRollbackFor=PMSCustomException.class)
-    public SokoModels.OrderAction confirmDelivery(long orderId,SokoRequests.DeliveryConfirmation request){SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);requireMerchantOrAssignedRider(o);String code=decryptDeliveryCode(o);if(!"DELIVERY".equals(o.getDeliveryMethod())||!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified()||StringUtils.isBlank(code)||StringUtils.isBlank(o.getDeliveryProofReference())||codeExpired(o)||o.getDeliveryCodeLockedAt()!=null)throw invalid();if(o.getDeliveryCodeAttempts()>=5){o.setDeliveryCodeLockedAt(now());orderRepo.save(o);throw forbidden();}o.setDeliveryCodeAttempts(o.getDeliveryCodeAttempts()+1);if(!constantTimeEquals(code,request.code())){if(o.getDeliveryCodeAttempts()>=5)o.setDeliveryCodeLockedAt(now());orderRepo.save(o);throw invalid();}o.setDeliveryCodeVerified(true);o.setDeliveryCode(null);o.setEncryptedDeliveryCode(null);o.setDeliveryRecipientName(StringUtils.left(StringUtils.trimToNull(request.recipientName()),160));o.setDeliveryProofAt(now());o.setStatus("COMPLETED");o.setCompletedAt(now());releaseRider(o,true);orderRepo.save(o);audit(o,"SOKO_DELIVERY_COMPLETED");notifyOrder(o,"Delivered","Delivery was verified using the buyer's single-use code.");return SokoModels.OrderAction.from(o);}
+    public SokoModels.OrderAction confirmDelivery(long orderId,SokoRequests.DeliveryConfirmation request){SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);requireMerchantOrAssignedRider(o);if("DELIVERY".equals(o.getDeliveryMethod())&&"COMPLETED".equals(o.getStatus())&&o.isDeliveryCodeVerified())return SokoModels.OrderAction.from(o);String code=decryptDeliveryCode(o);if(!"DELIVERY".equals(o.getDeliveryMethod())||!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified()||StringUtils.isBlank(code)||StringUtils.isBlank(o.getDeliveryProofReference())||codeExpired(o)||o.getDeliveryCodeLockedAt()!=null)throw invalid();if(o.getDeliveryCodeAttempts()>=5){o.setDeliveryCodeLockedAt(now());orderRepo.save(o);throw forbidden();}o.setDeliveryCodeAttempts(o.getDeliveryCodeAttempts()+1);if(!constantTimeEquals(code,request.code())){if(o.getDeliveryCodeAttempts()>=5)o.setDeliveryCodeLockedAt(now());orderRepo.save(o);throw invalid();}o.setDeliveryCodeVerified(true);o.setDeliveryCode(null);o.setEncryptedDeliveryCode(null);o.setDeliveryRecipientName(StringUtils.left(StringUtils.trimToNull(request.recipientName()),160));o.setDeliveryProofAt(now());o.setStatus("COMPLETED");o.setCompletedAt(now());releaseRider(o,true);orderRepo.save(o);audit(o,"SOKO_DELIVERY_COMPLETED");notifyOrder(o,"Delivered","Delivery was verified using the buyer's single-use code.");return SokoModels.OrderAction.from(o);}
 
     @Transactional(noRollbackFor=PMSCustomException.class)
     public OrderDetail confirmPickup(long orderId,SokoRequests.PickupConfirmation request){
         SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);
         SokoStore store=ownedStore(o.getStoreId());
+        if("PICKUP".equals(o.getDeliveryMethod())&&"COMPLETED".equals(o.getStatus())&&o.isDeliveryCodeVerified())return detail(o,store,itemRepo.findAllByOrderIdAndActiveTrueOrderById(o.getId()));
         String code=decryptDeliveryCode(o);
         if(!"PICKUP".equals(o.getDeliveryMethod())||!"READY_FOR_PICKUP".equals(o.getStatus())||o.isDeliveryCodeVerified()||StringUtils.isBlank(code)||codeExpired(o)||o.getDeliveryCodeLockedAt()!=null)throw invalid();
         if(o.getDeliveryCodeAttempts()>=5){o.setDeliveryCodeLockedAt(now());orderRepo.save(o);throw forbidden();}
@@ -485,14 +519,23 @@ public class SokoService {
         SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);SokoStore store=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);String next=requested.toUpperCase(Locale.ROOT);
         boolean customer=o.getCustomerUserId()==userDao.getUserId(),merchant=store.getOwnerUserId()==userDao.getUserId();
         if("CANCELLED".equals(next))throw invalid();
-        else {if(!merchant)throw forbidden(); switch(next){case "CONFIRMED"->{requireState(o,"PAID");o.setConfirmedAt(now());}case "PACKED"->requireState(o,"CONFIRMED");case "ASSIGNMENT_ACCEPTED"->{requireState(o,"DELIVERY_ASSIGNED");requireMerchantManagedRider(o);o.setAssignmentAcceptedAt(now());}case "DISPATCHED"->{if("PACKED".equals(o.getStatus())){if(!"DELIVERY".equals(o.getDeliveryMethod()))throw invalid();boolean managed=assignAndRegisterDelivery(o,dispatch);if(managed){next="DELIVERY_ASSIGNED";o.setAssignedAt(now());}else{o.setCollectedAt(now());generateDeliveryCode(o);o.setDispatchedAt(now());}}else{requireState(o,"ASSIGNMENT_ACCEPTED");requireMerchantManagedRider(o);o.setCollectedAt(now());o.setDispatchedAt(now());generateDeliveryCode(o);}}case "READY_FOR_PICKUP"->{requireState(o,"PACKED");if(!"PICKUP".equals(o.getDeliveryMethod()))throw invalid();generatePickupCode(o);}default->throw invalid();}o.setStatus(next);}
+        else {if(!merchant)throw forbidden();if(next.equals(o.getStatus()))return detail(o);if("DISPATCHED".equals(next)&&"DELIVERY_ASSIGNED".equals(o.getStatus())){if(!"DELIVERY".equals(o.getDeliveryMethod())||o.getRiderId()==null||o.getAssignedAt()==null)throw invalid();return detail(o);}switch(next){case "CONFIRMED"->{requireState(o,"PAID");o.setConfirmedAt(now());}case "PACKED"->requireState(o,"CONFIRMED");case "ASSIGNMENT_ACCEPTED"->{requireState(o,"DELIVERY_ASSIGNED");requireMerchantManagedRider(o);o.setAssignmentAcceptedAt(now());}case "DISPATCHED"->{if("PACKED".equals(o.getStatus())){if(!"DELIVERY".equals(o.getDeliveryMethod()))throw invalid();boolean managed=assignAndRegisterDelivery(o,dispatch);if(managed){next="DELIVERY_ASSIGNED";o.setAssignedAt(now());}else{o.setCollectedAt(now());generateDeliveryCode(o);o.setDispatchedAt(now());}}else{requireState(o,"ASSIGNMENT_ACCEPTED");requireMerchantManagedRider(o);o.setCollectedAt(now());o.setDispatchedAt(now());generateDeliveryCode(o);}}case "READY_FOR_PICKUP"->{requireState(o,"PACKED");if(!"PICKUP".equals(o.getDeliveryMethod()))throw invalid();generatePickupCode(o);}default->throw invalid();}o.setStatus(next);}
         orderRepo.save(o);audit(o,"SOKO_ORDER_"+next);notifyOrder(o,o.getStatus().replace('_',' '),"Your order progress was updated by the merchant.");return detail(o);
     }
 
-    @Transactional public SokoModels.OrderAction acceptAssignment(long orderId){SokoOrder o=assignedOrder(orderId,"DELIVERY_ASSIGNED");o.setStatus("ASSIGNMENT_ACCEPTED");o.setAssignmentAcceptedAt(now());orderRepo.save(o);audit(o,"SOKO_DELIVERY_ACCEPTED");notifyOrder(o,"Rider assigned","Your verified rider accepted the delivery assignment.");return SokoModels.OrderAction.from(o);}
-    @Transactional public SokoModels.OrderAction confirmCollection(long orderId){SokoOrder o=assignedOrder(orderId,"ASSIGNMENT_ACCEPTED");o.setStatus("DISPATCHED");o.setCollectedAt(now());o.setDispatchedAt(now());generateDeliveryCode(o);orderRepo.save(o);audit(o,"SOKO_DELIVERY_COLLECTED");notifyOrder(o,"Out for delivery","The rider collected your order and is on the way.");return SokoModels.OrderAction.from(o);}
-    @Transactional public SokoModels.OrderAction failDelivery(long orderId,SokoRequests.DeliveryException request){SokoOrder o=deliveryExceptionOrder(orderId,null);if(!List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED","DISPATCHED").contains(o.getStatus()))throw invalid();o.setStatus("DELIVERY_FAILED");o.setDeliveryFailedAt(now());o.setDeliveryExceptionReason(request.reason().trim());clearDeliveryCode(o);releaseRider(o,false);orderRepo.save(o);audit(o,"SOKO_DELIVERY_FAILED");notifyOrder(o,"Delivery attempt failed",request.reason());return SokoModels.OrderAction.from(o);}
-    @Transactional public SokoModels.OrderAction returnDelivery(long orderId,SokoRequests.DeliveryException request){SokoOrder o=deliveryExceptionOrder(orderId,"DELIVERY_FAILED");o.setStatus("RETURNED");o.setReturnedAt(now());o.setDeliveryExceptionReason(request.reason().trim());if(hasRefundableBalance(o))o.setRefundStatus("REQUESTED");orderRepo.save(o);audit(o,"SOKO_DELIVERY_RETURNED");notifyOrder(o,"Order returned",request.reason());return SokoModels.OrderAction.from(o);}
+    @Transactional public SokoModels.OrderAction acceptAssignment(long orderId){SokoOrder o=assignedOrder(orderId,null);if("ASSIGNMENT_ACCEPTED".equals(o.getStatus()))return SokoModels.OrderAction.from(o);requireState(o,"DELIVERY_ASSIGNED");o.setStatus("ASSIGNMENT_ACCEPTED");o.setAssignmentAcceptedAt(now());orderRepo.save(o);audit(o,"SOKO_DELIVERY_ACCEPTED");notifyOrder(o,"Rider assigned","Your verified rider accepted the delivery assignment.");return SokoModels.OrderAction.from(o);}
+    @Transactional public SokoModels.OrderAction confirmCollection(long orderId){SokoOrder o=assignedOrder(orderId,null);if("DISPATCHED".equals(o.getStatus())&&o.getCollectedAt()!=null)return SokoModels.OrderAction.from(o);requireState(o,"ASSIGNMENT_ACCEPTED");o.setStatus("DISPATCHED");o.setCollectedAt(now());o.setDispatchedAt(now());generateDeliveryCode(o);orderRepo.save(o);audit(o,"SOKO_DELIVERY_COLLECTED");notifyOrder(o,"Out for delivery","The rider collected your order and is on the way.");return SokoModels.OrderAction.from(o);}
+    @Transactional public SokoModels.OrderAction failDelivery(long orderId,SokoRequests.DeliveryException request){SokoOrder o=deliveryExceptionOrder(orderId,null);if("PACKED".equals(o.getStatus())&&o.getDeliveryFailedAt()!=null||"DELIVERY_RETURN_REQUIRED".equals(o.getStatus()))return SokoModels.OrderAction.from(o);if(!List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED","DISPATCHED").contains(o.getStatus()))throw invalid();boolean collected=o.getCollectedAt()!=null||"DISPATCHED".equals(o.getStatus());o.setStatus(collected?"DELIVERY_RETURN_REQUIRED":"PACKED");o.setDeliveryFailedAt(now());o.setDeliveryExceptionReason(request.reason().trim());clearDeliveryCode(o);if(!collected){releaseRider(o,false);clearPriorAssignmentDisplay(o);}orderRepo.save(o);audit(o,collected?"SOKO_DELIVERY_RETURN_REQUIRED":"SOKO_DELIVERY_REASSIGNMENT_REQUIRED");notifyOrder(o,collected?"Delivery failed — return required":"Delivery assignment failed — choose another rider",request.reason());return SokoModels.OrderAction.from(o);}
+    @Transactional public SokoModels.OrderAction returnDelivery(long orderId,SokoRequests.DeliveryException request){SokoOrder o=deliveryExceptionOrder(orderId,null);if("RETURNED".equals(o.getStatus()))return SokoModels.OrderAction.from(o);if(!List.of("DELIVERY_FAILED","DELIVERY_RETURN_REQUIRED").contains(o.getStatus()))throw invalid();BigDecimal collected=authoritativeCollected(o);o.setStatus("RETURNED");o.setReturnedAt(now());o.setDeliveryExceptionReason(request.reason().trim());releaseRider(o,false);requestOutstandingRefund(o,collected);orderRepo.save(o);audit(o,"SOKO_DELIVERY_RETURNED");notifyOrder(o,"Order returned",request.reason());return SokoModels.OrderAction.from(o);}
+    @Transactional public SokoModels.OrderAction returnAfterFinanceHold(long orderId,SokoRequests.DeliveryException request){
+        SokoOrder o=financeHoldOrder(orderId);
+        if("FINANCE_HOLD_RETURNED".equals(o.getStatus()))return SokoModels.OrderAction.from(o);
+        releaseRider(o,false);clearDeliveryAuthorization(o);
+        // A physical return ends rider custody, but groceries are not silently put back on sale.
+        // The merchant can inspect them and explicitly adjust inventory if they are saleable.
+        o.setReturnedAt(now());o.setDeliveryExceptionReason(request.reason().trim());o.setStatus("FINANCE_HOLD_RETURNED");
+        orderRepo.save(o);audit(o,"SOKO_FINANCE_HOLD_RETURNED");notifyOrder(o,"Order returned to the shop",request.reason());return SokoModels.OrderAction.from(o);
+    }
     @Transactional public OrderDetail reissueDeliveryCode(long orderId,SokoRequests.CodeReissue request){requireSuperAdmin();return requestDeliveryCodeRecovery(orderId,request.reason());}
 
     @Transactional
@@ -540,23 +583,89 @@ public class SokoService {
     }
 
     @Transactional
-    public void completePaidInvoice(String invoiceRef,String providerReference){orderRepo.findByInvoiceRefAndActiveTrue(invoiceRef).ifPresent(o->{if("UNPAID".equals(o.getPaymentStatus())){o.setPaymentStatus("PAID");if("EXPIRED".equals(o.getStatus())||"CANCELLED".equals(o.getStatus()))o.setRefundStatus("REQUESTED");else o.setStatus("PAID");orderRepo.save(o);audit(o,"SOKO_PAYMENT_CONFIRMED");notifyOrder(o,"Payment confirmed","");}});}
+    public void completePaidInvoice(String invoiceRef,String providerReference){
+        applyInvoicePayment(invoiceRef,providerReference);
+    }
 
-    @Transactional public void completeFinanceOperation(String invoiceRef,String type,BigDecimal amount,String providerReference){orderRepo.findByInvoiceRefAndActiveTrue(invoiceRef).ifPresent(o->{BigDecimal total=zero(o.getRefundedAmount()).add(amount);o.setRefundedAmount(total);o.setRefundReference(StringUtils.left(providerReference,120));o.setRefundStatus("CONFIRMED");if("REFUND".equals(type)){boolean full=total.compareTo(o.getTotal())>=0;o.setPaymentStatus(full?"REFUNDED":"PARTIALLY_REFUNDED");if(full){o.setStatus("REFUNDED");clearDeliveryAuthorization(o);}notifyOrder(o,full?"Refund completed":"Partial refund completed",o.getCurrency()+" "+amount.toPlainString()+" was refunded.");}else{o.setPaymentStatus("REVERSED");o.setStatus("PAYMENT_REVERSED");clearDeliveryAuthorization(o);o.setSettlementStatus("BLOCKED");notifyOrder(o,"Payment reversed","The payment provider confirmed a "+type.toLowerCase(Locale.ROOT)+". The order is no longer treated as paid.");}orderRepo.save(o);audit(o,"SOKO_PAYMENT_"+type);});}
+    /** Reconciles from the locked invoice instead of trusting callback order or amount. */
+    @Transactional
+    public void applyInvoicePayment(String invoiceRef,String providerReference){
+        orderRepo.findByInvoiceRefAndActiveTrue(invoiceRef).ifPresent(o->{
+            String previousStatus=o.getStatus(),previousPaymentStatus=o.getPaymentStatus(),previousRefundStatus=o.getRefundStatus();
+            BigDecimal previousRefundRequestedAmount=o.getRefundRequestedAmount();
+            BigDecimal collected=authoritativeCollected(o);
+            if(collected.signum()<=0)return;
+            boolean fullyPaid=collected.compareTo(zero(o.getTotal()))>=0;
+            BigDecimal reversals=zero(o.getReversedAmount()).add(zero(o.getChargedBackAmount()));
+            BigDecimal refunds=zero(o.getRefundedAmount());
+            if(reversals.signum()>0)o.setPaymentStatus(reversals.add(refunds).compareTo(collected)>=0?"REVERSED":"PARTIALLY_REVERSED");
+            else if(refunds.signum()>0)o.setPaymentStatus(refunds.compareTo(collected)>=0?"REFUNDED":"PARTIALLY_REFUNDED");
+            else o.setPaymentStatus(fullyPaid?"PAID":"PARTIALLY_PAID");
+            if(List.of("CANCELLED","EXPIRED","RETURNED","REFUNDED","PAYMENT_REVERSED","DELIVERY_RETURN_REQUIRED",
+                    "FINANCE_HOLD","FINANCE_HOLD_RETURN_REQUIRED","FINANCE_HOLD_RETURNED").contains(o.getStatus()))requestOutstandingRefund(o,collected);
+            else if(fullyPaid&&confirmedFinancialAdjustments(o).signum()==0&&"PENDING_PAYMENT".equals(o.getStatus()))o.setStatus("PAID");
+            if(java.util.Objects.equals(previousStatus,o.getStatus())
+                    &&java.util.Objects.equals(previousPaymentStatus,o.getPaymentStatus())
+                    &&java.util.Objects.equals(previousRefundStatus,o.getRefundStatus())
+                    &&sameAmount(previousRefundRequestedAmount,o.getRefundRequestedAmount()))return;
+            orderRepo.save(o);audit(o,fullyPaid?"SOKO_PAYMENT_CONFIRMED":"SOKO_PARTIAL_PAYMENT_APPLIED");
+            notifyOrder(o,fullyPaid?"Payment confirmed":"Partial payment received","");
+        });
+    }
 
-    @Transactional public OrderDetail cancel(long orderId,SokoRequests.Cancellation request){SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);SokoStore s=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);boolean allowed=o.getCustomerUserId()==userDao.getUserId()||s.getOwnerUserId()==userDao.getUserId();if(!allowed)throw forbidden();if(!List.of("PENDING_PAYMENT","PAID","CONFIRMED").contains(o.getStatus()))throw invalid();restoreStock(o);releaseRider(o,false);o.setCancellationReason(request.reason().trim());o.setCancelledAt(now());o.setStatus("CANCELLED");if(hasRefundableBalance(o))o.setRefundStatus("REQUESTED");orderRepo.save(o);audit(o,"SOKO_ORDER_CANCELLED");notifyOrder(o,"Cancelled","");return detail(o);}
-    @Transactional public OrderDetail finance(long orderId,SokoRequests.FinanceUpdate r){if(!userDao.hasRole(PMSRole.FINANCE)&&!userDao.hasRole(PMSRole.SUPER_ADMIN))throw forbidden();SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);
-        boolean refund=r.type()==SokoRequests.FinanceType.REFUND;
-        boolean paidLike="PAID".equals(o.getPaymentStatus())||"PARTIALLY_REFUNDED".equals(o.getPaymentStatus());
-        BigDecimal confirmedRefund=zero(o.getRefundedAmount());
-        if(refund&&r.amount().compareTo(confirmedRefund)<0)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Enter the cumulative refunded total. It cannot be less than the amount already confirmed.");
-        boolean extendsConfirmedPartialRefund=refund&&"PARTIALLY_REFUNDED".equals(o.getPaymentStatus())&&"CONFIRMED".equals(o.getRefundStatus())&&r.status()==SokoRequests.FinanceStatus.CONFIRMED&&r.amount().compareTo(confirmedRefund)>0;
-        String previousStatus=extendsConfirmedPartialRefund?"PARTIAL_CONFIRMED":refund?o.getRefundStatus():o.getSettlementStatus();
-        var previous=new org.pms.silverocean.service.payment.MarketplaceFinanceGuard.Entry(previousStatus,refund?o.getRefundedAmount():o.getSettledAmount(),refund?o.getRefundReference():o.getSettlementReference());
-        var other=new org.pms.silverocean.service.payment.MarketplaceFinanceGuard.Entry(refund?o.getSettlementStatus():o.getRefundStatus(),refund?o.getSettledAmount():o.getRefundedAmount(),null);
-        if(org.pms.silverocean.service.payment.MarketplaceFinanceGuard.validate(o.getTotal(),paidLike,"COMPLETED".equals(o.getStatus()),refund,new org.pms.silverocean.service.payment.MarketplaceFinanceGuard.Entry(r.status().name(),r.amount(),StringUtils.trimToNull(r.providerReference())),previous,other))return detail(o);
-        if(r.status()==SokoRequests.FinanceStatus.CONFIRMED&&StringUtils.isBlank(r.providerReference()))throw invalid();if(r.type()==SokoRequests.FinanceType.REFUND){if(!paidLike||r.amount().compareTo(o.getTotal())>0)throw invalid();o.setRefundStatus(r.status().name());o.setRefundedAmount(r.amount());o.setRefundReference(StringUtils.left(StringUtils.trimToNull(r.providerReference()),120));if(r.status()==SokoRequests.FinanceStatus.CONFIRMED){if(r.amount().compareTo(o.getTotal())==0){o.setPaymentStatus("REFUNDED");o.setStatus("REFUNDED");clearDeliveryAuthorization(o);}else{o.setPaymentStatus("PARTIALLY_REFUNDED");}}}else{BigDecimal refundable=o.getRefundedAmount()==null?BigDecimal.ZERO:o.getRefundedAmount();if(!"COMPLETED".equals(o.getStatus())||r.amount().compareTo(o.getTotal().subtract(refundable))>0)throw invalid();o.setSettlementStatus(r.status().name());o.setSettledAmount(r.amount());o.setSettlementReference(StringUtils.left(StringUtils.trimToNull(r.providerReference()),120));}orderRepo.save(o);audit(o,"SOKO_FINANCE_RECORD_"+r.type().name()+"_"+r.status().name());notifyFinanceRecord(o,refund);return detail(o);}
-    @Scheduled(fixedDelayString="${soko.reservation-expiry-scan-ms:300000}") @Transactional public void expireReservations(){for(SokoOrder o:orderRepo.findExpiredReservations(now(),PageRequest.of(0,100,Sort.by("reservationExpiresAt")))){restoreStock(o);o.setStatus("EXPIRED");o.setCancelledAt(now());o.setCancellationReason("Payment reservation expired");orderRepo.save(o);audit(o,"SOKO_RESERVATION_EXPIRED");notifyOrder(o,"Payment reservation expired","");}}
+    @Transactional
+    public void completeFinanceOperation(String invoiceRef,String type,BigDecimal amount,String providerReference){
+        orderRepo.findByInvoiceRefAndActiveTrue(invoiceRef).ifPresent(o->{
+            String operation=StringUtils.upperCase(StringUtils.trimToEmpty(type),Locale.ROOT);
+            if(!List.of("REFUND","REVERSAL","CHARGEBACK").contains(operation)||amount==null||amount.signum()<=0)throw invalid();
+            String reference=StringUtils.left(StringUtils.trimToNull(providerReference),120);
+            if(reference==null)throw invalid();
+            if(financeOperationReplay(o.getId(),operation,reference,amount))return;
+            BigDecimal collected=authoritativeCollected(o);
+            BigDecimal adjusted=confirmedFinancialAdjustments(o);
+            if(adjusted.add(amount).compareTo(collected)>0)
+                throw new PMSCustomException(ResponseCode.INVALID_AMOUNT,"The confirmed finance total cannot exceed money collected for this order.");
+            if("REFUND".equals(operation)){
+                o.setRefundedAmount(zero(o.getRefundedAmount()).add(amount));o.setRefundReference(reference);o.setRefundStatus("CONFIRMED");o.setRefundRequestedAmount(null);
+            }else if("REVERSAL".equals(operation)){
+                o.setReversedAmount(zero(o.getReversedAmount()).add(amount));o.setReversalReference(reference);o.setReversalStatus("CONFIRMED");o.setSettlementStatus("BLOCKED");
+            }else{
+                o.setChargedBackAmount(zero(o.getChargedBackAmount()).add(amount));o.setChargebackReference(reference);o.setChargebackStatus("CONFIRMED");o.setSettlementStatus("BLOCKED");
+            }
+            boolean finality=confirmedFinancialAdjustments(o).compareTo(collected)>=0;
+            if(finality){
+                String terminal=zero(o.getReversedAmount()).add(zero(o.getChargedBackAmount())).signum()>0?"PAYMENT_REVERSED":"REFUNDED";
+                o.setPaymentStatus("PAYMENT_REVERSED".equals(terminal)?"REVERSED":"REFUNDED");
+                applyFinancialFinality(o,terminal);
+            }else{
+                o.setPaymentStatus("REFUND".equals(operation)?"PARTIALLY_REFUNDED":"PARTIALLY_REVERSED");
+                applyFinancialReductionHold(o,collected);
+            }
+            orderRepo.save(o);financeOperationRepo.save(new SokoFinanceOperation(o.getId(),operation,reference,amount));audit(o,"SOKO_PAYMENT_"+operation);
+            notifyOrder(o,finality?"Payment adjustment completed":"Partial payment adjustment completed",o.getCurrency()+" "+amount.toPlainString()+" was confirmed.");
+        });
+    }
+
+    @Transactional public OrderDetail cancel(long orderId,SokoRequests.Cancellation request){SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);SokoStore s=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);boolean allowed=o.getCustomerUserId()==userDao.getUserId()||s.getOwnerUserId()==userDao.getUserId();if(!allowed)throw forbidden();if("CANCELLED".equals(o.getStatus()))return detail(o);if(!List.of("PENDING_PAYMENT","PAID","CONFIRMED").contains(o.getStatus()))throw invalid();BigDecimal collected=authoritativeCollected(o);if(collected.signum()>0)o.setPaymentStatus(collected.compareTo(zero(o.getTotal()))>=0?"PAID":"PARTIALLY_PAID");restoreStock(o);releaseRider(o,false);o.setCancellationReason(request.reason().trim());o.setCancelledAt(now());o.setStatus("CANCELLED");requestOutstandingRefund(o,collected);orderRepo.save(o);audit(o,"SOKO_ORDER_CANCELLED");notifyOrder(o,"Cancelled","");return detail(o);}
+    @Transactional public OrderDetail finance(long orderId,SokoRequests.FinanceUpdate r){requireFinanceRole();SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);
+        if(r.type()==SokoRequests.FinanceType.REFUND)return updateManualRefund(o,r);
+        BigDecimal collected=authoritativeCollected(o),refunded=zero(o.getRefundedAmount());
+        if(!"COMPLETED".equals(o.getStatus())||r.amount().compareTo(collected.subtract(refunded).max(BigDecimal.ZERO))>0)throw invalid();
+        String reference=StringUtils.left(StringUtils.trimToNull(r.providerReference()),120);
+        if(r.status()==SokoRequests.FinanceStatus.CONFIRMED&&reference==null)throw invalid();
+        if(java.util.Objects.equals(o.getSettlementStatus(),r.status().name())&&zero(o.getSettledAmount()).compareTo(r.amount())==0&&java.util.Objects.equals(o.getSettlementReference(),reference))return detail(o);
+        o.setSettlementStatus(r.status().name());o.setSettledAmount(r.amount());o.setSettlementReference(reference);orderRepo.save(o);audit(o,"SOKO_FINANCE_RECORD_SETTLEMENT_"+r.status().name());notifyFinanceRecord(o,false);return detail(o);}
+    @Scheduled(fixedDelayString="${soko.reservation-expiry-scan-ms:300000}")
+    @Transactional public void expireReservations(){
+        Pageable batch=PageRequest.of(0,100,Sort.by("reservationExpiresAt"));
+        for(int scan=0;scan<10;scan++){
+            List<SokoOrder> expired=orderRepo.findExpiredReservations(now(),batch);
+            expired.forEach(this::expirePendingCheckout);
+            if(expired.size()<100)break;
+        }
+    }
+
+    private void expirePendingCheckout(SokoOrder o){BigDecimal collected=authoritativeCollected(o);if(collected.signum()>0)o.setPaymentStatus(collected.compareTo(zero(o.getTotal()))>=0?"PAID":"PARTIALLY_PAID");restoreStock(o);o.setStatus("EXPIRED");o.setCancelledAt(now());o.setCancellationReason("Payment reservation expired");requestOutstandingRefund(o,collected);orderRepo.save(o);audit(o,"SOKO_RESERVATION_EXPIRED");notifyOrder(o,"Payment reservation expired","");}
 
     private void applyStore(SokoStore s,SokoRequests.StoreUpsert r){s.setName(r.name().trim());s.setDescription(StringUtils.trimToNull(r.description()));s.setPhoneNumber(StringUtils.trimToNull(r.phoneNumber()));s.setAddress(StringUtils.trimToNull(r.address()));s.setLatitude(r.latitude());s.setLongitude(r.longitude());s.setServiceRadiusKm(r.serviceRadiusKm()==null?BigDecimal.valueOf(25):r.serviceRadiusKm());s.setPickupEnabled(r.pickupEnabled());s.setDeliveryEnabled(r.deliveryEnabled());s.setDeliveryFee(zero(r.deliveryFee()));s.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(r.currency()));s.setPaymentAccountId(r.paymentAccountId());if(!s.isPickupEnabled()&&!s.isDeliveryEnabled())throw invalid();if((s.getLatitude()==null)!=(s.getLongitude()==null)||s.getLatitude()!=null&&(!validLatitude(s.getLatitude())||!validLongitude(s.getLongitude())))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Choose a valid shop location on the map.");if(s.getServiceRadiusKm()==null||s.getServiceRadiusKm().compareTo(BigDecimal.ONE)<0||s.getServiceRadiusKm().compareTo(BigDecimal.valueOf(100))>0)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"The service radius must be between 1 km and 100 km.");}
     private void applyProduct(SokoProduct p,SokoRequests.ProductUpsert r,SokoStore store){validateAllowedGrocery(r.name(),r.description());p.setName(r.name().trim());p.setDescription(StringUtils.trimToNull(r.description()));p.setCategory(SokoGroceryCategory.normalize(r.category()));p.setUnit(r.unit().trim());p.setPrice(r.price());p.setCurrency(store.getCurrency());if(r.variations()!=null||p.getId()==0)p.setStockQuantity(r.variations()!=null&&!r.variations().isEmpty()?r.variations().stream().mapToInt(v->v.stockQuantity()==null?0:v.stockQuantity()).sum():r.stockQuantity());p.setImageUrl(safeLegacyImageUrl(r.imageUrl()));if(List.of(OUT_OF_STOCK,"PAUSED").contains(p.getStatus())&&p.getStockQuantity()>0)p.setStatus(DRAFT);}
@@ -580,7 +689,12 @@ public class SokoService {
         // owns that account. Link self-service access only after the rider proves
         // ownership of the normalized phone using the SMS challenge.
         if(!rider.isPhoneConfirmed()){rider.setUserId(null);return;}
-        rider.setUserId(findRiderUserByPhone(rider.getPhoneNumber()).map(u->u.getId()).orElse(null));
+        rider.setUserId(findRiderUserByPhone(rider.getPhoneNumber())
+                .filter(org.pms.silverocean.database.pms.entities.Users::isActive)
+                .filter(org.pms.silverocean.database.pms.entities.Users::isVerified)
+                .filter(org.pms.silverocean.database.pms.entities.Users::isEmailVerified)
+                .filter(user->org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name().equals(user.getAccountStatus()))
+                .map(org.pms.silverocean.database.pms.entities.Users::getId).orElse(null));
     }
     private java.util.Optional<org.pms.silverocean.database.pms.entities.Users> findRiderUserByPhone(String phone){
         String normalized=normalizeStoredPhone(phone);
@@ -722,9 +836,10 @@ public class SokoService {
     private PMSInvoice createInvoice(SokoOrder o,SokoStore s,List<SokoOrderItem> items){PMSInvoice inv=new PMSInvoice();inv.setUnitId(o.getDestinationUnitId()==null?0:o.getDestinationUnitId());inv.setPropertyId(0);inv.setDescription(("Soko order "+o.getOrderNumber()).getBytes(StandardCharsets.UTF_8));String html=items.stream().map(i->"<tr><td><span>"+HtmlUtils.htmlEscape(i.getProductName())+" x "+i.getQuantity()+"</span></td><td class='amount-col'>"+i.getLineTotal()+"</td></tr>").collect(Collectors.joining());inv.setHtmlDescription(html.getBytes(StandardCharsets.UTF_8));inv.setMoneyAmount(o.getTotal());inv.setMoneyPendingAmount(o.getTotal());inv.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(o.getCurrency()));inv.setBilledUserId(o.getCustomerUserId());inv.setPayToUserId(s.getOwnerUserId());inv.setPaymentAccountId(o.getPaymentAccountId());inv.setActive(true);inv.setBillingType("SOKO");inv.setCustomerPhoneNumber(o.getCustomerPhone());userDao.findById(o.getCustomerUserId()).ifPresent(u->inv.setCustomerEmail(u.getEmail()));invoiceDao.createInvoice(inv);return inv;}
     private boolean assignAndRegisterDelivery(SokoOrder o,SokoRequests.Dispatch d){
         if(d==null||d.riderId()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Select a verified, registered and available SlickHood rider. One-off courier dispatch is no longer available.");
+        if(d.expectedArrivalTime()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Enter the rider's expected arrival time before dispatching the order.");
         ZonedDateTime expectedArrival=d.expectedArrivalTime().atZone(ZoneId.of("Africa/Nairobi")).withZoneSameInstant(ZoneId.of("UTC"));
         if(!expectedArrival.isAfter(now()))throw invalid();
-        SokoRider rider=riderRepo.findForUpdate(d.riderId(),o.getStoreId()).orElseThrow(this::notFound);if(!rider.isPhoneConfirmed()||!rider.isVerified()||!"ACTIVE".equals(rider.getStatus())||!"AVAILABLE".equals(rider.getAvailability()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Choose a phone-confirmed, active and available rider.");rider.setAvailability("BUSY");riderRepo.save(rider);o.setRiderId(rider.getId());o.setCourierName(rider.getDisplayName());o.setCourierPhone(rider.getPhoneNumber());o.setCourierVehiclePlate(rider.getVehiclePlate());
+        SokoRider rider=riderRepo.findForUpdate(d.riderId(),o.getStoreId()).orElseThrow(this::notFound);if(!rider.isPhoneConfirmed()||!rider.isVerified()||!"ACTIVE".equals(rider.getStatus())||!"AVAILABLE".equals(rider.getAvailability()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Choose a phone-confirmed, active and available rider.");rider.setAvailability("BUSY");riderRepo.save(rider);o.setRiderId(rider.getId());o.setCourierName(rider.getDisplayName());o.setCourierPhone(rider.getPhoneNumber());o.setCourierVehiclePlate(rider.getVehiclePlate());o.setDeliveryFailedAt(null);o.setDeliveryExceptionReason(null);
         o.setExpectedArrivalAt(expectedArrival);
         if(o.getDestinationUnitId()!=null){var visitor=visitorService.preRegisterDeliveryForHost(o.getCustomerUserId(),new CreateVisitorRequest(o.getCourierName(),o.getCourierVehiclePlate(),d.expectedArrivalTime(),null,false,o.getDestinationUnitId(),o.getCourierPhone(), VisitorCategory.DELIVERY));o.setDeliveryVisitorId(visitor.getId());}
         // A linked rider can accept/collect in their own account. A merchant-created,
@@ -747,8 +862,18 @@ public class SokoService {
         SokoOrder o=orderRepo.findByIdForUpdate(id).orElseThrow(this::notFound);if(o.getRiderId()==null)throw forbidden();
         SokoRider rider=riderRepo.findForUpdate(o.getRiderId(),o.getStoreId()).orElseThrow(this::notFound);long actor=userDao.getUserId();
         boolean assignedRider=rider.isPhoneConfirmed()&&rider.isVerified()&&"ACTIVE".equals(rider.getStatus())&&java.util.Objects.equals(rider.getUserId(),actor);
-        boolean owningMerchant=rider.getUserId()==null&&storeRepo.findByIdAndActiveTrue(o.getStoreId()).filter(store->store.getOwnerUserId()==actor).isPresent();
+        boolean owningMerchant=storeRepo.findByIdAndActiveTrue(o.getStoreId()).filter(store->store.getOwnerUserId()==actor).isPresent();
         if(!assignedRider&&!owningMerchant)throw forbidden();if(required!=null)requireState(o,required);return o;
+    }
+    private SokoOrder financeHoldOrder(long id){
+        SokoOrder o=orderRepo.findByIdForUpdate(id).orElseThrow(this::notFound);
+        if(!List.of("FINANCE_HOLD_RETURN_REQUIRED","FINANCE_HOLD_RETURNED").contains(o.getStatus()))throw invalid();
+        if(o.getRiderId()==null)throw forbidden();
+        SokoRider rider=riderRepo.findForUpdate(o.getRiderId(),o.getStoreId()).orElseThrow(this::notFound);
+        long actor=userDao.getUserId();boolean assigned=rider.isPhoneConfirmed()&&rider.isVerified()&&"ACTIVE".equals(rider.getStatus())
+                &&java.util.Objects.equals(rider.getUserId(),actor);
+        boolean merchant=storeRepo.findByIdAndActiveTrue(o.getStoreId()).filter(store->store.getOwnerUserId()==actor).isPresent();
+        if(!assigned&&!merchant)throw forbidden();return o;
     }
     private SokoStore requireMerchantOrAssignedRider(SokoOrder o){
         SokoStore store=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);
@@ -760,6 +885,7 @@ public class SokoService {
         throw forbidden();
     }
     private void releaseRider(SokoOrder o,boolean completed){if(o.getRiderId()==null)return;riderRepo.findForUpdate(o.getRiderId(),o.getStoreId()).ifPresent(r->{if("BUSY".equals(r.getAvailability()))r.setAvailability(r.isVerified()&&"ACTIVE".equals(r.getStatus())?"AVAILABLE":"OFFLINE");if(completed)r.setCompletedDeliveries(r.getCompletedDeliveries()+1);riderRepo.save(r);});}
+    private void clearPriorAssignmentDisplay(SokoOrder order){order.setCourierName(null);order.setCourierPhone(null);order.setCourierVehiclePlate(null);order.setAssignedAt(null);order.setAssignmentAcceptedAt(null);order.setExpectedArrivalAt(null);}
     private boolean validProof(String type,byte[] b){if(b==null)return false;return switch(type){case "image/jpeg"->b.length>3&&(b[0]&255)==255&&(b[1]&255)==216;case "image/png"->b.length>8&&(b[0]&255)==137&&b[1]=='P'&&b[2]=='N'&&b[3]=='G';default->false;};}
     private String decryptDeliveryCode(SokoOrder order){if(order.getEncryptedDeliveryCode()!=null){var decrypted=encryptionService.decrypt(order.getEncryptedDeliveryCode());return decrypted==null?null:decrypted.decryptedValue();}return order.getDeliveryCode();}
     private boolean constantTimeEquals(String expected,String actual){return java.security.MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),actual.getBytes(StandardCharsets.UTF_8));}
@@ -800,6 +926,7 @@ public class SokoService {
     private Double storeLongitude(SokoOrder order,SokoStore store){return order.getStoreLongitudeSnapshot()!=null?order.getStoreLongitudeSnapshot():store.getLongitude();}
     private SokoStore ownedStore(long id){return storeRepo.findByIdAndOwnerUserIdAndActiveTrue(id,userDao.getUserId()).orElseThrow(this::notFound);}
     private void requireMerchantRole(){if(!userDao.hasRole(PMSRole.SERVICE_PROVIDER)&&!userDao.hasRole(PMSRole.SUPER_ADMIN))throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
+    private void requireFinanceRole(){if(!userDao.hasRole(PMSRole.FINANCE)&&!userDao.hasRole(PMSRole.SUPER_ADMIN))throw forbidden();}
     private void requireSuperAdmin(){if(!userDao.hasRole(PMSRole.SUPER_ADMIN))throw forbidden();}
     private void notifyModeration(long ownerId,String name,String status,String reason){
         userDao.findById(ownerId).map(user->user.getEmail()).filter(StringUtils::isNotBlank).ifPresent(email->{
@@ -831,7 +958,103 @@ public class SokoService {
     private void audit(Object entity,String action){if(auditLogService!=null)auditLogService.createAuditLog(entity,action);}
     private void requireState(SokoOrder o,String state){if(!state.equals(o.getStatus()))throw invalid();}
     private BigDecimal zero(BigDecimal value){return value==null?BigDecimal.ZERO:value;}
-    private boolean hasRefundableBalance(SokoOrder order){return List.of("PAID","PARTIALLY_REFUNDED").contains(order.getPaymentStatus())&&zero(order.getTotal()).subtract(zero(order.getRefundedAmount())).signum()>0;}
+    private boolean sameAmount(BigDecimal left,BigDecimal right){return left==null?right==null:right!=null&&left.compareTo(right)==0;}
+    private boolean hasRefundableBalance(SokoOrder order){return List.of("PAID","PARTIALLY_PAID","PARTIALLY_REFUNDED").contains(order.getPaymentStatus())&&zero(order.getTotal()).subtract(zero(order.getRefundedAmount())).signum()>0;}
+    private BigDecimal authoritativeCollected(SokoOrder order){
+        PMSInvoice invoice=invoiceDao.getInvoiceByRefForUpdate(order.getInvoiceRef()).orElseThrow(this::notFound);
+        BigDecimal collected=invoice.moneyAmount().subtract(invoice.moneyPendingAmount()).max(BigDecimal.ZERO);
+        return collected.min(zero(order.getTotal())).setScale(2,java.math.RoundingMode.HALF_UP);
+    }
+    private BigDecimal confirmedFinancialAdjustments(SokoOrder order){
+        return zero(order.getRefundedAmount()).add(zero(order.getReversedAmount())).add(zero(order.getChargedBackAmount()));
+    }
+    private SokoModels.RefundQueueItem refundQueueItem(SokoOrder order){
+        BigDecimal collected=invoiceDao.getInvoiceByRef(order.getInvoiceRef())
+                .map(invoice->invoice.moneyAmount().subtract(invoice.moneyPendingAmount()).max(BigDecimal.ZERO))
+                .orElse(BigDecimal.ZERO).min(zero(order.getTotal()));
+        BigDecimal remaining=collected.subtract(confirmedFinancialAdjustments(order)).max(BigDecimal.ZERO);
+        String storeName=storeRepo.findById(order.getStoreId()).map(SokoStore::getName).orElse("Soko shop");
+        ZonedDateTime requestedAt=order.getCancelledAt()!=null?order.getCancelledAt():order.getReturnedAt()!=null?order.getReturnedAt():order.getCreatedOn();
+        return new SokoModels.RefundQueueItem(order.getId(),order.getOrderNumber(),storeName,order.getInvoiceRef(),
+                order.getStatus(),order.getPaymentStatus(),order.getRefundStatus(),order.getCurrency(),order.getTotal(),
+                zero(order.getRefundedAmount()),order.getRefundRequestedAmount(),remaining,
+                StringUtils.defaultIfBlank(order.getCancellationReason(),order.getDeliveryExceptionReason()),
+                requestedAt,order.getLastModifiedDate());
+    }
+    private void requestOutstandingRefund(SokoOrder order,BigDecimal collected){
+        BigDecimal target=collected.subtract(zero(order.getReversedAmount())).subtract(zero(order.getChargedBackAmount())).max(BigDecimal.ZERO);
+        if(target.compareTo(zero(order.getRefundedAmount()))<=0)return;
+        if(!"PROCESSING".equals(order.getRefundStatus())||order.getRefundRequestedAmount()==null||order.getRefundRequestedAmount().compareTo(target)<0){
+            order.setRefundStatus("REQUESTED");order.setRefundRequestedAmount(target);
+        }
+    }
+    private OrderDetail updateManualRefund(SokoOrder order,SokoRequests.FinanceUpdate request){
+        BigDecimal collected=authoritativeCollected(order),confirmed=zero(order.getRefundedAmount());
+        BigDecimal maximum=collected.subtract(zero(order.getReversedAmount())).subtract(zero(order.getChargedBackAmount())).max(BigDecimal.ZERO);
+        BigDecimal requested=request.amount();String next=request.status().name(),current=StringUtils.defaultIfBlank(order.getRefundStatus(),"NOT_REQUIRED");
+        String reference=StringUtils.left(StringUtils.trimToNull(request.providerReference()),120);
+        if(current.equals(next)&&"CONFIRMED".equals(next)&&confirmed.compareTo(requested)==0&&java.util.Objects.equals(order.getRefundReference(),reference)){
+            confirmedRefundReplay(order,reference);return detail(order);
+        }
+        if(current.equals(next)&&!"CONFIRMED".equals(next)&&zero(order.getRefundRequestedAmount()).compareTo(requested)==0)return detail(order);
+        if("CONFIRMED".equals(next)&&confirmed.compareTo(requested)==0&&reference!=null
+                &&confirmedRefundReplay(order,reference))return detail(order);
+        if(requested.compareTo(confirmed)<0||requested.compareTo(maximum)>0||requested.compareTo(confirmed)==0)throw invalid();
+        boolean valid="PROCESSING".equals(next)&&List.of("REQUESTED","FAILED").contains(current)
+                ||List.of("CONFIRMED","FAILED").contains(next)&&"PROCESSING".equals(current);
+        if(!valid)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Move refunds from requested to processing, then confirm or fail them.");
+        if(order.getRefundRequestedAmount()!=null&&List.of("REQUESTED","PROCESSING","FAILED").contains(current)
+                &&order.getRefundRequestedAmount().compareTo(requested)!=0)throw invalid();
+        if("CONFIRMED".equals(next)&&reference==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Enter the provider refund reference before confirming the refund.");
+        BigDecimal confirmedDelta=requested.subtract(confirmed);
+        if("CONFIRMED".equals(next)&&financeOperationReplay(order.getId(),"REFUND",reference,confirmedDelta))return detail(order);
+        order.setRefundStatus(next);
+        if("PROCESSING".equals(next)){order.setRefundRequestedAmount(requested);order.setRefundReference(null);}
+        else if("FAILED".equals(next)){order.setRefundRequestedAmount(requested);order.setRefundReference(reference);}
+        else{
+            order.setRefundedAmount(requested);order.setRefundReference(reference);order.setRefundRequestedAmount(null);
+            if(confirmedFinancialAdjustments(order).compareTo(collected)>=0){order.setPaymentStatus("REFUNDED");applyFinancialFinality(order,"REFUNDED");}
+            else{order.setPaymentStatus("PARTIALLY_REFUNDED");applyFinancialReductionHold(order,collected);}
+        }
+        orderRepo.save(order);
+        if("CONFIRMED".equals(next))financeOperationRepo.save(new SokoFinanceOperation(order.getId(),"REFUND",reference,confirmedDelta));
+        audit(order,"SOKO_FINANCE_RECORD_REFUND_"+next);notifyFinanceRecord(order,true);return detail(order);
+    }
+    private boolean financeOperationReplay(long orderId,String operation,String reference,BigDecimal amount){
+        var replay=financeOperationRepo.findByOrderIdAndProviderReference(orderId,reference);
+        if(replay.isEmpty())return false;
+        SokoFinanceOperation recorded=replay.get();
+        if(recorded.getOperationType().equals(operation)&&recorded.getAmount().compareTo(amount)==0)return true;
+        throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This provider reference was already recorded for a different finance operation.");
+    }
+    private boolean confirmedRefundReplay(SokoOrder order,String reference){
+        var replay=financeOperationRepo.findByOrderIdAndProviderReference(order.getId(),reference);
+        if(replay.isEmpty())return false;
+        if("REFUND".equals(replay.get().getOperationType())&&java.util.Objects.equals(order.getRefundReference(),reference))return true;
+        throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This provider reference was already recorded for a different finance operation.");
+    }
+    private void applyFinancialFinality(SokoOrder order,String terminalStatus){
+        clearDeliveryAuthorization(order);order.setSettlementStatus("BLOCKED");
+        if(riderHasCustody(order)){order.setStatus("FINANCE_HOLD_RETURN_REQUIRED");return;}
+        String previous=order.getStatus();
+        if(!List.of("COMPLETED","RETURNED","FINANCE_HOLD_RETURNED","REFUNDED","PAYMENT_REVERSED").contains(previous))restoreStock(order);
+        releaseRider(order,false);order.setStatus(terminalStatus);
+    }
+    private void applyFinancialReductionHold(SokoOrder order,BigDecimal collected){
+        clearDeliveryAuthorization(order);order.setSettlementStatus("BLOCKED");
+        if("COMPLETED".equals(order.getStatus()))return;
+        if(List.of("CANCELLED","EXPIRED","RETURNED","FINANCE_HOLD_RETURNED","REFUNDED","PAYMENT_REVERSED").contains(order.getStatus())){
+            requestOutstandingRefund(order,collected);return;
+        }
+        if(riderHasCustody(order))order.setStatus("FINANCE_HOLD_RETURN_REQUIRED");
+        else{
+            restoreStock(order);releaseRider(order,false);clearPriorAssignmentDisplay(order);order.setStatus("FINANCE_HOLD");
+        }
+        requestOutstandingRefund(order,collected);
+    }
+    private boolean riderHasCustody(SokoOrder order){return order.getRiderId()!=null&&order.getCollectedAt()!=null
+            &&List.of("DISPATCHED","DELIVERY_RETURN_REQUIRED","FINANCE_HOLD_RETURN_REQUIRED").contains(order.getStatus());}
+    private String financialTerminalStatus(SokoOrder order){return zero(order.getReversedAmount()).add(zero(order.getChargedBackAmount())).signum()>0?"PAYMENT_REVERSED":"REFUNDED";}
     private ZonedDateTime now(){return ZonedDateTime.now(ZoneId.of("UTC"));}
     private PMSCustomException notFound(){return new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND);}
     private PMSCustomException invalid(){return new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);}

@@ -21,6 +21,10 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
         // SlickHood product. Endpoint role checks still protect affiliate and
         // administrator data, but neither persona may be sent through billing.
         if (path.startsWith("/affiliate")) return true;
+        // Finance, administration and linked-rider operations are protected by
+        // endpoint roles/ownership. Requiring the merchant's Soko subscription
+        // here would incorrectly bill staff and riders merely to perform work.
+        if (isSokoOperationalExemption(path)) return true;
         if (path.startsWith("/smart-gate")) {
             entitlements.requireFeatureOrAddOn(entitlements.sessionBusinessProduct(),
                     "GATE_MANAGEMENT_INCLUDED_UNITS", SubscriptionProduct.GATE_MANAGEMENT_ADDON);
@@ -60,12 +64,23 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
     private SubscriptionProduct product(String path) {
         if (path.startsWith("/soko/store") || path.startsWith("/soko/product")
                 || path.startsWith("/soko/rider") || path.equals("/soko/order/merchant")
-                || path.matches("/soko/order/[^/]+/(status|finance)")) return SubscriptionProduct.SOKO;
+                || path.matches("/soko/order/[^/]+/status")) return SubscriptionProduct.SOKO;
         if (path.startsWith("/sp/profile") || path.startsWith("/sp/service")
                 || path.startsWith("/sp/document") || path.startsWith("/sp/referee")
                 || path.matches("/sp/booking/[^/]+/(confirm|complete|start|finance)")) {
             return SubscriptionProduct.SERVICES;
         }
         return null;
+    }
+
+    private boolean isSokoOperationalExemption(String path) {
+        return path.startsWith("/soko/catalog")
+                || path.equals("/soko/categories")
+                || path.equals("/soko/delivery-destinations")
+                || path.startsWith("/soko/order/")
+                || path.startsWith("/soko/finance/")
+                || path.equals("/soko/rider/assignments")
+                || path.startsWith("/soko/rider/kyc")
+                ;
     }
 }

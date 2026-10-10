@@ -37,6 +37,7 @@ public class SokoRiderKycService {
     private final org.pms.silverocean.service.notification.BusinessNotificationService businessAlerts;
     // Identity/business documents continue through the established common KYC flow.
     private static final Set<String> SUPPLEMENTAL_TYPES=Set.of("GOOD_CONDUCT_CERTIFICATE","PROFESSIONAL_CERTIFICATE","APPOINTMENT_LETTER");
+    private static final String NO_LINKED_ACCOUNT="This rider does not yet have a phone-confirmed linked SlickHood account.";
     public record DocumentView(long id,String documentType,String status,String reviewNotes,ZonedDateTime expiresAt,String downloadUrl){}
     public record Checklist(boolean commonKycApproved,List<String> outstanding,List<String> uploadTypes,List<DocumentView> documents,List<String> renewalDocumentTypes){}
     public record Review(String decision,String notes,ZonedDateTime expiresAt){}
@@ -96,9 +97,19 @@ public class SokoRiderKycService {
                 .filter(r->"BOTH".equals(r.getProfileScope())||user.getProfileType().equals(r.getProfileScope()))
                 .flatMap(r->Arrays.stream(r.getAcceptedDocumentTypes().split(","))).map(String::trim).filter(SUPPLEMENTAL_TYPES::contains).distinct().toList();
     }
-    private Users riderUser(long id){SokoRider r=riders.findById(id).filter(SokoRider::isActive).orElseThrow(()->new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND));return users.findByEmail(StringUtils.defaultString(r.getEmail()).trim().toLowerCase(Locale.ROOT)).orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"The rider must register using the email supplied by the merchant."));}
+    private Users riderUser(long id){
+        SokoRider rider=riders.findById(id).filter(SokoRider::isActive)
+                .orElseThrow(()->new PMSCustomException(ResponseCode.RESOURCE_NOT_FOUND));
+        if(!rider.isPhoneConfirmed()||rider.getUserId()==null)throw noLinkedAccount();
+        return users.findById(rider.getUserId()).orElseThrow(this::noLinkedAccount);
+    }
     private Users currentUser(){return users.findById(users.getUserId()).orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));}
-    private void requireRegisteredRider(Users user){if(riders.findAllByUserIdAndActiveTrue(user.getId()).isEmpty()&&(StringUtils.isBlank(user.getEmail())||riders.findAllByEmailIgnoreCaseAndActiveTrue(user.getEmail()).isEmpty()))throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);}
+    private void requireRegisteredRider(Users user){
+        boolean linked=riders.findAllByUserIdAndActiveTrue(user.getId()).stream()
+                .anyMatch(rider->rider.isPhoneConfirmed()&&Objects.equals(rider.getUserId(),user.getId()));
+        if(!linked)throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);
+    }
+    private PMSCustomException noLinkedAccount(){return new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,NO_LINKED_ACCOUNT);}
     private void requireAdmin(){if(!users.hasRole(PMSRole.SUPER_ADMIN))throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);}
     private boolean commonApproved(Users user){return user.isActive()&&user.isVerified()&&user.isEmailVerified()&&"ACTIVE".equals(user.getAccountStatus())&&cases.findByUserId(user.getId()).filter(c->c.isActive()&&"APPROVED".equals(c.getStatus())).isPresent();}
     private ProfileType profileType(Users user){return ProfileType.valueOf(user.getProfileType());}

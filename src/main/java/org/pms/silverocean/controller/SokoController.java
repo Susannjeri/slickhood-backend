@@ -56,6 +56,7 @@ public class SokoController {
     @PutMapping("/order/{id}/rider/collect") public ResponseEntity<ResponseDTO> confirmCollection(@PathVariable long id){return ok(service.confirmCollection(id));}
     @PutMapping("/order/{id}/rider/fail") public ResponseEntity<ResponseDTO> failDelivery(@PathVariable long id,@RequestBody @Valid SokoRequests.DeliveryException request){return ok(service.failDelivery(id,request));}
     @PutMapping("/order/{id}/rider/return") public ResponseEntity<ResponseDTO> returnDelivery(@PathVariable long id,@RequestBody @Valid SokoRequests.DeliveryException request){return ok(service.returnDelivery(id,request));}
+    @PutMapping("/order/{id}/finance-hold/return") public ResponseEntity<ResponseDTO> returnAfterFinanceHold(@PathVariable long id,@RequestBody @Valid SokoRequests.DeliveryException request){return ok(service.returnAfterFinanceHold(id,request));}
     @PostMapping("/order/checkout") public ResponseEntity<ResponseDTO> checkout(@RequestHeader("Idempotency-Key") String idempotencyKey,@RequestBody @Valid SokoRequests.Checkout r){return ok(service.checkout(r,idempotencyKey));}
     @GetMapping("/order/my") public ResponseEntity<ResponseDTO> myOrders(Pageable pageable){return page(service.myOrders(pageable));}
     @GetMapping("/order/merchant") public ResponseEntity<ResponseDTO> merchantOrders(Pageable pageable){return page(service.merchantOrders(pageable));}
@@ -67,9 +68,12 @@ public class SokoController {
     @PutMapping("/order/{id}/pickup/confirm") public ResponseEntity<ResponseDTO> confirmPickup(@PathVariable long id,@RequestBody @Valid SokoRequests.PickupConfirmation request){return ok(service.confirmPickup(id,request));}
     @PutMapping(value="/order/{id}/delivery/proof",consumes=MediaType.MULTIPART_FORM_DATA_VALUE) public ResponseEntity<ResponseDTO> proof(@PathVariable long id,@RequestPart("proof") MultipartFile proof)throws IOException{return ok(service.uploadDeliveryProof(id,proof));}
     @GetMapping("/order/{id}/delivery/proof") public ResponseEntity<ResponseDTO> proof(@PathVariable long id){return ok(service.deliveryProof(id));}
-    @PutMapping("/order/{id}/status") public ResponseEntity<ResponseDTO> status(@PathVariable long id,@RequestParam String status,@RequestBody(required=false) @Valid SokoRequests.Dispatch dispatch){return ok(service.transition(id,status,dispatch));}
+    @PutMapping(value="/order/{id}/status",consumes=MediaType.APPLICATION_JSON_VALUE) public ResponseEntity<ResponseDTO> status(@PathVariable long id,@RequestParam String status,@RequestBody(required=false) @Valid SokoRequests.Dispatch dispatch){return ok(service.transition(id,status,dispatch));}
+    /** Rolling-deploy compatibility for cached clients that submitted an empty HTML form. */
+    @PutMapping(value="/order/{id}/status",consumes=MediaType.APPLICATION_FORM_URLENCODED_VALUE) public ResponseEntity<ResponseDTO> legacyFormStatus(@PathVariable long id,@RequestParam String status){return ok(service.transition(id,status,null));}
     @PutMapping("/order/{id}/cancel") public ResponseEntity<ResponseDTO> cancel(@PathVariable long id,@RequestBody @Valid SokoRequests.Cancellation request){return ok(service.cancel(id,request));}
     @PutMapping("/order/{id}/finance") @PreAuthorize("hasAnyRole('FINANCE','SUPER_ADMIN')") public ResponseEntity<ResponseDTO> finance(@PathVariable long id,@RequestBody @Valid SokoRequests.FinanceUpdate request){return ok(service.finance(id,request));}
+    @GetMapping("/finance/refunds") @PreAuthorize("hasAnyRole('FINANCE','SUPER_ADMIN')") public ResponseEntity<ResponseDTO> refundQueue(Pageable pageable,@RequestParam(required=false)String status){return page(service.refundQueue(pageable,status));}
     @GetMapping("/admin/summary") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminSummary(){return ok(service.adminSummary());}
     @GetMapping("/admin/stores") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> adminStores(@RequestParam(required=false)String status,Pageable pageable){return page(service.adminStores(status,pageable));}
     @PutMapping("/admin/stores/{id}/moderation") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> moderateStore(@PathVariable long id,@RequestBody @Valid SokoRequests.ModerationDecision request){return ok(service.moderateStore(id,request));}

@@ -16,6 +16,8 @@ import java.time.ZonedDateTime;
 @Table(name = "pms_soko_order", indexes = {
         @Index(name = "idx_soko_order_customer", columnList = "customerUserId,createdOn"),
         @Index(name = "idx_soko_order_store", columnList = "storeId,status"),
+        @Index(name = "idx_soko_order_buyer_store_status", columnList = "customerUserId,storeId,status,active"),
+        @Index(name = "uk_soko_checkout_idempotency", columnList = "customerUserId,checkoutIdempotencyKey", unique = true),
         @Index(name = "idx_soko_order_invoice", columnList = "invoiceRef", unique = true)
 })
 @Getter @Setter @NoArgsConstructor
@@ -71,6 +73,15 @@ public class SokoOrder extends BaseCreatorEntity implements Auditable {
     private String refundStatus;
     private String refundReference;
     private BigDecimal refundedAmount;
+    /** Cumulative refund target currently being worked by Finance; confirmed refunds remain in refundedAmount. */
+    private BigDecimal refundRequestedAmount;
+    /** Provider reversals and chargebacks are independent of customer refunds and must never overwrite them. */
+    private String reversalStatus;
+    private String reversalReference;
+    private BigDecimal reversedAmount;
+    private String chargebackStatus;
+    private String chargebackReference;
+    private BigDecimal chargedBackAmount;
     private String settlementStatus;
     private String settlementReference;
     private BigDecimal settledAmount;

@@ -40,6 +40,10 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
 
     Optional<PMSInvoice> findByRef(String ref);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM PMSInvoice i WHERE i.ref=:ref")
+    Optional<PMSInvoice> findByRefForUpdate(@Param("ref") String ref);
+
     @Query(value = """
             SELECT o.payment_account_id
             FROM pms_soko_order o
@@ -53,7 +57,8 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
               AND s.owner_user_id = i.pay_to_user_id
               AND o.active = 1
               AND o.status = 'PENDING_PAYMENT'
-              AND o.payment_status = 'UNPAID'
+              AND o.payment_status IN ('UNPAID', 'PARTIALLY_PAID')
+              AND o.stock_released = 0
               AND o.reservation_expires_at > UTC_TIMESTAMP(6)
               AND a.active = 1
               AND a.verified = 1

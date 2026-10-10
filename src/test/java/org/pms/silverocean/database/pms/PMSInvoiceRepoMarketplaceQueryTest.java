@@ -18,7 +18,8 @@ class PMSInvoiceRepoMarketplaceQueryTest {
 
         assertThat(sql)
                 .contains("O.STATUS = 'PENDING_PAYMENT'")
-                .contains("O.PAYMENT_STATUS = 'UNPAID'")
+                .contains("O.PAYMENT_STATUS IN ('UNPAID', 'PARTIALLY_PAID')")
+                .contains("O.STOCK_RELEASED = 0")
                 .contains("O.RESERVATION_EXPIRES_AT > UTC_TIMESTAMP(6)")
                 .contains("B.STATUS = 'AWAITING_PAYMENT'")
                 .contains("B.PAYMENT_STATUS = 'UNPAID'")

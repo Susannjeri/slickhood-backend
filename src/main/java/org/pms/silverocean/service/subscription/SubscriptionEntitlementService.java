@@ -65,6 +65,18 @@ public class SubscriptionEntitlementService {
         return subscription;
     }
 
+    /**
+     * Server-side marketplace boundary for resources owned by another user. Unlike
+     * requireProduct, this deliberately does not derive the payer from the caller's
+     * active role: checkout must validate the shop owner, not the buyer.
+     */
+    @Transactional
+    public UserSubscription requireActiveProductForOwner(long ownerUserId, SubscriptionProduct product) {
+        return subscriptions.findActiveProductForUpdate(ownerUserId,product,SubscriptionStatus.ACTIVE)
+                .filter(subscription->subscription.getEndAt()==null||subscription.getEndAt().isAfter(ZonedDateTime.now()))
+                .orElseThrow(()->new PMSCustomException(ResponseCode.SUBSCRIPTION_ACCESS_REQUIRED));
+    }
+
     @Transactional(readOnly = true)
     public void requireFeature(SubscriptionProduct product, String featureKey) {
         UserSubscription subscription = requireProduct(product);

@@ -3,6 +3,7 @@ package org.pms.silverocean.service.soko;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -28,7 +29,9 @@ public final class SokoRequests {
             @DecimalMin("1.00") @DecimalMax("100.00") BigDecimal serviceRadiusKm,
             boolean pickupEnabled,
             boolean deliveryEnabled,
-            @DecimalMin("0.00") BigDecimal deliveryFee,
+            @DecimalMin(value="0.00",message="Delivery fee cannot be negative.")
+            @DecimalMax(value="1000000.00",message="Delivery fee cannot exceed KES 1,000,000.")
+            @Digits(integer=7,fraction=2,message="Delivery fee may have at most two decimal places.") BigDecimal deliveryFee,
             @NotBlank @Size(min=3,max=3) String currency,
             Long paymentAccountId) {}
 
@@ -38,8 +41,11 @@ public final class SokoRequests {
             @Size(max=1500) String description,
             @NotBlank @Size(max=80) String category,
             @NotBlank @Size(max=40) String unit,
-            @NotNull @DecimalMin("0.01") BigDecimal price,
-            @Min(0) int stockQuantity,
+            @NotNull @DecimalMin(value="0.01",message="Product price must be at least KES 0.01.")
+            @DecimalMax(value="10000000.00",message="Product price cannot exceed KES 10,000,000.")
+            @Digits(integer=8,fraction=2,message="Product price may have at most two decimal places.") BigDecimal price,
+            @Min(value=0,message="Product stock cannot be negative.")
+            @Max(value=1000000,message="Product stock cannot exceed 1,000,000 units.") int stockQuantity,
             @Size(max=800) String imageUrl,
             @Size(max=30) List<@Valid ProductVariation> variations) {
         public ProductUpsert(Long storeId,String name,String description,String category,String unit,BigDecimal price,int stockQuantity,String imageUrl){this(storeId,name,description,category,unit,price,stockQuantity,imageUrl,List.of());}
@@ -48,18 +54,21 @@ public final class SokoRequests {
     public record ProductVariation(Long id,
                                    @NotBlank @Size(max=80) String name,
                                    @NotBlank @Size(max=120) String value,
-                                   @DecimalMin("0.00") BigDecimal priceAdjustment,
-                                   @NotNull @Min(0) Integer stockQuantity) {
+                                   @DecimalMin(value="0.00",message="Variation price adjustment cannot be negative.")
+                                   @DecimalMax(value="10000000.00",message="Variation price adjustment cannot exceed KES 10,000,000.")
+                                   @Digits(integer=8,fraction=2,message="Variation price adjustment may have at most two decimal places.") BigDecimal priceAdjustment,
+                                   @NotNull @Min(value=0,message="Variation stock cannot be negative.")
+                                   @Max(value=1000000,message="Variation stock cannot exceed 1,000,000 units.") Integer stockQuantity) {
         public ProductVariation(String name,String value,BigDecimal priceAdjustment,Integer stockQuantity){this(null,name,value,priceAdjustment,stockQuantity);}
     }
 
-    public record CheckoutItem(@NotNull Long productId, @Min(1) @Max(10_000) int quantity, Long variationId) {
+    public record CheckoutItem(@NotNull Long productId, @Min(1) @Max(100) int quantity, Long variationId) {
         public CheckoutItem(Long productId,int quantity){this(productId,quantity,null);}
     }
 
     public record Checkout(
             @NotNull Long storeId,
-            @NotEmpty @Size(max=50) List<@Valid CheckoutItem> items,
+            @NotEmpty @Size(max=25) List<@Valid CheckoutItem> items,
             @NotBlank @Pattern(regexp="(?i)DELIVERY|PICKUP") String deliveryMethod,
             @Size(max=500) String deliveryAddress,
             @NotBlank @Size(max=30) String customerPhone,
@@ -78,7 +87,7 @@ public final class SokoRequests {
             @Size(max=150) String courierName,
             @Size(max=30) String courierPhone,
             @Size(max=20) String vehiclePlate,
-            @NotNull LocalDateTime expectedArrivalTime) {}
+            LocalDateTime expectedArrivalTime) {}
 
     public record RiderUpsert(
             @NotNull Long storeId,
@@ -110,7 +119,9 @@ public final class SokoRequests {
     public record Cancellation(@NotBlank @Size(max=1000) String reason) {}
     public enum FinanceType { REFUND, SETTLEMENT }
     public enum FinanceStatus { REQUESTED, PROCESSING, CONFIRMED, FAILED }
-    public record FinanceUpdate(@NotNull FinanceType type,@NotNull FinanceStatus status,@NotNull @DecimalMin("0.01") BigDecimal amount,@Size(max=120) String providerReference) {}
+    public record FinanceUpdate(@NotNull FinanceType type,@NotNull FinanceStatus status,
+                                @NotNull @DecimalMin("0.01") @Digits(integer=17,fraction=2,message="Finance amount may have at most two decimal places.") BigDecimal amount,
+                                @Size(max=120) String providerReference) {}
     public record ModerationDecision(@NotBlank @Pattern(regexp="APPROVE|REJECT|SUSPEND|REACTIVATE") String decision,@Size(max=1000) String reason) {}
     public record RiderDecision(@NotBlank @Pattern(regexp="VERIFY|ACTIVATE|SUSPEND|REJECT") String decision,
                                 @Size(max=1000) String reason) {}
