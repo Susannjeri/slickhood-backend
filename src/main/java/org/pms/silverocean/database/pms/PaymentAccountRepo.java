@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.Optional;
+import java.util.List;
 
 public interface PaymentAccountRepo extends JpaRepository<PaymentAccount, Long>, JpaSpecificationExecutor<PaymentAccount> {
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
@@ -19,6 +20,8 @@ public interface PaymentAccountRepo extends JpaRepository<PaymentAccount, Long>,
     Optional<PaymentAccount> findByIdAndActiveTrueAndCreatedBy(long id, long createdBy);
     long countByCreatedByAndCategoryAndActiveTrueAndVerifiedTrue(long createdBy,
             org.pms.silverocean.service.account.enums.AccountCategory category);
+    List<PaymentAccount> findByCreatedByAndCategoryAndActiveTrueAndVerifiedTrueOrderByNameAsc(
+            long createdBy, org.pms.silverocean.service.account.enums.AccountCategory category);
 
     @Query("SELECT pa FROM PaymentAccount pa JOIN PropertyAccount pa2 ON pa.id=pa2.accountId " +
             "WHERE pa2.propertyId=:propertyId AND pa2.active AND pa.active AND pa.verified AND " +

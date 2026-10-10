@@ -21,6 +21,7 @@ import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.property.UnitDao;
+import org.pms.silverocean.service.soko.SokoService;
 import org.pms.silverocean.service.property.wrappers.PropertyNameAddressAndTypeProjection;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -48,13 +49,14 @@ class InvoiceAccessBoundaryTest {
     @Mock I18NService i18n;
     @Mock PaymentPlatformFactory platforms;
     @Mock org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher events;
+    @Mock SokoService soko;
 
     InvoiceService service;
 
     @BeforeEach
     void setUp() {
         service = new InvoiceService(invoices, units, users, accounts, renderer, email, i18n, platforms,
-                org.mockito.Mockito.mock(org.pms.silverocean.service.payment.PaymentDao.class), events);
+                org.mockito.Mockito.mock(org.pms.silverocean.service.payment.PaymentDao.class), soko, events);
     }
 
     @Test

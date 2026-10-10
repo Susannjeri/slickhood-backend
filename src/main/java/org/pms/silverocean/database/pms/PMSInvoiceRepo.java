@@ -4,6 +4,7 @@ import jakarta.persistence.LockModeType;
 import org.pms.silverocean.database.pms.entities.PMSInvoice;
 import org.pms.silverocean.database.pms.entities.PMSPayment;
 import org.pms.silverocean.service.payment.invoice.wrappers.AmountCurrencyProjection;
+import org.pms.silverocean.service.payment.invoice.wrappers.InvoiceRefIdProjection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -17,6 +18,7 @@ import java.time.ZonedDateTime;
 import java.util.Optional;
 import java.util.Set;
 import java.util.List;
+import java.util.Collection;
 
 public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpecificationExecutor<PMSInvoice> {
     boolean existsByUnitIdAndActiveTrueAndPaidFalse(long unitId);
@@ -39,6 +41,9 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
     Optional<PMSInvoice> findByIdForUpdate(@Param("id") long id);
 
     Optional<PMSInvoice> findByRef(String ref);
+
+    @Query("SELECT i.id AS id, i.ref AS ref FROM PMSInvoice i WHERE i.active=true AND i.ref IN :refs")
+    List<InvoiceRefIdProjection> findIdsByRefs(@Param("refs") Collection<String> refs);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT i FROM PMSInvoice i WHERE i.ref=:ref")

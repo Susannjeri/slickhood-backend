@@ -30,6 +30,7 @@ import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
 import org.pms.silverocean.service.property.UnitDao;
 import org.pms.silverocean.service.property.wrappers.PropertyNameAddressAndTypeProjection;
 import org.pms.silverocean.service.property.wrappers.TenantNameEmailPhoneAndUnitRefProjection;
+import org.pms.silverocean.service.soko.SokoService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -59,6 +60,7 @@ public class InvoiceService {
     private final I18NService i18NService;
     private final PaymentPlatformFactory paymentPlatformFactory;
     private final PaymentDao paymentDao;
+    private final SokoService sokoService;
     private final org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents;
     private static final String INVOICE_TEMPLATE = "invoice";
 
@@ -67,6 +69,7 @@ public class InvoiceService {
                           I18NService i18NService,
                           PaymentPlatformFactory paymentPlatformFactory,
                           PaymentDao paymentDao,
+                          SokoService sokoService,
                           org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents) {
         this.invoiceDao = invoiceDao;
         this.unitDao = unitDao;
@@ -77,6 +80,7 @@ public class InvoiceService {
         this.i18NService = i18NService;
         this.paymentPlatformFactory = paymentPlatformFactory;
         this.paymentDao = paymentDao;
+        this.sokoService = sokoService;
         this.notificationEvents = notificationEvents;
     }
 
@@ -413,7 +417,9 @@ public class InvoiceService {
         PMSInvoice invoice=accessibleInvoice(invoiceId);
         List<PaymentAccount> candidates = invoice.getSubscriptionPlanCode()!=null
                 ? accountDao.getActiveAndVerifiedSlickHoodAccount(Pageable.unpaged()).getContent()
-                : isMarketplaceInvoice(invoice)
+                : isSokoInvoice(invoice)
+                    ? selectableSokoAccounts(invoice)
+                    : isMarketplaceInvoice(invoice)
                     ? pinnedMarketplaceAccount(invoice)
                     : accountDao.listByPropertyAndOwner(Pageable.unpaged(),invoice.getPropertyId(),invoice.getPayToUserId()).getContent();
         AccountCategory expectedCategory=expectedAccountCategory(invoice);
@@ -422,8 +428,6 @@ public class InvoiceService {
         return candidates.stream()
                 .filter(account->account.isActive()&&account.isVerified())
                 .filter(account->java.util.Objects.equals(account.getCreatedBy(),invoice.getPayToUserId()))
-                .filter(account->!isMarketplaceInvoice(invoice)
-                        || java.util.Objects.equals(account.getId(),invoice.getPaymentAccountId()))
                 .filter(account->account.getChannel()!=null&&account.getChannel()!=PaymentChannel.FLUTTER_WAVE)
                 .filter(account->activeChannels.contains(account.getChannel().name()))
                 .filter(account->expectedCategory==null||account.getCategory()==expectedCategory)
@@ -433,6 +437,11 @@ public class InvoiceService {
                         .thenComparing(PaymentAccount::getName))
                 .map(account->new AccountSummaryDTO(account,paymentPlatformFactory.getChannelImage(account.getChannel())))
                 .toList();
+    }
+
+    private List<PaymentAccount> selectableSokoAccounts(PMSInvoice invoice) {
+        if (!marketplaceDestinationMatchesSource(invoice)) return List.of();
+        return accountDao.listReadyMerchantAccounts(invoice.getPayToUserId());
     }
 
     private List<PaymentAccount> pinnedMarketplaceAccount(PMSInvoice invoice) {
@@ -489,6 +498,30 @@ public class InvoiceService {
     }
 
     private void validateSubscriptionPaymentAccount(PMSInvoice invoice, PaymentChannel paymentChannel, long accountId) {
+        if (isSokoInvoice(invoice)) {
+            if (!marketplaceDestinationMatchesSource(invoice)) {
+                throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+            }
+            PaymentAccount account;
+            try {
+                account=accountDao.getAccountById(accountId);
+            } catch (PMSCustomException missingOrInactiveAccount) {
+                throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+            }
+            if (!account.isActive() || !account.isVerified()
+                    || account.getCategory() != AccountCategory.MERCHANT
+                    || !java.util.Objects.equals(account.getCreatedBy(),invoice.getPayToUserId())
+                    || account.getChannel() != paymentChannel) {
+                throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+            }
+            if (!java.util.Objects.equals(invoice.getPaymentAccountId(),accountId)) {
+                sokoService.selectPendingPaymentDestination(invoice,account);
+                if (!marketplaceDestinationMatchesSource(invoice)) {
+                    throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+                }
+            }
+            return;
+        }
         if (isMarketplaceInvoice(invoice)) {
             if (!java.util.Objects.equals(invoice.getPaymentAccountId(),accountId)
                     || !marketplaceDestinationMatchesSource(invoice)) {
@@ -532,6 +565,10 @@ public class InvoiceService {
     private boolean isMarketplaceInvoice(PMSInvoice invoice) {
         return "SOKO".equals(invoice.getBillingType())
                 || "SERVICE_MARKETPLACE".equals(invoice.getBillingType());
+    }
+
+    private boolean isSokoInvoice(PMSInvoice invoice) {
+        return "SOKO".equals(invoice.getBillingType());
     }
 
     private boolean marketplaceDestinationMatchesSource(PMSInvoice invoice) {

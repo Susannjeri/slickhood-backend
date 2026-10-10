@@ -15,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 import java.util.Set;
+import java.util.Collection;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.pms.silverocean.service.payment.invoice.InvoiceSpecifications.searchParticipantInvoices;
 import static org.pms.silverocean.service.payment.invoice.InvoiceSpecifications.searchPlatformInvoices;
@@ -48,6 +51,15 @@ public class InvoiceDao {
 
     public Optional<PMSInvoice> getInvoiceByRef(String ref) {
         return pmsInvoiceRepo.findByRef(ref);
+    }
+
+    public Map<String, Long> getInvoiceIdsByRefs(Collection<String> refs) {
+        if (refs == null || refs.isEmpty()) return Map.of();
+        return pmsInvoiceRepo.findIdsByRefs(refs).stream()
+                .collect(Collectors.toUnmodifiableMap(
+                        org.pms.silverocean.service.payment.invoice.wrappers.InvoiceRefIdProjection::getRef,
+                        org.pms.silverocean.service.payment.invoice.wrappers.InvoiceRefIdProjection::getId,
+                        (left, ignored) -> left));
     }
 
     public Optional<PMSInvoice> getInvoiceByRefForUpdate(String ref) {

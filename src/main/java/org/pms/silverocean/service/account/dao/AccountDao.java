@@ -9,6 +9,7 @@ import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
+import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -82,6 +83,12 @@ public class AccountDao {
 
     public Page<PaymentAccount> listByOwner(Long ownerId, Pageable pageable) {
         return accountRepo.findByCreatedByAndActiveTrue(ownerId, pageable);
+    }
+
+    /** Eligible, secret-free marketplace destinations owned by the invoice payee. */
+    public List<PaymentAccount> listReadyMerchantAccounts(long ownerId) {
+        return accountRepo.findByCreatedByAndCategoryAndActiveTrueAndVerifiedTrueOrderByNameAsc(
+                ownerId, AccountCategory.MERCHANT);
     }
 
     public PaymentAccount getAccountById(Long id) {

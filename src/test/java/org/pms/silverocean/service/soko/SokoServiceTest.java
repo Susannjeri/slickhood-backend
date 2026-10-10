@@ -284,6 +284,7 @@ class SokoServiceTest {
         lenient().when(stores.findByIdForCheckout(anyLong())).thenAnswer(call->stores.findByIdAndActiveTrue(call.getArgument(0)));
         lenient().when(orders.findPendingCheckoutForUpdate(anyLong(),anyLong(),any())).thenReturn(List.of());
         lenient().when(financeOperations.findByOrderIdAndProviderReference(anyLong(),anyString())).thenReturn(Optional.empty());
+        lenient().when(invoices.getInvoiceIdsByRefs(any())).thenReturn(java.util.Map.of());
         var paidInvoice=new org.pms.silverocean.database.pms.entities.PMSInvoice();paidInvoice.setMoneyAmount(new BigDecimal("100"));paidInvoice.setMoneyPendingAmount(BigDecimal.ZERO);
         lenient().when(invoices.getInvoiceByRefForUpdate(any())).thenReturn(Optional.of(paidInvoice));
         lenient().when(invoices.getInvoiceByRef(any())).thenReturn(Optional.of(paidInvoice));
@@ -358,16 +359,35 @@ class SokoServiceTest {
         SokoOrderItem item=new SokoOrderItem();item.setId(10L);item.setOrderId(9L);item.setProductId(5L);item.setProductName("Milk");item.setUnit("litre");item.setUnitPrice(BigDecimal.TEN);item.setQuantity(1);item.setLineTotal(BigDecimal.TEN);item.setCreatedBy(4L);item.setActive(true);
         SokoStore store=new SokoStore();store.setId(2L);store.setName("Fresh Corner");store.setActive(true);
         var pageable=org.springframework.data.domain.PageRequest.of(0,10);when(users.getUserId()).thenReturn(4L);when(orders.findAllByCustomerUserIdAndActiveTrue(eq(4L),any())).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(order),pageable,1));when(items.findAllByOrderIdInAndActiveTrueOrderByOrderIdAscIdAsc(List.of(9L))).thenReturn(List.of(item));when(stores.findAllById(List.of(2L))).thenReturn(List.of(store));
+        when(invoices.getInvoiceIdsByRefs(List.of("INV-9"))).thenReturn(java.util.Map.of("INV-9",71L));
 
         var detail=service.myOrders(pageable).getContent().getFirst();
         String orderJson=new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(detail.order());
         String itemJson=new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(detail.items());
         String actionJson=new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(SokoModels.OrderAction.from(order));
 
-        assertTrue(orderJson.contains("SOKO-9"));assertTrue(itemJson.contains("Milk"));
+        assertTrue(orderJson.contains("SOKO-9"));assertTrue(itemJson.contains("Milk"));assertEquals(71L,detail.invoiceId());
+        verify(invoices).getInvoiceIdsByRefs(List.of("INV-9"));
         for(String forbidden:List.of("customerUserId","paymentAccountId","paymentChannel","checkoutIdempotencyKey","settlementStatus","settledAmount","deliveryRecoveryRequestedBy","deliveryRecoverySupportReason","deliveryRecoveryRequestCount","createdBy","uuid","active"))assertFalse(orderJson.contains(forbidden),forbidden);
         for(String forbidden:List.of("orderId","createdBy","uuid","active"))assertFalse(itemJson.contains(forbidden),forbidden);
         for(String forbidden:List.of("subtotal","deliveryFee","total","currency","paymentAccountId","paymentChannel","refund","settlement","recovery","customerPhone"))assertFalse(actionJson.toLowerCase(java.util.Locale.ROOT).contains(forbidden.toLowerCase(java.util.Locale.ROOT)),forbidden);
+    }
+
+    @Test void orderPageResolvesAllInvoiceIdsWithOneBatchLookup(){
+        SokoOrder first=new SokoOrder();first.setId(1L);first.setOrderNumber("SOKO-1");first.setStoreId(2L);first.setCustomerUserId(4L);first.setInvoiceRef("INV-1");first.setActive(true);
+        SokoOrder second=new SokoOrder();second.setId(2L);second.setOrderNumber("SOKO-2");second.setStoreId(2L);second.setCustomerUserId(4L);second.setInvoiceRef("INV-2");second.setActive(true);
+        SokoStore store=new SokoStore();store.setId(2L);store.setName("Fresh Corner");store.setActive(true);
+        var pageable=org.springframework.data.domain.PageRequest.of(0,10);
+        when(users.getUserId()).thenReturn(4L);
+        when(orders.findAllByCustomerUserIdAndActiveTrue(eq(4L),any())).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(first,second),pageable,2));
+        when(items.findAllByOrderIdInAndActiveTrueOrderByOrderIdAscIdAsc(List.of(1L,2L))).thenReturn(List.of());
+        when(stores.findAllById(List.of(2L))).thenReturn(List.of(store));
+        when(invoices.getInvoiceIdsByRefs(List.of("INV-1","INV-2"))).thenReturn(java.util.Map.of("INV-1",101L,"INV-2",102L));
+
+        var result=service.myOrders(pageable).getContent();
+
+        assertEquals(List.of(101L,102L),result.stream().map(SokoModels.OrderDetail::invoiceId).toList());
+        verify(invoices,times(1)).getInvoiceIdsByRefs(List.of("INV-1","INV-2"));
     }
 
     @Test void oneOffCourierDispatchIsRejectedBeforeAssignmentOrCodeGeneration(){
@@ -425,6 +445,42 @@ class SokoServiceTest {
         SokoStore store=new SokoStore();store.setId(2L);store.setName("Renamed Shop");store.setAddress("Moved Road");store.setPhoneNumber("0799999999");store.setLatitude(-2.0);store.setLongitude(37.0);store.setPaymentAccountId(44L);
         when(users.getUserId()).thenReturn(7L);when(orders.findAllByCustomerUserIdAndActiveTrue(eq(7L),any())).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(order)));when(stores.findAllById(any())).thenReturn(List.of(store));
         var result=service.myOrders(org.springframework.data.domain.PageRequest.of(0,10)).getContent().getFirst();assertEquals(33L,result.paymentAccountId());assertEquals("MPESA",result.paymentChannel());assertEquals("Original Shop",result.storeName());assertEquals("Original Road",result.storeAddress());assertEquals("0711111111",result.storePhoneNumber());assertEquals(-1.28,result.storeLatitude());assertEquals(36.82,result.storeLongitude());verify(accounts,never()).getAccountById(44L);
+    }
+
+    @Test void buyerSelectionRepinsUnpaidOrderAndInvoiceToReadySameOwnerAccount(){
+        SokoOrder order=new SokoOrder();order.setId(41L);order.setInvoiceRef("INV-41");order.setStoreId(2L);order.setCustomerUserId(7L);order.setStatus("PENDING_PAYMENT");order.setPaymentStatus("UNPAID");order.setPaymentAccountId(12L);order.setPaymentChannel("MPESA_BANK");order.setReservationExpiresAt(ZonedDateTime.now().plusMinutes(10));order.setActive(true);
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(99L);store.setActive(true);
+        var invoice=new org.pms.silverocean.database.pms.entities.PMSInvoice();invoice.setRef("INV-41");invoice.setBillingType("SOKO");invoice.setBilledUserId(7L);invoice.setPayToUserId(99L);invoice.setPaymentAccountId(12L);invoice.setMoneyAmount(new BigDecimal("1500"));invoice.setMoneyPendingAmount(new BigDecimal("1500"));invoice.setActive(true);
+        var direct=new org.pms.silverocean.database.pms.entities.PaymentAccount();direct.setId(13L);direct.setCreatedBy(99L);direct.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);direct.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);direct.setActive(true);direct.setVerified(true);
+        when(orders.findByInvoiceRefAndActiveTrue("INV-41")).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+
+        service.selectPendingPaymentDestination(invoice,direct);
+
+        assertEquals(13L,order.getPaymentAccountId());assertEquals("MPESA",order.getPaymentChannel());assertEquals(13L,invoice.getPaymentAccountId());
+        verify(orders).save(order);verify(invoices).saveInvoice(invoice);
+    }
+
+    @Test void paymentDestinationSelectionRejectsForeignMerchantAndPartiallyPaidOrder(){
+        SokoOrder order=new SokoOrder();order.setId(41L);order.setInvoiceRef("INV-41");order.setStoreId(2L);order.setCustomerUserId(7L);order.setStatus("PENDING_PAYMENT");order.setPaymentStatus("PARTIALLY_PAID");order.setPaymentAccountId(12L);order.setReservationExpiresAt(ZonedDateTime.now().plusMinutes(10));order.setActive(true);
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(99L);store.setActive(true);
+        var invoice=new org.pms.silverocean.database.pms.entities.PMSInvoice();invoice.setRef("INV-41");invoice.setBillingType("SOKO");invoice.setBilledUserId(7L);invoice.setPayToUserId(99L);invoice.setPaymentAccountId(12L);invoice.setMoneyAmount(new BigDecimal("1500"));invoice.setMoneyPendingAmount(new BigDecimal("500"));invoice.setActive(true);
+        var foreign=new org.pms.silverocean.database.pms.entities.PaymentAccount();foreign.setId(13L);foreign.setCreatedBy(100L);foreign.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);foreign.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);foreign.setActive(true);foreign.setVerified(true);
+        assertThrows(org.pms.silverocean.service.payment.PaymentRequestException.class,()->service.selectPendingPaymentDestination(invoice,foreign));
+        foreign.setCreatedBy(99L);when(orders.findByInvoiceRefAndActiveTrue("INV-41")).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+        assertThrows(org.pms.silverocean.service.payment.PaymentRequestException.class,()->service.selectPendingPaymentDestination(invoice,foreign));
+        verify(orders,never()).save(any());verify(invoices,never()).saveInvoice(any());
+    }
+
+    @Test void paymentDestinationSelectionRejectsExpiredReservation(){
+        SokoOrder order=new SokoOrder();order.setId(41L);order.setInvoiceRef("INV-41");order.setStoreId(2L);order.setCustomerUserId(7L);order.setStatus("PENDING_PAYMENT");order.setPaymentStatus("UNPAID");order.setPaymentAccountId(12L);order.setReservationExpiresAt(ZonedDateTime.now().minusSeconds(1));order.setActive(true);
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(99L);store.setActive(true);
+        var invoice=new org.pms.silverocean.database.pms.entities.PMSInvoice();invoice.setRef("INV-41");invoice.setBillingType("SOKO");invoice.setBilledUserId(7L);invoice.setPayToUserId(99L);invoice.setPaymentAccountId(12L);invoice.setMoneyAmount(new BigDecimal("1500"));invoice.setMoneyPendingAmount(new BigDecimal("1500"));invoice.setActive(true);
+        var direct=new org.pms.silverocean.database.pms.entities.PaymentAccount();direct.setId(13L);direct.setCreatedBy(99L);direct.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);direct.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);direct.setActive(true);direct.setVerified(true);
+        when(orders.findByInvoiceRefAndActiveTrue("INV-41")).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+
+        assertThrows(org.pms.silverocean.service.payment.PaymentRequestException.class,()->service.selectPendingPaymentDestination(invoice,direct));
+
+        verify(orders,never()).save(any());verify(invoices,never()).saveInvoice(any());
     }
 
     @Test void createRiderRequiresVerificationBeforeAssignments(){

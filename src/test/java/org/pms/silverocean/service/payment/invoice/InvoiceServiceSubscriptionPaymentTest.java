@@ -11,6 +11,7 @@ import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.entities.PMSInvoice;
 import org.pms.silverocean.database.pms.entities.PaymentAccount;
 import org.pms.silverocean.service.I18NService;
+import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -24,13 +25,16 @@ import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannelDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
 import org.pms.silverocean.service.property.UnitDao;
+import org.pms.silverocean.service.soko.SokoService;
 
 import java.util.Optional;
 import java.util.Set;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -47,6 +51,7 @@ class InvoiceServiceSubscriptionPaymentTest {
     @Mock private PaymentPlatformFactory paymentPlatformFactory;
     @Mock private PaymentPlatform paymentPlatform;
     @Mock private PaymentDao paymentDao;
+    @Mock private SokoService sokoService;
     @Mock private org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents;
 
     private InvoiceService service;
@@ -54,7 +59,7 @@ class InvoiceServiceSubscriptionPaymentTest {
     @BeforeEach
     void setUp() {
         service = new InvoiceService(invoiceDao, unitDao, userDao, accountDao, renderService,
-                emailService, i18NService, paymentPlatformFactory, paymentDao, notificationEvents);
+                emailService, i18NService, paymentPlatformFactory, paymentDao, sokoService, notificationEvents);
     }
 
     @Test
@@ -293,10 +298,9 @@ class InvoiceServiceSubscriptionPaymentTest {
         verify(accountDao, never()).isAttachedToProperty(12L, 0L);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"SOKO", "SERVICE_MARKETPLACE"})
-    void rejectsMarketplaceCheckoutThroughAccountOtherThanPinnedDestination(String billingType) {
-        PMSInvoice invoice = propertyInvoice(billingType, 12L);
+    @Test
+    void serviceMarketplaceStillRejectsCheckoutThroughAccountOtherThanPinnedDestination() {
+        PMSInvoice invoice = propertyInvoice("SERVICE_MARKETPLACE", 12L);
         when(userDao.getUserId()).thenReturn(7L);
         when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
 
@@ -306,6 +310,91 @@ class InvoiceServiceSubscriptionPaymentTest {
         verify(accountDao, never()).getAccountById(13L);
         verify(accountDao, never()).isAttachedToProperty(13L, 0L);
         verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PESAWISE);
+    }
+
+    @Test
+    void sokoBuyerCanSelectAnotherReadyAccountOwnedByTheSameMerchant() {
+        PMSInvoice invoice = propertyInvoice("SOKO", 12L);
+        PaymentAccount account = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.MPESA, 99L);
+        account.setId(13L);
+        PaymentResponse expected = new PaymentResponse(true, ResponseCode.MPESA_PAYMENT_INITIALIZED);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", "SOKO"))
+                .thenReturn(Optional.of(12L), Optional.of(13L));
+        when(accountDao.getAccountById(13L)).thenReturn(account);
+        org.mockito.Mockito.doAnswer(call->{invoice.setPaymentAccountId(13L);return null;})
+                .when(sokoService).selectPendingPaymentDestination(invoice,account);
+        when(paymentPlatformFactory.getPlatform(PaymentChannel.MPESA)).thenReturn(paymentPlatform);
+        when(paymentPlatform.processPayment(invoice, "0712345678", 13L)).thenReturn(expected);
+
+        assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, "0712345678", 13L));
+
+        org.mockito.InOrder paymentOrder=org.mockito.Mockito.inOrder(sokoService,paymentPlatform);
+        paymentOrder.verify(sokoService).selectPendingPaymentDestination(invoice,account);
+        paymentOrder.verify(paymentPlatform).processPayment(invoice,"0712345678",13L);
+        verify(accountDao, never()).isAttachedToProperty(13L, 0L);
+    }
+
+    @Test
+    void sokoRejectsForeignWrongCategoryAndInactiveAlternateAccounts() {
+        PMSInvoice invoice = propertyInvoice("SOKO", 12L);
+        PaymentAccount foreign = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.MPESA, 100L);
+        foreign.setId(13L);
+        PaymentAccount wrongCategory = paymentAccount(AccountCategory.LANDLORD, PaymentChannel.MPESA, 99L);
+        wrongCategory.setId(14L);
+        PaymentAccount inactive = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.MPESA, 99L);
+        inactive.setId(15L);
+        inactive.setActive(false);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", "SOKO")).thenReturn(Optional.of(12L));
+        when(accountDao.getAccountById(13L)).thenReturn(foreign);
+        when(accountDao.getAccountById(14L)).thenReturn(wrongCategory);
+        when(accountDao.getAccountById(15L)).thenReturn(inactive);
+
+        org.junit.jupiter.api.Assertions.assertAll(
+                () -> assertThrows(PaymentRequestException.class,
+                        () -> service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 13L)),
+                () -> assertThrows(PaymentRequestException.class,
+                        () -> service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 14L)),
+                () -> assertThrows(PaymentRequestException.class,
+                        () -> service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 15L)));
+
+        verify(sokoService,never()).selectPendingPaymentDestination(any(),any());
+        verify(paymentPlatformFactory,never()).getPlatform(any());
+    }
+
+    @Test
+    void sokoMasksMissingAlternateAccountAsUnauthorized() {
+        PMSInvoice invoice = propertyInvoice("SOKO", 12L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", "SOKO")).thenReturn(Optional.of(12L));
+        when(accountDao.getAccountById(18L))
+                .thenThrow(new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND));
+
+        PaymentRequestException error = assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 18L));
+
+        assertEquals(ResponseCode.ACCOUNT_UNAUTHORIZED, error.getResponseCode());
+        verify(sokoService, never()).selectPendingPaymentDestination(any(), any());
+        verify(paymentPlatformFactory, never()).getPlatform(any());
+    }
+
+    @Test
+    void sokoCannotSwitchDestinationAfterTheSourceStopsBeingPayable() {
+        PMSInvoice invoice = propertyInvoice("SOKO", 12L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", "SOKO")).thenReturn(Optional.empty());
+
+        assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, null, 13L));
+
+        verify(accountDao,never()).getAccountById(13L);
+        verify(sokoService,never()).selectPendingPaymentDestination(any(),any());
+        verify(paymentPlatformFactory,never()).getPlatform(any());
     }
 
     @ParameterizedTest
@@ -338,16 +427,15 @@ class InvoiceServiceSubscriptionPaymentTest {
         verify(paymentPlatformFactory, never()).getPlatform(PaymentChannel.PESAWISE);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"SOKO", "SERVICE_MARKETPLACE"})
-    void listsOnlyPinnedValidMarketplaceAccountWithoutPropertyLookup(String billingType) {
-        PMSInvoice invoice = propertyInvoice(billingType, 12L);
+    @Test
+    void serviceMarketplaceListsOnlyPinnedValidAccountWithoutPropertyLookup() {
+        PMSInvoice invoice = propertyInvoice("SERVICE_MARKETPLACE", 12L);
         PaymentAccount account = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.PESAWISE, 99L);
         account.setId(12L);
         account.setName("Marketplace PesaWise");
         when(userDao.getUserId()).thenReturn(7L);
         when(invoiceDao.getInvoiceForOwnerOrTenantView(41L, 7L)).thenReturn(Optional.of(invoice));
-        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", billingType)).thenReturn(Optional.of(12L));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", "SERVICE_MARKETPLACE")).thenReturn(Optional.of(12L));
         when(accountDao.getAccountById(12L)).thenReturn(account);
         when(paymentPlatformFactory.getPaymentTypes()).thenReturn(Set.of(
                 new PaymentChannelDTO("PESAWISE", "PesaWise", "", "")));
@@ -361,6 +449,41 @@ class InvoiceServiceSubscriptionPaymentTest {
         verify(accountDao, never()).listByPropertyAndOwner(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
         verify(accountDao, never()).isAttachedToProperty(12L, 0L);
+    }
+
+    @Test
+    void sokoListsEveryReadyAccountOwnedByMerchantWithPinnedDefaultFirst() {
+        PMSInvoice invoice = propertyInvoice("SOKO", 12L);
+        PaymentAccount bank = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.MPESA_BANK, 99L);
+        bank.setId(12L);bank.setName("Collectable class - bank");
+        PaymentAccount direct = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.MPESA, 99L);
+        direct.setId(13L);direct.setName("Collectable class - direct");
+        PaymentAccount foreign = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.MPESA, 100L);
+        foreign.setId(14L);foreign.setName("Foreign merchant");
+        PaymentAccount wrongCategory = paymentAccount(AccountCategory.LANDLORD, PaymentChannel.MPESA, 99L);
+        wrongCategory.setId(15L);wrongCategory.setName("Wrong category");
+        PaymentAccount inactive = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.MPESA, 99L);
+        inactive.setId(16L);inactive.setName("Inactive");inactive.setActive(false);
+        PaymentAccount unverified = paymentAccount(AccountCategory.MERCHANT, PaymentChannel.MPESA, 99L);
+        unverified.setId(17L);unverified.setName("Unverified");unverified.setVerified(false);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView(41L, 7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", "SOKO")).thenReturn(Optional.of(12L));
+        when(accountDao.listReadyMerchantAccounts(99L))
+                .thenReturn(List.of(direct,foreign,wrongCategory,inactive,unverified,bank));
+        when(paymentPlatformFactory.getPaymentTypes()).thenReturn(Set.of(
+                new PaymentChannelDTO("MPESA", "M-Pesa Direct", "", ""),
+                new PaymentChannelDTO("MPESA_BANK", "M-Pesa via Bank Paybill", "", "")));
+        when(paymentPlatformFactory.getChannelImage(PaymentChannel.MPESA)).thenReturn("mpesa.png");
+        when(paymentPlatformFactory.getChannelImage(PaymentChannel.MPESA_BANK)).thenReturn("bank.png");
+
+        var result=service.getInvoicePaymentAccounts(41L);
+
+        assertEquals(2,result.size());
+        assertEquals(12L,result.get(0).id());
+        assertEquals(13L,result.get(1).id());
+        verify(accountDao,never()).listByPropertyAndOwner(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyLong(),org.mockito.ArgumentMatchers.anyLong());
     }
 
     @ParameterizedTest

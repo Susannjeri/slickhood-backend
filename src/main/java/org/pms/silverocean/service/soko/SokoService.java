@@ -30,6 +30,7 @@ import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
+import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.filestorage.GarageService;
 import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.security.EncryptionService;
@@ -475,11 +476,42 @@ public class SokoService {
         SokoOrder o=new SokoOrder(); o.setOrderNumber("SOKO-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(Locale.ROOT)); o.setStoreId(store.getId()); o.setStoreNameSnapshot(store.getName());o.setStoreAddressSnapshot(store.getAddress());o.setStorePhoneSnapshot(store.getPhoneNumber());o.setStoreLatitudeSnapshot(store.getLatitude());o.setStoreLongitudeSnapshot(store.getLongitude()); o.setCustomerUserId(customerUserId); o.setCreatedBy(customerUserId); o.setCheckoutIdempotencyKey(cleanKey); o.setActive(true); o.setStatus("PENDING_PAYMENT"); o.setPaymentStatus("UNPAID");o.setRefundStatus("NOT_REQUIRED");o.setSettlementStatus("PENDING");o.setReservationExpiresAt(now().plusMinutes(reservationMinutes)); o.setDeliveryMethod(request.deliveryMethod().toUpperCase(Locale.ROOT)); o.setDeliveryAddress(destination.address());o.setDeliveryLatitude(destination.latitude());o.setDeliveryLongitude(destination.longitude()); o.setCustomerPhone(request.customerPhone()); o.setNotes(StringUtils.trimToNull(request.notes())); o.setDestinationUnitId(destination.unitId()); o.setSubtotal(subtotal); o.setDeliveryFee(fee); o.setTotal(subtotal.add(fee)); o.setCurrency(store.getCurrency());o.setPaymentAccountId(store.getPaymentAccountId());o.setPaymentChannel(accountDao.getAccountById(store.getPaymentAccountId()).getChannel().name()); o.setPlacedAt(now()); orderRepo.save(o);
         List<SokoOrderItem> items=new ArrayList<>();
         for(int i=0;i<products.size();i++){SokoProduct p=products.get(i);SokoProductVariation v=selectedVariations.get(i);BigDecimal unitPrice=unitPrices.get(i);int qty=checkoutLines.get(i).quantity();SokoOrderItem it=new SokoOrderItem();it.setOrderId(o.getId());it.setProductId(p.getId());it.setProductName(p.getName());if(v!=null){it.setVariationId(v.getId());it.setVariationName(v.getName());it.setVariationValue(v.getValue());}it.setUnit(p.getUnit());it.setUnitPrice(unitPrice);it.setQuantity(qty);it.setLineTotal(unitPrice.multiply(BigDecimal.valueOf(qty)));it.setCreatedBy(userDao.getUserId());it.setActive(true);items.add(itemRepo.save(it));}
-        PMSInvoice invoice=createInvoice(o,store,items);o.setInvoiceRef(invoice.getRef());orderRepo.save(o);notifyOrder(o,"Awaiting payment","");return detail(o,store,items);
+        PMSInvoice invoice=createInvoice(o,store,items);o.setInvoiceRef(invoice.getRef());orderRepo.save(o);notifyOrder(o,"Awaiting payment","");return detail(o,store,items,invoice.getId());
     }
 
     public Page<OrderDetail> myOrders(Pageable pageable){return hydrate(orderRepo.findAllByCustomerUserIdAndActiveTrue(userDao.getUserId(),bounded(pageable)));}
     public Page<OrderDetail> merchantOrders(Pageable pageable){List<Long> ids=myStores().stream().map(SokoStore::getId).toList();if(ids.isEmpty())return Page.empty(bounded(pageable));return hydrate(orderRepo.findAllByStoreIdInAndActiveTrue(ids,bounded(pageable)));}
+
+    /**
+     * Selects another ready receiving rail for an unpaid order. The order and
+     * invoice are changed together so callbacks can never settle to a stale or
+     * customer-supplied destination.
+     */
+    @Transactional("pmsDBTransactionManager")
+    public void selectPendingPaymentDestination(PMSInvoice invoice,PaymentAccount account){
+        if(invoice==null||account==null||!"SOKO".equals(invoice.getBillingType())
+                ||StringUtils.isBlank(invoice.getRef())||!invoice.isActive()||invoice.isPaid()
+                ||invoice.moneyPendingAmount().signum()<=0||account.getChannel()==null
+                ||!account.isActive()||!account.isVerified()||account.getCategory()!=AccountCategory.MERCHANT
+                ||!java.util.Objects.equals(account.getCreatedBy(),invoice.getPayToUserId()))
+            throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+        SokoOrder order=orderRepo.findByInvoiceRefAndActiveTrue(invoice.getRef())
+                .orElseThrow(()->new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED));
+        SokoStore store=storeRepo.findByIdAndActiveTrue(order.getStoreId())
+                .orElseThrow(()->new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED));
+        boolean payable="PENDING_PAYMENT".equals(order.getStatus())&&"UNPAID".equals(order.getPaymentStatus())
+                &&!order.isStockReleased()&&order.getReservationExpiresAt()!=null
+                &&order.getReservationExpiresAt().isAfter(now());
+        boolean sameSource=java.util.Objects.equals(order.getPaymentAccountId(),invoice.getPaymentAccountId())
+                &&order.getCustomerUserId()==invoice.getBilledUserId()
+                &&store.getOwnerUserId()==invoice.getPayToUserId();
+        if(!payable||!sameSource)throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+        if(java.util.Objects.equals(order.getPaymentAccountId(),account.getId())
+                &&account.getChannel().name().equals(order.getPaymentChannel()))return;
+        order.setPaymentAccountId(account.getId());order.setPaymentChannel(account.getChannel().name());
+        invoice.setPaymentAccountId(account.getId());
+        orderRepo.save(order);invoiceDao.saveInvoice(invoice);audit(order,"SOKO_PAYMENT_DESTINATION_SELECTED");
+    }
     public Page<SokoModels.RefundQueueItem> refundQueue(Pageable pageable,String requestedStatus){
         requireFinanceRole();
         List<String> statuses=StringUtils.isBlank(requestedStatus)?List.of("REQUESTED","PROCESSING","FAILED"):
@@ -900,15 +932,18 @@ public class SokoService {
     private Pageable bounded(Pageable p){return PageRequest.of(Math.max(0,p.getPageNumber()),Math.min(100,Math.max(1,p.getPageSize())),p.getSort().isSorted()?p.getSort():Sort.by(Sort.Direction.DESC,"createdOn"));}
     private void restoreStock(SokoOrder o){if(o.isStockReleased())return;for(SokoOrderItem i:itemRepo.findAllByOrderIdAndActiveTrueOrderById(o.getId())){SokoProduct p=productRepo.findByIdForUpdate(i.getProductId()).orElse(null);if(p!=null){p.setStockQuantity(p.getStockQuantity()+i.getQuantity());if(OUT_OF_STOCK.equals(p.getStatus()))p.setStatus(PUBLISHED);productRepo.save(p);}if(i.getVariationId()!=null)productVariationRepo.findForUpdate(i.getVariationId(),i.getProductId()).ifPresent(v->{v.setStockQuantity(v.getStockQuantity()+i.getQuantity());productVariationRepo.save(v);});}o.setStockReleased(true);}
     private OrderDetail detail(SokoOrder o){SokoStore s=storeRepo.findById(o.getStoreId()).orElseThrow(this::notFound);return detail(o,s,itemRepo.findAllByOrderIdAndActiveTrueOrderById(o.getId()));}
-    private OrderDetail detail(SokoOrder o,SokoStore s,List<SokoOrderItem> items){Long account=o.getPaymentAccountId()!=null?o.getPaymentAccountId():s.getPaymentAccountId();String channel=o.getPaymentChannel()!=null?o.getPaymentChannel():safeChannel(account);return new OrderDetail(SokoModels.OrderView.from(o),storeName(o,s),storeAddress(o,s),storePhone(o,s),storeLatitude(o,s),storeLongitude(o,s),account,channel,items.stream().map(SokoModels.OrderItemView::from).toList());}
+    private OrderDetail detail(SokoOrder o,SokoStore s,List<SokoOrderItem> items){return detail(o,s,items,invoiceId(o));}
+    private OrderDetail detail(SokoOrder o,SokoStore s,List<SokoOrderItem> items,Long invoiceId){Long account=o.getPaymentAccountId()!=null?o.getPaymentAccountId():s.getPaymentAccountId();String channel=o.getPaymentChannel()!=null?o.getPaymentChannel():safeChannel(account);return new OrderDetail(SokoModels.OrderView.from(o),storeName(o,s),storeAddress(o,s),storePhone(o,s),storeLatitude(o,s),storeLongitude(o,s),account,channel,invoiceId,items.stream().map(SokoModels.OrderItemView::from).toList());}
+    private Long invoiceId(SokoOrder order){if(StringUtils.isBlank(order.getInvoiceRef()))return null;return invoiceDao.getInvoiceIdsByRefs(List.of(order.getInvoiceRef())).get(order.getInvoiceRef());}
     private String safeChannel(Long id){if(id==null)return null;try{var account=accountDao.getAccountById(id);return account==null||account.getChannel()==null?null:account.getChannel().name();}catch(PMSCustomException missingAccount){return null;}}
     private Page<OrderDetail> hydrate(Page<SokoOrder> page){
         if(page.isEmpty())return new PageImpl<>(List.of(),page.getPageable(),page.getTotalElements());
         List<Long> orderIds=page.stream().map(SokoOrder::getId).toList();
         Map<Long,List<SokoOrderItem>> itemsByOrder=itemRepo.findAllByOrderIdInAndActiveTrueOrderByOrderIdAscIdAsc(orderIds).stream().collect(Collectors.groupingBy(SokoOrderItem::getOrderId));
         Map<Long,SokoStore> stores=storeRepo.findAllById(page.stream().map(SokoOrder::getStoreId).distinct().toList()).stream().collect(Collectors.toMap(SokoStore::getId,Function.identity()));
+        Map<String,Long> invoiceIds=invoiceDao.getInvoiceIdsByRefs(page.stream().map(SokoOrder::getInvoiceRef).filter(StringUtils::isNotBlank).distinct().toList());
         Map<Long,String> channels=new java.util.HashMap<>();page.forEach(o->{SokoStore s=stores.get(o.getStoreId());Long id=o.getPaymentAccountId()!=null?o.getPaymentAccountId():s==null?null:s.getPaymentAccountId();if(id!=null&&!channels.containsKey(id))channels.put(id,safeChannel(id));});
-        List<OrderDetail> content=page.stream().map(o->{SokoStore s=stores.get(o.getStoreId());if(s==null)throw notFound();Long account=o.getPaymentAccountId()!=null?o.getPaymentAccountId():s.getPaymentAccountId();return new OrderDetail(SokoModels.OrderView.from(o),storeName(o,s),storeAddress(o,s),storePhone(o,s),storeLatitude(o,s),storeLongitude(o,s),account,o.getPaymentChannel()!=null?o.getPaymentChannel():channels.get(account),itemsByOrder.getOrDefault(o.getId(),List.of()).stream().map(SokoModels.OrderItemView::from).toList());}).toList();
+        List<OrderDetail> content=page.stream().map(o->{SokoStore s=stores.get(o.getStoreId());if(s==null)throw notFound();Long account=o.getPaymentAccountId()!=null?o.getPaymentAccountId():s.getPaymentAccountId();Long invoiceId=StringUtils.isBlank(o.getInvoiceRef())?null:invoiceIds.get(o.getInvoiceRef());return new OrderDetail(SokoModels.OrderView.from(o),storeName(o,s),storeAddress(o,s),storePhone(o,s),storeLatitude(o,s),storeLongitude(o,s),account,o.getPaymentChannel()!=null?o.getPaymentChannel():channels.get(account),invoiceId,itemsByOrder.getOrDefault(o.getId(),List.of()).stream().map(SokoModels.OrderItemView::from).toList());}).toList();
         return new PageImpl<>(content,page.getPageable(),page.getTotalElements());
     }
     private Page<SokoModels.RiderAssignment> hydrateRiderAssignments(Page<SokoOrder> page){

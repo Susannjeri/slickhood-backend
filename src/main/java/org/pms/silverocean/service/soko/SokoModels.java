@@ -97,7 +97,8 @@ public final class SokoModels {
     }
     public record OrderDetail(OrderView order, String storeName, String storeAddress, String storePhoneNumber,
                               Double storeLatitude, Double storeLongitude,
-                              Long paymentAccountId, String paymentChannel, List<OrderItemView> items) {}
+                              Long paymentAccountId, String paymentChannel, Long invoiceId,
+                              List<OrderItemView> items) {}
     /** Least-privilege Finance work item; customer contact and delivery secrets are intentionally omitted. */
     public record RefundQueueItem(long orderId,String orderNumber,String storeName,String invoiceRef,
                                   String orderStatus,String paymentStatus,String refundStatus,String currency,
