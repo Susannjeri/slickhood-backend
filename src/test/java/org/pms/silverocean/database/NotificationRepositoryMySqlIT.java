@@ -52,7 +52,7 @@ class NotificationRepositoryMySqlIT {
     @Test void listCountAndReadAllExcludeSecurityChallenges(){
         String recipient="isolated-buyer@example.test";
         long visible=notification(recipient,"PAYMENT_RECEIPT_EMAIL");
-        var secretIds=List.of("EMAIL_OTP","OTP_SMS","NEW_LOGIN_OTP","SOKO_DELIVERY_RECOVERY_EMAIL","SOKO_DELIVERY_CODE_EMAIL").stream().map(type->notification(recipient,type)).toList();
+        var secretIds=List.of("EMAIL_OTP","OTP_SMS","NEW_LOGIN_OTP","SOKO_DELIVERY_RECOVERY_EMAIL","SOKO_DELIVERY_CODE_EMAIL","SOKO_RIDER_ASSIGNMENT_SMS").stream().map(type->notification(recipient,type)).toList();
         tx(em->{var repo=repo(em);var recipients=List.of(recipient);assertEquals(1,repo.countUnreadForRecipients(recipients));assertEquals(visible,repo.findAllForRecipients(PageRequest.of(0,20),recipients).getContent().getFirst().getId());
             for(long id:secretIds)assertEquals(0,repo.markRecipientRead(id,recipients,LocalDateTime.now()));
             assertEquals(0,repo.markRecipientRead(visible,List.of("other@example.test"),LocalDateTime.now()));assertEquals(1,repo.markRecipientRead(visible,recipients,LocalDateTime.now()));assertEquals(0,repo.countUnreadForRecipients(recipients));return null;});

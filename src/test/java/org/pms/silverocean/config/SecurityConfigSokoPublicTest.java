@@ -15,11 +15,13 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @WebMvcTest(org.pms.silverocean.controller.SokoController.class)
 @Import({SecurityConfig.class, SimpleCorsFilter.class, AccountActivationFilter.class})
@@ -57,6 +59,31 @@ class SecurityConfigSokoPublicTest {
     @Test
     void anonymousCallerStillCannotReadMerchantStoreData() throws Exception {
         mvc.perform(get("/soko/store/my"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anonymousAndStaleSessionBrowsersCanUseAssignmentScopedRiderBearer() throws Exception {
+        var view=new org.pms.silverocean.service.soko.SokoModels.PublicRiderAssignment("SOKO-1","DELIVERY_ASSIGNED",
+                "Fresh Corner","Market Road",java.time.ZonedDateTime.now().plusHours(1),0,java.util.List.of(),false,null);
+        when(sokoService.publicRiderAssignment("assignment-secret")).thenReturn(view);
+        when(sokoService.acceptPublicRiderAssignment("assignment-secret")).thenReturn(view);
+
+        mvc.perform(get("/soko/public/rider-assignment")
+                        .header("Authorization","Bearer stale-session")
+                        .header("X-Soko-Rider-Token","assignment-secret"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].orderReference").value("SOKO-1"));
+        mvc.perform(put("/soko/public/rider-assignment/accept")
+                        .header("Authorization","Bearer stale-session")
+                        .header("X-Soko-Rider-Token","assignment-secret"))
+                .andExpect(status().isOk());
+
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
+    void anonymousCallerCannotRotateMerchantAssignmentLink() throws Exception {
+        mvc.perform(put("/soko/order/9/rider/assignment-link/resend"))
                 .andExpect(status().isForbidden());
     }
 }

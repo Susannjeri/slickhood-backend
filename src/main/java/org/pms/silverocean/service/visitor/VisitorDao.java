@@ -44,6 +44,10 @@ public class VisitorDao {
         return visitorRepo.findByIdAndCreatedBy(visitorId, createdBy);
     }
 
+    public Optional<Visitor> findByIdAndHostUserId(long visitorId, long hostUserId) {
+        return visitorRepo.findByIdAndHostUserId(visitorId, hostUserId);
+    }
+
     public List<Visitor> findByTenantOrGuardOrLandlordOrPropertyManager(Pageable pageable, long userId) {
         return visitorRepo.findByTenantOrLandlordOrGuardOrPropertyManager(pageable.getPageSize(), pageable.getOffset(), userId);
     }

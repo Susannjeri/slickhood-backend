@@ -74,6 +74,21 @@ class SimpleCorsFilterTest {
                 .contains("Content-Disposition", "X-Report-Truncated", "X-Report-Row-Limit");
     }
 
+    @Test
+    void riderBearerCorsIsCredentialFreeAndLimitedToConfiguredAppOriginsAndHeaders() throws Exception {
+        var source=configured("https://app.slickhood.com",true).corsConfigurationSource();
+        var request=new org.springframework.mock.web.MockHttpServletRequest("OPTIONS","/soko/public/rider-assignment/delivery/confirm");
+        request.addHeader("Origin","https://app.slickhood.com");request.addHeader("Access-Control-Request-Method","PUT");
+        request.addHeader("Access-Control-Request-Headers","content-type,x-soko-rider-token");
+        var response=new org.springframework.mock.web.MockHttpServletResponse();var policy=source.getCorsConfiguration(request);
+        assertThat(new org.springframework.web.cors.DefaultCorsProcessor().processRequest(policy,request,response)).isTrue();
+        assertThat(response.getHeader("Access-Control-Allow-Origin")).isEqualTo("https://app.slickhood.com");
+        assertThat(response.getHeader("Access-Control-Allow-Credentials")).isNull();
+        assertThat(policy.checkOrigin("https://attacker.invalid")).isNull();
+        assertThat(policy.checkHttpMethod(org.springframework.http.HttpMethod.POST)).isNull();
+        assertThat(policy.getAllowedHeaders()).containsExactlyInAnyOrder("Content-Type","X-Soko-Rider-Token","X-Correlation-Id");
+    }
+
     private SimpleCorsFilter configured(String origin, boolean requireHttps) {
         SimpleCorsFilter filter = new SimpleCorsFilter();
         ReflectionTestUtils.setField(filter, "allowedOrigins", new String[]{origin});

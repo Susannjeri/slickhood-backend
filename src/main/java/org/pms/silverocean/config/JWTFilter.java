@@ -45,6 +45,16 @@ public class JWTFilter extends GenericFilter {
 
         HttpServletRequest httpRequest = (HttpServletRequest) request;
         HttpServletResponse httpResponse = (HttpServletResponse) response;
+        // Rider assignment links carry their own narrow, assignment-scoped
+        // bearer. Ignore a stale browser login on this public endpoint so an
+        // unrelated expired session cannot prevent the rider from responding.
+        if (isPublicRiderAssignment(httpRequest)) {
+            httpResponse.setHeader("Cache-Control", "no-store, max-age=0");
+            httpResponse.setHeader("Pragma", "no-cache");
+            httpResponse.setHeader("Referrer-Policy", "no-referrer");
+            chain.doFilter(request, response);
+            return;
+        }
         String header = httpRequest.getHeader("Authorization");
 
         if (StringUtils.isNotBlank(header) && header.startsWith(StaticStrings.BEARER_PREFIX)) {
@@ -151,6 +161,17 @@ public class JWTFilter extends GenericFilter {
             path = path.substring(contextPath.length());
         }
         return Set.of("/kyc/access-status", "/kyc/current").contains(path);
+    }
+
+    private boolean isPublicRiderAssignment(HttpServletRequest request) {
+        String path = request.getServletPath();
+        if (StringUtils.isBlank(path)) path = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (StringUtils.isNotBlank(contextPath) && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        return path.equals("/soko/public/rider-assignment")
+                || path.startsWith("/soko/public/rider-assignment/");
     }
 
     private String normalizeRole(String role) {

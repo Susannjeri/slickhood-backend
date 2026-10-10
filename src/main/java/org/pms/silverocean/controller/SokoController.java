@@ -27,6 +27,11 @@ public class SokoController {
     private final I18NService i18n;
 
     private ResponseEntity<ResponseDTO> ok(Object data){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),data));}
+    private ResponseEntity<ResponseDTO> publicRiderOk(Object data){return ResponseEntity.ok()
+            .header("Cache-Control","no-store, max-age=0")
+            .header("Pragma","no-cache")
+            .header("Referrer-Policy","no-referrer")
+            .body(new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),i18n.getLocalizedMessage(ResponseCode.GENERAL_SUCCESS),data));}
     @GetMapping("/catalog") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> catalog(Pageable pageable,@RequestParam(required=false)Long storeId,@RequestParam(required=false)String category,@RequestParam(required=false)String query,@RequestParam(required=false)Double latitude,@RequestParam(required=false)Double longitude,@RequestParam(required=false)Double radiusKm,@RequestParam(required=false)String sortMode,@RequestParam(required=false)String fulfilment){var p=service.catalog(pageable,storeId,category,query,latitude,longitude,radiusKm,sortMode,fulfilment);return page(p);}
     @GetMapping("/catalog/sellers") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> sellers(Pageable pageable,@RequestParam(required=false)String query,@RequestParam(required=false)String fulfilment){return page(service.sellers(pageable,query,fulfilment));}
     @GetMapping("/catalog/{storeId}") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> store(@PathVariable long storeId){return ok(service.storeDetail(storeId));}
@@ -54,6 +59,13 @@ public class SokoController {
     @GetMapping("/rider/assignments") public ResponseEntity<ResponseDTO> riderAssignments(Pageable pageable){return page(service.riderAssignments(pageable));}
     @PutMapping("/order/{id}/rider/accept") public ResponseEntity<ResponseDTO> acceptAssignment(@PathVariable long id){return ok(service.acceptAssignment(id));}
     @PutMapping("/order/{id}/rider/collect") public ResponseEntity<ResponseDTO> confirmCollection(@PathVariable long id){return ok(service.confirmCollection(id));}
+    @GetMapping("/public/rider-assignment") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> publicRiderAssignment(@RequestHeader(value="X-Soko-Rider-Token",required=false) String token){return publicRiderOk(service.publicRiderAssignment(token));}
+    @PutMapping("/public/rider-assignment/accept") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> acceptPublicRiderAssignment(@RequestHeader(value="X-Soko-Rider-Token",required=false) String token){return publicRiderOk(service.acceptPublicRiderAssignment(token));}
+    @PutMapping("/public/rider-assignment/collect") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> collectPublicRiderAssignment(@RequestHeader(value="X-Soko-Rider-Token",required=false) String token){return publicRiderOk(service.collectPublicRiderAssignment(token));}
+    @PutMapping("/public/rider-assignment/decline") @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> declinePublicRiderAssignment(@RequestHeader(value="X-Soko-Rider-Token",required=false) String token,@RequestBody(required=false) @Valid SokoRequests.RiderAssignmentDecline request){return publicRiderOk(service.declinePublicRiderAssignment(token,request));}
+    @PutMapping(value="/public/rider-assignment/delivery/proof",consumes=MediaType.MULTIPART_FORM_DATA_VALUE) @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> uploadPublicRiderDeliveryProof(@RequestHeader(value="X-Soko-Rider-Token",required=false) String token,@RequestPart("proof") MultipartFile proof)throws IOException{return publicRiderOk(service.uploadPublicRiderDeliveryProof(token,proof));}
+    @PutMapping(value="/public/rider-assignment/delivery/confirm",consumes=MediaType.APPLICATION_JSON_VALUE) @PreAuthorize("permitAll()") public ResponseEntity<ResponseDTO> confirmPublicRiderDelivery(@RequestHeader(value="X-Soko-Rider-Token",required=false) String token,@RequestBody @Valid SokoRequests.DeliveryConfirmation request){return publicRiderOk(service.confirmPublicRiderDelivery(token,request));}
+    @PutMapping("/order/{id}/rider/assignment-link/resend") public ResponseEntity<ResponseDTO> resendRiderAssignmentLink(@PathVariable long id){return ok(service.resendRiderAssignmentLink(id));}
     @PutMapping("/order/{id}/rider/fail") public ResponseEntity<ResponseDTO> failDelivery(@PathVariable long id,@RequestBody @Valid SokoRequests.DeliveryException request){return ok(service.failDelivery(id,request));}
     @PutMapping("/order/{id}/rider/return") public ResponseEntity<ResponseDTO> returnDelivery(@PathVariable long id,@RequestBody @Valid SokoRequests.DeliveryException request){return ok(service.returnDelivery(id,request));}
     @PutMapping("/order/{id}/finance-hold/return") public ResponseEntity<ResponseDTO> returnAfterFinanceHold(@PathVariable long id,@RequestBody @Valid SokoRequests.DeliveryException request){return ok(service.returnAfterFinanceHold(id,request));}

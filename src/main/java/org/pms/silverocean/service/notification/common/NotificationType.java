@@ -86,6 +86,9 @@ public enum NotificationType {
     SOKO_MODERATION_EMAIL("email.soko.moderation.subject", "email.soko.moderation.body", true, NotificationChannel.EMAIL),
     SOKO_ORDER_STATUS_EMAIL("email.soko.order.status.subject", "email.soko.order.status.body", true, NotificationChannel.EMAIL),
     SOKO_RIDER_CONFIRMATION_SMS("sms.soko.rider.confirmation", false, NotificationChannel.SMS),
+    // Assignment links are deliberately non-retrying: a merchant resend rotates
+    // the bearer and an old queued retry must never deliver a revoked link later.
+    SOKO_RIDER_ASSIGNMENT_SMS("sms.soko.rider.assignment", false, NotificationChannel.SMS),
     SOKO_DELIVERY_CODE_EMAIL("email.soko.delivery.code.subject", "email.soko.delivery.code.body", true, NotificationChannel.EMAIL),
     SOKO_DELIVERY_RECOVERY_EMAIL("email.soko.delivery.recovery.subject", "email.soko.delivery.recovery.body", true, NotificationChannel.EMAIL),
     BUSINESS_ALERT_EMAIL("email.business.alert.subject", "email.business.alert.body", true, NotificationChannel.EMAIL),

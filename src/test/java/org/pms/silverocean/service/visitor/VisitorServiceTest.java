@@ -30,6 +30,9 @@ import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -205,6 +208,39 @@ class VisitorServiceTest {
         ArgumentCaptor<Visitor> captor = ArgumentCaptor.forClass(Visitor.class);
         verify(visitorDao).save(captor.capture(), anyString());
         assertEquals(VisitorStatus.CANCELLED.name(), captor.getValue().getStatus());
+    }
+
+    @Test
+    void systemSokoRevokeIsNarrowIdempotentAndClearsGateCredential() {
+        Visitor pending=new Visitor();pending.setStatus(VisitorStatus.PENDING.name());pending.setCategory(VisitorCategory.DELIVERY.name());pending.setPurpose("Soko delivery");pending.setCredentialHash("secret-hash");pending.setCredentialHint("1234");
+        when(visitorDao.findByIdAndHostUserId(42L,7L)).thenReturn(Optional.of(pending));
+
+        assertTrue(visitorService.revokeSokoDeliveryVisitor(42L,7L));
+        assertEquals(VisitorStatus.CANCELLED.name(),pending.getStatus());assertNull(pending.getCredentialHash());assertNull(pending.getCredentialHint());
+        verify(visitorDao).save(pending,"SYSTEM_SOKO_DELIVERY_VISITOR_CANCELLED");
+
+        org.mockito.Mockito.clearInvocations(visitorDao);
+        assertTrue(visitorService.revokeSokoDeliveryVisitor(42L,7L));
+        verify(visitorDao,never()).save(any(),anyString());
+    }
+
+    @Test
+    void systemSokoRevokeCannotCancelAnotherHostOrNonSokoVisitorAndPreservesCheckedInAuditState() {
+        when(visitorDao.findByIdAndHostUserId(42L,7L)).thenReturn(Optional.empty());
+        assertFalse(visitorService.revokeSokoDeliveryVisitor(42L,7L));
+
+        Visitor guest=new Visitor();guest.setStatus(VisitorStatus.PENDING.name());guest.setCategory(VisitorCategory.GUEST.name());guest.setPurpose("Soko delivery");
+        when(visitorDao.findByIdAndHostUserId(43L,7L)).thenReturn(Optional.of(guest));
+        assertFalse(visitorService.revokeSokoDeliveryVisitor(43L,7L));
+
+        Visitor unrelatedDelivery=new Visitor();unrelatedDelivery.setStatus(VisitorStatus.PENDING.name());unrelatedDelivery.setCategory(VisitorCategory.DELIVERY.name());unrelatedDelivery.setPurpose("Supplier delivery");
+        when(visitorDao.findByIdAndHostUserId(45L,7L)).thenReturn(Optional.of(unrelatedDelivery));
+        assertFalse(visitorService.revokeSokoDeliveryVisitor(45L,7L));
+
+        Visitor checkedIn=new Visitor();checkedIn.setStatus(VisitorStatus.CHECKED_IN.name());checkedIn.setCategory(VisitorCategory.DELIVERY.name());checkedIn.setPurpose("Soko delivery");checkedIn.setCredentialHash("used-hash");
+        when(visitorDao.findByIdAndHostUserId(44L,7L)).thenReturn(Optional.of(checkedIn));
+        assertFalse(visitorService.revokeSokoDeliveryVisitor(44L,7L));assertEquals("used-hash",checkedIn.getCredentialHash());
+        verify(visitorDao,never()).save(any(),anyString());
     }
 
     @Test

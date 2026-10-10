@@ -126,6 +126,7 @@ public final class SokoRequests {
     public record RiderDecision(@NotBlank @Pattern(regexp="VERIFY|ACTIVATE|SUSPEND|REJECT") String decision,
                                 @Size(max=1000) String reason) {}
     public record DeliveryException(@NotBlank @Size(max=1000) String reason) {}
+    public record RiderAssignmentDecline(@Size(max=500) String reason) {}
     public record CodeReissue(@NotBlank @Size(max=1000) String reason) {}
     public record DeliveryCodeRecoveryConfirm(@NotBlank @Pattern(regexp="\\d{6}") String otp) {}
 }

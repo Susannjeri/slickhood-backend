@@ -92,6 +92,21 @@ public class SokoOrder extends BaseCreatorEntity implements Auditable {
     private ZonedDateTime expectedArrivalAt;
     private ZonedDateTime assignedAt;
     private ZonedDateTime assignmentAcceptedAt;
+    /**
+     * SHA-256 digest of the opaque rider-assignment bearer. The raw bearer is
+     * delivered once by SMS and is never persisted or returned to the merchant.
+     */
+    @JsonIgnore
+    @jakarta.persistence.Column(length=64)
+    private String riderAssignmentTokenHash;
+    private ZonedDateTime riderAssignmentTokenIssuedAt;
+    private ZonedDateTime riderAssignmentTokenExpiresAt;
+    private ZonedDateTime riderAssignmentTokenRevokedAt;
+    private ZonedDateTime riderAssignmentLinkRequestedAt;
+    private int riderAssignmentLinkRequestCount;
+    private ZonedDateTime riderAssignmentDeclinedAt;
+    @jakarta.persistence.Column(length=500)
+    private String riderAssignmentDeclineReason;
     private ZonedDateTime collectedAt;
     private ZonedDateTime deliveryFailedAt;
     private ZonedDateTime returnedAt;

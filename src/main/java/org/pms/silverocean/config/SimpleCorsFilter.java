@@ -23,7 +23,7 @@ public class SimpleCorsFilter {
     @Value("${app.cors.allowed-methods:GET,POST,PUT,PATCH,DELETE,OPTIONS}")
     private String[] allowedMethods;
 
-    @Value("${app.cors.allowed-headers:Authorization,Content-Type,X-Slickhood-Role,X-Correlation-Id}")
+    @Value("${app.cors.allowed-headers:Authorization,Content-Type,X-Slickhood-Role,X-Correlation-Id,X-Soko-Rider-Token}")
     private String[] allowedHeaders;
 
     @Value("${app.cors.exposed-headers:Content-Disposition,X-Report-Truncated,X-Report-Row-Limit}")
@@ -65,6 +65,17 @@ public class SimpleCorsFilter {
         publicWebsite.setAllowCredentials(false);
         source.registerCorsConfiguration("/public/insurance/**", publicWebsite);
         source.registerCorsConfiguration("/public/property-listings/**", publicWebsite);
+
+        // Rider links are public bearer flows, not session-bearing API calls.
+        // Keep them on the configured application origins while refusing
+        // credentials and unrelated headers such as Authorization.
+        CorsConfiguration riderAssignment = new CorsConfiguration();
+        riderAssignment.setAllowedOrigins(origins);
+        riderAssignment.setAllowedMethods(List.of("GET", "PUT", "OPTIONS"));
+        riderAssignment.setAllowedHeaders(List.of("Content-Type", "X-Soko-Rider-Token", "X-Correlation-Id"));
+        riderAssignment.setAllowCredentials(false);
+        source.registerCorsConfiguration("/soko/public/rider-assignment", riderAssignment);
+        source.registerCorsConfiguration("/soko/public/rider-assignment/**", riderAssignment);
         source.registerCorsConfiguration("/**", config);
         return source;
     }

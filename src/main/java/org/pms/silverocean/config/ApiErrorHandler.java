@@ -263,15 +263,30 @@ public class ApiErrorHandler extends ResponseEntityExceptionHandler {
         PMSCustomException ex = (PMSCustomException) e;
         ResponseDTO response = new ResponseDTO(false, ex.getResponseCode().getCode(),
                 i18NService.getLocalizedMessage(ex.getResponseCode()));
-        log.warn(ex.getMessage(), ex);
+        if (ex instanceof org.pms.silverocean.service.soko.SokoRiderAssignmentAccessException) {
+            // Public bearer failures are expected and uniform; never amplify
+            // anonymous scans with stack traces or anything token-derived.
+            log.debug("Rejected invalid or expired Soko rider assignment bearer");
+        } else {
+            log.warn(ex.getMessage(), ex);
+        }
         if (ex.getData() != null) {
             Object data = ex.getData();
             response.setData(data instanceof Collection ? List.copyOf((Collection<?>) data) : List.of(data));
         }
-        HttpStatus status = ex.getResponseCode() == ResponseCode.KYC_OCR_PROVIDER_UNAVAILABLE
+        HttpStatus status = e instanceof org.pms.silverocean.service.soko.SokoRiderAssignmentAccessException
+                ? HttpStatus.GONE
+                : e instanceof org.pms.silverocean.service.soko.SokoDeliveryCodeLockedException
+                ? HttpStatus.LOCKED
+                : ex.getResponseCode() == ResponseCode.KYC_OCR_PROVIDER_UNAVAILABLE
                 || ex.getResponseCode() == ResponseCode.UPLOAD_SCAN_UNAVAILABLE
                 ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.CONFLICT;
-        return ResponseEntity.status(status).body(response);
+        ResponseEntity.BodyBuilder builder=ResponseEntity.status(status);
+        if(e instanceof org.pms.silverocean.service.soko.SokoRiderAssignmentAccessException){
+            builder.header("Cache-Control","no-store, max-age=0").header("Pragma","no-cache")
+                    .header("Referrer-Policy","no-referrer");
+        }
+        return builder.body(response);
     }
 
 

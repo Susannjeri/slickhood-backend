@@ -38,6 +38,20 @@ public interface SokoOrderRepo extends JpaRepository<SokoOrder, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from SokoOrder o where o.id=:id and o.active=true")
     Optional<SokoOrder> findByIdForUpdate(long id);
+    Optional<SokoOrder> findByRiderAssignmentTokenHashAndActiveTrue(String riderAssignmentTokenHash);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from SokoOrder o where o.riderAssignmentTokenHash=:tokenHash and o.active=true")
+    Optional<SokoOrder> findByRiderAssignmentTokenHashForUpdate(@Param("tokenHash") String tokenHash);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from SokoOrder o where o.active=true and o.status in ('DELIVERY_ASSIGNED','ASSIGNMENT_ACCEPTED') " +
+            "and o.riderAssignmentTokenRevokedAt is null and o.riderAssignmentTokenExpiresAt<:now order by o.riderAssignmentTokenExpiresAt")
+    List<SokoOrder> findExpiredRiderAssignmentsForUpdate(@Param("now") ZonedDateTime now,Pageable pageable);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from SokoOrder o where o.active=true and o.storeId in :storeIds " +
+            "and o.status in ('DELIVERY_ASSIGNED','ASSIGNMENT_ACCEPTED') and o.riderAssignmentTokenRevokedAt is null " +
+            "and o.riderAssignmentTokenExpiresAt<:now order by o.riderAssignmentTokenExpiresAt")
+    List<SokoOrder> findExpiredRiderAssignmentsForStoresForUpdate(@Param("storeIds") List<Long> storeIds,
+                                                                  @Param("now") ZonedDateTime now,Pageable pageable);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from SokoOrder o where o.active=true and o.status='PENDING_PAYMENT' and o.stockReleased=false and o.reservationExpiresAt<:now")
     List<SokoOrder> findExpiredReservations(ZonedDateTime now,Pageable pageable);

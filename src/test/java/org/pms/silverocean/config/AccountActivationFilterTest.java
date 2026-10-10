@@ -54,6 +54,12 @@ class AccountActivationFilterTest {
         assertThat(run("/kyc/current").getStatus()).isEqualTo(200);
     }
 
+    @Test void accountStateNeverBlocksAssignmentScopedPublicRiderBearer() throws Exception {
+        pendingCustomer(PMSRole.LANDLORD);
+        assertThat(run("/soko/public/rider-assignment/accept").getStatus()).isEqualTo(200);
+        verify(users, never()).getCurrentAccessState();
+    }
+
     @Test void internalReviewerIsNotSentThroughCustomerKyc() throws Exception {
         pendingCustomer(PMSRole.SUPER_ADMIN);
         assertThat(run("/kyc/admin/queue").getStatus()).isEqualTo(200);

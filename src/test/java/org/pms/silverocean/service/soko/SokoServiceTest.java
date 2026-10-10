@@ -604,28 +604,154 @@ class SokoServiceTest {
         assertEquals("DELIVERY_ASSIGNED",result.order().status());assertNull(order.getDispatchedAt());verify(orders,never()).save(any());verifyNoInteractions(riders,visitors,encryption,notifications,businessAlerts);
     }
 
-    @Test void merchantCanDispatchAndSecurelyCompletePhoneConfirmedUnlinkedRiderWithoutRiderLogin() throws Exception {
-        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setName("Fresh Corner");store.setActive(true);
-        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setOrderNumber("SOKO-9");order.setStatus("PACKED");order.setDeliveryMethod("DELIVERY");order.setActive(true);
+    @Test void accountlessRiderPersonallyAcceptsCollectsAndCompletesThroughPrivateBearer() throws Exception {
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setName("Fresh Corner");store.setAddress("Market Road");store.setActive(true);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setOrderNumber("SOKO-9");order.setStatus("PACKED");order.setDeliveryMethod("DELIVERY");order.setDeliveryAddress("Buyer Estate, House 7");order.setDeliveryLatitude(-1.28);order.setDeliveryLongitude(36.82);order.setCustomerPhone("0711000000");order.setActive(true);
+        SokoOrderItem line=new SokoOrderItem();line.setProductName("Spinach");line.setUnit("bunch");line.setQuantity(2);line.setActive(true);
         SokoRider rider=existingRider();rider.setUserId(null);
         java.util.concurrent.atomic.AtomicReference<String> issuedCode=new java.util.concurrent.atomic.AtomicReference<>();
-        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of());when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(encryption.encrypt(anyString())).thenAnswer(call->{issuedCode.set(call.getArgument(0));return new byte[]{1,2,3};});
-        var dispatched=service.transition(9L,"DISPATCHED",new SokoRequests.Dispatch(3L,null,null,null,java.time.LocalDateTime.now(java.time.ZoneId.of("Africa/Nairobi")).plusHours(1)));
-        assertEquals("DISPATCHED",dispatched.order().status());assertNull(order.getAssignmentAcceptedAt());assertNotNull(order.getCollectedAt());assertNotNull(order.getDispatchedAt());assertEquals("BUSY",rider.getAvailability());assertArrayEquals(new byte[]{1,2,3},order.getEncryptedDeliveryCode());assertNotNull(order.getDeliveryCodeExpiresAt());assertNotNull(issuedCode.get());
+        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(line));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(riders.findByIdAndStoreIdAndActiveTrue(3L,2L)).thenReturn(Optional.of(rider));when(encryption.encrypt(anyString())).thenAnswer(call->{issuedCode.set(call.getArgument(0));return new byte[]{1,2,3};});
 
-        byte[] png={(byte)0x89,'P','N','G',13,10,26,10,0};service.uploadDeliveryProof(9L,new MockMultipartFile("proof","handover.png","image/png",png));when(encryption.decrypt(order.getEncryptedDeliveryCode())).thenAnswer(call->new DecryptDTO(false,issuedCode.get()));
-        var completed=service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation(issuedCode.get(),"Jane Buyer","merchant handover"));
-        assertEquals("COMPLETED",completed.status());assertTrue(order.isDeliveryCodeVerified());assertEquals("AVAILABLE",rider.getAvailability());assertEquals(1,rider.getCompletedDeliveries());verifyNoInteractions(marketplaceKycGate);
+        var assigned=service.transition(9L,"DISPATCHED",new SokoRequests.Dispatch(3L,null,null,null,java.time.LocalDateTime.now(java.time.ZoneId.of("Africa/Nairobi")).plusHours(1)));
+        assertEquals("DELIVERY_ASSIGNED",assigned.order().status());assertNull(order.getAssignmentAcceptedAt());assertNull(order.getCollectedAt());assertEquals("BUSY",rider.getAvailability());assertNull(order.getEncryptedDeliveryCode());assertNull(order.getDeliveryVisitorId());
+        var sms=org.mockito.ArgumentCaptor.forClass(org.pms.silverocean.service.notification.NotificationDTO.class);verify(notifications).queueNotification(sms.capture());
+        assertEquals(NotificationType.SOKO_RIDER_ASSIGNMENT_SMS,sms.getValue().notificationType());assertFalse(sms.getValue().notificationType().isRetry());
+        java.util.regex.Matcher tokenMatch=java.util.regex.Pattern.compile("#token=([A-Za-z0-9_-]+)").matcher(sms.getValue().formattedMessage());assertTrue(tokenMatch.find());String rawToken=tokenMatch.group(1);
+        assertNotEquals(rawToken,order.getRiderAssignmentTokenHash());assertEquals(64,order.getRiderAssignmentTokenHash().length());assertFalse(sms.getValue().formattedMessage().contains("?token="));
+        when(orders.findByRiderAssignmentTokenHashAndActiveTrue(order.getRiderAssignmentTokenHash())).thenReturn(Optional.of(order));
+        when(orders.findByRiderAssignmentTokenHashForUpdate(order.getRiderAssignmentTokenHash())).thenReturn(Optional.of(order));
+
+        var preview=service.publicRiderAssignment(rawToken);
+        assertEquals("SOKO-9",preview.orderReference());assertEquals(2,preview.itemCount());assertNull(preview.delivery());assertFalse(preview.deliveryProofUploaded());
+        order.setRiderAssignmentTokenExpiresAt(ZonedDateTime.now().plusMinutes(1));
+        var accepted=service.acceptPublicRiderAssignment(rawToken);
+        assertEquals("ASSIGNMENT_ACCEPTED",accepted.status());assertTrue(order.getRiderAssignmentTokenExpiresAt().isAfter(ZonedDateTime.now().plusMinutes(14)));assertEquals("Buyer Estate, House 7",accepted.delivery().address());assertEquals("0711000000",accepted.delivery().customerPhone());assertNull(order.getDeliveryVisitorId());
+        var collected=service.collectPublicRiderAssignment(rawToken);
+        assertEquals("DISPATCHED",collected.status());assertNotNull(order.getCollectedAt());assertNotNull(order.getDispatchedAt());assertArrayEquals(new byte[]{1,2,3},order.getEncryptedDeliveryCode());assertNotNull(issuedCode.get());
+        byte[] originalCode=order.getEncryptedDeliveryCode();service.collectPublicRiderAssignment(rawToken);assertArrayEquals(originalCode,order.getEncryptedDeliveryCode());verify(encryption,times(1)).encrypt(anyString());
+
+        byte[] png={(byte)0x89,'P','N','G',13,10,26,10,0};
+        var proofed=service.uploadPublicRiderDeliveryProof(rawToken,new MockMultipartFile("proof","handover.png","image/png",png));assertTrue(proofed.deliveryProofUploaded());
+        when(encryption.decrypt(order.getEncryptedDeliveryCode())).thenAnswer(call->new DecryptDTO(false,issuedCode.get()));
+        var completed=service.confirmPublicRiderDelivery(rawToken,new SokoRequests.DeliveryConfirmation(issuedCode.get()));
+        assertEquals("COMPLETED",completed.status());assertTrue(order.isDeliveryCodeVerified());assertNotNull(order.getRiderAssignmentTokenRevokedAt());assertEquals("AVAILABLE",rider.getAvailability());assertEquals(1,rider.getCompletedDeliveries());
+        var lostResponseRetry=service.confirmPublicRiderDelivery(rawToken,new SokoRequests.DeliveryConfirmation(issuedCode.get()));
+        assertEquals("COMPLETED",lostResponseRetry.status());assertNull(lostResponseRetry.delivery());assertEquals(1,rider.getCompletedDeliveries());
+        assertNull(service.publicRiderAssignment(rawToken).delivery());
+        assertThrows(SokoRiderAssignmentAccessException.class,()->service.acceptPublicRiderAssignment(rawToken));
+        verifyNoInteractions(marketplaceKycGate);
+    }
+
+    @Test void riderDeclineIsIdempotentRevokesBearerAndReleasesLegacyGatePass(){
+        String raw=java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]);
+        String hash=org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"hashAssignmentToken",raw);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setOrderNumber("SOKO-9");order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("DELIVERY_ASSIGNED");order.setRiderId(3L);order.setDeliveryVisitorId(55L);order.setRiderAssignmentTokenHash(hash);order.setRiderAssignmentTokenExpiresAt(ZonedDateTime.now().plusHours(1));order.setActive(true);
+        SokoRider rider=existingRider();rider.setUserId(null);rider.setAvailability("BUSY");
+        when(orders.findByRiderAssignmentTokenHashForUpdate(hash)).thenReturn(Optional.of(order));when(riders.findByIdAndStoreIdAndActiveTrue(3L,2L)).thenReturn(Optional.of(rider));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(visitors.revokeSokoDeliveryVisitor(55L,4L)).thenReturn(true);
+
+        assertEquals("DECLINED",service.declinePublicRiderAssignment(raw,new SokoRequests.RiderAssignmentDecline("Cannot take this delivery")).status());
+        assertEquals("DECLINED",service.declinePublicRiderAssignment(raw,null).status());
+        assertEquals("PACKED",order.getStatus());assertEquals("AVAILABLE",rider.getAvailability());assertNotNull(order.getRiderAssignmentTokenRevokedAt());assertNull(order.getDeliveryVisitorId());
+        assertThrows(SokoRiderAssignmentAccessException.class,()->service.acceptPublicRiderAssignment(raw));
+        order.setRiderAssignmentTokenExpiresAt(ZonedDateTime.now().minusSeconds(1));
+        assertThrows(SokoRiderAssignmentAccessException.class,()->service.declinePublicRiderAssignment(raw,null));
+        verify(orders,times(1)).save(order);verify(visitors,times(1)).revokeSokoDeliveryVisitor(55L,4L);
+    }
+
+    @Test void publicInspectOfExpiredBearerIsReadOnlyWhileLockedActionSafelyReleasesAssignment(){
+        String raw=java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]);
+        String hash=org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"hashAssignmentToken",raw);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setOrderNumber("SOKO-9");order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("ASSIGNMENT_ACCEPTED");order.setRiderId(3L);order.setDeliveryVisitorId(55L);order.setRiderAssignmentTokenHash(hash);order.setRiderAssignmentTokenExpiresAt(ZonedDateTime.now().minusSeconds(1));order.setActive(true);
+        SokoRider rider=existingRider();rider.setAvailability("BUSY");
+        when(orders.findByRiderAssignmentTokenHashAndActiveTrue(hash)).thenReturn(Optional.of(order));when(orders.findByRiderAssignmentTokenHashForUpdate(hash)).thenReturn(Optional.of(order));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(visitors.revokeSokoDeliveryVisitor(55L,4L)).thenReturn(true);
+
+        assertThrows(SokoRiderAssignmentAccessException.class,()->service.publicRiderAssignment(raw));
+        assertEquals("ASSIGNMENT_ACCEPTED",order.getStatus());verify(orders,never()).save(any());verify(riders,never()).save(any());
+        assertThrows(SokoRiderAssignmentAccessException.class,()->service.acceptPublicRiderAssignment(raw));
+        assertEquals("PACKED",order.getStatus());assertEquals("AVAILABLE",rider.getAvailability());assertNotNull(order.getRiderAssignmentTokenRevokedAt());assertNull(order.getDeliveryVisitorId());verify(orders).save(order);verify(visitors).revokeSokoDeliveryVisitor(55L,4L);
+    }
+
+    @Test void assignmentLinkResendIsRotatedBoundedAndNeverReturnsBearer(){
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"riderAssignmentLinkCooldownSeconds",60L);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"riderAssignmentLinkMaxSends",2);
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setName("Fresh Corner");store.setActive(true);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setOrderNumber("SOKO-9");order.setStoreId(2L);order.setStatus("DELIVERY_ASSIGNED");order.setRiderId(3L);order.setRiderAssignmentTokenHash("old-hash");order.setRiderAssignmentLinkRequestCount(1);order.setRiderAssignmentLinkRequestedAt(ZonedDateTime.now());order.setActive(true);
+        SokoRider rider=existingRider();rider.setAvailability("BUSY");
+        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
+
+        assertThrows(PMSCustomException.class,()->service.resendRiderAssignmentLink(9L));
+        order.setRiderAssignmentLinkRequestedAt(ZonedDateTime.now().minusMinutes(2));
+        var response=service.resendRiderAssignmentLink(9L);assertEquals("LINK_QUEUED",response.status());assertNotEquals("old-hash",order.getRiderAssignmentTokenHash());assertEquals(64,order.getRiderAssignmentTokenHash().length());
+        var sms=org.mockito.ArgumentCaptor.forClass(org.pms.silverocean.service.notification.NotificationDTO.class);verify(notifications).queueNotification(sms.capture());
+        java.util.regex.Matcher match=java.util.regex.Pattern.compile("#token=([A-Za-z0-9_-]+)").matcher(sms.getValue().formattedMessage());assertTrue(match.find());assertFalse(response.toString().contains(match.group(1)));
+        order.setRiderAssignmentLinkRequestedAt(ZonedDateTime.now().minusMinutes(2));
+        assertThrows(PMSCustomException.class,()->service.resendRiderAssignmentLink(9L));
+        verify(notifications,times(1)).queueNotification(any());
+    }
+
+    @Test void firstLinkForLegacyAcceptedAssignmentRequiresFreshPersonalAcceptance(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setName("Fresh Corner");store.setAddress("Market Road");store.setActive(true);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setOrderNumber("SOKO-9");order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("ASSIGNMENT_ACCEPTED");order.setRiderId(3L);order.setAssignmentAcceptedAt(ZonedDateTime.now().minusHours(1));order.setDeliveryAddress("Buyer Estate");order.setCustomerPhone("0711000000");order.setActive(true);
+        SokoRider rider=existingRider();rider.setUserId(null);rider.setAvailability("BUSY");
+        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(riders.findByIdAndStoreIdAndActiveTrue(3L,2L)).thenReturn(Optional.of(rider));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of());
+
+        service.resendRiderAssignmentLink(9L);
+
+        assertEquals("DELIVERY_ASSIGNED",order.getStatus());assertNull(order.getAssignmentAcceptedAt());
+        var sms=org.mockito.ArgumentCaptor.forClass(org.pms.silverocean.service.notification.NotificationDTO.class);verify(notifications).queueNotification(sms.capture());
+        var match=java.util.regex.Pattern.compile("#token=([A-Za-z0-9_-]+)").matcher(sms.getValue().formattedMessage());assertTrue(match.find());String raw=match.group(1);
+        when(orders.findByRiderAssignmentTokenHashAndActiveTrue(order.getRiderAssignmentTokenHash())).thenReturn(Optional.of(order));when(orders.findByRiderAssignmentTokenHashForUpdate(order.getRiderAssignmentTokenHash())).thenReturn(Optional.of(order));
+        assertNull(service.publicRiderAssignment(raw).delivery());
+        assertEquals("ASSIGNMENT_ACCEPTED",service.acceptPublicRiderAssignment(raw).status());assertNotNull(order.getAssignmentAcceptedAt());assertNotNull(service.publicRiderAssignment(raw).delivery());
+    }
+
+    @Test void firstLinkForLegacyDispatchedOrderPreservesCustodyButRequiresExplicitAcceptance() throws Exception{
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setName("Fresh Corner");store.setAddress("Market Road");store.setActive(true);
+        ZonedDateTime codeExpiry=ZonedDateTime.now().plusHours(5);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setOrderNumber("SOKO-9");order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");order.setRiderId(3L);order.setAssignmentAcceptedAt(ZonedDateTime.now().minusHours(1));order.setCollectedAt(ZonedDateTime.now().minusMinutes(30));order.setDeliveryAddress("Buyer Estate");order.setCustomerPhone("0711000000");order.setEncryptedDeliveryCode(new byte[]{1});order.setDeliveryCodeExpiresAt(codeExpiry);order.setActive(true);
+        SokoRider rider=existingRider();rider.setUserId(null);rider.setAvailability("BUSY");
+        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(riders.findByIdAndStoreIdAndActiveTrue(3L,2L)).thenReturn(Optional.of(rider));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of());
+
+        service.resendRiderAssignmentLink(9L);
+
+        assertEquals("DISPATCHED",order.getStatus());assertNull(order.getAssignmentAcceptedAt());assertFalse(order.getRiderAssignmentTokenExpiresAt().isBefore(codeExpiry));
+        var sms=org.mockito.ArgumentCaptor.forClass(org.pms.silverocean.service.notification.NotificationDTO.class);verify(notifications).queueNotification(sms.capture());
+        var match=java.util.regex.Pattern.compile("#token=([A-Za-z0-9_-]+)").matcher(sms.getValue().formattedMessage());assertTrue(match.find());String raw=match.group(1);
+        when(orders.findByRiderAssignmentTokenHashAndActiveTrue(order.getRiderAssignmentTokenHash())).thenReturn(Optional.of(order));when(orders.findByRiderAssignmentTokenHashForUpdate(order.getRiderAssignmentTokenHash())).thenReturn(Optional.of(order));
+        assertNull(service.publicRiderAssignment(raw).delivery());
+        byte[] png={(byte)0x89,'P','N','G',13,10,26,10,0};
+        assertThrows(SokoRiderAssignmentAccessException.class,()->service.collectPublicRiderAssignment(raw));
+        assertThrows(SokoRiderAssignmentAccessException.class,()->service.uploadPublicRiderDeliveryProof(raw,new MockMultipartFile("proof","handover.png","image/png",png)));
+        assertThrows(SokoRiderAssignmentAccessException.class,()->service.confirmPublicRiderDelivery(raw,new SokoRequests.DeliveryConfirmation("123456")));
+        assertEquals("DISPATCHED",service.acceptPublicRiderAssignment(raw).status());assertNotNull(order.getAssignmentAcceptedAt());assertNotNull(service.publicRiderAssignment(raw).delivery());
+        assertTrue(service.uploadPublicRiderDeliveryProof(raw,new MockMultipartFile("proof","handover.png","image/png",png)).deliveryProofUploaded());
+        when(encryption.decrypt(order.getEncryptedDeliveryCode())).thenReturn(new DecryptDTO(false,"123456"));
+        assertEquals("COMPLETED",service.confirmPublicRiderDelivery(raw,new SokoRequests.DeliveryConfirmation("123456")).status());
+    }
+
+    @Test void smartGatePassIsCreatedOnlyWhenAcceptedRiderCollects(){
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setName("Fresh Corner");store.setActive(true);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setOrderNumber("SOKO-9");order.setStoreId(2L);order.setCustomerUserId(4L);order.setDestinationUnitId(12L);order.setStatus("PACKED");order.setDeliveryMethod("DELIVERY");order.setActive(true);
+        SokoRider rider=existingRider();rider.setUserId(null);
+        var gateVisitor=new org.pms.silverocean.database.pms.entities.Visitor();gateVisitor.setId(55L);
+        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of());when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(riders.findByIdAndStoreIdAndActiveTrue(3L,2L)).thenReturn(Optional.of(rider));when(encryption.encrypt(anyString())).thenReturn(new byte[]{1});when(visitors.preRegisterDeliveryForHost(eq(4L),any())).thenReturn(gateVisitor);
+
+        service.transition(9L,"DISPATCHED",new SokoRequests.Dispatch(3L,null,null,null,java.time.LocalDateTime.now(java.time.ZoneId.of("Africa/Nairobi")).plusHours(1)));
+        verify(visitors,never()).preRegisterDeliveryForHost(anyLong(),any());
+        var sms=org.mockito.ArgumentCaptor.forClass(org.pms.silverocean.service.notification.NotificationDTO.class);verify(notifications).queueNotification(sms.capture());java.util.regex.Matcher match=java.util.regex.Pattern.compile("#token=([A-Za-z0-9_-]+)").matcher(sms.getValue().formattedMessage());assertTrue(match.find());String raw=match.group(1);
+        when(orders.findByRiderAssignmentTokenHashForUpdate(order.getRiderAssignmentTokenHash())).thenReturn(Optional.of(order));
+        service.acceptPublicRiderAssignment(raw);verify(visitors,never()).preRegisterDeliveryForHost(anyLong(),any());
+        service.collectPublicRiderAssignment(raw);assertEquals(55L,order.getDeliveryVisitorId());verify(visitors,times(1)).preRegisterDeliveryForHost(eq(4L),any());
     }
 
     @Test void owningMerchantCanFailAndReturnPhoneConfirmedUnlinkedRiderDelivery(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setName("Fresh Corner");store.setActive(true);
-        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");order.setPaymentStatus("PARTIALLY_REFUNDED");order.setRefundStatus("CONFIRMED");order.setTotal(new BigDecimal("100"));order.setRefundedAmount(new BigDecimal("25"));order.setRiderId(3L);order.setEncryptedDeliveryCode(new byte[]{1,2,3});order.setActive(true);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");order.setPaymentStatus("PARTIALLY_REFUNDED");order.setRefundStatus("CONFIRMED");order.setTotal(new BigDecimal("100"));order.setRefundedAmount(new BigDecimal("25"));order.setRiderId(3L);order.setDeliveryVisitorId(55L);order.setEncryptedDeliveryCode(new byte[]{1,2,3});order.setActive(true);
         SokoRider rider=existingRider();rider.setUserId(null);rider.setAvailability("BUSY");
-        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
+        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));when(visitors.revokeSokoDeliveryVisitor(55L,4L)).thenReturn(true);
 
         var failed=service.failDelivery(9L,new SokoRequests.DeliveryException("Customer was unavailable"));
-        assertEquals("DELIVERY_RETURN_REQUIRED",failed.status());assertNull(order.getEncryptedDeliveryCode());assertEquals("BUSY",rider.getAvailability());
+        assertEquals("DELIVERY_RETURN_REQUIRED",failed.status());assertNull(order.getEncryptedDeliveryCode());assertEquals("BUSY",rider.getAvailability());assertNull(order.getDeliveryVisitorId());verify(visitors).revokeSokoDeliveryVisitor(55L,4L);
         var returned=service.returnDelivery(9L,new SokoRequests.DeliveryException("Groceries returned to shop"));
         assertEquals("RETURNED",returned.status());assertEquals("REQUESTED",order.getRefundStatus());
     }
@@ -674,8 +800,7 @@ class SokoServiceTest {
     @Test void merchantCannotImpersonateLinkedRiderAcceptanceOrCollection(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);
         SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setStatus("DELIVERY_ASSIGNED");order.setRiderId(3L);order.setActive(true);
-        SokoRider rider=existingRider();rider.setUserId(8L);rider.setAvailability("BUSY");
-        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
+        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
         assertThrows(PMSCustomException.class,()->service.transition(9L,"ASSIGNMENT_ACCEPTED",null));
         order.setStatus("ASSIGNMENT_ACCEPTED");assertThrows(PMSCustomException.class,()->service.transition(9L,"DISPATCHED",null));
         verify(orders,never()).save(any());verifyNoInteractions(encryption);
@@ -977,14 +1102,14 @@ class SokoServiceTest {
     }
 
     @Test void deliveryProofUsesServerGeneratedKeyAndRejectsSpoofing() throws Exception {
-        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setStatus("DISPATCHED");order.setRiderId(3L);order.setActive(true);SokoRider rider=existingRider();rider.setUserId(null);
-        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
+        SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setStatus("DISPATCHED");order.setRiderId(3L);order.setActive(true);SokoRider rider=existingRider();rider.setUserId(8L);
+        when(users.getUserId()).thenReturn(8L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
         byte[] png={(byte)0x89,'P','N','G',13,10,26,10,0};assertThrows(PMSCustomException.class,()->service.uploadDeliveryProof(9L,new MockMultipartFile("proof","fake.png","image/png","bad".getBytes())));service.uploadDeliveryProof(9L,new MockMultipartFile("proof","../../proof.png","image/png",png));service.uploadDeliveryProof(9L,new MockMultipartFile("proof","lost-response-retry.png","image/png",png));verify(garage,times(1)).uploadBytes(matches("soko/delivery-proof/9/[0-9a-f-]+\\.png"),eq(png),eq("image/png"));
     }
 
     @Test void merchantCannotUploadProofOrConfirmForLinkedRider(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");order.setDeliveryCode("123456");order.setDeliveryProofReference("proof");order.setRiderId(3L);order.setActive(true);SokoRider rider=existingRider();rider.setUserId(8L);
-        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
+        when(users.getUserId()).thenReturn(7L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
         byte[] png={(byte)0x89,'P','N','G',13,10,26,10,0};assertThrows(PMSCustomException.class,()->service.uploadDeliveryProof(9L,new MockMultipartFile("proof","proof.png","image/png",png)));assertThrows(PMSCustomException.class,()->service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("123456")));
         verifyNoInteractions(garage,malwarePolicy,encryption);verify(orders,never()).save(any());
     }
@@ -1146,15 +1271,15 @@ class SokoServiceTest {
         SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setRiderId(3L);
         order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");
         order.setDeliveryCode("123456");order.setDeliveryCodeExpiresAt(ZonedDateTime.now().plusHours(1));order.setDeliveryProofReference("protected-proof");
-        SokoRider rider=existingRider();rider.setUserId(null);
-        when(users.getUserId()).thenReturn(7L);
+        SokoRider rider=existingRider();rider.setUserId(8L);
+        when(users.getUserId()).thenReturn(8L);
         when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));
-        when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
         when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
-        for(int i=0;i<5;i++)assertThrows(PMSCustomException.class,()->service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("000000")));
+        for(int i=0;i<4;i++)assertThrows(PMSCustomException.class,()->service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("000000")));
+        assertThrows(SokoDeliveryCodeLockedException.class,()->service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("000000")));
         assertEquals(5,order.getDeliveryCodeAttempts());
         assertEquals("protected-proof",order.getDeliveryProofReference());
-        assertThrows(PMSCustomException.class,()->service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("123456")));
+        assertThrows(SokoDeliveryCodeLockedException.class,()->service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("123456")));
         assertEquals("DISPATCHED",order.getStatus());
     }
 }

@@ -121,6 +121,11 @@ public class SokoService {
     @Value("${soko.rider-phone-confirmation-cooldown-seconds:60}") private long riderPhoneConfirmationCooldownSeconds;
     @Value("${soko.rider-phone-confirmation-max-attempts:5}") private int riderPhoneConfirmationMaxAttempts;
     @Value("${soko.rider-phone-confirmation-max-requests-per-day:5}") private int riderPhoneConfirmationMaxRequestsPerDay;
+    @Value("${soko.rider-assignment-token-valid-hours:2}") private long riderAssignmentTokenValidHours;
+    @Value("${soko.rider-assignment-link-cooldown-seconds:60}") private long riderAssignmentLinkCooldownSeconds;
+    @Value("${soko.rider-assignment-link-max-sends:5}") private int riderAssignmentLinkMaxSends;
+    @Value("${soko.rider-assignment-accepted-collect-minutes:60}") private long riderAssignmentAcceptedCollectMinutes;
+    @Value("${soko.rider-assignment-url:https://app.slickhood.com/soko/rider-assignment}") private String riderAssignmentUrl;
     private static final ObjectMapper JSON = new ObjectMapper();
     @Autowired(required=false) private AuditLogService auditLogService;
 
@@ -480,7 +485,7 @@ public class SokoService {
     }
 
     public Page<OrderDetail> myOrders(Pageable pageable){return hydrate(orderRepo.findAllByCustomerUserIdAndActiveTrue(userDao.getUserId(),bounded(pageable)));}
-    public Page<OrderDetail> merchantOrders(Pageable pageable){List<Long> ids=myStores().stream().map(SokoStore::getId).toList();if(ids.isEmpty())return Page.empty(bounded(pageable));return hydrate(orderRepo.findAllByStoreIdInAndActiveTrue(ids,bounded(pageable)));}
+    @Transactional public Page<OrderDetail> merchantOrders(Pageable pageable){List<Long> ids=myStores().stream().map(SokoStore::getId).toList();if(ids.isEmpty())return Page.empty(bounded(pageable));expireRiderAssignments(ids);return hydrate(orderRepo.findAllByStoreIdInAndActiveTrue(ids,bounded(pageable)));}
 
     /**
      * Selects another ready receiving rail for an unpaid order. The order and
@@ -524,11 +529,11 @@ public class SokoService {
 
     public String pickupCode(long orderId){SokoOrder o=orderRepo.findById(orderId).filter(SokoOrder::isActive).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId())throw forbidden();if(!"PICKUP".equals(o.getDeliveryMethod())||!"READY_FOR_PICKUP".equals(o.getStatus())||o.isDeliveryCodeVerified()||codeExpired(o)||o.getDeliveryCodeLockedAt()!=null)throw invalid();String code=decryptDeliveryCode(o);if(StringUtils.isBlank(code))throw invalid();return code;}
 
-    @Transactional public SokoModels.OrderAction uploadDeliveryProof(long orderId,MultipartFile proof)throws IOException{SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);requireMerchantOrAssignedRider(o);if(StringUtils.isNotBlank(o.getDeliveryProofReference()))return SokoModels.OrderAction.from(o);if(!"DISPATCHED".equals(o.getStatus())||proof==null||proof.isEmpty()||proof.getSize()>5L*1024*1024)throw invalid();String type=StringUtils.defaultString(proof.getContentType()).toLowerCase(Locale.ROOT);byte[] bytes=proof.getBytes();if(!validProof(type,bytes))throw new PMSCustomException(ResponseCode.INVALID_IMAGE);malwarePolicy.requireSafe(bytes);String extension="image/png".equals(type)?"png":"jpg";String ref="soko/delivery-proof/"+o.getId()+"/"+UUID.randomUUID()+"."+extension;garageService.uploadBytes(ref,bytes,type);o.setDeliveryProofReference(ref);o.setDeliveryProofContentType(type);o.setDeliveryProofSize((long)bytes.length);o.setDeliveryProofAt(now());orderRepo.save(o);return SokoModels.OrderAction.from(o);}
+    @Transactional public SokoModels.OrderAction uploadDeliveryProof(long orderId,MultipartFile proof)throws IOException{SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);requireAssignedRiderForDoorstep(o);storeDeliveryProof(o,proof);return SokoModels.OrderAction.from(o);}
     public String deliveryProof(long orderId){SokoOrder o=orderRepo.findById(orderId).filter(x->x.isActive()).orElseThrow(this::notFound);SokoStore store=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId()&&store.getOwnerUserId()!=userDao.getUserId())throw forbidden();if(StringUtils.isBlank(o.getDeliveryProofReference()))throw notFound();return garageService.getPresignedUrlForStoredObject(o.getDeliveryProofReference());}
 
     @Transactional(noRollbackFor=PMSCustomException.class)
-    public SokoModels.OrderAction confirmDelivery(long orderId,SokoRequests.DeliveryConfirmation request){SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);requireMerchantOrAssignedRider(o);if("DELIVERY".equals(o.getDeliveryMethod())&&"COMPLETED".equals(o.getStatus())&&o.isDeliveryCodeVerified())return SokoModels.OrderAction.from(o);String code=decryptDeliveryCode(o);if(!"DELIVERY".equals(o.getDeliveryMethod())||!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified()||StringUtils.isBlank(code)||StringUtils.isBlank(o.getDeliveryProofReference())||codeExpired(o)||o.getDeliveryCodeLockedAt()!=null)throw invalid();if(o.getDeliveryCodeAttempts()>=5){o.setDeliveryCodeLockedAt(now());orderRepo.save(o);throw forbidden();}o.setDeliveryCodeAttempts(o.getDeliveryCodeAttempts()+1);if(!constantTimeEquals(code,request.code())){if(o.getDeliveryCodeAttempts()>=5)o.setDeliveryCodeLockedAt(now());orderRepo.save(o);throw invalid();}o.setDeliveryCodeVerified(true);o.setDeliveryCode(null);o.setEncryptedDeliveryCode(null);o.setDeliveryRecipientName(StringUtils.left(StringUtils.trimToNull(request.recipientName()),160));o.setDeliveryProofAt(now());o.setStatus("COMPLETED");o.setCompletedAt(now());releaseRider(o,true);orderRepo.save(o);audit(o,"SOKO_DELIVERY_COMPLETED");notifyOrder(o,"Delivered","Delivery was verified using the buyer's single-use code.");return SokoModels.OrderAction.from(o);}
+    public SokoModels.OrderAction confirmDelivery(long orderId,SokoRequests.DeliveryConfirmation request){SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);requireAssignedRiderForDoorstep(o);confirmDeliveryOrder(o,request);return SokoModels.OrderAction.from(o);}
 
     @Transactional(noRollbackFor=PMSCustomException.class)
     public OrderDetail confirmPickup(long orderId,SokoRequests.PickupConfirmation request){
@@ -549,16 +554,108 @@ public class SokoService {
     @Transactional
     public OrderDetail transition(long orderId,String requested,SokoRequests.Dispatch dispatch){
         SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);SokoStore store=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);String next=requested.toUpperCase(Locale.ROOT);
-        boolean customer=o.getCustomerUserId()==userDao.getUserId(),merchant=store.getOwnerUserId()==userDao.getUserId();
+        if(expireRiderAssignmentIfNeeded(o))return detail(o);
+        boolean merchant=store.getOwnerUserId()==userDao.getUserId(),assignmentCreated=false;
         if("CANCELLED".equals(next))throw invalid();
-        else {if(!merchant)throw forbidden();if(next.equals(o.getStatus()))return detail(o);if("DISPATCHED".equals(next)&&"DELIVERY_ASSIGNED".equals(o.getStatus())){if(!"DELIVERY".equals(o.getDeliveryMethod())||o.getRiderId()==null||o.getAssignedAt()==null)throw invalid();return detail(o);}switch(next){case "CONFIRMED"->{requireState(o,"PAID");o.setConfirmedAt(now());}case "PACKED"->requireState(o,"CONFIRMED");case "ASSIGNMENT_ACCEPTED"->{requireState(o,"DELIVERY_ASSIGNED");requireMerchantManagedRider(o);o.setAssignmentAcceptedAt(now());}case "DISPATCHED"->{if("PACKED".equals(o.getStatus())){if(!"DELIVERY".equals(o.getDeliveryMethod()))throw invalid();boolean managed=assignAndRegisterDelivery(o,dispatch);if(managed){next="DELIVERY_ASSIGNED";o.setAssignedAt(now());}else{o.setCollectedAt(now());generateDeliveryCode(o);o.setDispatchedAt(now());}}else{requireState(o,"ASSIGNMENT_ACCEPTED");requireMerchantManagedRider(o);o.setCollectedAt(now());o.setDispatchedAt(now());generateDeliveryCode(o);}}case "READY_FOR_PICKUP"->{requireState(o,"PACKED");if(!"PICKUP".equals(o.getDeliveryMethod()))throw invalid();generatePickupCode(o);}default->throw invalid();}o.setStatus(next);}
+        else {
+            if(!merchant)throw forbidden();
+            if(next.equals(o.getStatus()))return detail(o);
+            if("DISPATCHED".equals(next)&&"DELIVERY_ASSIGNED".equals(o.getStatus())){
+                if(!"DELIVERY".equals(o.getDeliveryMethod())||o.getRiderId()==null||o.getAssignedAt()==null)throw invalid();
+                return detail(o);
+            }
+            switch(next){
+                case "CONFIRMED"->{requireState(o,"PAID");o.setConfirmedAt(now());}
+                case "PACKED"->requireState(o,"CONFIRMED");
+                case "ASSIGNMENT_ACCEPTED"->throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS,
+                        "Only the assigned rider can accept this delivery.");
+                case "DISPATCHED"->{
+                    if(!"PACKED".equals(o.getStatus()))throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS,
+                            "The assigned rider must confirm collection from their private delivery link.");
+                    if(!"DELIVERY".equals(o.getDeliveryMethod()))throw invalid();
+                    assignAndRegisterDelivery(o,dispatch);next="DELIVERY_ASSIGNED";o.setAssignedAt(now());assignmentCreated=true;
+                }
+                case "READY_FOR_PICKUP"->{requireState(o,"PACKED");if(!"PICKUP".equals(o.getDeliveryMethod()))throw invalid();generatePickupCode(o);}
+                default->throw invalid();
+            }
+            o.setStatus(next);
+        }
+        if(assignmentCreated)issueRiderAssignmentLink(o,store,false,true);
         orderRepo.save(o);audit(o,"SOKO_ORDER_"+next);notifyOrder(o,o.getStatus().replace('_',' '),"Your order progress was updated by the merchant.");return detail(o);
     }
 
-    @Transactional public SokoModels.OrderAction acceptAssignment(long orderId){SokoOrder o=assignedOrder(orderId,null);if("ASSIGNMENT_ACCEPTED".equals(o.getStatus()))return SokoModels.OrderAction.from(o);requireState(o,"DELIVERY_ASSIGNED");o.setStatus("ASSIGNMENT_ACCEPTED");o.setAssignmentAcceptedAt(now());orderRepo.save(o);audit(o,"SOKO_DELIVERY_ACCEPTED");notifyOrder(o,"Rider assigned","Your verified rider accepted the delivery assignment.");return SokoModels.OrderAction.from(o);}
-    @Transactional public SokoModels.OrderAction confirmCollection(long orderId){SokoOrder o=assignedOrder(orderId,null);if("DISPATCHED".equals(o.getStatus())&&o.getCollectedAt()!=null)return SokoModels.OrderAction.from(o);requireState(o,"ASSIGNMENT_ACCEPTED");o.setStatus("DISPATCHED");o.setCollectedAt(now());o.setDispatchedAt(now());generateDeliveryCode(o);orderRepo.save(o);audit(o,"SOKO_DELIVERY_COLLECTED");notifyOrder(o,"Out for delivery","The rider collected your order and is on the way.");return SokoModels.OrderAction.from(o);}
-    @Transactional public SokoModels.OrderAction failDelivery(long orderId,SokoRequests.DeliveryException request){SokoOrder o=deliveryExceptionOrder(orderId,null);if("PACKED".equals(o.getStatus())&&o.getDeliveryFailedAt()!=null||"DELIVERY_RETURN_REQUIRED".equals(o.getStatus()))return SokoModels.OrderAction.from(o);if(!List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED","DISPATCHED").contains(o.getStatus()))throw invalid();boolean collected=o.getCollectedAt()!=null||"DISPATCHED".equals(o.getStatus());o.setStatus(collected?"DELIVERY_RETURN_REQUIRED":"PACKED");o.setDeliveryFailedAt(now());o.setDeliveryExceptionReason(request.reason().trim());clearDeliveryCode(o);if(!collected){releaseRider(o,false);clearPriorAssignmentDisplay(o);}orderRepo.save(o);audit(o,collected?"SOKO_DELIVERY_RETURN_REQUIRED":"SOKO_DELIVERY_REASSIGNMENT_REQUIRED");notifyOrder(o,collected?"Delivery failed — return required":"Delivery assignment failed — choose another rider",request.reason());return SokoModels.OrderAction.from(o);}
-    @Transactional public SokoModels.OrderAction returnDelivery(long orderId,SokoRequests.DeliveryException request){SokoOrder o=deliveryExceptionOrder(orderId,null);if("RETURNED".equals(o.getStatus()))return SokoModels.OrderAction.from(o);if(!List.of("DELIVERY_FAILED","DELIVERY_RETURN_REQUIRED").contains(o.getStatus()))throw invalid();BigDecimal collected=authoritativeCollected(o);o.setStatus("RETURNED");o.setReturnedAt(now());o.setDeliveryExceptionReason(request.reason().trim());releaseRider(o,false);requestOutstandingRefund(o,collected);orderRepo.save(o);audit(o,"SOKO_DELIVERY_RETURNED");notifyOrder(o,"Order returned",request.reason());return SokoModels.OrderAction.from(o);}
+    @Transactional public SokoModels.OrderAction acceptAssignment(long orderId){return acceptAssignedOrder(assignedOrder(orderId,null));}
+    @Transactional public SokoModels.OrderAction confirmCollection(long orderId){return collectAssignedOrder(assignedOrder(orderId,null));}
+
+    @Transactional(readOnly=true)
+    public SokoModels.PublicRiderAssignment publicRiderAssignment(String token){
+        SokoOrder order=publicAssignmentOrderForInspect(token);
+        return publicRiderView(order,!terminalAssignmentReceipt(order));
+    }
+
+    @Transactional(noRollbackFor=PMSCustomException.class)
+    public SokoModels.PublicRiderAssignment acceptPublicRiderAssignment(String token){
+        SokoOrder order=publicAssignmentOrder(token,true);
+        acceptAssignedOrder(order);
+        return publicRiderView(order);
+    }
+
+    @Transactional(noRollbackFor=PMSCustomException.class)
+    public SokoModels.PublicRiderAssignment collectPublicRiderAssignment(String token){
+        SokoOrder order=publicAssignmentOrder(token,true);
+        requirePersonalRiderAcceptance(order);
+        collectAssignedOrder(order);
+        return publicRiderView(order);
+    }
+
+    @Transactional(noRollbackFor=PMSCustomException.class)
+    public SokoModels.PublicRiderAssignment uploadPublicRiderDeliveryProof(String token,MultipartFile proof)throws IOException{
+        SokoOrder order=publicAssignmentOrder(token,true);requirePersonalRiderAcceptance(order);storeDeliveryProof(order,proof);return publicRiderView(order);
+    }
+
+    @Transactional(noRollbackFor=PMSCustomException.class)
+    public SokoModels.PublicRiderAssignment confirmPublicRiderDelivery(String token,SokoRequests.DeliveryConfirmation request){
+        SokoOrder order=publicAssignmentOrderForCompletion(token);
+        if(terminalAssignmentReceipt(order))return publicRiderView(order,false);
+        requirePersonalRiderAcceptance(order);
+        confirmDeliveryOrder(order,request);return publicRiderView(order,false);
+    }
+
+    @Transactional(noRollbackFor=PMSCustomException.class)
+    public SokoModels.RiderAssignmentDecision declinePublicRiderAssignment(String token,SokoRequests.RiderAssignmentDecline request){
+        SokoOrder order=publicAssignmentOrderForDecline(token);
+        if(order.getRiderAssignmentDeclinedAt()!=null)return new SokoModels.RiderAssignmentDecision(order.getOrderNumber(),"DECLINED");
+        if(!List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED").contains(order.getStatus()))throw invalid();
+        String reason=request==null?null:StringUtils.left(StringUtils.trimToNull(request.reason()),500);
+        releaseRider(order,false);order.setStatus("PACKED");order.setRiderAssignmentDeclinedAt(now());
+        order.setRiderAssignmentDeclineReason(reason);revokeRiderAssignmentAccess(order);clearPriorAssignmentDisplay(order);
+        orderRepo.save(order);audit(order,"SOKO_RIDER_ASSIGNMENT_DECLINED");
+        notifyOrder(order,"Rider declined","Choose another available rider for this order.");
+        return new SokoModels.RiderAssignmentDecision(order.getOrderNumber(),"DECLINED");
+    }
+
+    @Transactional(noRollbackFor=PMSCustomException.class)
+    public SokoModels.AssignmentLinkDelivery resendRiderAssignmentLink(long orderId){
+        SokoOrder order=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);
+        SokoStore store=ownedStore(order.getStoreId());
+        if(expireRiderAssignmentIfNeeded(order))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                "This assignment link expired. The rider was released; assign an available rider again.");
+        if(!List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED","DISPATCHED").contains(order.getStatus())||order.getRiderId()==null)throw invalid();
+        SokoRider rider=riderRepo.findForUpdate(order.getRiderId(),order.getStoreId()).orElseThrow(this::notFound);
+        if(!rider.isPhoneConfirmed()||!rider.isVerified()||!"ACTIVE".equals(rider.getStatus()))throw invalid();
+        // Before the private-link workflow, a merchant could stamp acceptance on
+        // an accountless rider's behalf. Never trust that legacy timestamp as
+        // proof of the rider's personal consent when issuing the first bearer.
+        if(order.getRiderAssignmentTokenHash()==null){
+            order.setAssignmentAcceptedAt(null);
+            if("ASSIGNMENT_ACCEPTED".equals(order.getStatus()))order.setStatus("DELIVERY_ASSIGNED");
+        }
+        issueRiderAssignmentLink(order,store,true,false);orderRepo.save(order);
+        return new SokoModels.AssignmentLinkDelivery(order.getOrderNumber(),"LINK_QUEUED",
+                order.getRiderAssignmentTokenExpiresAt(),"A new private assignment link was queued to the rider's confirmed phone.");
+    }
+    @Transactional public SokoModels.OrderAction failDelivery(long orderId,SokoRequests.DeliveryException request){SokoOrder o=deliveryExceptionOrder(orderId,null);if("PACKED".equals(o.getStatus())&&o.getDeliveryFailedAt()!=null||"DELIVERY_RETURN_REQUIRED".equals(o.getStatus()))return SokoModels.OrderAction.from(o);if(!List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED","DISPATCHED").contains(o.getStatus()))throw invalid();boolean collected=o.getCollectedAt()!=null||"DISPATCHED".equals(o.getStatus());o.setStatus(collected?"DELIVERY_RETURN_REQUIRED":"PACKED");o.setDeliveryFailedAt(now());o.setDeliveryExceptionReason(request.reason().trim());clearDeliveryCode(o);revokeRiderAssignmentAccess(o);cancelDeliveryVisitor(o);if(!collected){releaseRider(o,false);clearPriorAssignmentDisplay(o);}orderRepo.save(o);audit(o,collected?"SOKO_DELIVERY_RETURN_REQUIRED":"SOKO_DELIVERY_REASSIGNMENT_REQUIRED");notifyOrder(o,collected?"Delivery failed — return required":"Delivery assignment failed — choose another rider",request.reason());return SokoModels.OrderAction.from(o);}
+    @Transactional public SokoModels.OrderAction returnDelivery(long orderId,SokoRequests.DeliveryException request){SokoOrder o=deliveryExceptionOrder(orderId,null);if("RETURNED".equals(o.getStatus()))return SokoModels.OrderAction.from(o);if(!List.of("DELIVERY_FAILED","DELIVERY_RETURN_REQUIRED").contains(o.getStatus()))throw invalid();BigDecimal collected=authoritativeCollected(o);o.setStatus("RETURNED");o.setReturnedAt(now());o.setDeliveryExceptionReason(request.reason().trim());revokeRiderAssignmentAccess(o);cancelDeliveryVisitor(o);releaseRider(o,false);requestOutstandingRefund(o,collected);orderRepo.save(o);audit(o,"SOKO_DELIVERY_RETURNED");notifyOrder(o,"Order returned",request.reason());return SokoModels.OrderAction.from(o);}
     @Transactional public SokoModels.OrderAction returnAfterFinanceHold(long orderId,SokoRequests.DeliveryException request){
         SokoOrder o=financeHoldOrder(orderId);
         if("FINANCE_HOLD_RETURNED".equals(o.getStatus()))return SokoModels.OrderAction.from(o);
@@ -678,7 +775,7 @@ public class SokoService {
         });
     }
 
-    @Transactional public OrderDetail cancel(long orderId,SokoRequests.Cancellation request){SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);SokoStore s=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);boolean allowed=o.getCustomerUserId()==userDao.getUserId()||s.getOwnerUserId()==userDao.getUserId();if(!allowed)throw forbidden();if("CANCELLED".equals(o.getStatus()))return detail(o);if(!List.of("PENDING_PAYMENT","PAID","CONFIRMED").contains(o.getStatus()))throw invalid();BigDecimal collected=authoritativeCollected(o);if(collected.signum()>0)o.setPaymentStatus(collected.compareTo(zero(o.getTotal()))>=0?"PAID":"PARTIALLY_PAID");restoreStock(o);releaseRider(o,false);o.setCancellationReason(request.reason().trim());o.setCancelledAt(now());o.setStatus("CANCELLED");requestOutstandingRefund(o,collected);orderRepo.save(o);audit(o,"SOKO_ORDER_CANCELLED");notifyOrder(o,"Cancelled","");return detail(o);}
+    @Transactional public OrderDetail cancel(long orderId,SokoRequests.Cancellation request){SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);SokoStore s=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);boolean allowed=o.getCustomerUserId()==userDao.getUserId()||s.getOwnerUserId()==userDao.getUserId();if(!allowed)throw forbidden();if("CANCELLED".equals(o.getStatus()))return detail(o);if(!List.of("PENDING_PAYMENT","PAID","CONFIRMED").contains(o.getStatus()))throw invalid();BigDecimal collected=authoritativeCollected(o);if(collected.signum()>0)o.setPaymentStatus(collected.compareTo(zero(o.getTotal()))>=0?"PAID":"PARTIALLY_PAID");restoreStock(o);revokeRiderAssignmentAccess(o);releaseRider(o,false);o.setCancellationReason(request.reason().trim());o.setCancelledAt(now());o.setStatus("CANCELLED");requestOutstandingRefund(o,collected);orderRepo.save(o);audit(o,"SOKO_ORDER_CANCELLED");notifyOrder(o,"Cancelled","");return detail(o);}
     @Transactional public OrderDetail finance(long orderId,SokoRequests.FinanceUpdate r){requireFinanceRole();SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);
         if(r.type()==SokoRequests.FinanceType.REFUND)return updateManualRefund(o,r);
         BigDecimal collected=authoritativeCollected(o),refunded=zero(o.getRefundedAmount());
@@ -693,6 +790,16 @@ public class SokoService {
         for(int scan=0;scan<10;scan++){
             List<SokoOrder> expired=orderRepo.findExpiredReservations(now(),batch);
             expired.forEach(this::expirePendingCheckout);
+            if(expired.size()<100)break;
+        }
+    }
+
+    @Scheduled(fixedDelayString="${soko.rider-assignment-expiry-scan-ms:300000}")
+    @Transactional public void expireRiderAssignments(){
+        Pageable batch=PageRequest.of(0,100,Sort.by("riderAssignmentTokenExpiresAt"));
+        for(int scan=0;scan<10;scan++){
+            List<SokoOrder> expired=orderRepo.findExpiredRiderAssignmentsForUpdate(now(),batch);
+            expired.forEach(this::expireRiderAssignmentIfNeeded);
             if(expired.size()<100)break;
         }
     }
@@ -866,19 +973,225 @@ public class SokoService {
         SokoStore store=storeRepo.findById(existing.getStoreId()).orElseThrow(this::notFound);return detail(existing,store,savedItems);
     }
     private PMSInvoice createInvoice(SokoOrder o,SokoStore s,List<SokoOrderItem> items){PMSInvoice inv=new PMSInvoice();inv.setUnitId(o.getDestinationUnitId()==null?0:o.getDestinationUnitId());inv.setPropertyId(0);inv.setDescription(("Soko order "+o.getOrderNumber()).getBytes(StandardCharsets.UTF_8));String html=items.stream().map(i->"<tr><td><span>"+HtmlUtils.htmlEscape(i.getProductName())+" x "+i.getQuantity()+"</span></td><td class='amount-col'>"+i.getLineTotal()+"</td></tr>").collect(Collectors.joining());inv.setHtmlDescription(html.getBytes(StandardCharsets.UTF_8));inv.setMoneyAmount(o.getTotal());inv.setMoneyPendingAmount(o.getTotal());inv.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(o.getCurrency()));inv.setBilledUserId(o.getCustomerUserId());inv.setPayToUserId(s.getOwnerUserId());inv.setPaymentAccountId(o.getPaymentAccountId());inv.setActive(true);inv.setBillingType("SOKO");inv.setCustomerPhoneNumber(o.getCustomerPhone());userDao.findById(o.getCustomerUserId()).ifPresent(u->inv.setCustomerEmail(u.getEmail()));invoiceDao.createInvoice(inv);return inv;}
-    private boolean assignAndRegisterDelivery(SokoOrder o,SokoRequests.Dispatch d){
+    private void assignAndRegisterDelivery(SokoOrder o,SokoRequests.Dispatch d){
         if(d==null||d.riderId()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Select a verified, registered and available SlickHood rider. One-off courier dispatch is no longer available.");
         if(d.expectedArrivalTime()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Enter the rider's expected arrival time before dispatching the order.");
         ZonedDateTime expectedArrival=d.expectedArrivalTime().atZone(ZoneId.of("Africa/Nairobi")).withZoneSameInstant(ZoneId.of("UTC"));
         if(!expectedArrival.isAfter(now()))throw invalid();
         SokoRider rider=riderRepo.findForUpdate(d.riderId(),o.getStoreId()).orElseThrow(this::notFound);if(!rider.isPhoneConfirmed()||!rider.isVerified()||!"ACTIVE".equals(rider.getStatus())||!"AVAILABLE".equals(rider.getAvailability()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Choose a phone-confirmed, active and available rider.");rider.setAvailability("BUSY");riderRepo.save(rider);o.setRiderId(rider.getId());o.setCourierName(rider.getDisplayName());o.setCourierPhone(rider.getPhoneNumber());o.setCourierVehiclePlate(rider.getVehiclePlate());o.setDeliveryFailedAt(null);o.setDeliveryExceptionReason(null);
         o.setExpectedArrivalAt(expectedArrival);
-        if(o.getDestinationUnitId()!=null){var visitor=visitorService.preRegisterDeliveryForHost(o.getCustomerUserId(),new CreateVisitorRequest(o.getCourierName(),o.getCourierVehiclePlate(),d.expectedArrivalTime(),null,false,o.getDestinationUnitId(),o.getCourierPhone(), VisitorCategory.DELIVERY));o.setDeliveryVisitorId(visitor.getId());}
-        // A linked rider can accept/collect in their own account. A merchant-created,
-        // phone-confirmed rider has no login, so dispatch directly and let the shop
-        // owner complete the proof + buyer-code handover without stranding the order.
-        return rider.getUserId()!=null;
+        resetRiderAssignmentAccess(o);
     }
+    private SokoModels.OrderAction acceptAssignedOrder(SokoOrder order){
+        if(order.getAssignmentAcceptedAt()!=null&&List.of("ASSIGNMENT_ACCEPTED","DISPATCHED","COMPLETED").contains(order.getStatus()))
+            return SokoModels.OrderAction.from(order);
+        // Rolling-deploy recovery: older accountless assignments may already be
+        // DISPATCHED without ever having had a personal acceptance link.
+        if("DISPATCHED".equals(order.getStatus())&&order.getRiderAssignmentTokenHash()!=null){
+            order.setAssignmentAcceptedAt(now());extendAcceptedAssignmentWindow(order);orderRepo.save(order);audit(order,"SOKO_DELIVERY_ACCEPTED");
+            notifyOrder(order,"Rider confirmed","The assigned rider confirmed custody through the private delivery link.");
+            return SokoModels.OrderAction.from(order);
+        }
+        requireState(order,"DELIVERY_ASSIGNED");order.setStatus("ASSIGNMENT_ACCEPTED");order.setAssignmentAcceptedAt(now());extendAcceptedAssignmentWindow(order);
+        orderRepo.save(order);audit(order,"SOKO_DELIVERY_ACCEPTED");notifyOrder(order,"Rider assigned","Your verified rider accepted the delivery assignment.");
+        return SokoModels.OrderAction.from(order);
+    }
+    private void extendAcceptedAssignmentWindow(SokoOrder order){
+        ZonedDateTime collectBy=now().plusMinutes(Math.max(15,Math.min(riderAssignmentAcceptedCollectMinutes,240)));
+        if(order.getRiderAssignmentTokenExpiresAt()==null||order.getRiderAssignmentTokenExpiresAt().isBefore(collectBy))
+            order.setRiderAssignmentTokenExpiresAt(collectBy);
+    }
+    private SokoModels.OrderAction collectAssignedOrder(SokoOrder order){
+        if(order.getCollectedAt()!=null&&List.of("DISPATCHED","COMPLETED").contains(order.getStatus()))return SokoModels.OrderAction.from(order);
+        requireState(order,"ASSIGNMENT_ACCEPTED");order.setStatus("DISPATCHED");order.setCollectedAt(now());order.setDispatchedAt(now());
+        ensureDeliveryVisitor(order);generateDeliveryCode(order);
+        if(order.getDeliveryCodeExpiresAt()!=null&&(order.getRiderAssignmentTokenExpiresAt()==null
+                ||order.getRiderAssignmentTokenExpiresAt().isBefore(order.getDeliveryCodeExpiresAt())))
+            order.setRiderAssignmentTokenExpiresAt(order.getDeliveryCodeExpiresAt());
+        orderRepo.save(order);audit(order,"SOKO_DELIVERY_COLLECTED");
+        notifyOrder(order,"Out for delivery","The rider collected your order and is on the way.");return SokoModels.OrderAction.from(order);
+    }
+    private void ensureDeliveryVisitor(SokoOrder order){
+        if(order.getDestinationUnitId()==null||order.getDeliveryVisitorId()!=null)return;
+        if(order.getExpectedArrivalAt()==null)throw invalid();
+        java.time.LocalDateTime arrival=order.getExpectedArrivalAt()
+                .withZoneSameInstant(ZoneId.of("Africa/Nairobi")).toLocalDateTime();
+        var visitor=visitorService.preRegisterDeliveryForHost(order.getCustomerUserId(),
+                new CreateVisitorRequest(order.getCourierName(),order.getCourierVehiclePlate(),arrival,null,false,
+                        order.getDestinationUnitId(),order.getCourierPhone(),VisitorCategory.DELIVERY));
+        order.setDeliveryVisitorId(visitor.getId());
+    }
+    private void storeDeliveryProof(SokoOrder order,MultipartFile proof)throws IOException{
+        if(StringUtils.isNotBlank(order.getDeliveryProofReference()))return;
+        if(!"DISPATCHED".equals(order.getStatus())||proof==null||proof.isEmpty()||proof.getSize()>5L*1024*1024)throw invalid();
+        String type=StringUtils.defaultString(proof.getContentType()).toLowerCase(Locale.ROOT);byte[] bytes=proof.getBytes();
+        if(!validProof(type,bytes))throw new PMSCustomException(ResponseCode.INVALID_IMAGE);
+        malwarePolicy.requireSafe(bytes);String extension="image/png".equals(type)?"png":"jpg";
+        String ref="soko/delivery-proof/"+order.getId()+"/"+UUID.randomUUID()+"."+extension;
+        garageService.uploadBytes(ref,bytes,type);order.setDeliveryProofReference(ref);order.setDeliveryProofContentType(type);
+        order.setDeliveryProofSize((long)bytes.length);order.setDeliveryProofAt(now());orderRepo.save(order);
+    }
+    private void confirmDeliveryOrder(SokoOrder order,SokoRequests.DeliveryConfirmation request){
+        if("DELIVERY".equals(order.getDeliveryMethod())&&"COMPLETED".equals(order.getStatus())&&order.isDeliveryCodeVerified())return;
+        String code=decryptDeliveryCode(order);
+        if(!"DELIVERY".equals(order.getDeliveryMethod())||!"DISPATCHED".equals(order.getStatus())||order.isDeliveryCodeVerified()
+                ||StringUtils.isBlank(code)||StringUtils.isBlank(order.getDeliveryProofReference())||codeExpired(order))throw invalid();
+        if(order.getDeliveryCodeLockedAt()!=null)throw new SokoDeliveryCodeLockedException();
+        if(order.getDeliveryCodeAttempts()>=5){order.setDeliveryCodeLockedAt(now());orderRepo.save(order);throw new SokoDeliveryCodeLockedException();}
+        order.setDeliveryCodeAttempts(order.getDeliveryCodeAttempts()+1);
+        if(!constantTimeEquals(code,request.code())){if(order.getDeliveryCodeAttempts()>=5){order.setDeliveryCodeLockedAt(now());orderRepo.save(order);throw new SokoDeliveryCodeLockedException();}orderRepo.save(order);throw invalid();}
+        order.setDeliveryCodeVerified(true);order.setDeliveryCode(null);order.setEncryptedDeliveryCode(null);
+        order.setDeliveryRecipientName(StringUtils.left(StringUtils.trimToNull(request.recipientName()),160));order.setDeliveryProofAt(now());
+        order.setStatus("COMPLETED");order.setCompletedAt(now());revokeRiderAssignmentAccess(order);cancelDeliveryVisitor(order);
+        releaseRider(order,true);orderRepo.save(order);audit(order,"SOKO_DELIVERY_COMPLETED");
+        notifyOrder(order,"Delivered","Delivery was verified using the buyer's single-use code.");
+    }
+    private void issueRiderAssignmentLink(SokoOrder order,SokoStore store,boolean respectCooldown,boolean newAssignment){
+        SokoRider rider=riderRepo.findForUpdate(order.getRiderId(),order.getStoreId()).orElseThrow(this::notFound);
+        ZonedDateTime timestamp=now();
+        if(newAssignment)resetRiderAssignmentAccess(order);
+        long cooldown=Math.max(30,Math.min(riderAssignmentLinkCooldownSeconds,600));
+        if(respectCooldown&&order.getRiderAssignmentLinkRequestedAt()!=null
+                &&order.getRiderAssignmentLinkRequestedAt().plusSeconds(cooldown).isAfter(timestamp))
+            throw new PMSCustomException(ResponseCode.OTP_RESEND_TOO_SOON,"A rider assignment link was just sent. Wait one minute before resending.");
+        int maxSends=Math.max(2,Math.min(riderAssignmentLinkMaxSends,10));
+        if(order.getRiderAssignmentLinkRequestCount()>=maxSends)
+            throw new PMSCustomException(ResponseCode.OTP_RESEND_TOO_SOON,"This assignment has reached the SMS link limit. Choose another rider or contact support.");
+        RawAssignmentToken token=newAssignmentToken();long validHours=Math.max(1,Math.min(riderAssignmentTokenValidHours,168));
+        order.setRiderAssignmentTokenHash(token.hash());order.setRiderAssignmentTokenIssuedAt(timestamp);
+        ZonedDateTime expiresAt=timestamp.plusHours(validHours);
+        if("DISPATCHED".equals(order.getStatus())){
+            if(order.getDeliveryCodeExpiresAt()!=null&&order.getDeliveryCodeExpiresAt().isAfter(expiresAt))expiresAt=order.getDeliveryCodeExpiresAt();
+            if(order.getRiderAssignmentTokenExpiresAt()!=null&&order.getRiderAssignmentTokenExpiresAt().isAfter(expiresAt))expiresAt=order.getRiderAssignmentTokenExpiresAt();
+        }
+        order.setRiderAssignmentTokenExpiresAt(expiresAt);order.setRiderAssignmentTokenRevokedAt(null);
+        order.setRiderAssignmentLinkRequestedAt(timestamp);order.setRiderAssignmentLinkRequestCount(order.getRiderAssignmentLinkRequestCount()+1);
+        boolean enRoute="DISPATCHED".equals(order.getStatus());
+        String template=i18n.getLocalizedMessage(enRoute?"sms.soko.rider.delivery.continue":NotificationType.SOKO_RIDER_ASSIGNMENT_SMS.getBody());
+        if(StringUtils.isBlank(template))template=enRoute
+                ?"SlickHood delivery %s from %s is in progress. Continue delivery and complete secure handover: %s. This private link expires in %s hours. Do not share it."
+                :"SlickHood delivery %s from %s is ready. Accept or decline: %s. This private link expires in %s hours. Do not share it.";
+        String link=assignmentLinkBase()+"#token="+token.raw();
+        long displayedValidityHours=Math.max(1,(java.time.Duration.between(timestamp,expiresAt).toMinutes()+59)/60);
+        String body=String.format(template,order.getOrderNumber(),storeName(order,store),link,displayedValidityHours);
+        notificationService.queueNotification(new NotificationDTO(body,rider.getPhoneNumber(),NotificationType.SOKO_RIDER_ASSIGNMENT_SMS));
+        audit(order,newAssignment?"SOKO_RIDER_ASSIGNMENT_LINK_SENT":"SOKO_RIDER_ASSIGNMENT_LINK_RESENT");
+    }
+    private SokoModels.PublicRiderAssignment publicRiderView(SokoOrder order){return publicRiderView(order,true);}
+    private SokoModels.PublicRiderAssignment publicRiderView(SokoOrder order,boolean allowDeliveryDetails){
+        SokoStore store=storeRepo.findById(order.getStoreId()).orElseThrow(this::notFound);
+        List<SokoOrderItem> rows=itemRepo.findAllByOrderIdAndActiveTrueOrderById(order.getId());
+        List<SokoModels.PublicRiderItem> publicItems=rows.stream().map(SokoModels.PublicRiderItem::from).toList();
+        int itemCount=rows.stream().mapToInt(SokoOrderItem::getQuantity).sum();
+        boolean accepted=allowDeliveryDetails&&order.getAssignmentAcceptedAt()!=null&&!"DELIVERY_ASSIGNED".equals(order.getStatus());
+        SokoModels.PublicRiderDelivery delivery=accepted
+                ?new SokoModels.PublicRiderDelivery(order.getDeliveryAddress(),order.getDeliveryLatitude(),order.getDeliveryLongitude(),order.getCustomerPhone())
+                :null;
+        return new SokoModels.PublicRiderAssignment(order.getOrderNumber(),order.getStatus(),storeName(order,store),
+                storeAddress(order,store),order.getExpectedArrivalAt(),itemCount,publicItems,
+                StringUtils.isNotBlank(order.getDeliveryProofReference()),delivery);
+    }
+    private SokoOrder publicAssignmentOrder(String token,boolean forUpdate){
+        String hash=assignmentTokenHash(token);
+        SokoOrder order=(forUpdate?orderRepo.findByRiderAssignmentTokenHashForUpdate(hash)
+                :orderRepo.findByRiderAssignmentTokenHashAndActiveTrue(hash)).orElseThrow(this::invalidAssignmentAccess);
+        if(forUpdate&&expireRiderAssignmentIfNeeded(order))throw invalidAssignmentAccess();
+        requireCurrentAssignmentAccess(order);
+        return order;
+    }
+    private SokoOrder publicAssignmentOrderForInspect(String token){
+        SokoOrder order=orderRepo.findByRiderAssignmentTokenHashAndActiveTrue(assignmentTokenHash(token))
+                .orElseThrow(this::invalidAssignmentAccess);
+        if(terminalAssignmentReceipt(order))return order;
+        requireCurrentAssignmentAccess(order);return order;
+    }
+    private SokoOrder publicAssignmentOrderForCompletion(String token){
+        SokoOrder order=orderRepo.findByRiderAssignmentTokenHashForUpdate(assignmentTokenHash(token))
+                .orElseThrow(this::invalidAssignmentAccess);
+        if(terminalAssignmentReceipt(order))return order;
+        if(expireRiderAssignmentIfNeeded(order))throw invalidAssignmentAccess();
+        requireCurrentAssignmentAccess(order);return order;
+    }
+    private boolean terminalAssignmentReceipt(SokoOrder order){
+        return "COMPLETED".equals(order.getStatus())&&order.isDeliveryCodeVerified()
+                &&order.getRiderAssignmentTokenRevokedAt()!=null&&order.getRiderAssignmentTokenExpiresAt()!=null
+                &&order.getRiderAssignmentTokenExpiresAt().isAfter(now());
+    }
+    private SokoOrder publicAssignmentOrderForDecline(String token){
+        SokoOrder order=orderRepo.findByRiderAssignmentTokenHashForUpdate(assignmentTokenHash(token)).orElseThrow(this::invalidAssignmentAccess);
+        if(order.getRiderAssignmentDeclinedAt()!=null){
+            boolean currentReceipt="PACKED".equals(order.getStatus())&&order.getRiderAssignmentTokenRevokedAt()!=null
+                    &&order.getRiderAssignmentTokenExpiresAt()!=null&&order.getRiderAssignmentTokenExpiresAt().isAfter(now());
+            if(currentReceipt)return order;
+            throw invalidAssignmentAccess();
+        }
+        if(expireRiderAssignmentIfNeeded(order))throw invalidAssignmentAccess();
+        requireCurrentAssignmentAccess(order);
+        return order;
+    }
+    private void requireCurrentAssignmentAccess(SokoOrder order){
+        if(order.getRiderId()==null||order.getRiderAssignmentTokenRevokedAt()!=null
+                ||order.getRiderAssignmentTokenExpiresAt()==null||!order.getRiderAssignmentTokenExpiresAt().isAfter(now()))
+            throw invalidAssignmentAccess();
+        SokoRider rider=riderRepo.findByIdAndStoreIdAndActiveTrue(order.getRiderId(),order.getStoreId()).orElseThrow(this::invalidAssignmentAccess);
+        if(!rider.isPhoneConfirmed()||!rider.isVerified()||!"ACTIVE".equals(rider.getStatus()))throw invalidAssignmentAccess();
+    }
+    private void requirePersonalRiderAcceptance(SokoOrder order){
+        if(order.getAssignmentAcceptedAt()==null)throw invalidAssignmentAccess();
+    }
+    private void expireRiderAssignments(List<Long> storeIds){
+        Pageable batch=PageRequest.of(0,100,Sort.by("riderAssignmentTokenExpiresAt"));
+        for(int scan=0;scan<10;scan++){
+            List<SokoOrder> expired=orderRepo.findExpiredRiderAssignmentsForStoresForUpdate(storeIds,now(),batch);
+            expired.forEach(this::expireRiderAssignmentIfNeeded);
+            if(expired.size()<100)break;
+        }
+    }
+    private boolean expireRiderAssignmentIfNeeded(SokoOrder order){
+        if(!List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED").contains(order.getStatus())
+                ||order.getRiderAssignmentTokenRevokedAt()!=null||order.getRiderAssignmentTokenExpiresAt()==null
+                ||order.getRiderAssignmentTokenExpiresAt().isAfter(now()))return false;
+        releaseRider(order,false);order.setStatus("PACKED");order.setDeliveryFailedAt(now());
+        order.setDeliveryExceptionReason("Rider assignment response window expired");
+        revokeRiderAssignmentAccess(order);clearPriorAssignmentDisplay(order);orderRepo.save(order);
+        audit(order,"SOKO_RIDER_ASSIGNMENT_EXPIRED");notifyOrder(order,"Rider response expired","Choose an available rider and send a new private assignment link.");
+        return true;
+    }
+    private RawAssignmentToken newAssignmentToken(){
+        byte[] bytes=new byte[32];SECURE_RANDOM.nextBytes(bytes);
+        String raw=java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        return new RawAssignmentToken(raw,hashAssignmentToken(raw));
+    }
+    private String assignmentTokenHash(String token){
+        String raw=StringUtils.trimToNull(token);
+        if(raw==null||raw.length()>64)throw invalidAssignmentAccess();
+        try{if(java.util.Base64.getUrlDecoder().decode(raw).length!=32)throw invalidAssignmentAccess();}
+        catch(IllegalArgumentException invalid){throw invalidAssignmentAccess();}
+        return hashAssignmentToken(raw);
+    }
+    private String hashAssignmentToken(String raw){
+        try{return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(raw.getBytes(StandardCharsets.UTF_8)));}
+        catch(java.security.NoSuchAlgorithmException impossible){throw new IllegalStateException("SHA-256 is unavailable",impossible);}
+    }
+    private String assignmentLinkBase(){
+        String configured=StringUtils.defaultIfBlank(riderAssignmentUrl,"https://app.slickhood.com/soko/rider-assignment").trim();
+        try{
+            URI uri=URI.create(configured);
+            if(!"https".equalsIgnoreCase(uri.getScheme())||StringUtils.isBlank(uri.getHost())||uri.getUserInfo()!=null||uri.getQuery()!=null||uri.getFragment()!=null)
+                throw new IllegalStateException("The Soko rider assignment URL must be an HTTPS URL without query or fragment data.");
+            return configured.endsWith("/")?configured.substring(0,configured.length()-1):configured;
+        }catch(IllegalArgumentException invalid){throw new IllegalStateException("The Soko rider assignment URL is invalid.",invalid);}
+    }
+    private void resetRiderAssignmentAccess(SokoOrder order){
+        order.setRiderAssignmentTokenHash(null);order.setRiderAssignmentTokenIssuedAt(null);order.setRiderAssignmentTokenExpiresAt(null);
+        order.setRiderAssignmentTokenRevokedAt(null);order.setRiderAssignmentLinkRequestedAt(null);order.setRiderAssignmentLinkRequestCount(0);
+        order.setRiderAssignmentDeclinedAt(null);order.setRiderAssignmentDeclineReason(null);
+    }
+    private void revokeRiderAssignmentAccess(SokoOrder order){
+        if(order.getRiderAssignmentTokenHash()!=null&&order.getRiderAssignmentTokenRevokedAt()==null)order.setRiderAssignmentTokenRevokedAt(now());
+    }
+    private PMSCustomException invalidAssignmentAccess(){return new SokoRiderAssignmentAccessException();}
+    private record RawAssignmentToken(String raw,String hash){}
     private void generateDeliveryCode(SokoOrder o){String code=generateHandoverCode(o);notifyDeliveryCode(o,code);}
     private void generatePickupCode(SokoOrder o){generateHandoverCode(o);}
     private String generateHandoverCode(SokoOrder o){String code=String.format(Locale.ROOT,"%06d",SECURE_RANDOM.nextInt(1_000_000));o.setDeliveryCode(null);o.setEncryptedDeliveryCode(encryptionService.encrypt(code));o.setDeliveryCodeAttempts(0);o.setDeliveryCodeLockedAt(null);o.setDeliveryCodeVerified(false);o.setDeliveryCodeExpiresAt(now().plusHours(Math.max(1,Math.min(deliveryCodeValidHours,72))));return code;}
@@ -886,7 +1199,7 @@ public class SokoService {
     private boolean handoverCodeRecoveryAllowed(SokoOrder o){return !o.isDeliveryCodeVerified()&&(("DELIVERY".equals(o.getDeliveryMethod())&&"DISPATCHED".equals(o.getStatus()))||("PICKUP".equals(o.getDeliveryMethod())&&"READY_FOR_PICKUP".equals(o.getStatus())));}
     // Financial finality invalidates delivery authorization, but does not imply
     // returned groceries are saleable or that a rider has relinquished custody.
-    private void clearDeliveryAuthorization(SokoOrder o){clearDeliveryCode(o);o.setDeliveryRecoveryOtp(null);o.setDeliveryRecoveryOtpExpiresAt(null);}
+    private void clearDeliveryAuthorization(SokoOrder o){clearDeliveryCode(o);revokeRiderAssignmentAccess(o);cancelDeliveryVisitor(o);o.setDeliveryRecoveryOtp(null);o.setDeliveryRecoveryOtpExpiresAt(null);}
     private boolean codeExpired(SokoOrder o){return o.getDeliveryCodeExpiresAt()==null||!o.getDeliveryCodeExpiresAt().isAfter(now());}
     private SokoOrder assignedOrder(long id,String required){SokoOrder o=orderRepo.findByIdForUpdate(id).orElseThrow(this::notFound);if(o.getRiderId()==null)throw forbidden();SokoRider r=riderRepo.findForUpdate(o.getRiderId(),o.getStoreId()).orElseThrow(this::notFound);if(!r.isPhoneConfirmed()||!r.isVerified()||!"ACTIVE".equals(r.getStatus())||!java.util.Objects.equals(r.getUserId(),userDao.getUserId()))throw forbidden();if(required!=null)requireState(o,required);return o;}
     private SokoRider requireMerchantManagedRider(SokoOrder o){if(o.getRiderId()==null)throw forbidden();SokoRider rider=riderRepo.findForUpdate(o.getRiderId(),o.getStoreId()).orElseThrow(this::notFound);if(rider.getUserId()!=null)throw forbidden();return rider;}
@@ -907,17 +1220,17 @@ public class SokoService {
         boolean merchant=storeRepo.findByIdAndActiveTrue(o.getStoreId()).filter(store->store.getOwnerUserId()==actor).isPresent();
         if(!assigned&&!merchant)throw forbidden();return o;
     }
-    private SokoStore requireMerchantOrAssignedRider(SokoOrder o){
-        SokoStore store=storeRepo.findByIdAndActiveTrue(o.getStoreId()).orElseThrow(this::notFound);
+    private SokoRider requireAssignedRiderForDoorstep(SokoOrder o){
         if(o.getRiderId()==null)throw forbidden();
         SokoRider rider=riderRepo.findForUpdate(o.getRiderId(),o.getStoreId()).orElseThrow(this::notFound);
-        long actor=userDao.getUserId();
-        if(rider.getUserId()==null){if(store.getOwnerUserId()==actor)return store;throw forbidden();}
-        if(rider.isPhoneConfirmed()&&rider.isVerified()&&"ACTIVE".equals(rider.getStatus())&&rider.getUserId().equals(actor))return store;
+        if(rider.isPhoneConfirmed()&&rider.isVerified()&&"ACTIVE".equals(rider.getStatus())
+                &&rider.getUserId()!=null&&rider.getUserId().equals(userDao.getUserId()))return rider;
         throw forbidden();
     }
     private void releaseRider(SokoOrder o,boolean completed){if(o.getRiderId()==null)return;riderRepo.findForUpdate(o.getRiderId(),o.getStoreId()).ifPresent(r->{if("BUSY".equals(r.getAvailability()))r.setAvailability(r.isVerified()&&"ACTIVE".equals(r.getStatus())?"AVAILABLE":"OFFLINE");if(completed)r.setCompletedDeliveries(r.getCompletedDeliveries()+1);riderRepo.save(r);});}
-    private void clearPriorAssignmentDisplay(SokoOrder order){order.setCourierName(null);order.setCourierPhone(null);order.setCourierVehiclePlate(null);order.setAssignedAt(null);order.setAssignmentAcceptedAt(null);order.setExpectedArrivalAt(null);}
+    private void clearPriorAssignmentDisplay(SokoOrder order){revokeRiderAssignmentAccess(order);cancelDeliveryVisitor(order);order.setCourierName(null);order.setCourierPhone(null);order.setCourierVehiclePlate(null);order.setAssignedAt(null);order.setAssignmentAcceptedAt(null);order.setExpectedArrivalAt(null);}
+    private void cancelDeliveryVisitor(SokoOrder order){if(order.getDeliveryVisitorId()!=null
+            &&visitorService.revokeSokoDeliveryVisitor(order.getDeliveryVisitorId(),order.getCustomerUserId()))order.setDeliveryVisitorId(null);}
     private boolean validProof(String type,byte[] b){if(b==null)return false;return switch(type){case "image/jpeg"->b.length>3&&(b[0]&255)==255&&(b[1]&255)==216;case "image/png"->b.length>8&&(b[0]&255)==137&&b[1]=='P'&&b[2]=='N'&&b[3]=='G';default->false;};}
     private String decryptDeliveryCode(SokoOrder order){if(order.getEncryptedDeliveryCode()!=null){var decrypted=encryptionService.decrypt(order.getEncryptedDeliveryCode());return decrypted==null?null:decrypted.decryptedValue();}return order.getDeliveryCode();}
     private boolean constantTimeEquals(String expected,String actual){return java.security.MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),actual.getBytes(StandardCharsets.UTF_8));}

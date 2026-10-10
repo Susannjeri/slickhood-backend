@@ -10,20 +10,29 @@ import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.soko.SokoModels;
 import org.pms.silverocean.service.soko.SokoRequests;
 import org.pms.silverocean.service.soko.SokoService;
+import org.pms.silverocean.config.ApiErrorHandler;
+import org.pms.silverocean.service.soko.SokoDeliveryCodeLockedException;
+import org.pms.silverocean.service.soko.SokoRiderAssignmentAccessException;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 @ExtendWith(MockitoExtension.class)
 class SokoControllerContractTest {
@@ -33,7 +42,8 @@ class SokoControllerContractTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new SokoController(service, i18n)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(new SokoController(service, i18n))
+                .setControllerAdvice(new ApiErrorHandler(i18n)).build();
     }
 
     @Test
@@ -80,5 +90,44 @@ class SokoControllerContractTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void publicRiderBoundaryReturnsPrivacyHeadersAndRoutesAllPersonalActions() throws Exception {
+        var view=new SokoModels.PublicRiderAssignment("SOKO-1","DELIVERY_ASSIGNED","Fresh Corner","Market Road",
+                java.time.ZonedDateTime.now().plusHours(1),1,List.of(new SokoModels.PublicRiderItem("Milk","litre",1)),false,null);
+        when(service.publicRiderAssignment("secret")).thenReturn(view);
+        when(service.acceptPublicRiderAssignment("secret")).thenReturn(view);
+        when(service.collectPublicRiderAssignment("secret")).thenReturn(view);
+        when(service.declinePublicRiderAssignment(eq("secret"),any())).thenReturn(new SokoModels.RiderAssignmentDecision("SOKO-1","DECLINED"));
+        when(service.confirmPublicRiderDelivery(eq("secret"),any())).thenReturn(view);
+
+        mockMvc.perform(get("/soko/public/rider-assignment").header("X-Soko-Rider-Token","secret"))
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store, max-age=0"))
+                .andExpect(header().string("Referrer-Policy","no-referrer")).andExpect(jsonPath("$.data[0].orderReference").value("SOKO-1"));
+        mockMvc.perform(put("/soko/public/rider-assignment/accept").header("X-Soko-Rider-Token","secret")).andExpect(status().isOk());
+        mockMvc.perform(put("/soko/public/rider-assignment/collect").header("X-Soko-Rider-Token","secret")).andExpect(status().isOk());
+        mockMvc.perform(put("/soko/public/rider-assignment/decline").header("X-Soko-Rider-Token","secret").contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Unavailable\"}")) .andExpect(status().isOk());
+        mockMvc.perform(put("/soko/public/rider-assignment/delivery/confirm").header("X-Soko-Rider-Token","secret").contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}")) .andExpect(status().isOk());
+        verify(service).acceptPublicRiderAssignment("secret");verify(service).collectPublicRiderAssignment("secret");verify(service).confirmPublicRiderDelivery(eq("secret"),any());
+    }
+
+    @Test
+    void invalidExpiredRevokedAndMissingPublicBearersAreUniformGoneAndNeverCached() throws Exception {
+        when(service.publicRiderAssignment(nullable(String.class))).thenThrow(new SokoRiderAssignmentAccessException());
+        for(String token:new String[]{"invalid",null}){
+            var request=get("/soko/public/rider-assignment");if(token!=null)request.header("X-Soko-Rider-Token",token);
+            mockMvc.perform(request).andExpect(status().isGone())
+                    .andExpect(header().string("Cache-Control","no-store, max-age=0"))
+                    .andExpect(header().string("Referrer-Policy","no-referrer"));
+        }
+    }
+
+    @Test
+    void lockedDeliveryCodeHasStableLockedHttpStatus() throws Exception {
+        when(service.confirmPublicRiderDelivery(eq("secret"),any())).thenThrow(new SokoDeliveryCodeLockedException());
+        mockMvc.perform(put("/soko/public/rider-assignment/delivery/confirm").header("X-Soko-Rider-Token","secret")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
+                .andExpect(status().isLocked());
     }
 }

@@ -1,6 +1,6 @@
 # SlickHood production preflight
 
-This runbook applies to the integrated release at Flyway V124. It adds a blocking,
+This runbook applies to the integrated release at Flyway V125. It adds a blocking,
 secret-safe host preflight; it does not replace backups, staging journeys or the
 backend-before-frontend deployment order.
 
@@ -11,7 +11,7 @@ backend-before-frontend deployment order.
 - S3 bucket: `slickhood-production-documents-603455138904-ca-central-1-an`
 - AWS region: `ca-central-1`
 - Required readiness scope: `wealth,insurance,affiliate,services,soko,helpdesk`
-- Required Flyway version: V121 before installation and V124 after installation, with zero failed rows
+- Required Flyway version: V121 before installation and V125 after installation, with zero failed rows
 
 Do not place a secret in this document, a command line, GitHub Actions output,
 Git history, or a world-readable host file.
@@ -188,7 +188,7 @@ after the new backend is healthy:
 sudo python3 /tmp/slickhood-backend-release/production-preflight.py \
   --readiness-url https://app.slickhood.com/api/actuator/health/production-readiness \
   --public-origin https://app.slickhood.com \
-  --expected-flyway-version 124 \
+  --expected-flyway-version 125 \
   --expected-bucket slickhood-production-documents-603455138904-ca-central-1-an \
   --expected-region ca-central-1
 ```
@@ -199,9 +199,11 @@ creates a random object under `preflight/`, calls both `DetectDocumentText` and
 the object in a `finally` cleanup. A cleanup failure blocks deployment.
 
 Use `--expected-flyway-version 121` for the pre-install check on the existing
-release; use `124` after the candidate starts. V122 adds the buyer/store order
+release; use `125` after the candidate starts. V122 adds the buyer/store order
 serialization index, V123 separates Soko finance snapshots, and V124 adds the
-deduplicated Soko finance-operation ledger. Rehearse the complete V121-to-V124
+deduplicated Soko finance-operation ledger. V125 adds expiring, revocable,
+hashed access for accountless riders to accept and complete assigned Soko
+deliveries. Rehearse the complete V121-to-V125
 upgrade against a disposable schema copy; never reverse it or edit migration
 history to make the gate pass.
 
@@ -231,7 +233,7 @@ never use that prefix.
 1. Record backend/frontend commit hashes and artifact SHA-256 values.
 2. Back up the database and current backend/frontend artifacts; verify restores.
 3. Run the host preflight against the current release.
-4. Deploy backend, require Flyway V124, readiness `UP`, deployed hash, and the
+4. Deploy backend, require Flyway V125, readiness `UP`, deployed hash, and the
    second host preflight.
 5. Complete authenticated staging smoke tests before frontend promotion.
 6. Build and deploy the frontend only after the backend passes.

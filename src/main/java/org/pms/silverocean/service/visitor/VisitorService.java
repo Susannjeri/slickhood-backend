@@ -129,6 +129,24 @@ public class VisitorService {
         return visitor;
     }
 
+    /** Idempotently revokes only a system-created Soko delivery visit for this host. */
+    @Transactional
+    public boolean revokeSokoDeliveryVisitor(long visitorId, long hostUserId) {
+        Visitor visitor = visitorDao.findByIdAndHostUserId(visitorId, hostUserId).orElse(null);
+        if (visitor == null || !VisitorCategory.DELIVERY.name().equals(visitor.getCategory())
+                || !"Soko delivery".equals(visitor.getPurpose())) return false;
+        VisitorStatus status = VisitorStatus.valueOf(visitor.getStatus());
+        if (Set.of(VisitorStatus.CANCELLED, VisitorStatus.EXPIRED, VisitorStatus.DENIED, VisitorStatus.DELETED)
+                .contains(status)) return true;
+        if (!Set.of(VisitorStatus.PENDING, VisitorStatus.PENDING_APPROVAL, VisitorStatus.APPROVED,
+                VisitorStatus.ARRIVED).contains(status)) return false;
+        visitor.setStatus(VisitorStatus.CANCELLED.name());
+        visitor.setCredentialHash(null);
+        visitor.setCredentialHint(null);
+        visitorDao.save(visitor, "SYSTEM_SOKO_DELIVERY_VISITOR_CANCELLED");
+        return true;
+    }
+
     public List<VisitorDTO> listMyVisitors(Pageable pageable, Optional<String> phoneNumber) {
         long loggedInUserId = userDao.getUserId();
         Pageable bounded = bounded(pageable);

@@ -148,5 +148,25 @@ public final class SokoModels {
                     order.getCompletedAt());
         }
     }
+    public record PublicRiderItem(String name, String unit, int quantity) {
+        public static PublicRiderItem from(SokoOrderItem item) {
+            return new PublicRiderItem(item.getProductName(), item.getUnit(), item.getQuantity());
+        }
+    }
+    public record PublicRiderDelivery(String address, Double latitude, Double longitude,
+                                      String customerPhone) {}
+    /**
+     * Token-scoped rider view. Delivery contact and coordinates are absent until
+     * the rider has personally accepted the assignment.
+     */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public record PublicRiderAssignment(String orderReference, String status, String shopName,
+                                        String pickupAddress, ZonedDateTime expectedArrivalAt,
+                                        int itemCount, List<PublicRiderItem> items,
+                                        boolean deliveryProofUploaded,
+                                        PublicRiderDelivery delivery) {}
+    public record RiderAssignmentDecision(String orderReference, String status) {}
+    public record AssignmentLinkDelivery(String orderReference, String status,
+                                         ZonedDateTime expiresAt, String message) {}
     public record AdminSummary(long stores,long pendingStores,long publishedStores,long products,long publishedProducts,long orders,long activeOrders) {}
 }

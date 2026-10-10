@@ -130,13 +130,28 @@ class NotificationReportServiceTest {
         Users user = new Users(); user.setEmail("buyer@example.test");
         when(users.getUserObject()).thenReturn(user);
         var service = new NotificationReportService(notifications, sms, users, encryption, org.mockito.Mockito.mock(NotificationActionResolver.class));
-        for (String type : java.util.List.of("EMAIL_OTP", "OTP_SMS", "SOKO_DELIVERY_RECOVERY_EMAIL", "SOKO_DELIVERY_CODE_EMAIL", "NEW_LOGIN_OTP")) {
+        for (String type : java.util.List.of("EMAIL_OTP", "OTP_SMS", "SOKO_DELIVERY_RECOVERY_EMAIL", "SOKO_DELIVERY_CODE_EMAIL", "SOKO_RIDER_ASSIGNMENT_SMS", "NEW_LOGIN_OTP")) {
             Notification secret = new Notification(); secret.setId(20L); secret.setActive(true); secret.setRecipient(user.getEmail()); secret.setType(type); secret.setMessage(new byte[]{4});
             when(notifications.findById(20L)).thenReturn(java.util.Optional.of(secret));
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.markMyNotificationRead(20L)).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
         }
         org.mockito.Mockito.verifyNoInteractions(encryption);
         verify(notifications, org.mockito.Mockito.never()).markRecipientRead(org.mockito.ArgumentMatchers.anyLong(), any());
+    }
+
+    @Test
+    void assignmentBearerIsNeverDecryptedWhenARepositoryReturnsItToTheFeed() {
+        Users user = new Users(); user.setEmail("rider@example.test"); when(users.getUserObject()).thenReturn(user);
+        Notification secret = new Notification(); secret.setId(21L); secret.setActive(true); secret.setRecipient(user.getEmail());
+        secret.setType("SOKO_RIDER_ASSIGNMENT_SMS"); secret.setMessage(new byte[]{5});
+        when(notifications.getNotificationsForRecipients(any(), any())).thenReturn(new PageImpl<>(java.util.List.of(secret)));
+
+        var result = new NotificationReportService(notifications, sms, users, encryption, org.mockito.Mockito.mock(NotificationActionResolver.class))
+                .getMyNotifications(PageRequest.of(0,20));
+
+        assertThat(result.getContent().getFirst().message())
+                .isEqualTo("This message is available only in its secure verification workflow.");
+        org.mockito.Mockito.verifyNoInteractions(encryption);
     }
 
     @Test

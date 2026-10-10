@@ -218,6 +218,18 @@ class JWTFilterTest {
         verify(chain).doFilter(request, response);
     }
 
+    @Test
+    void assignmentScopedPublicRiderBearerIgnoresUnrelatedStaleLoginAndSetsPrivacyHeaders() throws Exception {
+        request.setRequestURI("/soko/public/rider-assignment/delivery/confirm");
+
+        filter.doFilter(request,response,chain);
+
+        verify(chain).doFilter(request,response);verifyNoInteractions(jwtService);
+        assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store, max-age=0");
+        assertThat(response.getHeader("Referrer-Policy")).isEqualTo("no-referrer");
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
     private void stubValidatedToken(Claims claims, boolean currentSession) {
         when(jwtService.validateToken("access-token")).thenReturn(parsedToken);
         when(parsedToken.getBody()).thenReturn(claims);
