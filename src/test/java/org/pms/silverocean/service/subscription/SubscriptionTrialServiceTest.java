@@ -99,6 +99,24 @@ class SubscriptionTrialServiceTest {
     }
 
     @Test
+    void preventsASecondMerchantTrialAcrossServicesAndSokoWithStableResponseCode() {
+        when(userDao.getUserId()).thenReturn(7L);
+        UserSubscription existingSokoTrial = UserSubscription.builder()
+                .role(PMSRole.SERVICE_PROVIDER)
+                .productKey(SubscriptionProduct.SOKO)
+                .build();
+        when(subscriptionRepo.findTopByCreatedByAndRoleOrderByStartAtDesc(7L, PMSRole.SERVICE_PROVIDER))
+                .thenReturn(Optional.of(existingSokoTrial));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class,
+                () -> service.startTrialForSessionUser("SERVICE_PROVIDER", "SERVICES_MONTHLY"));
+
+        assertEquals(ResponseCode.SUBSCRIPTION_TRIAL_ALREADY_USED, error.getResponseCode());
+        assertEquals("S00278", error.getResponseCode().getCode());
+        verify(subscriptionRepo).findTopByCreatedByAndRoleOrderByStartAtDesc(7L, PMSRole.SERVICE_PROVIDER);
+    }
+
+    @Test
     void salesManagedPlanCannotBeActivatedByPostingZeroPriceDirectly() {
         Role role = Role.builder().name(PMSRole.LANDLORD.getName()).description("owner").selfAssignable(true).build();
         role.setId(2L); role.setActive(true);

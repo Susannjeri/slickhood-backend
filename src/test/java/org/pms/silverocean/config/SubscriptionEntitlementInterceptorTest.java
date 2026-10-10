@@ -117,6 +117,16 @@ class SubscriptionEntitlementInterceptorTest {
         verify(entitlements).requireProduct(SubscriptionProduct.SOKO);
     }
 
+    @Test void serviceMarketplaceMutationsRequireServicesRatherThanSoko() {
+        when(request.getRequestURI()).thenReturn("/sp/profile/me");
+
+        assertTrue(new SubscriptionEntitlementInterceptor(entitlements)
+                .preHandle(request, response, new Object()));
+
+        verify(entitlements).requireProduct(SubscriptionProduct.SERVICES);
+        verify(entitlements, never()).requireProduct(SubscriptionProduct.SOKO);
+    }
+
     @Test void sokoShoppingAndExistingOrderFulfilmentAreSubscriptionNeutral() {
         var interceptor=new SubscriptionEntitlementInterceptor(entitlements);
         for(String path:new String[]{"/soko/catalog","/soko/catalog/sellers","/soko/categories",
