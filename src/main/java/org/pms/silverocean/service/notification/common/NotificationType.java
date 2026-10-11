@@ -89,7 +89,10 @@ public enum NotificationType {
     // Assignment links are deliberately non-retrying: a merchant resend rotates
     // the bearer and an old queued retry must never deliver a revoked link later.
     SOKO_RIDER_ASSIGNMENT_SMS("sms.soko.rider.assignment", false, NotificationChannel.SMS),
-    SOKO_DELIVERY_CODE_EMAIL("email.soko.delivery.code.subject", "email.soko.delivery.code.body", true, NotificationChannel.EMAIL),
+    // Do not retry an expiring code: the generic retry worker is not aware of
+    // deliveryCodeExpiresAt and must never deliver a stale handover secret.
+    SOKO_DELIVERY_CODE_EMAIL("email.soko.delivery.code.subject", "email.soko.delivery.code.body", false, NotificationChannel.EMAIL),
+    SOKO_DELIVERY_CODE_SMS("sms.soko.delivery.code", false, NotificationChannel.SMS),
     SOKO_DELIVERY_RECOVERY_EMAIL("email.soko.delivery.recovery.subject", "email.soko.delivery.recovery.body", true, NotificationChannel.EMAIL),
     BUSINESS_ALERT_EMAIL("email.business.alert.subject", "email.business.alert.body", true, NotificationChannel.EMAIL),
     HELPDESK_ESCALATION_EMAIL("email.helpdesk.escalation.subject", "email.helpdesk.escalation.body", true, NotificationChannel.EMAIL),

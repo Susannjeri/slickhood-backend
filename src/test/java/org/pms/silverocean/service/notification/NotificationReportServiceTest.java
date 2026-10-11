@@ -68,6 +68,24 @@ class NotificationReportServiceTest {
     }
 
     @Test
+    void buyerDeliveryCodeInAppMessageIsVisibleToItsAuthenticatedRecipient() {
+        Users user = new Users();user.setEmail("buyer@example.test");
+        Notification notification = new Notification();notification.setId(71L);notification.setRecipient("buyer@example.test");
+        notification.setChannel("IN_APP");notification.setType("SOKO_DELIVERY_CODE_IN_APP");notification.setMessage(new byte[]{7,1});
+        when(users.getUserObject()).thenReturn(user);
+        when(notifications.getNotificationsForRecipients(any(), any())).thenReturn(new PageImpl<>(java.util.List.of(notification)));
+        when(encryption.decrypt(notification.getMessage())).thenReturn(new DecryptDTO(false,"Soko order SOKO-7 delivery code: 123456."));
+
+        var result = new NotificationReportService(notifications, sms, users, encryption, org.mockito.Mockito.mock(NotificationActionResolver.class))
+                .getMyNotifications(PageRequest.of(0,20));
+
+        assertThat(result.getContent()).singleElement().satisfies(item->{
+            assertThat(item.notificationType()).isEqualTo("SOKO_DELIVERY_CODE_IN_APP");
+            assertThat(item.message()).contains("123456");
+        });
+    }
+
+    @Test
     void userCanMarkOnlyTheirOwnNotificationRead() {
         Users user = new Users();
         user.setEmail("owner@example.com");
@@ -130,7 +148,7 @@ class NotificationReportServiceTest {
         Users user = new Users(); user.setEmail("buyer@example.test");
         when(users.getUserObject()).thenReturn(user);
         var service = new NotificationReportService(notifications, sms, users, encryption, org.mockito.Mockito.mock(NotificationActionResolver.class));
-        for (String type : java.util.List.of("EMAIL_OTP", "OTP_SMS", "SOKO_DELIVERY_RECOVERY_EMAIL", "SOKO_DELIVERY_CODE_EMAIL", "SOKO_RIDER_ASSIGNMENT_SMS", "NEW_LOGIN_OTP")) {
+        for (String type : java.util.List.of("EMAIL_OTP", "OTP_SMS", "SOKO_DELIVERY_RECOVERY_EMAIL", "SOKO_DELIVERY_CODE_EMAIL", "SOKO_DELIVERY_CODE_SMS", "SOKO_RIDER_ASSIGNMENT_SMS", "NEW_LOGIN_OTP")) {
             Notification secret = new Notification(); secret.setId(20L); secret.setActive(true); secret.setRecipient(user.getEmail()); secret.setType(type); secret.setMessage(new byte[]{4});
             when(notifications.findById(20L)).thenReturn(java.util.Optional.of(secret));
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.markMyNotificationRead(20L)).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);

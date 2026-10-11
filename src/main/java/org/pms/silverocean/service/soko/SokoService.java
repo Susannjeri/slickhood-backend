@@ -557,7 +557,7 @@ public class SokoService {
         return orderRepo.findAllByRefundStatusInAndActiveTrue(statuses,bounded(pageable)).map(this::refundQueueItem);
     }
 
-    public String deliveryCode(long orderId){requireBuyerPersona();SokoOrder o=orderRepo.findById(orderId).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId())throw forbidden();if(!"DELIVERY".equals(o.getDeliveryMethod())||!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified()||codeExpired(o)||o.getDeliveryCodeLockedAt()!=null)throw invalid();String code=decryptDeliveryCode(o);if(StringUtils.isBlank(code))throw invalid();return code;}
+    public String deliveryCode(long orderId){requireBuyerPersona();SokoOrder o=orderRepo.findById(orderId).filter(SokoOrder::isActive).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId())throw forbidden();if(!"DELIVERY".equals(o.getDeliveryMethod())||!"DISPATCHED".equals(o.getStatus())||o.isDeliveryCodeVerified()||codeExpired(o)||o.getDeliveryCodeLockedAt()!=null)throw invalid();String code=decryptDeliveryCode(o);if(StringUtils.isBlank(code))throw invalid();return code;}
 
     public String pickupCode(long orderId){requireBuyerPersona();SokoOrder o=orderRepo.findById(orderId).filter(SokoOrder::isActive).orElseThrow(this::notFound);if(o.getCustomerUserId()!=userDao.getUserId())throw forbidden();if(!"PICKUP".equals(o.getDeliveryMethod())||!"READY_FOR_PICKUP".equals(o.getStatus())||o.isDeliveryCodeVerified()||codeExpired(o)||o.getDeliveryCodeLockedAt()!=null)throw invalid();String code=decryptDeliveryCode(o);if(StringUtils.isBlank(code))throw invalid();return code;}
 
@@ -702,7 +702,7 @@ public class SokoService {
         if(!List.of("DELIVERY_ASSIGNED","ASSIGNMENT_ACCEPTED","DISPATCHED").contains(order.getStatus()))throw invalid();
         boolean collected=order.getCollectedAt()!=null||"DISPATCHED".equals(order.getStatus());
         order.setStatus(collected?"DELIVERY_RETURN_REQUIRED":"PACKED");order.setDeliveryFailedAt(now());order.setDeliveryExceptionReason(request.reason().trim());
-        clearDeliveryCode(order);revokeRiderAssignmentAccess(order);cancelDeliveryVisitor(order);
+        clearDeliveryCode(order);deactivateDeliveryCodeMessage(order);revokeRiderAssignmentAccess(order);cancelDeliveryVisitor(order);
         if(!collected){releaseRider(order,false);clearPriorAssignmentDisplay(order);}
         orderRepo.save(order);audit(order,collected?"SOKO_DELIVERY_RETURN_REQUIRED":"SOKO_DELIVERY_REASSIGNMENT_REQUIRED");
         notifyOrder(order,collected?"Delivery failed — return required":"Delivery assignment failed — choose another rider",request.reason());
@@ -740,7 +740,7 @@ public class SokoService {
         // A recovery request means the original code can no longer be trusted.
         // Invalidate it before sending the identity challenge; only the buyer can
         // generate a replacement by completing the fresh-contact OTP check.
-        clearDeliveryCode(o);
+        clearDeliveryCode(o);deactivateDeliveryCodeMessage(o);
         o.setDeliveryRecoveryOtp(encryptionService.encrypt(otp));o.setDeliveryRecoveryOtpExpiresAt(timestamp.plusMinutes(Math.max(5,Math.min(deliveryRecoveryOtpValidMinutes,30))));
         o.setDeliveryRecoveryRequestedAt(timestamp);o.setDeliveryRecoveryRequestCount(o.getDeliveryRecoveryRequestCount()+1);o.setDeliveryRecoveryOtpAttempts(0);
         o.setDeliveryRecoveryRequestedBy(actor);o.setDeliveryRecoverySupportReason(StringUtils.left(StringUtils.trimToNull(supportReason),1000));
@@ -1169,10 +1169,10 @@ public class SokoService {
         if(!"DELIVERY".equals(order.getDeliveryMethod())||!"DISPATCHED".equals(order.getStatus())||order.isDeliveryCodeVerified()
                 ||StringUtils.isBlank(code)||StringUtils.isBlank(order.getDeliveryProofReference())||codeExpired(order))throw invalid();
         if(order.getDeliveryCodeLockedAt()!=null)throw new SokoDeliveryCodeLockedException();
-        if(order.getDeliveryCodeAttempts()>=5){order.setDeliveryCodeLockedAt(now());orderRepo.save(order);throw new SokoDeliveryCodeLockedException();}
+        if(order.getDeliveryCodeAttempts()>=5){order.setDeliveryCodeLockedAt(now());deactivateDeliveryCodeMessage(order);orderRepo.save(order);throw new SokoDeliveryCodeLockedException();}
         order.setDeliveryCodeAttempts(order.getDeliveryCodeAttempts()+1);
-        if(!constantTimeEquals(code,request.code())){if(order.getDeliveryCodeAttempts()>=5){order.setDeliveryCodeLockedAt(now());orderRepo.save(order);throw new SokoDeliveryCodeLockedException();}orderRepo.save(order);throw invalid();}
-        order.setDeliveryCodeVerified(true);order.setDeliveryCode(null);order.setEncryptedDeliveryCode(null);
+        if(!constantTimeEquals(code,request.code())){if(order.getDeliveryCodeAttempts()>=5){order.setDeliveryCodeLockedAt(now());deactivateDeliveryCodeMessage(order);orderRepo.save(order);throw new SokoDeliveryCodeLockedException();}orderRepo.save(order);throw invalid();}
+        order.setDeliveryCodeVerified(true);order.setDeliveryCode(null);order.setEncryptedDeliveryCode(null);deactivateDeliveryCodeMessage(order);
         order.setDeliveryRecipientName(StringUtils.left(StringUtils.trimToNull(request.recipientName()),160));order.setDeliveryProofAt(now());
         order.setStatus("COMPLETED");order.setCompletedAt(now());revokeRiderAssignmentAccess(order);cancelDeliveryVisitor(order);
         releaseRider(order,true);orderRepo.save(order);audit(order,"SOKO_DELIVERY_COMPLETED");
@@ -1331,7 +1331,7 @@ public class SokoService {
     private boolean handoverCodeRecoveryAllowed(SokoOrder o){return !o.isDeliveryCodeVerified()&&(("DELIVERY".equals(o.getDeliveryMethod())&&"DISPATCHED".equals(o.getStatus()))||("PICKUP".equals(o.getDeliveryMethod())&&"READY_FOR_PICKUP".equals(o.getStatus())));}
     // Financial finality invalidates delivery authorization, but does not imply
     // returned groceries are saleable or that a rider has relinquished custody.
-    private void clearDeliveryAuthorization(SokoOrder o){clearDeliveryCode(o);revokeRiderAssignmentAccess(o);cancelDeliveryVisitor(o);o.setDeliveryRecoveryOtp(null);o.setDeliveryRecoveryOtpExpiresAt(null);}
+    private void clearDeliveryAuthorization(SokoOrder o){clearDeliveryCode(o);deactivateDeliveryCodeMessage(o);revokeRiderAssignmentAccess(o);cancelDeliveryVisitor(o);o.setDeliveryRecoveryOtp(null);o.setDeliveryRecoveryOtpExpiresAt(null);}
     private boolean codeExpired(SokoOrder o){return o.getDeliveryCodeExpiresAt()==null||!o.getDeliveryCodeExpiresAt().isAfter(now());}
     private SokoOrder assignedOrder(long id,String required){requireRiderPersona();SokoOrder o=orderRepo.findByIdForUpdate(id).orElseThrow(this::notFound);if(o.getRiderId()==null)throw forbidden();SokoRider r=riderRepo.findForUpdate(o.getRiderId(),o.getStoreId()).orElseThrow(this::notFound);if(!r.isPhoneConfirmed()||!r.isVerified()||!"ACTIVE".equals(r.getStatus())||!java.util.Objects.equals(r.getUserId(),userDao.getUserId()))throw forbidden();if(required!=null)requireState(o,required);return o;}
     private SokoRider requireMerchantManagedRider(SokoOrder o){if(o.getRiderId()==null)throw forbidden();SokoRider rider=riderRepo.findForUpdate(o.getRiderId(),o.getStoreId()).orElseThrow(this::notFound);if(rider.getUserId()!=null)throw forbidden();return rider;}
@@ -1459,7 +1459,30 @@ public class SokoService {
         storeRepo.findByIdAndActiveTrue(order.getStoreId()).filter(store->!refund||store.getOwnerUserId()!=order.getCustomerUserId())
                 .ifPresent(store->businessAlerts.publish(store.getOwnerUserId(),key,"SOKO_ORDER_STATUS",message,"/dashboard/soko"));
     }
-    private void notifyDeliveryCode(SokoOrder order,String code){userDao.findById(order.getCustomerUserId()).map(u->u.getEmail()).filter(StringUtils::isNotBlank).ifPresent(email->{String body=String.format(i18n.getLocalizedMessage(NotificationType.SOKO_DELIVERY_CODE_EMAIL.getBody()),HtmlUtils.htmlEscape(order.getOrderNumber()),code,order.getDeliveryCodeExpiresAt());notificationService.queueNotification(new NotificationDTO(body,email,NotificationType.SOKO_DELIVERY_CODE_EMAIL));});}
+    private void notifyDeliveryCode(SokoOrder order,String code){
+        userDao.findById(order.getCustomerUserId()).filter(user->user.isActive()).ifPresent(buyer->{
+            String orderNumber=StringUtils.defaultIfBlank(order.getOrderNumber(),"Soko order");
+            String email=StringUtils.trimToNull(buyer.getEmail());
+            if(email!=null){
+                if(buyer.isEmailVerified()){
+                    String body=String.format(i18n.getLocalizedMessage(NotificationType.SOKO_DELIVERY_CODE_EMAIL.getBody()),HtmlUtils.htmlEscape(orderNumber),code,order.getDeliveryCodeExpiresAt());
+                    notificationService.queueNotification(new NotificationDTO(body,email,NotificationType.SOKO_DELIVERY_CODE_EMAIL));
+                }
+                String inAppMessage="New delivery code for Soko order "+orderNumber+": "+code+". This replaces any earlier code. Give it to the rider only after receiving and checking the order. It expires at "+order.getDeliveryCodeExpiresAt()+".";
+                notificationService.replaceInAppNotificationForExistingUser(email,"SOKO_DELIVERY_CODE_IN_APP",inAppMessage,deliveryCodeActionPath(order));
+            }
+            String phone=StringUtils.trimToNull(buyer.getPhoneNumber());
+            if(buyer.isPhoneVerified()&&phone!=null){
+                String sms=String.format(i18n.getLocalizedMessage(NotificationType.SOKO_DELIVERY_CODE_SMS.getBody()),orderNumber,code,order.getDeliveryCodeExpiresAt());
+                notificationService.queueNotification(new NotificationDTO(sms,phone,NotificationType.SOKO_DELIVERY_CODE_SMS));
+            }
+        });
+    }
+    private String deliveryCodeActionPath(SokoOrder order){return "/dashboard/soko?orderId="+order.getId();}
+    private void deactivateDeliveryCodeMessage(SokoOrder order){
+        userDao.findById(order.getCustomerUserId()).map(user->StringUtils.trimToNull(user.getEmail())).filter(java.util.Objects::nonNull)
+                .ifPresent(email->notificationService.deactivateInAppNotification(email,"SOKO_DELIVERY_CODE_IN_APP",deliveryCodeActionPath(order)));
+    }
     private boolean productIsInOpenOrder(long productId){return itemRepo.countOpenOrdersForProduct(productId)>0;}
     private void audit(Object entity,String action){if(auditLogService!=null)auditLogService.createAuditLog(entity,action);}
     private void requireState(SokoOrder o,String state){if(!state.equals(o.getStatus()))throw invalid();}

@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
@@ -112,6 +113,43 @@ class NotificationServiceTest {
         ArgumentCaptor<Notification> stored = ArgumentCaptor.forClass(Notification.class);
         verify(dao).save(stored.capture());
         assertThat(stored.getValue().getActionPath()).isEqualTo("/dashboard/unit/details/17");
+    }
+
+    @Test
+    void replacingBuyerCodeDeactivatesOnlyTheSameOrderMessageBeforeSavingTheNewOne() {
+        EncryptionService encryption = mock(EncryptionService.class);
+        NotificationDao dao = mock(NotificationDao.class);
+        UserDao users = mock(UserDao.class);
+        ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+        Users recipient = Users.builder().email("buyer@example.test").build();recipient.setActive(true);
+        when(users.findByEmail("buyer@example.test")).thenReturn(java.util.Optional.of(recipient));
+        when(encryption.encrypt("New delivery code: 654321")).thenReturn(new byte[]{6,5,4});
+        NotificationService service = new NotificationService(encryption,dao,users,Map.of(),events,mock(NotificationPreferenceService.class));
+
+        assertThat(service.replaceInAppNotificationForExistingUser("buyer@example.test","SOKO_DELIVERY_CODE_IN_APP",
+                "New delivery code: 654321","/dashboard/soko?orderId=9")).isTrue();
+
+        org.mockito.InOrder sequence=org.mockito.Mockito.inOrder(dao);
+        sequence.verify(dao).deactivateInApp("buyer@example.test","SOKO_DELIVERY_CODE_IN_APP","/dashboard/soko?orderId=9");
+        ArgumentCaptor<Notification> stored=ArgumentCaptor.forClass(Notification.class);sequence.verify(dao).save(stored.capture());
+        assertThat(stored.getValue().getRecipient()).isEqualTo("buyer@example.test");
+        assertThat(stored.getValue().getActionPath()).isEqualTo("/dashboard/soko?orderId=9");
+        assertThat(stored.getValue().getType()).isEqualTo("SOKO_DELIVERY_CODE_IN_APP");
+        verifyNoInteractions(events);
+    }
+
+    @Test
+    void genericBusinessQueueCannotBroadcastBuyerDeliveryCode() {
+        EncryptionService encryption=mock(EncryptionService.class);NotificationDao dao=mock(NotificationDao.class);
+        UserDao users=mock(UserDao.class);ApplicationEventPublisher events=mock(ApplicationEventPublisher.class);
+        NotificationService service=new NotificationService(encryption,dao,users,Map.of(),events,mock(NotificationPreferenceService.class));
+
+        assertThatThrownBy(()->service.queueEmailAndInAppOnce("order:9:code","buyer@example.test",
+                NotificationType.BUSINESS_ALERT_EMAIL,"Delivery code","SOKO_DELIVERY_CODE_IN_APP",
+                "Delivery code 123456","/dashboard/soko?orderId=9"))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(encryption,dao,users,events);
     }
 
     @Test

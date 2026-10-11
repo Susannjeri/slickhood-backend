@@ -26,7 +26,7 @@ class BusinessNotificationServiceTest {
         verifyNoInteractions(publisher);
     }
     @Test void codesAndChallengesNeverBecomeBusinessAlerts(){
-        for(String type:new String[]{"EMAIL_OTP","SOKO_DELIVERY_CODE_EMAIL","SOKO_DELIVERY_RECOVERY_EMAIL"})
+        for(String type:new String[]{"EMAIL_OTP","SOKO_DELIVERY_CODE_EMAIL","SOKO_DELIVERY_CODE_SMS","SOKO_DELIVERY_CODE_IN_APP","SOKO_DELIVERY_RECOVERY_EMAIL"})
             assertThrows(IllegalArgumentException.class,()->service.publish(9,"order:7",type,"Private challenge","/dashboard/soko"));
         verifyNoInteractions(publisher);
     }

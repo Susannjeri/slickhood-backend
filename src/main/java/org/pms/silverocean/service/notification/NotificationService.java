@@ -103,6 +103,30 @@ public class NotificationService {
     }
 
     /**
+     * Replaces a buyer-visible secret for one exact application destination.
+     * This is intentionally narrower than a business alert: old code messages
+     * are removed before the new encrypted in-app record is stored.
+     */
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
+    public boolean replaceInAppNotificationForExistingUser(String recipient, String type, String message,
+                                                            String actionPath) {
+        if (recipient == null || recipient.isBlank() || !NotificationVisibility.personal(type)
+                || message == null || message.isBlank() || actionPath == null
+                || !BusinessNotificationService.safePath(actionPath)) return false;
+        String normalizedRecipient = recipient.trim().toLowerCase(Locale.ROOT);
+        if (userDao.findByEmail(normalizedRecipient).filter(Users::isActive).isEmpty()) return false;
+        notificationDao.deactivateInApp(normalizedRecipient,type,actionPath);
+        return queueInAppNotificationForExistingUser(normalizedRecipient,type,message,actionPath);
+    }
+
+    @org.springframework.transaction.annotation.Transactional("pmsDBTransactionManager")
+    public void deactivateInAppNotification(String recipient, String type, String actionPath) {
+        if (recipient == null || recipient.isBlank() || !NotificationVisibility.personal(type)
+                || actionPath == null || !BusinessNotificationService.safePath(actionPath)) return;
+        notificationDao.deactivateInApp(recipient.trim().toLowerCase(Locale.ROOT),type,actionPath);
+    }
+
+    /**
      * Queues the customer email and mirrors the same business event into the
      * authenticated notification centre when the recipient already has an
      * active SlickHood account. External delivery and the in-app record remain
@@ -121,7 +145,7 @@ public class NotificationService {
     public void queueEmailAndInAppOnce(String key,String recipient,NotificationType emailType,
                                        String emailMessage,String inAppType,String inAppMessage,String actionPath) {
         if(recipient==null||recipient.isBlank())return;
-        if(key==null||key.isBlank()||emailType==null||emailMessage==null||emailMessage.isBlank()||inAppMessage==null||inAppMessage.isBlank()||!NotificationVisibility.personal(emailType.name())||!NotificationVisibility.personal(inAppType))
+        if(key==null||key.isBlank()||emailType==null||emailMessage==null||emailMessage.isBlank()||inAppMessage==null||inAppMessage.isBlank()||!NotificationVisibility.businessAlertSafe(emailType.name())||!NotificationVisibility.businessAlertSafe(inAppType))
             throw new IllegalArgumentException("Verification challenges cannot be mirrored as business alerts");
         if(actionPath!=null&&!BusinessNotificationService.safePath(actionPath))throw new IllegalArgumentException("Unsafe notification action");
         String normalized=recipient.trim().toLowerCase(Locale.ROOT),eventKey=digest(key+":"+normalized);

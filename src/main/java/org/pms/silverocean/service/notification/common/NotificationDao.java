@@ -57,6 +57,11 @@ public class NotificationDao {
     }
 
     @Transactional
+    public int deactivateInApp(String recipient, String type, String actionPath) {
+        return notificationRepo.deactivateInApp(recipient, type, actionPath, LocalDateTime.now());
+    }
+
+    @Transactional
     public void confirmDelivered(long id) {
         notificationRepo.confirmDelivered(id, LocalDateTime.now());
     }

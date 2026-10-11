@@ -48,6 +48,12 @@ public interface NotificationRepo extends JpaRepository<Notification, Long>, Jpa
     int markRecipientRead(@Param("id") long id, @Param("recipients") Collection<String> recipients, @Param("now") LocalDateTime now);
 
     @Modifying
+    @Query("UPDATE Notification n SET n.active=false,n.retry=false,n.updatedOn=:now WHERE n.active AND n.channel='IN_APP' " +
+            "AND n.recipient=:recipient AND n.type=:type AND n.actionPath=:actionPath")
+    int deactivateInApp(@Param("recipient") String recipient, @Param("type") String type,
+                        @Param("actionPath") String actionPath, @Param("now") LocalDateTime now);
+
+    @Modifying
     @Query("UPDATE Notification n SET n.delivered=true,n.providerStatus='DELIVERED',n.deliveredAt=COALESCE(n.deliveredAt,:now),n.failedAt=NULL,n.retry=false,n.updatedOn=:now WHERE n.id=:id AND n.active")
     int confirmDelivered(@Param("id") long id, @Param("now") LocalDateTime now);
 

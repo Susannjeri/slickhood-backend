@@ -64,7 +64,8 @@ class UserManualBundleTest {
         assertTrue(daily.contains("at most 5,000"));
         assertTrue(daily.contains("same financial access restrictions"));
         assertTrue(daily.contains("count once"));
-        assertTrue(daily.contains("not shown in the ordinary notification inbox"));
+        assertTrue(daily.contains("current delivery code is shown only in that signed-in buyer's notification inbox"));
+        assertTrue(daily.contains("recovery OTPs and rider assignment links stay out of the ordinary inbox"));
         assertTrue(publishing.contains("preserves the database ID"));
         assertTrue(publishing.contains("publication approval"));
     }

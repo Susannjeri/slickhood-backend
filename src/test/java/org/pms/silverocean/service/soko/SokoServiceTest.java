@@ -296,11 +296,59 @@ class SokoServiceTest {
 
     @Test void deliveryCodeQueueErrorsPropagateToTransactionalCaller(){
         SokoOrder order=new SokoOrder();order.setId(9L);order.setCustomerUserId(8L);order.setOrderNumber("SOKO-TEST");
-        var buyer=new org.pms.silverocean.database.pms.entities.Users();buyer.setEmail("buyer@example.test");
+        var buyer=new org.pms.silverocean.database.pms.entities.Users();buyer.setEmail("buyer@example.test");buyer.setEmailVerified(true);buyer.setActive(true);
         when(users.findById(8L)).thenReturn(Optional.of(buyer));when(i18n.getLocalizedMessage(anyString())).thenReturn("Order %s code %s expires %s");
         when(notifications.queueNotification(any())).thenThrow(new IllegalStateException("fixture queue unavailable"));
         assertThrows(IllegalStateException.class,()->org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"notifyDeliveryCode",order,"123456"));
         verifyNoInteractions(products,variations,orders,items,riders,invoices,accounts,visitors,businessAlerts);
+    }
+
+    @Test void deliveryCodeGoesOnlyToBuyerEmailInAppAndVerifiedPhone(){
+        ZonedDateTime expiry=ZonedDateTime.now().plusHours(2);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setRiderId(3L);order.setCustomerUserId(8L);order.setOrderNumber("SOKO-PRIVATE");order.setCustomerPhone("+254799999999");order.setDeliveryCodeExpiresAt(expiry);
+        var buyer=new org.pms.silverocean.database.pms.entities.Users();buyer.setId(8L);buyer.setEmail("buyer@example.test");buyer.setEmailVerified(true);buyer.setPhoneNumber("+254700123456");buyer.setPhoneVerified(true);buyer.setActive(true);
+        when(users.findById(8L)).thenReturn(Optional.of(buyer));
+        when(i18n.getLocalizedMessage(NotificationType.SOKO_DELIVERY_CODE_EMAIL.getBody())).thenReturn("Order %s code %s expires %s");
+        when(i18n.getLocalizedMessage(NotificationType.SOKO_DELIVERY_CODE_SMS.getBody())).thenReturn("Order %s code %s expires %s");
+
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"notifyDeliveryCode",order,"123456");
+
+        var queued=org.mockito.ArgumentCaptor.forClass(org.pms.silverocean.service.notification.NotificationDTO.class);
+        verify(notifications,times(2)).queueNotification(queued.capture());
+        var email=queued.getAllValues().stream().filter(message->message.notificationType()==NotificationType.SOKO_DELIVERY_CODE_EMAIL).findFirst().orElseThrow();
+        var sms=queued.getAllValues().stream().filter(message->message.notificationType()==NotificationType.SOKO_DELIVERY_CODE_SMS).findFirst().orElseThrow();
+        assertEquals("buyer@example.test",email.recipient());assertTrue(email.formattedMessage().contains("123456"));
+        assertEquals("+254700123456",sms.recipient());assertTrue(sms.formattedMessage().contains("123456"));
+        assertFalse(email.notificationType().isRetry());assertFalse(sms.notificationType().isRetry());
+        verify(notifications).replaceInAppNotificationForExistingUser(eq("buyer@example.test"),eq("SOKO_DELIVERY_CODE_IN_APP"),contains("123456"),eq("/dashboard/soko?orderId=9"));
+        verifyNoInteractions(stores,riders,businessAlerts);
+        assertTrue(queued.getAllValues().stream().noneMatch(message->List.of("merchant@example.test","rider@example.test").contains(message.recipient())));
+        assertTrue(queued.getAllValues().stream().noneMatch(message->"+254799999999".equals(message.recipient())));
+    }
+
+    @Test void unverifiedBuyerPhoneNeverReceivesTheDeliveryCodeBySms(){
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setCustomerUserId(8L);order.setOrderNumber("SOKO-PRIVATE");order.setDeliveryCodeExpiresAt(ZonedDateTime.now().plusHours(2));
+        var buyer=new org.pms.silverocean.database.pms.entities.Users();buyer.setId(8L);buyer.setEmail("buyer@example.test");buyer.setEmailVerified(true);buyer.setPhoneNumber("+254700123456");buyer.setPhoneVerified(false);buyer.setActive(true);
+        when(users.findById(8L)).thenReturn(Optional.of(buyer));when(i18n.getLocalizedMessage(NotificationType.SOKO_DELIVERY_CODE_EMAIL.getBody())).thenReturn("Order %s code %s expires %s");
+
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"notifyDeliveryCode",order,"123456");
+
+        var queued=org.mockito.ArgumentCaptor.forClass(org.pms.silverocean.service.notification.NotificationDTO.class);
+        verify(notifications).queueNotification(queued.capture());assertEquals(NotificationType.SOKO_DELIVERY_CODE_EMAIL,queued.getValue().notificationType());
+        verify(notifications).replaceInAppNotificationForExistingUser(eq("buyer@example.test"),eq("SOKO_DELIVERY_CODE_IN_APP"),contains("123456"),eq("/dashboard/soko?orderId=9"));
+        verify(notifications,never()).queueNotification(argThat(message->message.notificationType()==NotificationType.SOKO_DELIVERY_CODE_SMS));
+    }
+
+    @Test void unverifiedBuyerEmailStillGetsThePrivateInAppCodeButNeverEmail(){
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setCustomerUserId(8L);order.setOrderNumber("SOKO-PRIVATE");order.setDeliveryCodeExpiresAt(ZonedDateTime.now().plusHours(2));
+        var buyer=new org.pms.silverocean.database.pms.entities.Users();buyer.setId(8L);buyer.setEmail("buyer@example.test");buyer.setEmailVerified(false);buyer.setActive(true);
+        when(users.findById(8L)).thenReturn(Optional.of(buyer));
+
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"notifyDeliveryCode",order,"123456");
+
+        verify(notifications).replaceInAppNotificationForExistingUser(eq("buyer@example.test"),eq("SOKO_DELIVERY_CODE_IN_APP"),contains("123456"),eq("/dashboard/soko?orderId=9"));
+        verify(notifications,never()).queueNotification(any());
+        verifyNoInteractions(i18n,stores,riders,businessAlerts);
     }
 
     @Test void paymentConfirmationAlertsBuyerAndMerchantOnlyOnce(){
@@ -1142,24 +1190,32 @@ class SokoServiceTest {
 
     @Test void deliveryCodeCompletesOrderAndReleasesPreferredRider(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setActive(true);SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");order.setDeliveryCode("123456");order.setDeliveryCodeExpiresAt(ZonedDateTime.now().plusHours(1));order.setDeliveryProofReference("soko/delivery-proof/9/proof.jpg");order.setRiderId(3L);order.setActive(true);SokoRider rider=new SokoRider();rider.setId(3L);rider.setStoreId(2L);rider.setUserId(8L);rider.setStatus("ACTIVE");rider.setAvailability("BUSY");rider.setActive(true);
+        var buyer=new org.pms.silverocean.database.pms.entities.Users();buyer.setId(4L);buyer.setEmail("buyer@example.test");buyer.setActive(true);
         rider.setPhoneConfirmed(true);rider.setVerified(true);
-        when(users.getUserId()).thenReturn(8L);when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
+        when(users.getUserId()).thenReturn(8L);when(users.findById(4L)).thenReturn(Optional.of(buyer));when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
         var result=service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("123456"));
         var retry=service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("123456"));
         assertEquals("COMPLETED",result.status());assertTrue(order.isDeliveryCodeVerified());assertEquals("AVAILABLE",rider.getAvailability());assertEquals(1,rider.getCompletedDeliveries());
         assertEquals("COMPLETED",retry.status());verify(riders,times(1)).save(rider);verify(orders,times(1)).save(order);
+        verify(notifications).deactivateInAppNotification("buyer@example.test","SOKO_DELIVERY_CODE_IN_APP","/dashboard/soko?orderId=9");
     }
 
     @Test void customerCanReadEncryptedDeliveryCodeWithoutExposingCiphertext(){
-        SokoOrder order=new SokoOrder();order.setId(9L);order.setCustomerUserId(4L);order.setDeliveryMethod("DELIVERY");order.setStatus("DISPATCHED");order.setEncryptedDeliveryCode(new byte[]{1,2,3});order.setDeliveryCodeExpiresAt(ZonedDateTime.now().plusHours(1));
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setCustomerUserId(4L);order.setDeliveryMethod("DELIVERY");order.setStatus("DISPATCHED");order.setEncryptedDeliveryCode(new byte[]{1,2,3});order.setDeliveryCodeExpiresAt(ZonedDateTime.now().plusHours(1));order.setActive(true);
         when(users.getUserId()).thenReturn(4L);when(orders.findById(9L)).thenReturn(Optional.of(order));when(encryption.decrypt(order.getEncryptedDeliveryCode())).thenReturn(new DecryptDTO(false,"123456"));
         assertEquals("123456",service.deliveryCode(9L));
     }
 
     @Test void expiredDeliveryCodeCannotBeRead(){
-        SokoOrder order=new SokoOrder();order.setId(9L);order.setCustomerUserId(4L);order.setDeliveryMethod("DELIVERY");order.setStatus("DISPATCHED");order.setDeliveryCode("123456");order.setDeliveryCodeExpiresAt(ZonedDateTime.now().minusMinutes(1));
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setCustomerUserId(4L);order.setDeliveryMethod("DELIVERY");order.setStatus("DISPATCHED");order.setDeliveryCode("123456");order.setDeliveryCodeExpiresAt(ZonedDateTime.now().minusMinutes(1));order.setActive(true);
         when(users.getUserId()).thenReturn(4L);when(orders.findById(9L)).thenReturn(Optional.of(order));
         assertThrows(PMSCustomException.class,()->service.deliveryCode(9L));
+    }
+
+    @Test void inactiveOrderDeliveryCodeCannotBeRead(){
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setCustomerUserId(4L);order.setDeliveryMethod("DELIVERY");order.setStatus("DISPATCHED");order.setEncryptedDeliveryCode(new byte[]{1,2,3});order.setDeliveryCodeExpiresAt(ZonedDateTime.now().plusHours(1));order.setActive(false);
+        when(orders.findById(9L)).thenReturn(Optional.of(order));
+        assertThrows(PMSCustomException.class,()->service.deliveryCode(9L));verifyNoInteractions(encryption);
     }
 
     @Test void supportInvalidatesOldCodeAndStartsBuyerVerifiedRecoveryWithoutSeeingReplacement() throws Exception {
@@ -1170,6 +1226,7 @@ class SokoServiceTest {
         var result=service.reissueDeliveryCode(9L,new SokoRequests.CodeReissue("Buyer cannot access the original email"));
         String json=new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules().writeValueAsString(result);
         assertNull(order.getEncryptedDeliveryCode());assertArrayEquals(new byte[]{1,2,3},order.getDeliveryRecoveryOtp());assertEquals(99L,order.getDeliveryRecoveryRequestedBy());assertEquals(1,order.getDeliveryRecoveryRequestCount());verify(notifications).queueNotification(any());
+        verify(notifications).deactivateInAppNotification("buyer@example.com","SOKO_DELIVERY_CODE_IN_APP","/dashboard/soko?orderId=9");
         for(String forbidden:List.of("INV-SECRET","Private Buyer Estate","0799999999","Call the private side entrance","customerUserId","invoiceRef","deliveryAddress","customerPhone","notes","destinationUnitId","paymentAccountId","riderId","deliveryRecoveryOtp","deliveryRecoveryRequestedBy"))assertFalse(json.contains(forbidden),forbidden);
     }
 
@@ -1814,11 +1871,13 @@ class SokoServiceTest {
     }
     @Test void wrongCodeRetainsProofAndLimitsAttempts(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);
-        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setRiderId(3L);
+        SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setRiderId(3L);order.setCustomerUserId(4L);
         order.setStatus("DISPATCHED");order.setDeliveryMethod("DELIVERY");
         order.setDeliveryCode("123456");order.setDeliveryCodeExpiresAt(ZonedDateTime.now().plusHours(1));order.setDeliveryProofReference("protected-proof");
         SokoRider rider=existingRider();rider.setUserId(8L);
+        var buyer=new org.pms.silverocean.database.pms.entities.Users();buyer.setId(4L);buyer.setEmail("buyer@example.test");buyer.setActive(true);
         when(users.getUserId()).thenReturn(8L);
+        when(users.findById(4L)).thenReturn(Optional.of(buyer));
         when(orders.findByIdForUpdate(9L)).thenReturn(Optional.of(order));
         when(riders.findForUpdate(3L,2L)).thenReturn(Optional.of(rider));
         for(int i=0;i<4;i++)assertThrows(PMSCustomException.class,()->service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("000000")));
@@ -1827,5 +1886,6 @@ class SokoServiceTest {
         assertEquals("protected-proof",order.getDeliveryProofReference());
         assertThrows(SokoDeliveryCodeLockedException.class,()->service.confirmDelivery(9L,new SokoRequests.DeliveryConfirmation("123456")));
         assertEquals("DISPATCHED",order.getStatus());
+        verify(notifications).deactivateInAppNotification("buyer@example.test","SOKO_DELIVERY_CODE_IN_APP","/dashboard/soko?orderId=9");
     }
 }

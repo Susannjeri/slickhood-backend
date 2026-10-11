@@ -25,7 +25,7 @@ public class BusinessNotificationService implements DomainEventHandler {
 
     @Transactional("pmsDBTransactionManager")
     public void publish(long userId,String key,String type,String message,String actionPath) {
-        if(userId<=0||key==null||key.isBlank()||!NotificationVisibility.personal(type)||message==null||message.isBlank())
+        if(userId<=0||key==null||key.isBlank()||!NotificationVisibility.businessAlertSafe(type)||message==null||message.isBlank())
             throw new IllegalArgumentException("A recipient and non-sensitive business event are required");
         if(!safePath(actionPath))throw new IllegalArgumentException("Business alerts require a safe internal destination");
         String eventKey=NotificationService.digest(key+":"+userId);
@@ -38,7 +38,7 @@ public class BusinessNotificationService implements DomainEventHandler {
         // protect the commit-to-processed gap after an application restart.
         var locked=events.lockForNotification(event.getId()).orElseThrow();
         Alert alert=mapper.readValue(locked.getPayload(),Alert.class);
-        if(alert.userId()<=0||alert.key()==null||alert.key().isBlank()||alert.message()==null||alert.message().isBlank()||!safePath(alert.actionPath())||!NotificationVisibility.personal(alert.type()))throw new IllegalArgumentException("Invalid business alert");
+        if(alert.userId()<=0||alert.key()==null||alert.key().isBlank()||alert.message()==null||alert.message().isBlank()||!safePath(alert.actionPath())||!NotificationVisibility.businessAlertSafe(alert.type()))throw new IllegalArgumentException("Invalid business alert");
         var user=users.findById(alert.userId()).filter(u->u.isActive()&&u.getEmail()!=null&&!u.getEmail().isBlank()).orElse(null);
         if(user==null)return;
         String text=alert.message()+" Open "+alert.actionPath()+" to review it securely.";
