@@ -9,11 +9,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SokoControllerSecurityTest {
     @Test
-    void financeEndpointRequiresFinanceOrSuperAdmin() throws Exception {
+    void financeEndpointRequiresDedicatedFinanceRole() throws Exception {
         var method = SokoController.class.getMethod("finance", long.class, SokoRequests.FinanceUpdate.class);
         var authorization = method.getAnnotation(PreAuthorize.class);
         assertThat(authorization).isNotNull();
-        assertThat(authorization.value()).contains("FINANCE", "SUPER_ADMIN");
+        assertThat(authorization.value()).isEqualTo("hasRole('FINANCE')");
     }
 
     @Test
