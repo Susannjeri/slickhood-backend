@@ -64,6 +64,8 @@ public class InvoiceService {
     private final org.pms.silverocean.service.architecture.events.DomainEventOutboxPublisher notificationEvents;
     private static final String INVOICE_TEMPLATE = "invoice";
     private static final String MARKETPLACE_INVOICE_NOT_PAYABLE = "MARKETPLACE_INVOICE_NOT_PAYABLE";
+    private static final Set<PMSRole> INTERNAL_PLATFORM_ROLES=Set.of(PMSRole.SUPER_ADMIN,PMSRole.SUPPORT,
+            PMSRole.SALES_MARKETING,PMSRole.FINANCE,PMSRole.INSURANCE_ADVISER,PMSRole.INSURANCE_MANAGER);
 
     public InvoiceService(InvoiceDao invoiceDao, UnitDao unitDao, UserDao userDao, AccountDao accountDao,
                           RenderService renderService, @Qualifier("EMAIL") EmailService emailService,
@@ -538,6 +540,10 @@ public class InvoiceService {
 
     private void validateSubscriptionPaymentAccount(PMSInvoice invoice, PaymentChannel paymentChannel, long accountId) {
         if (isSokoInvoice(invoice)) {
+            PMSRole activeRole=userDao.getActiveRole();
+            if (activeRole != null && INTERNAL_PLATFORM_ROLES.contains(activeRole)) {
+                throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
+            }
             if (!marketplaceDestinationMatchesSource(invoice)) {
                 throw new PaymentRequestException(ResponseCode.ACCOUNT_UNAUTHORIZED);
             }

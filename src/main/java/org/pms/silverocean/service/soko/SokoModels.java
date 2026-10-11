@@ -53,7 +53,20 @@ public final class SokoModels {
                                       double latitude, double longitude, String source, boolean preferred) {}
     public record ProductImages(long productId, List<String> imageUrls) {}
     public record StoreDetail(PublicStore store, List<PublicProduct> products) {}
-    public record RiderVerificationResult(SokoRider rider, String confirmationStatus, String message) {}
+    /** Seller-facing rider view. OTP material, internal user links and moderation notes never leave the service. */
+    public record RiderSummary(long id,long storeId,String riderType,String displayName,String phoneNumber,
+                               String nationalIdNumber,String vehicleType,String vehiclePlate,String status,
+                               String availability,boolean phoneConfirmed,String phoneConfirmationStatus,
+                               ZonedDateTime phoneConfirmedAt,boolean verified,int completedDeliveries) {
+        public static RiderSummary from(SokoRider rider) {
+            return new RiderSummary(rider.getId(),rider.getStoreId(),rider.getRiderType(),rider.getDisplayName(),
+                    rider.getPhoneNumber(),rider.getNationalIdNumber(),rider.getVehicleType(),rider.getVehiclePlate(),
+                    rider.getStatus(),rider.getAvailability(),rider.isPhoneConfirmed(),
+                    rider.getPhoneConfirmationStatus(),rider.getPhoneConfirmationConfirmedAt(),rider.isVerified(),
+                    rider.getCompletedDeliveries());
+        }
+    }
+    public record RiderVerificationResult(RiderSummary rider, String confirmationStatus, String message) {}
     /** Buyer/merchant order view. Persistence, routing and recovery-control metadata stay server-side. */
     public record OrderView(long id, String orderNumber, long storeId, String status, String paymentStatus,
                             String invoiceRef, String deliveryMethod, String deliveryAddress,
@@ -71,10 +84,18 @@ public final class SokoModels {
                             ZonedDateTime deliveryFailedAt, ZonedDateTime returnedAt, String deliveryExceptionReason,
                             ZonedDateTime deliveryRecoveryRequestedAt) {
         public static OrderView from(SokoOrder order) {
+            return from(order,true);
+        }
+        public static OrderView from(SokoOrder order,boolean showCustomerDeliveryDetails) {
             return new OrderView(order.getId(),order.getOrderNumber(),order.getStoreId(),order.getStatus(),
-                    order.getPaymentStatus(),order.getInvoiceRef(),order.getDeliveryMethod(),order.getDeliveryAddress(),
-                    order.getDeliveryLatitude(),order.getDeliveryLongitude(),order.getCustomerPhone(),order.getNotes(),
-                    order.getDestinationUnitId(),order.getSubtotal(),order.getDeliveryFee(),order.getTotal(),
+                    order.getPaymentStatus(),order.getInvoiceRef(),order.getDeliveryMethod(),
+                    showCustomerDeliveryDetails?order.getDeliveryAddress():null,
+                    showCustomerDeliveryDetails?order.getDeliveryLatitude():null,
+                    showCustomerDeliveryDetails?order.getDeliveryLongitude():null,
+                    showCustomerDeliveryDetails?order.getCustomerPhone():null,
+                    showCustomerDeliveryDetails?order.getNotes():null,
+                    showCustomerDeliveryDetails?order.getDestinationUnitId():null,
+                    order.getSubtotal(),order.getDeliveryFee(),order.getTotal(),
                     order.getCurrency(),order.getPlacedAt(),order.getConfirmedAt(),order.getDispatchedAt(),
                     order.getCompletedAt(),order.getRiderId(),order.getCourierName(),order.getCourierPhone(),
                     order.getCourierVehiclePlate(),order.isDeliveryCodeVerified(),order.getReservationExpiresAt(),
@@ -105,6 +126,23 @@ public final class SokoModels {
                                   BigDecimal orderTotal,BigDecimal refundedAmount,BigDecimal refundRequestedAmount,
                                   BigDecimal remainingRefundableAmount,String reason,ZonedDateTime requestedAt,
                                   java.time.LocalDateTime lastUpdatedAt) {}
+    /** Mutation receipt for Finance. Customer, delivery, rider and receiving-account data are intentionally absent. */
+    public record FinanceAction(long orderId,String orderNumber,String invoiceRef,String operationType,
+                                String operationStatus,String currency,BigDecimal amount,String providerReference,
+                                String paymentStatus,String refundStatus,String settlementStatus,
+                                java.time.LocalDateTime updatedAt) {
+        public static FinanceAction from(SokoOrder order,SokoRequests.FinanceType type) {
+            boolean refund=type==SokoRequests.FinanceType.REFUND;
+            String status=refund?order.getRefundStatus():order.getSettlementStatus();
+            BigDecimal amount=refund
+                    ?("CONFIRMED".equals(status)?order.getRefundedAmount():order.getRefundRequestedAmount())
+                    :order.getSettledAmount();
+            String reference=refund?order.getRefundReference():order.getSettlementReference();
+            return new FinanceAction(order.getId(),order.getOrderNumber(),order.getInvoiceRef(),type.name(),status,
+                    order.getCurrency(),amount,reference,order.getPaymentStatus(),order.getRefundStatus(),
+                    order.getSettlementStatus(),order.getLastModifiedDate());
+        }
+    }
     /** Least-privilege delivery view: riders never receive payment, settlement or recovery-control fields. */
     public record RiderOrder(long id, String orderNumber, long storeId, String status, String deliveryMethod,
                              String deliveryAddress, Double deliveryLatitude, Double deliveryLongitude,
@@ -116,10 +154,16 @@ public final class SokoModels {
                              ZonedDateTime dispatchedAt, ZonedDateTime deliveryFailedAt, ZonedDateTime returnedAt,
                              String deliveryExceptionReason, ZonedDateTime completedAt) {
         public static RiderOrder from(SokoOrder order) {
+            boolean showDeliveryDetails=order.getAssignmentAcceptedAt()!=null
+                    && ("ASSIGNMENT_ACCEPTED".equals(order.getStatus())||"DISPATCHED".equals(order.getStatus()));
             return new RiderOrder(order.getId(), order.getOrderNumber(), order.getStoreId(), order.getStatus(),
-                    order.getDeliveryMethod(), order.getDeliveryAddress(), order.getDeliveryLatitude(), order.getDeliveryLongitude(),
-                    order.getCustomerPhone(), order.getNotes(),
-                    order.getDestinationUnitId(), order.getRiderId(), order.getCourierName(), order.getCourierPhone(),
+                    order.getDeliveryMethod(), showDeliveryDetails?order.getDeliveryAddress():null,
+                    showDeliveryDetails?order.getDeliveryLatitude():null,
+                    showDeliveryDetails?order.getDeliveryLongitude():null,
+                    showDeliveryDetails?order.getCustomerPhone():null,
+                    showDeliveryDetails?order.getNotes():null,
+                    showDeliveryDetails?order.getDestinationUnitId():null,
+                    order.getRiderId(), order.getCourierName(), order.getCourierPhone(),
                     order.getCourierVehiclePlate(), order.getDeliveryProofReference()!=null, order.getPlacedAt(), order.getConfirmedAt(), order.getExpectedArrivalAt(),
                     order.getAssignedAt(), order.getAssignmentAcceptedAt(), order.getCollectedAt(), order.getDispatchedAt(),
                     order.getDeliveryFailedAt(), order.getReturnedAt(), order.getDeliveryExceptionReason(), order.getCompletedAt());
@@ -168,5 +212,39 @@ public final class SokoModels {
     public record RiderAssignmentDecision(String orderReference, String status) {}
     public record AssignmentLinkDelivery(String orderReference, String status,
                                          ZonedDateTime expiresAt, String message) {}
+    /** Moderation view. Rider identity documents, direct contact and private notes stay outside the admin API. */
+    public record AdminRiderSummary(long id,long storeId,String riderType,String displayName,String maskedPhoneNumber,
+                                    String vehicleType,String vehiclePlate,String status,String availability,
+                                    boolean phoneConfirmed,boolean verified,int completedDeliveries,
+                                    ZonedDateTime createdAt,ZonedDateTime phoneConfirmedAt,ZonedDateTime verifiedAt,
+                                    java.time.LocalDateTime updatedAt) {
+        public static AdminRiderSummary from(SokoRider rider) {
+            String phone=rider.getPhoneNumber();
+            String maskedPhone=phone==null?null:"******"+phone.substring(Math.max(0,phone.length()-4));
+            return new AdminRiderSummary(rider.getId(),rider.getStoreId(),rider.getRiderType(),rider.getDisplayName(),
+                    maskedPhone,rider.getVehicleType(),rider.getVehiclePlate(),rider.getStatus(),rider.getAvailability(),
+                    rider.isPhoneConfirmed(),rider.isVerified(),rider.getCompletedDeliveries(),rider.getCreatedOn(),
+                    rider.getPhoneConfirmationConfirmedAt(),rider.getVerifiedAt(),rider.getLastModifiedDate());
+        }
+    }
+    /** Operational moderation view. Buyer identity, destination, payment routing, codes and proof stay private. */
+    public record AdminOrderSummary(long id,String orderNumber,long storeId,String storeName,
+                                    String status,String paymentStatus,String deliveryMethod,
+                                    BigDecimal subtotal,BigDecimal deliveryFee,BigDecimal total,String currency,
+                                    boolean deliveryCodeVerified,ZonedDateTime deliveryRecoveryRequestedAt,
+                                    ZonedDateTime reservationExpiresAt,ZonedDateTime placedAt,ZonedDateTime confirmedAt,
+                                    ZonedDateTime assignedAt,ZonedDateTime dispatchedAt,ZonedDateTime completedAt,
+                                    ZonedDateTime cancelledAt,ZonedDateTime deliveryFailedAt,ZonedDateTime returnedAt,
+                                    java.time.LocalDateTime updatedAt) {
+        public static AdminOrderSummary from(SokoOrder order) {
+            return new AdminOrderSummary(order.getId(),order.getOrderNumber(),order.getStoreId(),
+                    order.getStoreNameSnapshot(),order.getStatus(),order.getPaymentStatus(),order.getDeliveryMethod(),
+                    order.getSubtotal(),order.getDeliveryFee(),order.getTotal(),order.getCurrency(),
+                    order.isDeliveryCodeVerified(),order.getDeliveryRecoveryRequestedAt(),order.getReservationExpiresAt(),
+                    order.getPlacedAt(),order.getConfirmedAt(),order.getAssignedAt(),
+                    order.getDispatchedAt(),order.getCompletedAt(),order.getCancelledAt(),order.getDeliveryFailedAt(),
+                    order.getReturnedAt(),order.getLastModifiedDate());
+        }
+    }
     public record AdminSummary(long stores,long pendingStores,long publishedStores,long products,long publishedProducts,long orders,long activeOrders) {}
 }

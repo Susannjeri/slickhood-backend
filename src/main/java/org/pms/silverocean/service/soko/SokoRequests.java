@@ -123,8 +123,8 @@ public final class SokoRequests {
                                 @NotNull @DecimalMin("0.01") @Digits(integer=17,fraction=2,message="Finance amount may have at most two decimal places.") BigDecimal amount,
                                 @Size(max=120) String providerReference) {}
     public record ModerationDecision(@NotBlank @Pattern(regexp="APPROVE|REJECT|SUSPEND|REACTIVATE") String decision,@Size(max=1000) String reason) {}
-    public record RiderDecision(@NotBlank @Pattern(regexp="VERIFY|ACTIVATE|SUSPEND|REJECT") String decision,
-                                @Size(max=1000) String reason) {}
+    public record RiderDecision(@NotBlank @Pattern(regexp="SUSPEND|REACTIVATE") String decision,
+                                @NotBlank @Size(max=1000) String reason) {}
     public record DeliveryException(@NotBlank @Size(max=1000) String reason) {}
     public record RiderAssignmentDecline(@Size(max=500) String reason) {}
     public record CodeReissue(@NotBlank @Size(max=1000) String reason) {}

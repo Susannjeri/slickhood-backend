@@ -23,29 +23,58 @@ public interface SokoStoreRepo extends JpaRepository<SokoStore, Long> {
     Page<SokoStore> findAllByActiveTrue(Pageable pageable);
     Page<SokoStore> findAllByStatusAndActiveTrue(String status,Pageable pageable);
     @Query(value="""
-            SELECT s FROM SokoStore s
-            WHERE s.active=true AND s.status='PUBLISHED'
-              AND EXISTS (SELECT p.id FROM SokoProduct p WHERE p.storeId=s.id AND p.active=true
-                          AND p.status='PUBLISHED' AND p.stockQuantity>0)
+            SELECT s.* FROM pms_soko_store s
+            WHERE s.active=1 AND s.status='PUBLISHED'
+              AND EXISTS (SELECT 1 FROM pms_soko_product p WHERE p.store_id=s.id AND p.active=1
+                          AND p.status='PUBLISHED' AND p.stock_quantity>0)
+              AND EXISTS (SELECT 1 FROM pms_user_subscription usub
+                          WHERE usub.created_by=s.owner_user_id AND usub.product_key='SOKO'
+                          AND usub.status='ACTIVE' AND usub.active=1
+                          AND (usub.end_at IS NULL OR usub.end_at>UTC_TIMESTAMP(6)))
+              AND EXISTS (SELECT 1 FROM pms_payment_account pacc
+                          WHERE pacc.id=s.payment_account_id AND pacc.created_by=s.owner_user_id
+                          AND pacc.category='MERCHANT' AND pacc.active=1 AND pacc.verified=1
+                          AND pacc.channel IS NOT NULL)
               AND (:query IS NULL OR LOWER(s.name) LIKE LOWER(CONCAT('%',:query,'%'))
                    OR LOWER(s.address) LIKE LOWER(CONCAT('%',:query,'%')))
               AND (:fulfilment='ALL'
-                   OR (:fulfilment='DELIVERY' AND s.deliveryEnabled=true)
-                   OR (:fulfilment='PICKUP' AND s.pickupEnabled=true))
+                   OR (:fulfilment='DELIVERY' AND s.delivery_enabled=1)
+                   OR (:fulfilment='PICKUP' AND s.pickup_enabled=1))
             ORDER BY LOWER(s.name),s.id
             """,
             countQuery="""
-            SELECT COUNT(s) FROM SokoStore s
-            WHERE s.active=true AND s.status='PUBLISHED'
-              AND EXISTS (SELECT p.id FROM SokoProduct p WHERE p.storeId=s.id AND p.active=true
-                          AND p.status='PUBLISHED' AND p.stockQuantity>0)
+            SELECT COUNT(*) FROM pms_soko_store s
+            WHERE s.active=1 AND s.status='PUBLISHED'
+              AND EXISTS (SELECT 1 FROM pms_soko_product p WHERE p.store_id=s.id AND p.active=1
+                          AND p.status='PUBLISHED' AND p.stock_quantity>0)
+              AND EXISTS (SELECT 1 FROM pms_user_subscription usub
+                          WHERE usub.created_by=s.owner_user_id AND usub.product_key='SOKO'
+                          AND usub.status='ACTIVE' AND usub.active=1
+                          AND (usub.end_at IS NULL OR usub.end_at>UTC_TIMESTAMP(6)))
+              AND EXISTS (SELECT 1 FROM pms_payment_account pacc
+                          WHERE pacc.id=s.payment_account_id AND pacc.created_by=s.owner_user_id
+                          AND pacc.category='MERCHANT' AND pacc.active=1 AND pacc.verified=1
+                          AND pacc.channel IS NOT NULL)
               AND (:query IS NULL OR LOWER(s.name) LIKE LOWER(CONCAT('%',:query,'%'))
                    OR LOWER(s.address) LIKE LOWER(CONCAT('%',:query,'%')))
               AND (:fulfilment='ALL'
-                   OR (:fulfilment='DELIVERY' AND s.deliveryEnabled=true)
-                   OR (:fulfilment='PICKUP' AND s.pickupEnabled=true))
-            """)
+                   OR (:fulfilment='DELIVERY' AND s.delivery_enabled=1)
+                   OR (:fulfilment='PICKUP' AND s.pickup_enabled=1))
+            """,nativeQuery=true)
     Page<SokoStore> searchPublicSellers(String query,String fulfilment,Pageable pageable);
+    @Query(value="""
+            SELECT s.* FROM pms_soko_store s
+            WHERE s.id=:id AND s.active=1 AND s.status='PUBLISHED'
+              AND EXISTS (SELECT 1 FROM pms_user_subscription usub
+                          WHERE usub.created_by=s.owner_user_id AND usub.product_key='SOKO'
+                          AND usub.status='ACTIVE' AND usub.active=1
+                          AND (usub.end_at IS NULL OR usub.end_at>UTC_TIMESTAMP(6)))
+              AND EXISTS (SELECT 1 FROM pms_payment_account pacc
+                          WHERE pacc.id=s.payment_account_id AND pacc.created_by=s.owner_user_id
+                          AND pacc.category='MERCHANT' AND pacc.active=1 AND pacc.verified=1
+                          AND pacc.channel IS NOT NULL)
+            """,nativeQuery=true)
+    Optional<SokoStore> findPublicSaleableById(@Param("id") long id);
     long countByActiveTrue();
     long countByStatusAndActiveTrue(String status);
 }

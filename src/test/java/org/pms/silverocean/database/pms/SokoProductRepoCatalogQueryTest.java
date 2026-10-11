@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,6 +40,26 @@ class SokoProductRepoCatalogQueryTest {
     void anExplicitSellerFiltersBothThePageAndItsCount() {
         assertThat(normalized(query.value())).contains("(:STOREID IS NULL OR P.STORE_ID = :STOREID)");
         assertThat(normalized(query.countQuery())).contains("(:STOREID IS NULL OR P.STORE_ID = :STOREID)");
+    }
+
+    @Test
+    void pageAndCountRequireLiveSokoEntitlementAndOwnedReadyMerchantAccount() {
+        for(String sql:List.of(normalized(query.value()),normalized(query.countQuery()))){
+            assertThat(sql)
+                    .contains("FROM PMS_USER_SUBSCRIPTION USUB")
+                    .contains("USUB.CREATED_BY = S.OWNER_USER_ID")
+                    .contains("USUB.PRODUCT_KEY = 'SOKO'")
+                    .contains("USUB.STATUS = 'ACTIVE'")
+                    .contains("USUB.ACTIVE = 1")
+                    .contains("USUB.END_AT IS NULL OR USUB.END_AT > UTC_TIMESTAMP(6)")
+                    .contains("FROM PMS_PAYMENT_ACCOUNT PACC")
+                    .contains("PACC.ID = S.PAYMENT_ACCOUNT_ID")
+                    .contains("PACC.CREATED_BY = S.OWNER_USER_ID")
+                    .contains("PACC.CATEGORY = 'MERCHANT'")
+                    .contains("PACC.ACTIVE = 1")
+                    .contains("PACC.VERIFIED = 1")
+                    .contains("PACC.CHANNEL IS NOT NULL");
+        }
     }
 
     @Test

@@ -42,6 +42,8 @@ public class AccountActivationFilter extends OncePerRequestFilter {
             "/actuator/health", "/error", "/deployed-hash", "/invite/validate", "/invite/inspect", "/team-access/invitations/accept",
             "/sp/directory/", "/soko/catalog/", "/soko/public/rider-assignment",
             "/affiliate/public/", "/public/property-listings");
+    private static final Set<String> ALLOWED_EXACT_PATHS = Set.of(
+            "/soko/catalog", "/soko/categories");
 
     private final UserDao userDao;
     private final I18NService i18NService;
@@ -128,6 +130,6 @@ public class AccountActivationFilter extends OncePerRequestFilter {
     }
 
     private boolean allowed(String path) {
-        return ALLOWED_PREFIXES.stream().anyMatch(path::startsWith);
+        return ALLOWED_EXACT_PATHS.contains(path) || ALLOWED_PREFIXES.stream().anyMatch(path::startsWith);
     }
 }

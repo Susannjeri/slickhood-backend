@@ -22,6 +22,23 @@ public interface SokoProductRepo extends JpaRepository<SokoProduct, Long> {
               AND p.stock_quantity > 0
               AND s.active = 1
               AND s.status = 'PUBLISHED'
+              AND EXISTS (
+                  SELECT 1 FROM pms_user_subscription usub
+                  WHERE usub.created_by = s.owner_user_id
+                    AND usub.product_key = 'SOKO'
+                    AND usub.status = 'ACTIVE'
+                    AND usub.active = 1
+                    AND (usub.end_at IS NULL OR usub.end_at > UTC_TIMESTAMP(6))
+              )
+              AND EXISTS (
+                  SELECT 1 FROM pms_payment_account pacc
+                  WHERE pacc.id = s.payment_account_id
+                    AND pacc.created_by = s.owner_user_id
+                    AND pacc.category = 'MERCHANT'
+                    AND pacc.active = 1
+                    AND pacc.verified = 1
+                    AND pacc.channel IS NOT NULL
+              )
               AND :sortMode IN ('RELEVANCE', 'PRICE', 'NEAREST')
               AND (:storeId IS NULL OR p.store_id = :storeId)
               AND (:category IS NULL OR LOWER(p.category) = LOWER(:category))
@@ -85,6 +102,23 @@ public interface SokoProductRepo extends JpaRepository<SokoProduct, Long> {
               AND p.stock_quantity > 0
               AND s.active = 1
               AND s.status = 'PUBLISHED'
+              AND EXISTS (
+                  SELECT 1 FROM pms_user_subscription usub
+                  WHERE usub.created_by = s.owner_user_id
+                    AND usub.product_key = 'SOKO'
+                    AND usub.status = 'ACTIVE'
+                    AND usub.active = 1
+                    AND (usub.end_at IS NULL OR usub.end_at > UTC_TIMESTAMP(6))
+              )
+              AND EXISTS (
+                  SELECT 1 FROM pms_payment_account pacc
+                  WHERE pacc.id = s.payment_account_id
+                    AND pacc.created_by = s.owner_user_id
+                    AND pacc.category = 'MERCHANT'
+                    AND pacc.active = 1
+                    AND pacc.verified = 1
+                    AND pacc.channel IS NOT NULL
+              )
               AND :sortMode IN ('RELEVANCE', 'PRICE', 'NEAREST')
               AND (:storeId IS NULL OR p.store_id = :storeId)
               AND (:category IS NULL OR LOWER(p.category) = LOWER(:category))

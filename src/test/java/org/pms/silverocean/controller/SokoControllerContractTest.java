@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -101,6 +102,7 @@ class SokoControllerContractTest {
         when(service.collectPublicRiderAssignment("secret")).thenReturn(view);
         when(service.declinePublicRiderAssignment(eq("secret"),any())).thenReturn(new SokoModels.RiderAssignmentDecision("SOKO-1","DECLINED"));
         when(service.confirmPublicRiderDelivery(eq("secret"),any())).thenReturn(view);
+        when(service.failPublicRiderDelivery(eq("secret"),any())).thenReturn(view);
 
         mockMvc.perform(get("/soko/public/rider-assignment").header("X-Soko-Rider-Token","secret"))
                 .andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store, max-age=0"))
@@ -109,7 +111,10 @@ class SokoControllerContractTest {
         mockMvc.perform(put("/soko/public/rider-assignment/collect").header("X-Soko-Rider-Token","secret")).andExpect(status().isOk());
         mockMvc.perform(put("/soko/public/rider-assignment/decline").header("X-Soko-Rider-Token","secret").contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Unavailable\"}")) .andExpect(status().isOk());
         mockMvc.perform(put("/soko/public/rider-assignment/delivery/confirm").header("X-Soko-Rider-Token","secret").contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}")) .andExpect(status().isOk());
-        verify(service).acceptPublicRiderAssignment("secret");verify(service).collectPublicRiderAssignment("secret");verify(service).confirmPublicRiderDelivery(eq("secret"),any());
+        mockMvc.perform(put("/soko/public/rider-assignment/delivery/fail").header("X-Soko-Rider-Token","secret").contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Customer unavailable\"}"))
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store, max-age=0"))
+                .andExpect(header().string("Referrer-Policy","no-referrer"));
+        verify(service).acceptPublicRiderAssignment("secret");verify(service).collectPublicRiderAssignment("secret");verify(service).confirmPublicRiderDelivery(eq("secret"),any());verify(service).failPublicRiderDelivery(eq("secret"),any());
     }
 
     @Test
@@ -129,5 +134,16 @@ class SokoControllerContractTest {
         mockMvc.perform(put("/soko/public/rider-assignment/delivery/confirm").header("X-Soko-Rider-Token","secret")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
                 .andExpect(status().isLocked());
+    }
+
+    @Test
+    void financeEndpointsAreRestrictedToFinanceRatherThanSuperadmin() throws Exception {
+        var mutation=SokoController.class.getMethod("finance",long.class,SokoRequests.FinanceUpdate.class)
+                .getAnnotation(org.springframework.security.access.prepost.PreAuthorize.class);
+        var queue=SokoController.class.getMethod("refundQueue",org.springframework.data.domain.Pageable.class,String.class)
+                .getAnnotation(org.springframework.security.access.prepost.PreAuthorize.class);
+
+        assertEquals("hasRole('FINANCE')",mutation.value());
+        assertEquals("hasRole('FINANCE')",queue.value());
     }
 }

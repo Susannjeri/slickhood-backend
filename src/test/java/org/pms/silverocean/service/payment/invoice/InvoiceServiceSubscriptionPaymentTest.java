@@ -15,6 +15,7 @@ import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.mustache.RenderService;
 import org.pms.silverocean.service.notification.email.EmailService;
 import org.pms.silverocean.service.payment.PaymentPlatform;
@@ -334,6 +335,24 @@ class InvoiceServiceSubscriptionPaymentTest {
         paymentOrder.verify(sokoService).selectPendingPaymentDestination(invoice,account);
         paymentOrder.verify(paymentPlatform).processPayment(invoice,"0712345678",13L);
         verify(accountDao, never()).isAttachedToProperty(13L, 0L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SUPER_ADMIN", "SUPPORT", "SALES_MARKETING", "FINANCE", "INSURANCE_ADVISER", "INSURANCE_MANAGER"})
+    void internalOperationsRoleCannotInitiateSokoPaymentEvenOnThePinnedRail(String roleName) {
+        PMSInvoice invoice = propertyInvoice("SOKO", 12L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(userDao.getActiveRole()).thenReturn(PMSRole.valueOf(roleName));
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB", 7L)).thenReturn(Optional.of(invoice));
+
+        PaymentRequestException error = assertThrows(PaymentRequestException.class,
+                () -> service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, "0712345678", 12L));
+
+        assertEquals(ResponseCode.ACCOUNT_UNAUTHORIZED, error.getResponseCode());
+        verify(invoiceDao, never()).getMarketplaceSourcePaymentAccountId("INV-SUB", "SOKO");
+        verify(accountDao, never()).getAccountById(12L);
+        verify(paymentPlatformFactory, never()).getPlatform(any());
+        verify(sokoService, never()).selectPendingPaymentDestination(any(), any());
     }
 
     @Test
