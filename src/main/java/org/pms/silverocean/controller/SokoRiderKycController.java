@@ -11,10 +11,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController @RequestMapping("/soko") @RequiredArgsConstructor @PreAuthorize("isAuthenticated()")
 public class SokoRiderKycController {
+    private static final String RIDER_SELF_SERVICE = "isAuthenticated() and !hasAnyRole('SUPER_ADMIN','SUPPORT','SALES_MARKETING','FINANCE','INSURANCE_ADVISER','INSURANCE_MANAGER')";
     private final SokoRiderKycService service;
     private ResponseEntity<ResponseDTO> ok(Object data){return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.GENERAL_SUCCESS.getCode(),"Rider evidence updated.",data));}
-    @GetMapping("/rider/kyc") public ResponseEntity<ResponseDTO> own(){return ok(service.myChecklist());}
-    @PostMapping(value="/rider/kyc",consumes="multipart/form-data") public ResponseEntity<ResponseDTO> upload(@RequestParam String documentType,@RequestPart("file") MultipartFile file)throws Exception{return ok(service.upload(documentType,file));}
+    @GetMapping("/rider/kyc") @PreAuthorize(RIDER_SELF_SERVICE) public ResponseEntity<ResponseDTO> own(){return ok(service.myChecklist());}
+    @PostMapping(value="/rider/kyc",consumes="multipart/form-data") @PreAuthorize(RIDER_SELF_SERVICE) public ResponseEntity<ResponseDTO> upload(@RequestParam String documentType,@RequestPart("file") MultipartFile file)throws Exception{return ok(service.upload(documentType,file));}
     @GetMapping("/admin/riders/{id}/kyc") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> admin(@PathVariable long id){return ok(service.adminChecklist(id));}
     @PutMapping("/admin/rider-kyc/{id}/review") @PreAuthorize("hasRole('SUPER_ADMIN')") public ResponseEntity<ResponseDTO> review(@PathVariable long id,@RequestBody SokoRiderKycService.Review review){return ok(service.review(id,review));}
 }

@@ -3,6 +3,8 @@ package org.pms.silverocean.service.soko;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.common.ResponseCode;
@@ -46,6 +48,14 @@ class SokoRiderKycServiceTest {
     void matrix(){KycMatrixRelease live=new KycMatrixRelease();live.setId(1L);when(releases.findFirstByStatusAndActiveTrueOrderByVersionNoDesc("PUBLISHED")).thenReturn(Optional.of(live));KycMatrixRequirement req=new KycMatrixRequirement();req.setProfileScope("INDIVIDUAL");req.setAcceptedDocumentTypes("GOOD_CONDUCT_CERTIFICATE");when(requirements.findAllByReleaseIdAndActiveTrueAndScopeTypeAndScopeKeyOrderByRequirementLabel(1L,"PROVIDER_TYPE","DELIVERY_RIDER")).thenReturn(List.of(req));}
 
     @Test void nonRiderCannotReadPrivateChecklist(){when(users.getUserId()).thenReturn(9L);when(users.findById(9L)).thenReturn(Optional.of(user));assertThrows(PMSCustomException.class,()->service.myChecklist());verifyNoInteractions(credentials,garage);}
+    @ParameterizedTest
+    @EnumSource(value=PMSRole.class,names={"SUPER_ADMIN","SUPPORT","SALES_MARKETING","FINANCE","INSURANCE_ADVISER","INSURANCE_MANAGER"})
+    void internalActiveRoleCannotUseLinkedRiderKyc(PMSRole role){
+        when(users.getActiveRole()).thenReturn(role);
+        PMSCustomException error=assertThrows(PMSCustomException.class,()->service.myChecklist());
+        assertEquals(ResponseCode.INVALID_ROLE,error.getResponseCode());
+        verifyNoInteractions(riders,credentials,garage);
+    }
     @Test void merchantCannotReadAnotherRidersKyc(){assertThrows(PMSCustomException.class,()->service.adminChecklist(7L));verifyNoInteractions(riders,credentials,garage);}
     @Test void merchantEnteredEmailDoesNotAuthorizeRiderKyc(){
         when(users.getUserId()).thenReturn(9L);when(users.findById(9L)).thenReturn(Optional.of(user));

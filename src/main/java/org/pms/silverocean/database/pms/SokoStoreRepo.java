@@ -18,6 +18,9 @@ public interface SokoStoreRepo extends JpaRepository<SokoStore, Long> {
     @Query("select s from SokoStore s where s.id=:id and s.active=true")
     Optional<SokoStore> findByIdForCheckout(@Param("id") long id);
     Optional<SokoStore> findByIdAndOwnerUserIdAndActiveTrue(long id, long ownerUserId);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from SokoStore s where s.id=:id and s.ownerUserId=:ownerUserId and s.active=true")
+    Optional<SokoStore> findOwnedByIdForUpdate(@Param("id") long id,@Param("ownerUserId") long ownerUserId);
     boolean existsByOwnerUserIdAndActiveTrue(long ownerUserId);
     List<SokoStore> findAllByOwnerUserIdAndActiveTrueOrderByName(long ownerUserId);
     Page<SokoStore> findAllByActiveTrue(Pageable pageable);

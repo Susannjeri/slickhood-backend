@@ -24,6 +24,8 @@ import java.util.*;
 
 @Service @RequiredArgsConstructor
 public class SokoRiderKycService {
+    private static final Set<PMSRole> INTERNAL_PLATFORM_ROLES=Set.of(PMSRole.SUPER_ADMIN,PMSRole.SUPPORT,
+            PMSRole.SALES_MARKETING,PMSRole.FINANCE,PMSRole.INSURANCE_ADVISER,PMSRole.INSURANCE_MANAGER);
     private final SokoRiderRepo riders;
     private final SokoRiderCredentialRepo credentials;
     private final KycCaseRepo cases;
@@ -42,12 +44,12 @@ public class SokoRiderKycService {
     public record Checklist(boolean commonKycApproved,List<String> outstanding,List<String> uploadTypes,List<DocumentView> documents,List<String> renewalDocumentTypes){}
     public record Review(String decision,String notes,ZonedDateTime expiresAt){}
 
-    public Checklist myChecklist(){Users user=currentUser();requireRegisteredRider(user);return checklist(user);}
+    public Checklist myChecklist(){requireRiderPersona();Users user=currentUser();requireRegisteredRider(user);return checklist(user);}
     public Checklist adminChecklist(long riderId){requireAdmin();return checklist(riderUser(riderId));}
 
     @Transactional(transactionManager="pmsDBTransactionManager")
     public DocumentView upload(String documentType,MultipartFile file)throws Exception {
-        Users user=currentUser();requireRegisteredRider(user);
+        requireRiderPersona();Users user=currentUser();requireRegisteredRider(user);
         cases.findByUserIdForUpdate(user.getId()).orElseThrow(()->new PMSCustomException(ResponseCode.KYC_CONSENT_REQUIRED));
         if(!commonApproved(user))throw new PMSCustomException(ResponseCode.KYC_MISSING_DOCUMENTS,"Complete your existing account KYC first. Approved account KYC is reused, not repeated.");
         String type=StringUtils.defaultString(documentType).trim().toUpperCase(Locale.ROOT);
@@ -104,6 +106,7 @@ public class SokoRiderKycService {
         return users.findById(rider.getUserId()).orElseThrow(this::noLinkedAccount);
     }
     private Users currentUser(){return users.findById(users.getUserId()).orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));}
+    private void requireRiderPersona(){PMSRole activeRole=users.getActiveRole();if(activeRole!=null&&INTERNAL_PLATFORM_ROLES.contains(activeRole))throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
     private void requireRegisteredRider(Users user){
         boolean linked=riders.findAllByUserIdAndActiveTrue(user.getId()).stream()
                 .anyMatch(rider->rider.isPhoneConfirmed()&&Objects.equals(rider.getUserId(),user.getId()));

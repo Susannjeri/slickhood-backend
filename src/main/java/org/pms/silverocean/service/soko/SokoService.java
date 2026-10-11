@@ -216,9 +216,16 @@ public class SokoService {
 
     @Transactional
     public SokoStore publishStore(long id) {
-        SokoStore s=ownedStore(id); requireStoreContact(s);validatePublishable(s);if(SUSPENDED.equals(s.getStatus()))throw forbidden();
+        requireMerchantRole();
+        SokoStore s=storeRepo.findOwnedByIdForUpdate(id,userDao.getUserId()).orElseThrow(this::notFound);
+        if(SUSPENDED.equals(s.getStatus()))throw forbidden();
+        // Submission is idempotent. A replay must not move an approved shop
+        // back into review or create another moderation alert.
+        if(PENDING_REVIEW.equals(s.getStatus())||PUBLISHED.equals(s.getStatus()))return s;
+        requireStoreContact(s);validatePublishable(s);
         marketplaceKycGate.require(s.getOwnerUserId(),"PROVIDER_TYPE","SOKO_MERCHANT",profileType(s.getOwnerUserId()));
-        s.setStatus(PENDING_REVIEW);s.setSubmittedAt(now());s.setReviewReason(null);s.setReviewedAt(null);s.setReviewedByUserId(null);return storeRepo.save(s);
+        s.setStatus(PENDING_REVIEW);s.setSubmittedAt(now());s.setReviewReason(null);s.setReviewedAt(null);s.setReviewedByUserId(null);s=storeRepo.save(s);
+        notifyStoreSubmitted(s);return s;
     }
 
     public List<SokoStore> myStores(){requireMerchantRole();return storeRepo.findAllByOwnerUserIdAndActiveTrueOrderByName(userDao.getUserId());}
@@ -464,6 +471,11 @@ public class SokoService {
         if(existing.isPresent())return existingCheckout(existing.get(),request,customerPhone);
         if(store.getOwnerUserId()==customerUserId)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"You cannot place an order with your own Soko shop.");
         subscriptionEntitlements.requireActiveProductForOwner(store.getOwnerUserId(),SubscriptionProduct.SOKO);
+        ProfileType sellerProfile=profileType(store.getOwnerUserId());
+        // Publication is not permanent proof of eligibility. Re-check the current
+        // KYC release and evidence while the shop row is locked, before reserving
+        // any stock or creating an invoice.
+        marketplaceKycGate.require(store.getOwnerUserId(),"PROVIDER_TYPE","SOKO_MERCHANT",sellerProfile);
         List<SokoOrder> pending=orderRepo.findPendingCheckoutForUpdate(customerUserId,store.getId(),PageRequest.of(0,1));
         if(!pending.isEmpty()){
             SokoOrder unpaid=pending.getFirst();
@@ -477,17 +489,27 @@ public class SokoService {
                         .thenComparing(line->line.variationId()==null?Long.MIN_VALUE:line.variationId()))
                 .toList();
         List<SokoProduct> products=new ArrayList<>();List<SokoProductVariation> selectedVariations=new ArrayList<>();List<BigDecimal> unitPrices=new ArrayList<>(); BigDecimal subtotal=BigDecimal.ZERO;
+        Set<String> checkedKycCategories=new java.util.HashSet<>();
         for(SokoRequests.CheckoutItem line:checkoutLines){
             SokoProduct p=productRepo.findByIdForUpdate(line.productId()).filter(x->x.getStoreId()==store.getId()&&PUBLISHED.equals(x.getStatus())).orElseThrow(this::notFound);
+            String category=SokoGroceryCategory.normalize(p.getCategory());
+            if(checkedKycCategories.add(category))marketplaceKycGate.require(store.getOwnerUserId(),"SOKO_CATEGORY",category,sellerProfile);
             if(!sameCurrency(p.getCurrency(),store.getCurrency()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This product has an invalid shop currency. The shop must correct it before checkout.");
             if(p.getStockQuantity()<line.quantity())throw new PMSCustomException(ResponseCode.INVALID_AMOUNT,"Insufficient stock for "+p.getName());
             List<SokoProductVariation> available=productVariationRepo.findAllByProductIdAndActiveTrueOrderByNameAscValueAsc(p.getId());SokoProductVariation selected=null;
-            if(!available.isEmpty()){if(line.variationId()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Choose a variation for "+p.getName()+".");selected=productVariationRepo.findForUpdate(line.variationId(),p.getId()).orElseThrow(this::notFound);if(selected.getStockQuantity()<line.quantity())throw new PMSCustomException(ResponseCode.INVALID_AMOUNT,"Insufficient stock for "+p.getName()+" ("+selected.getValue()+")");selected.setStockQuantity(selected.getStockQuantity()-line.quantity());productVariationRepo.save(selected);}else if(line.variationId()!=null)throw invalid();
-            BigDecimal unitPrice=p.getPrice().add(selected==null?BigDecimal.ZERO:zero(selected.getPriceAdjustment()));p.setStockQuantity(p.getStockQuantity()-line.quantity()); if(p.getStockQuantity()==0)p.setStatus(OUT_OF_STOCK); productRepo.save(p); products.add(p);selectedVariations.add(selected);unitPrices.add(unitPrice);
+            if(!available.isEmpty()){if(line.variationId()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Choose a variation for "+p.getName()+".");selected=productVariationRepo.findForUpdate(line.variationId(),p.getId()).orElseThrow(this::notFound);if(selected.getStockQuantity()<line.quantity())throw new PMSCustomException(ResponseCode.INVALID_AMOUNT,"Insufficient stock for "+p.getName()+" ("+selected.getValue()+")");}else if(line.variationId()!=null)throw invalid();
+            BigDecimal unitPrice=p.getPrice().add(selected==null?BigDecimal.ZERO:zero(selected.getPriceAdjustment()));products.add(p);selectedVariations.add(selected);unitPrices.add(unitPrice);
             subtotal=subtotal.add(unitPrice.multiply(BigDecimal.valueOf(line.quantity())));
         }
+        // All product/category checks have succeeded. Persist reservations only
+        // after the complete cart is known to remain eligible.
+        for(int i=0;i<products.size();i++){
+            SokoProduct product=products.get(i);SokoProductVariation variation=selectedVariations.get(i);int quantity=checkoutLines.get(i).quantity();
+            if(variation!=null){variation.setStockQuantity(variation.getStockQuantity()-quantity);productVariationRepo.save(variation);}
+            product.setStockQuantity(product.getStockQuantity()-quantity);if(product.getStockQuantity()==0)product.setStatus(OUT_OF_STOCK);productRepo.save(product);
+        }
         BigDecimal fee="DELIVERY".equalsIgnoreCase(request.deliveryMethod())?zero(store.getDeliveryFee()):BigDecimal.ZERO;
-        SokoOrder o=new SokoOrder(); o.setOrderNumber("SOKO-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(Locale.ROOT)); o.setStoreId(store.getId()); o.setStoreNameSnapshot(store.getName());o.setStoreAddressSnapshot(store.getAddress());o.setStorePhoneSnapshot(store.getPhoneNumber());o.setStoreLatitudeSnapshot(store.getLatitude());o.setStoreLongitudeSnapshot(store.getLongitude()); o.setCustomerUserId(customerUserId); o.setCreatedBy(customerUserId); o.setCheckoutIdempotencyKey(cleanKey); o.setActive(true); o.setStatus("PENDING_PAYMENT"); o.setPaymentStatus("UNPAID");o.setRefundStatus("NOT_REQUIRED");o.setSettlementStatus("PENDING");o.setReservationExpiresAt(now().plusMinutes(reservationMinutes)); o.setDeliveryMethod(request.deliveryMethod().toUpperCase(Locale.ROOT)); o.setDeliveryAddress(destination.address());o.setDeliveryLatitude(destination.latitude());o.setDeliveryLongitude(destination.longitude()); o.setCustomerPhone(customerPhone); o.setNotes(StringUtils.trimToNull(request.notes())); o.setDestinationUnitId(destination.unitId()); o.setSubtotal(subtotal); o.setDeliveryFee(fee); o.setTotal(subtotal.add(fee)); o.setCurrency(store.getCurrency());o.setPaymentAccountId(store.getPaymentAccountId());o.setPaymentChannel(accountDao.getAccountById(store.getPaymentAccountId()).getChannel().name()); o.setPlacedAt(now()); orderRepo.save(o);
+        SokoOrder o=new SokoOrder(); o.setOrderNumber("SOKO-"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase(Locale.ROOT)); o.setStoreId(store.getId()); o.setStoreNameSnapshot(store.getName());o.setStoreAddressSnapshot(store.getAddress());o.setStorePhoneSnapshot(store.getPhoneNumber());o.setStoreLatitudeSnapshot(store.getLatitude());o.setStoreLongitudeSnapshot(store.getLongitude()); o.setCustomerUserId(customerUserId); o.setCreatedBy(customerUserId); o.setCheckoutIdempotencyKey(cleanKey); o.setActive(true); o.setStatus("PENDING_PAYMENT"); o.setPaymentStatus("UNPAID");o.setRefundStatus("NOT_REQUIRED");o.setSettlementStatus("PENDING");o.setReservationExpiresAt(now().plusMinutes(reservationMinutes)); o.setDeliveryMethod(request.deliveryMethod().toUpperCase(Locale.ROOT)); o.setDeliveryAddress(destination.address());o.setDeliveryLatitude(destination.latitude());o.setDeliveryLongitude(destination.longitude()); o.setCustomerPhone(customerPhone); o.setNotes(StringUtils.trimToNull(request.notes())); o.setDestinationUnitId(destination.unitId()); o.setSubtotal(subtotal); o.setDeliveryFee(fee); o.setTotal(subtotal.add(fee)); o.setCurrency(store.getCurrency());o.setPaymentAccountId(store.getPaymentAccountId());o.setPaymentChannel(accountDao.getAccountById(store.getPaymentAccountId()).getChannel().name()); o.setPlacedAt(now()); orderRepo.save(o);
         List<SokoOrderItem> items=new ArrayList<>();
         for(int i=0;i<products.size();i++){SokoProduct p=products.get(i);SokoProductVariation v=selectedVariations.get(i);BigDecimal unitPrice=unitPrices.get(i);int qty=checkoutLines.get(i).quantity();SokoOrderItem it=new SokoOrderItem();it.setOrderId(o.getId());it.setProductId(p.getId());it.setProductName(p.getName());if(v!=null){it.setVariationId(v.getId());it.setVariationName(v.getName());it.setVariationValue(v.getValue());}it.setUnit(p.getUnit());it.setUnitPrice(unitPrice);it.setQuantity(qty);it.setLineTotal(unitPrice.multiply(BigDecimal.valueOf(qty)));it.setCreatedBy(userDao.getUserId());it.setActive(true);items.add(itemRepo.save(it));}
         PMSInvoice invoice=createInvoice(o,store,items);o.setInvoiceRef(invoice.getRef());orderRepo.save(o);notifyOrder(o,"Awaiting payment","");return detail(o,store,items,invoice.getId());
@@ -756,6 +778,14 @@ public class SokoService {
             BigDecimal previousRefundRequestedAmount=o.getRefundRequestedAmount();
             BigDecimal collected=authoritativeCollected(o);
             if(collected.signum()<=0)return;
+            // The repository query takes a pessimistic write lock. Resolve the
+            // reservation deadline inside that lock so a late callback and the
+            // expiry scan cannot disagree about whether this order is payable.
+            if("PENDING_PAYMENT".equals(o.getStatus())&&o.getReservationExpiresAt()!=null
+                    &&!o.getReservationExpiresAt().isAfter(now())){
+                expirePendingCheckout(o);
+                return;
+            }
             boolean fullyPaid=collected.compareTo(zero(o.getTotal()))>=0;
             BigDecimal reversals=zero(o.getReversedAmount()).add(zero(o.getChargedBackAmount()));
             BigDecimal refunds=zero(o.getRefundedAmount());
@@ -820,12 +850,21 @@ public class SokoService {
     }
     @Transactional public SokoModels.FinanceAction finance(long orderId,SokoRequests.FinanceUpdate r){requireFinanceRole();SokoOrder o=orderRepo.findByIdForUpdate(orderId).orElseThrow(this::notFound);
         if(r.type()==SokoRequests.FinanceType.REFUND)return updateManualRefund(o,r);
-        BigDecimal collected=authoritativeCollected(o),refunded=zero(o.getRefundedAmount());
-        if(!"COMPLETED".equals(o.getStatus())||r.amount().compareTo(collected.subtract(refunded).max(BigDecimal.ZERO))>0)throw invalid();
         String reference=StringUtils.left(StringUtils.trimToNull(r.providerReference()),120);
+        String current=StringUtils.defaultIfBlank(o.getSettlementStatus(),"PENDING"),next=r.status().name();
+        if("CONFIRMED".equals(current)){
+            if("CONFIRMED".equals(next)&&zero(o.getSettledAmount()).compareTo(r.amount())==0
+                    &&java.util.Objects.equals(o.getSettlementReference(),reference))return SokoModels.FinanceAction.from(o,r.type());
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"A confirmed Soko settlement is final and cannot be overwritten.");
+        }
+        if("BLOCKED".equals(current))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                "This Soko settlement is blocked because the payment was adjusted. Resolve the finance hold before settlement.");
+        BigDecimal collected=authoritativeCollected(o);
+        BigDecimal available=collected.subtract(confirmedFinancialAdjustments(o)).max(BigDecimal.ZERO);
+        if(!"COMPLETED".equals(o.getStatus())||r.amount().compareTo(available)>0)throw invalid();
         if(r.status()==SokoRequests.FinanceStatus.CONFIRMED&&reference==null)throw invalid();
-        if(java.util.Objects.equals(o.getSettlementStatus(),r.status().name())&&zero(o.getSettledAmount()).compareTo(r.amount())==0&&java.util.Objects.equals(o.getSettlementReference(),reference))return SokoModels.FinanceAction.from(o,r.type());
-        o.setSettlementStatus(r.status().name());o.setSettledAmount(r.amount());o.setSettlementReference(reference);orderRepo.save(o);audit(o,"SOKO_FINANCE_RECORD_SETTLEMENT_"+r.status().name());notifyFinanceRecord(o,false);return SokoModels.FinanceAction.from(o,r.type());}
+        if(java.util.Objects.equals(current,next)&&zero(o.getSettledAmount()).compareTo(r.amount())==0&&java.util.Objects.equals(o.getSettlementReference(),reference))return SokoModels.FinanceAction.from(o,r.type());
+        o.setSettlementStatus(next);o.setSettledAmount(r.amount());o.setSettlementReference(reference);orderRepo.save(o);audit(o,"SOKO_FINANCE_RECORD_SETTLEMENT_"+next);notifyFinanceRecord(o,false);return SokoModels.FinanceAction.from(o,r.type());}
     @Scheduled(fixedDelayString="${soko.reservation-expiry-scan-ms:300000}")
     @Transactional public void expireReservations(){
         Pageable batch=PageRequest.of(0,100,Sort.by("reservationExpiresAt"));
@@ -1378,6 +1417,11 @@ public class SokoService {
     private void requireMerchantRole(){if(userDao.getActiveRole()!=PMSRole.SERVICE_PROVIDER)throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
     private void requireFinanceRole(){if(userDao.getActiveRole()!=PMSRole.FINANCE)throw forbidden();}
     private void requireSuperAdmin(){if(userDao.getActiveRole()!=PMSRole.SUPER_ADMIN)throw forbidden();}
+    private void notifyStoreSubmitted(SokoStore store){
+        String key="soko-store-submission:"+store.getId()+":"+store.getSubmittedAt().toInstant();
+        userDao.findActiveSuperAdminAccounts().forEach(admin->businessAlerts.publish(admin.getId(),key,"SOKO_MODERATION",
+                "A Soko shop submission is waiting for review.","/dashboard/soko-management"));
+    }
     private void notifyModeration(long ownerId,String name,String status,String reason){
         userDao.findById(ownerId).map(user->user.getEmail()).filter(StringUtils::isNotBlank).ifPresent(email->{
             String body=String.format(i18n.getLocalizedMessage(NotificationType.SOKO_MODERATION_EMAIL.getBody()),HtmlUtils.htmlEscape(name),HtmlUtils.htmlEscape(status.replace('_',' ')),HtmlUtils.htmlEscape(StringUtils.defaultIfBlank(reason,"No action is required.")));
@@ -1386,8 +1430,20 @@ public class SokoService {
     }
     private void notifyOrder(SokoOrder order,String status,String detail){
         // One durable event per recipient and state; callbacks/replays cannot create
-        // duplicate alerts. Private exception notes and buyer codes are never copied.
-        String key="soko-order:"+order.getId()+":"+order.getStatus()+":"+order.getPaymentStatus()+":"+order.getRefundStatus()+":"+zero(order.getRefundedAmount());
+        // duplicate alerts. The event fingerprint distinguishes a rider decline,
+        // failure or assignment expiry from the earlier PACKED notification and
+        // its occurrence timestamp permits a later assignment cycle. Detail is
+        // digested, never copied into the persisted key or customer message.
+        String event=StringUtils.defaultString(status).trim().toUpperCase(Locale.ROOT);
+        ZonedDateTime occurredAt=null;
+        if("DELIVERY ASSIGNED".equals(event))occurredAt=order.getAssignedAt();
+        else if("RIDER ASSIGNED".equals(event)||"RIDER CONFIRMED".equals(event))occurredAt=order.getAssignmentAcceptedAt();
+        else if("OUT FOR DELIVERY".equals(event))occurredAt=order.getCollectedAt();
+        else if("RIDER DECLINED".equals(event))occurredAt=order.getRiderAssignmentDeclinedAt();
+        else if(event.contains("RIDER RESPONSE EXPIRED")||event.contains("DELIVERY ASSIGNMENT FAILED")||event.contains("DELIVERY FAILED"))occurredAt=order.getDeliveryFailedAt();
+        else if("PAYMENT RESERVATION EXPIRED".equals(event))occurredAt=order.getCancelledAt();
+        String eventFingerprint=NotificationService.digest(event+":"+StringUtils.defaultString(detail)+":"+(occurredAt==null?"":occurredAt.toInstant()));
+        String key="soko-order:"+order.getId()+":"+order.getStatus()+":"+order.getPaymentStatus()+":"+order.getRefundStatus()+":"+zero(order.getRefundedAmount())+":"+eventFingerprint;
         String message="Soko order "+order.getOrderNumber()+": "+status+".";
         java.util.Map<Long,String> recipients=new java.util.LinkedHashMap<>();
         recipients.put(order.getCustomerUserId(),"/dashboard/soko");

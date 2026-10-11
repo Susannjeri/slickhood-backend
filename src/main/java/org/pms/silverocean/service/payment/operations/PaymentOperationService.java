@@ -34,7 +34,8 @@ public class PaymentOperationService {
         return operations.findByIdempotencyKey(key).map(existing->{if(!sameRequest(existing,request))throw invalid();return existing;}).orElseGet(()->create(request,key));
     }
     public List<PaymentOperation> caseHistory(String caseReference){
-        long userId=users.getUserId(); boolean privileged=users.hasRole(PMSRole.SUPER_ADMIN)||users.hasRole(PMSRole.FINANCE);
+        long userId=users.getUserId(); PMSRole activeRole=users.getActiveRole();
+        boolean privileged=activeRole==PMSRole.SUPER_ADMIN||activeRole==PMSRole.FINANCE;
         return operations.findVisibleCase(caseReference,userId,privileged);
     }
     private PaymentOperation create(PaymentOperationModels.Create request,String key){
@@ -67,6 +68,6 @@ public class PaymentOperationService {
             BigDecimal collected=payment.moneyAmount(); if(collected==null||already.add(amount).compareTo(collected)>0)throw invalid();
         }
     }
-    private void requireFinance(){if(!users.hasRole(PMSRole.FINANCE)&&!users.hasRole(PMSRole.SUPER_ADMIN))throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
+    private void requireFinance(){if(users.getActiveRole()!=PMSRole.FINANCE)throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
     private PMSCustomException invalid(){return new PMSCustomException(ResponseCode.GENERAL_FAILURE);}
 }
