@@ -7,6 +7,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.database.pms.CommunityFundRepo;
+import org.pms.silverocean.database.pms.ServiceBookingRepo;
+import org.pms.silverocean.database.pms.SokoOrderRepo;
 import org.pms.silverocean.database.pms.entities.PaymentAccount;
 import org.pms.silverocean.database.pms.entities.PaymentAccountProperty;
 import org.pms.silverocean.database.pms.entities.Users;
@@ -48,6 +50,8 @@ class AccountServiceSecurityTest {
     @Mock PaymentPlatformFactory paymentPlatformFactory;
     @Mock NotificationService notificationService;
     @Mock CommunityFundRepo communityFundRepo;
+    @Mock ServiceBookingRepo serviceBookingRepo;
+    @Mock SokoOrderRepo sokoOrderRepo;
     @Mock ApplicationEventPublisher eventPublisher;
     @InjectMocks AccountService service;
 
@@ -171,6 +175,46 @@ class AccountServiceSecurityTest {
         verify(accountDao).updateVerification(account, false);
         verify(accountDao).upsertProperty(any(PaymentAccountProperty.class));
         verify(eventPublisher).publishEvent(new PaymentAccountCredentialsChangedEvent(42L, PaymentChannel.MPESA));
+    }
+
+    @Test
+    void changingCredentialsIsBlockedWhileAServiceTransactionUsesTheAccount() {
+        PaymentAccount account = account(42L, 7L, AccountCategory.MERCHANT, PaymentChannel.MPESA, true);
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(serviceBookingRepo.existsMarketplaceDependencyOnPaymentAccount(42L)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.updateAccountProperty(42L,
+                new UpdateAccountPropertyRequestDTO(PaymentPropertyKeys.CONSUMER_SECRET, "new-secret")))
+                .isInstanceOf(PMSCustomException.class);
+
+        verify(accountDao, never()).updateVerification(any(), org.mockito.ArgumentMatchers.anyBoolean());
+        verify(accountDao, never()).upsertProperty(any());
+        verifyNoInteractions(encryptionService, eventPublisher);
+    }
+
+    @Test
+    void deletingAnAccountIsBlockedWhileASokoTransactionUsesIt() {
+        PaymentAccount account = account(42L, 7L, AccountCategory.MERCHANT, PaymentChannel.PESA_LINK, true);
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(sokoOrderRepo.existsMarketplaceDependencyOnPaymentAccount(42L)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.deleteAccount(42L)).isInstanceOf(PMSCustomException.class);
+
+        verify(accountDao, never()).deleteAccount(any());
+        verifyNoInteractions(communityFundRepo);
+    }
+
+    @Test
+    void terminalMarketplaceTransactionsDoNotBlockAccountMaintenance() {
+        PaymentAccount account = account(42L, 7L, AccountCategory.MERCHANT, PaymentChannel.PESA_LINK, true);
+        when(accountDao.getAccountForUpdate(42L)).thenReturn(account);
+        when(userDao.getUserId()).thenReturn(7L);
+
+        service.deleteAccount(42L);
+
+        verify(accountDao).deleteAccount(account);
     }
 
     @Test

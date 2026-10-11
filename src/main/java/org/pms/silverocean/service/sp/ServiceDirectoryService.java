@@ -24,20 +24,28 @@ public class ServiceDirectoryService {
     private final ServiceRatingDao ratingDao;
 
     public Page<ProviderServiceDTO> listDirectory(Pageable pageable, Long categoryId) {
-        return serviceDao.findListedByCategoryEnriched(pageable, categoryId);
+        return enrichRatings(serviceDao.findListedByCategoryEnriched(bounded(pageable), categoryId));
     }
 
     public Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query,
                                                      BigDecimal minAmount, BigDecimal maxAmount,
                                                      Double latitude, Double longitude, Double radiusKm) {
         if (minAmount != null && maxAmount != null && minAmount.compareTo(maxAmount) > 0) {
-            throw new IllegalArgumentException("Minimum price cannot exceed maximum price");
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Minimum price cannot exceed maximum price.");
         }
-        if ((latitude == null) != (longitude == null)) throw new IllegalArgumentException("Latitude and longitude must be supplied together");
+        if ((latitude == null) != (longitude == null)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Latitude and longitude must be supplied together.");
+        }
         Double minLat=null,maxLat=null,minLng=null,maxLng=null;
         if(latitude!=null){double radius=Math.max(1,Math.min(radiusKm==null?25:radiusKm,100));double latDelta=radius/111.0;double lngDelta=radius/(111.0*Math.max(.2,Math.cos(Math.toRadians(latitude))));minLat=latitude-latDelta;maxLat=latitude+latDelta;minLng=longitude-lngDelta;maxLng=longitude+lngDelta;}
-        return serviceDao.searchDirectory(pageable, categoryId, StringUtils.trimToNull(query), minAmount, maxAmount,
-                latitude,longitude,minLat,maxLat,minLng,maxLng);
+        var amountOrder=pageable.getSort().getOrderFor("amount");
+        boolean lowestPriceFirst=amountOrder!=null && amountOrder.isAscending();
+        Double orderingLatitude=lowestPriceFirst?null:latitude;
+        Double orderingLongitude=lowestPriceFirst?null:longitude;
+        return enrichRatings(serviceDao.searchDirectory(bounded(pageable), categoryId, StringUtils.trimToNull(query), minAmount, maxAmount,
+                orderingLatitude,orderingLongitude,minLat,maxLat,minLng,maxLng));
     }
 
     public Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query,
@@ -48,9 +56,32 @@ public class ServiceDirectoryService {
     public ServiceDetailsDTO getServiceDetails(long serviceId) {
         ProviderServiceDTO service = serviceDao.findByIdEnriched(serviceId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        var providerRating = ratingDao.aggregateByProfileIds(java.util.List.of(service.profileId())).stream().findFirst().orElse(null);
+        service = service.withRatings(providerRating == null ? 0 : providerRating.getAverageRating(),
+                providerRating == null ? 0 : providerRating.getRatingCount()).withPublicLocation();
         var riskScore = riskScoreDao.findLatestByServiceId(serviceId)
                 .map(RiskScoreDTO::new)
                 .orElse(null);
         return new ServiceDetailsDTO(service, riskScore, ratingDao.avgStars(serviceId), ratingDao.countByServiceId(serviceId));
+    }
+
+    private Page<ProviderServiceDTO> enrichRatings(Page<ProviderServiceDTO> page) {
+        if (page.isEmpty()) return page;
+        java.util.Map<Long,org.pms.silverocean.database.pms.ServiceRatingRepo.ProviderRatingAggregate> byProfile =
+                ratingDao.aggregateByProfileIds(page.getContent().stream().map(ProviderServiceDTO::profileId).distinct().toList())
+                        .stream().collect(java.util.stream.Collectors.toMap(
+                                org.pms.silverocean.database.pms.ServiceRatingRepo.ProviderRatingAggregate::getProfileId,
+                                java.util.function.Function.identity()));
+        return page.map(service -> {
+            var aggregate=byProfile.get(service.profileId());
+            return service.withRatings(aggregate == null ? 0 : aggregate.getAverageRating(),
+                    aggregate == null ? 0 : aggregate.getRatingCount()).withPublicLocation();
+        });
+    }
+
+    private Pageable bounded(Pageable pageable) {
+        int page=Math.max(0,pageable.getPageNumber());
+        int size=Math.min(48,Math.max(1,pageable.getPageSize()));
+        return org.springframework.data.domain.PageRequest.of(page,size);
     }
 }

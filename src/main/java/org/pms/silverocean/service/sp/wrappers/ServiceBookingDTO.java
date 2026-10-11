@@ -2,6 +2,7 @@ package org.pms.silverocean.service.sp.wrappers;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.pms.silverocean.database.pms.entities.ServiceBooking;
+import org.pms.silverocean.database.pms.entities.ComplaintCase;
 
 import java.time.ZonedDateTime;
 import java.math.BigDecimal;
@@ -13,21 +14,46 @@ public record ServiceBookingDTO(
     ZonedDateTime completedAt, String status, String notes, String cancellationReason, ZonedDateTime createdOn,
     String serviceName, String serviceProviderName, String bookedByUserName,
     BigDecimal quotedAmount, String currency, PricingUnit pricingUnit,
-    Long propertyId, Long unitId, Long paymentAccountId, String paymentChannel,
+    Long propertyId, Long unitId, String serviceAddress, Long paymentAccountId, String paymentChannel,
     String invoiceRef, String paymentStatus, String providerReference,
     String refundStatus, String refundReference, BigDecimal refundedAmount,
     String settlementStatus, String settlementReference, BigDecimal settledAmount,
-    String completionEvidenceReference, ZonedDateTime startedAt, boolean customerBooking
+    String completionEvidenceReference, ZonedDateTime startedAt, ZonedDateTime disputeDeadlineAt,
+    boolean customerBooking, boolean rated,
+    Long complaintId, String complaintStatus, String complaintResolution
 ) {
     public ServiceBookingDTO(ServiceBooking b, String serviceName, String serviceProviderName, String bookedByUserName, long viewerUserId) {
         this(b.getId(), b.getServiceId(), b.getCreatedBy(), b.getScheduledAt(),
              b.getCompletedAt(), b.getStatus(), b.getNotes(), b.getCancellationReason(), b.getCreatedOn(),
              serviceName, serviceProviderName, bookedByUserName,
              b.getQuotedAmount(), b.getCurrency(), b.getPricingUnit(),
-             b.getPropertyId(), b.getUnitId(), b.getPaymentAccountId(), b.getPaymentChannel(),
+             b.getPropertyId(), b.getUnitId(), b.getServiceAddress(), b.getPaymentAccountId(), b.getPaymentChannel(),
              b.getInvoiceRef(), b.getPaymentStatus(), b.getProviderReference(),
              b.getRefundStatus(), b.getRefundReference(), b.getRefundedAmount(),
              b.getSettlementStatus(), b.getSettlementReference(), b.getSettledAmount(),
-             b.getCompletionEvidenceReference(), b.getStartedAt(), java.util.Objects.equals(b.getCreatedBy(), viewerUserId));
+             b.getCompletionEvidenceReference(), b.getStartedAt(), b.getDisputeDeadlineAt(),
+             java.util.Objects.equals(b.getCreatedBy(), viewerUserId), false, null, null, null);
+    }
+
+    public ServiceBookingDTO withRated(boolean rated) {
+        return new ServiceBookingDTO(id, serviceId, bookedByUserId, scheduledAt, completedAt, status,
+                notes, cancellationReason, createdOn, serviceName, serviceProviderName, bookedByUserName,
+                quotedAmount, currency, pricingUnit, propertyId, unitId, serviceAddress, paymentAccountId, paymentChannel,
+                invoiceRef, paymentStatus, providerReference, refundStatus, refundReference, refundedAmount,
+                settlementStatus, settlementReference, settledAmount, completionEvidenceReference, startedAt,
+                disputeDeadlineAt, customerBooking, rated, complaintId, complaintStatus, complaintResolution);
+    }
+
+    public ServiceBookingDTO withDispute(ComplaintCase complaint) {
+        return new ServiceBookingDTO(id, serviceId, bookedByUserId, scheduledAt, completedAt, status,
+                notes, cancellationReason, createdOn, serviceName, serviceProviderName, bookedByUserName,
+                quotedAmount, currency, pricingUnit, propertyId, unitId, serviceAddress, paymentAccountId, paymentChannel,
+                invoiceRef, paymentStatus, providerReference, refundStatus, refundReference, refundedAmount,
+                settlementStatus, settlementReference, settledAmount, completionEvidenceReference, startedAt,
+                disputeDeadlineAt, customerBooking, rated,
+                complaint == null ? null : complaint.getId(),
+                complaint == null ? null : complaint.getStatus(),
+                complaint == null ? null : org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                        complaint.getPublicResolution(), complaint.getResolution()));
     }
 }

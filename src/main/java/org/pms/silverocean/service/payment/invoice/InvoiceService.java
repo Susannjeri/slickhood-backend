@@ -236,8 +236,8 @@ public class InvoiceService {
         } else if ("SOKO".equals(invoice.getBillingType()) || "SERVICE_MARKETPLACE".equals(invoice.getBillingType())) {
             Users billed = userDao.findById(invoice.getBilledUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
             boolean serviceMarketplace = "SERVICE_MARKETPLACE".equals(invoice.getBillingType());
-            invoiceData.put("propertyName", serviceMarketplace ? "Slickhood Services" : "Slickhood Soko");
-            invoiceData.put("propertyAddress", serviceMarketplace ? "Service marketplace booking" : "Marketplace order");
+            invoiceData.put("propertyName", serviceMarketplace ? resolveIssuerName(invoice) : "Slickhood Soko");
+            invoiceData.put("propertyAddress", serviceMarketplace ? "Booked through SlickHood Services" : "Marketplace order");
             invoiceData.put("unitRef", invoice.getRef());
             invoiceData.put("customerName", billed.getFullName());
             invoiceData.put("customerEmail", billed.getEmail());
@@ -369,7 +369,7 @@ public class InvoiceService {
             Users billed = userDao.findById(invoice.getBilledUserId()).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_INVOICE_NUMBER));
             String label = "SERVICE_MARKETPLACE".equals(invoice.getBillingType()) ? "Slickhood service booking" : "Slickhood Soko order";
             return buildInvoiceDTO(invoice, label, null,
-                    "SERVICE_MARKETPLACE".equals(invoice.getBillingType()) ? "SlickHood Services" : "SlickHood Soko",
+                    "SERVICE_MARKETPLACE".equals(invoice.getBillingType()) ? resolveIssuerName(invoice) : "SlickHood Soko",
                     invoice.getRef(), billed.getFullName(), payableMarketplaceRefs);
         }
         PropertyNameAddressAndTypeProjection propertyDetails = unitDao.getPropertyDetailsFromUnitId(invoice.getUnitId()).orElseThrow();
@@ -437,14 +437,13 @@ public class InvoiceService {
     }
 
     private boolean isSlickHoodInvoice(PMSInvoice invoice) {
-        return Set.of("SLICKHOOD", "SOKO", "SERVICES").contains(resolveIssuerType(invoice));
+        return Set.of("SLICKHOOD", "SOKO").contains(resolveIssuerType(invoice));
     }
 
     private String resolveIssuerName(PMSInvoice invoice) {
         if (isSlickHoodInvoice(invoice)) {
             return switch (resolveIssuerType(invoice)) {
                 case "SOKO" -> "SlickHood Soko";
-                case "SERVICES" -> "SlickHood Services";
                 default -> "SlickHood";
             };
         }

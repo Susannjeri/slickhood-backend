@@ -54,6 +54,10 @@ public class UpdatePaymentService {
     @Transactional
     public void setInvoiceToPaid(PMSInvoice invoice, String thirdPartyId, BigDecimal transactionAmount) {
         if(invoice.getId()!=null)invoice=invoiceDao.getInvoiceByIdForUpdate(invoice.getId()).orElse(invoice);
+        if (!invoice.isActive()) {
+            throw new org.pms.silverocean.service.PMSCustomException(
+                    org.pms.silverocean.common.ResponseCode.MARKETPLACE_INVOICE_NOT_PAYABLE);
+        }
         MonetaryPolicy.currency(invoice.getCurrency());
         boolean alreadyFullyPaid = invoice.isPaid() && invoice.moneyPendingAmount().signum() <= 0;
         if (alreadyFullyPaid) {

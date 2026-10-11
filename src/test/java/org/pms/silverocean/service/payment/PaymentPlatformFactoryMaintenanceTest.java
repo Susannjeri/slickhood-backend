@@ -18,6 +18,24 @@ class PaymentPlatformFactoryMaintenanceTest {
         PaymentPlatformFactory factory = new PaymentPlatformFactory(Map.of("Paystack", platform), storage);
         assertThat(factory.getChannelImage(PaymentChannel.PAYSTACK)).isEqualTo("https://example.test/icon");
         assertThatThrownBy(() -> factory.getPlatform(PaymentChannel.PAYSTACK)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(factory.isAvailableForNewPayments(PaymentChannel.PAYSTACK)).isFalse();
+        assertThat(factory.getAvailableChannelsForNewPayments()).isEmpty();
         assertThat(factory.getPaymentTypes()).isEmpty();
+    }
+
+    @Test
+    void availableChannelSetUsesRuntimePlatformStateAndExcludesRetiredFlutterwave() {
+        PaymentPlatform mpesa = mock(PaymentPlatform.class);
+        when(mpesa.channelType()).thenReturn(PaymentChannel.MPESA);
+        when(mpesa.isActive()).thenReturn(true);
+        PaymentPlatform flutterwave = mock(PaymentPlatform.class);
+        when(flutterwave.channelType()).thenReturn(PaymentChannel.FLUTTER_WAVE);
+        when(flutterwave.isActive()).thenReturn(true);
+
+        PaymentPlatformFactory factory = new PaymentPlatformFactory(
+                Map.of("mpesa", mpesa, "flutterwave", flutterwave), mock(GarageService.class));
+
+        assertThat(factory.getAvailableChannelsForNewPayments())
+                .containsExactly(PaymentChannel.MPESA);
     }
 }

@@ -56,6 +56,15 @@ public interface SokoOrderRepo extends JpaRepository<SokoOrder, Long> {
     @Query("select o from SokoOrder o where o.active=true and o.status='PENDING_PAYMENT' and o.stockReleased=false and o.reservationExpiresAt<:now")
     List<SokoOrder> findExpiredReservations(ZonedDateTime now,Pageable pageable);
 
+    @Query("SELECT COUNT(o) > 0 FROM SokoOrder o WHERE o.active = true " +
+            "AND o.paymentAccountId = :accountId AND (" +
+            "(o.paymentStatus IN ('UNPAID', 'PARTIALLY_PAID', 'PAID') " +
+            "AND NOT (o.status IN ('CANCELLED', 'EXPIRED') AND o.paymentStatus = 'UNPAID') " +
+            "AND NOT (o.status = 'COMPLETED' AND o.settlementStatus = 'CONFIRMED')) " +
+            "OR o.refundStatus IN ('REQUESTED', 'PROCESSING', 'FAILED') " +
+            "OR o.settlementStatus IN ('REQUESTED', 'PROCESSING', 'FAILED'))")
+    boolean existsMarketplaceDependencyOnPaymentAccount(long accountId);
+
     @Query("SELECT o FROM SokoOrder o JOIN SokoStore s ON s.id=o.storeId WHERE o.active AND o.createdOn >= :start AND o.createdOn < :end " +
             "AND (:privileged=true OR o.customerUserId=:userId OR s.ownerUserId=:userId) ORDER BY o.createdOn DESC")
     List<SokoOrder> findForReport(long userId, boolean privileged, ZonedDateTime start, ZonedDateTime end, Pageable pageable);

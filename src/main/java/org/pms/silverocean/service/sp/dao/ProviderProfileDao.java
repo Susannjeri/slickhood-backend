@@ -40,6 +40,12 @@ public class ProviderProfileDao {
         return repo.findById(id);
     }
 
+    public Optional<ProviderProfile> findByIdForUpdate(long id) { return repo.findByIdForUpdate(id); }
+
+    public Page<ProviderProfile> findPending(Pageable pageable) {
+        return repo.findByStatusAndActiveTrue(ProviderProfileStatus.PENDING_VERIFICATION.name(), pageable);
+    }
+
     public void lockActiveProfile(long id) {
         repo.lockActiveProfile(id).orElseThrow(() -> new org.pms.silverocean.service.PMSCustomException(org.pms.silverocean.common.ResponseCode.SP_PROFILE_NOT_FOUND));
     }

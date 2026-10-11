@@ -1,6 +1,7 @@
 package org.pms.silverocean.controller;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
 import lombok.extern.slf4j.Slf4j;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.controller.utils.OutputStreamErrorHandler;
@@ -16,7 +17,9 @@ import org.pms.silverocean.service.sp.dao.ServiceTierDao;
 import org.pms.silverocean.service.sp.enums.DocumentStatus;
 import org.pms.silverocean.service.sp.enums.RefereeStatus;
 import org.pms.silverocean.service.sp.wrappers.AssignTierRequest;
+import org.pms.silverocean.service.sp.wrappers.ApproveProviderProfileRequest;
 import org.pms.silverocean.service.sp.wrappers.CreateCategoryRequest;
+import org.pms.silverocean.service.sp.wrappers.RejectProviderProfileRequest;
 import org.pms.silverocean.service.sp.wrappers.ReviewComplaintRequest;
 import org.pms.silverocean.service.sp.wrappers.ServiceTierDTO;
 import org.pms.silverocean.service.wrappers.EnumWrapper;
@@ -77,6 +80,32 @@ public class ServiceProviderAdminController extends OutputStreamErrorHandler {
                 profilePage.getContent(), profilePage.getTotalPages(), profilePage.getTotalElements(), profilePage.getSize()));
     }
 
+    @GetMapping("/profile/pending")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).APPROVE_SP_SERVICE)")
+    public ResponseEntity<ResponseDTO> getPendingProfiles(Pageable pageable) {
+        var page=profileService.getPendingProfileList(pageable);
+        return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.SP_PROFILE_DETAILS.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.SP_PROFILE_DETAILS),page.getContent(),page.getTotalPages(),page.getTotalElements(),page.getSize()));
+    }
+
+    @PutMapping("/profile/{profileId}/approve")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).APPROVE_SP_SERVICE)")
+    public ResponseEntity<ResponseDTO> approveProfile(@PathVariable long profileId,
+            @RequestBody @Valid ApproveProviderProfileRequest request){
+        return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.SP_PROFILE_UPDATED.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.SP_PROFILE_UPDATED),
+                profileService.approveProfile(profileId,request.expectedVersion(),request.adminNotes())));
+    }
+
+    @PutMapping("/profile/{profileId}/reject")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).APPROVE_SP_SERVICE)")
+    public ResponseEntity<ResponseDTO> rejectProfile(@PathVariable long profileId,
+            @RequestBody @Valid RejectProviderProfileRequest request){
+        return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.SP_PROFILE_UPDATED.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.SP_PROFILE_UPDATED),
+                profileService.rejectProfile(profileId,request.expectedVersion(),request.reason())));
+    }
+
     @GetMapping("/profile/{profileId}")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SP_LIST)")
     public ResponseEntity<ResponseDTO> getProfileById(@PathVariable long profileId) {
@@ -120,8 +149,8 @@ public class ServiceProviderAdminController extends OutputStreamErrorHandler {
     @PutMapping("/service/{serviceId}/approve")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).APPROVE_SP_SERVICE)")
     public ResponseEntity<ResponseDTO> approveService(@PathVariable long serviceId,
-                                                      @RequestParam(required = false) String adminNotes) {
-        serviceService.approveService(serviceId, adminNotes);
+            @RequestBody @Valid org.pms.silverocean.service.sp.wrappers.AdminNotesRequest request) {
+        serviceService.approveService(serviceId, request.adminNotes());
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_SERVICE_STATUS_UPDATED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_SERVICE_STATUS_UPDATED)));
     }
@@ -129,8 +158,8 @@ public class ServiceProviderAdminController extends OutputStreamErrorHandler {
     @PutMapping("/service/{serviceId}/reject")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).APPROVE_SP_SERVICE)")
     public ResponseEntity<ResponseDTO> rejectService(@PathVariable long serviceId,
-                                                     @RequestParam(required = false) String adminNotes) {
-        serviceService.rejectService(serviceId, adminNotes);
+            @RequestBody @Valid org.pms.silverocean.service.sp.wrappers.ReasonRequest request) {
+        serviceService.rejectService(serviceId, request.reason());
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_SERVICE_STATUS_UPDATED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_SERVICE_STATUS_UPDATED)));
     }
@@ -138,8 +167,8 @@ public class ServiceProviderAdminController extends OutputStreamErrorHandler {
     @PutMapping("/service/{serviceId}/suspend")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SUSPEND_SP_SERVICE)")
     public ResponseEntity<ResponseDTO> suspendService(@PathVariable long serviceId,
-                                                      @RequestParam(required = false) String reason) {
-        serviceService.suspendService(serviceId, reason);
+            @RequestBody @Valid org.pms.silverocean.service.sp.wrappers.ReasonRequest request) {
+        serviceService.suspendService(serviceId, request.reason());
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_SERVICE_STATUS_UPDATED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_SERVICE_STATUS_UPDATED)));
     }

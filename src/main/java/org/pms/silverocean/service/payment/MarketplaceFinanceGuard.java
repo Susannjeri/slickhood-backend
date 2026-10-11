@@ -21,9 +21,15 @@ public final class MarketplaceFinanceGuard {
             throw invalid();
         }
         if(!paid||(!refund&&!completed))throw invalid();
-        if (!refund && ("REQUESTED".equals(other.status()) || "PROCESSING".equals(other.status()))) throw invalid();
+        if (!refund && ("REQUESTED".equals(other.status()) || "PROCESSING".equals(other.status())
+                || "FAILED".equals(other.status()))) throw invalid();
         if ("CONFIRMED".equals(requested.status())
                 && (requested.reference() == null || requested.reference().isBlank())) throw invalid();
+        if ("CONFIRMED".equals(requested.status())
+                && ("REQUESTED".equals(existing.status()) || "PROCESSING".equals(existing.status())
+                || "FAILED".equals(existing.status()))
+                && existing.amount() != null
+                && existing.amount().compareTo(requested.amount()) != 0) throw invalid();
         BigDecimal committed = "CONFIRMED".equals(other.status()) && other.amount() != null
                 ? other.amount() : BigDecimal.ZERO;
         if (requested.amount().add(committed).compareTo(total) > 0) throw invalid();

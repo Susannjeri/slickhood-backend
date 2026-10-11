@@ -25,6 +25,10 @@ public class ProviderService extends BaseCreatorEntity implements Auditable {
     private long profileId;
     private long categoryId;
     private String categoryName;
+    @jakarta.persistence.Column(length = 120)
+    private String title;
+    @jakarta.persistence.Column(length = 2000)
+    private String description;
     private String tier;
     private BigDecimal amount;
     private String currency;
@@ -34,12 +38,13 @@ public class ProviderService extends BaseCreatorEntity implements Auditable {
 
     @Override
     public String toAuditJSON() {
-        return "{" +
-                "\"id\":" + getId() + "," +
-                "\"profileId\":" + profileId + "," +
-                "\"categoryId\":" + categoryId + "," +
-                "\"categoryName\":\"" + categoryName + "\"," +
-                "\"status\":\"" + status + "\"" +
-                "}";
+        var json = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        json.put("id", getId());
+        json.put("profileId", profileId);
+        json.put("categoryId", categoryId);
+        json.put("categoryName", categoryName);
+        json.put("title", title);
+        json.put("status", status);
+        return json.toString();
     }
 }

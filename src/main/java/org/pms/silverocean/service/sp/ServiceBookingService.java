@@ -19,19 +19,24 @@ import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
+import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.pms.silverocean.service.property.UnitDao;
 import org.pms.silverocean.service.sp.dao.ProviderProfileDao;
+import org.pms.silverocean.service.sp.dao.ComplaintCaseDao;
 import org.pms.silverocean.service.sp.dao.ServiceBookingDao;
+import org.pms.silverocean.service.sp.dao.ServiceRatingDao;
 import org.pms.silverocean.service.sp.enums.BookingStatus;
 import org.pms.silverocean.service.sp.enums.ProviderServiceStatus;
 import org.pms.silverocean.service.sp.wrappers.CreateBookingRequest;
 import org.pms.silverocean.service.sp.wrappers.ServiceBookingDTO;
 import org.pms.silverocean.service.sp.wrappers.MarketplaceFinanceRequest;
+import org.pms.silverocean.service.sp.wrappers.MarketplaceFinanceQueueDTO;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Sort;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,6 +54,9 @@ import org.springframework.web.util.HtmlUtils;
 @Slf4j
 @RequiredArgsConstructor
 public class ServiceBookingService {
+    private static final java.time.Duration CUSTOMER_CONFIRMATION_WINDOW = java.time.Duration.ofHours(48);
+    private static final int AUTO_FINALIZATION_BATCH_SIZE = 100;
+    private static final int AUTO_FINALIZATION_MAX_BATCHES = 10;
     private final ServiceBookingDao bookingDao;
     private final ProviderServiceDao serviceDao;
     private final ProviderProfileDao profileDao;
@@ -57,26 +65,53 @@ public class ServiceBookingService {
     private final org.pms.silverocean.service.notification.BusinessNotificationService businessAlerts;
     private final I18NService i18NService;
     private final AccountDao accountDao;
+    private final PaymentPlatformFactory paymentPlatformFactory;
     private final InvoiceDao invoiceDao;
     private final UnitDao unitDao;
+    private final ServiceRatingDao ratingDao;
+    private final ComplaintCaseDao complaintDao;
+    private final org.pms.silverocean.service.subscription.SubscriptionEntitlementService subscriptionEntitlements;
+    private final ServiceFinanceOperationService financeOperations;
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ServiceBookingDTO createBooking(CreateBookingRequest request) {
         long userId = userDao.getUserId();
-        var service = serviceDao.findById(request.serviceId())
+        String requestId=org.apache.commons.lang3.StringUtils.trimToNull(request.idempotencyKey());
+        if(requestId!=null){
+            // Serialise retries per buyer so two concurrent requests cannot both
+            // cross the pre-insert idempotency check.
+            userDao.findActiveByIdForUpdate(userId).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
+            var existing=bookingDao.findByCreatedByAndClientRequestId(userId,requestId);
+            if(existing.isPresent()){
+                assertIdempotentPayload(existing.get(),request);
+                return toDTO(existing.get());
+            }
+        }
+        var service = serviceDao.findByIdForUpdate(request.serviceId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
         if (!service.isActive() || !ProviderServiceStatus.LISTED.name().equals(service.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND);
         }
-        profileDao.findById(service.getProfileId())
-                .filter(p -> p.isActive() && "ACTIVE".equals(p.getStatus()))
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        if (!java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
+                org.pms.silverocean.service.sp.enums.PricingUnit.FIXED).contains(service.getPricingUnit())) {
+            throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND);
+        }
+        ProviderReadiness readiness = requireProviderReadiness(service);
+        ProviderProfile profile = readiness.profile();
+        subscriptionEntitlements.requireActiveProductForOwner(profile.getUserId(),
+                org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SERVICES);
         if (request.scheduledAt() == null || !request.scheduledAt()
                 .atZone(ZoneId.of("Africa/Nairobi")).isAfter(ZonedDateTime.now())) {
             throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
         }
         ServiceBooking booking = new ServiceBooking();
         booking.setServiceId(request.serviceId());
+        booking.setServiceTitleSnapshot(org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                service.getTitle(), service.getCategoryName()));
+        booking.setServiceCategorySnapshot(service.getCategoryName());
+        booking.setServiceDescriptionSnapshot(service.getDescription());
+        booking.setProviderBusinessNameSnapshot(profile.getBusinessName());
+        booking.setClientRequestId(requestId);
         if (java.util.Objects.equals(service.getCreatedBy(), userId)) {
             throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
         }
@@ -92,7 +127,10 @@ public class ServiceBookingService {
         booking.setSettlementStatus("PENDING");
         booking.setActive(true);
         booking.setCreatedBy(userId);
-        bookingDao.save(booking, Permission.CREATE_SP_BOOKING);
+        try { bookingDao.save(booking, Permission.CREATE_SP_BOOKING); }
+        catch (org.springframework.dao.DataIntegrityViolationException duplicate) {
+            throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
+        }
         notifyProgress(booking);
         return toDTO(booking, service);
     }
@@ -105,6 +143,13 @@ public class ServiceBookingService {
         if (!BookingStatus.PENDING.name().equals(booking.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
         }
+        if (booking.getScheduledAt() == null || !booking.getScheduledAt().isAfter(utcNow())) {
+            booking.setStatus(BookingStatus.CANCELLED.name());
+            booking.setCancellationReason("The requested service time passed before the provider confirmed it.");
+            bookingDao.save(booking, "SYSTEM_SP_BOOKING_REQUEST_EXPIRED");
+            notifyProgress(booking);
+            return;
+        }
         ProviderService providerService = serviceDao.findById(booking.getServiceId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
         ProviderProfile profile = profileDao.findById(providerService.getProfileId())
@@ -113,10 +158,12 @@ public class ServiceBookingService {
             throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);
         }
         var account = accountDao.getAccountByIdAndCreatedBy(profile.getPaymentAccountId(), profile.getUserId());
-        if (!account.isActive() || !account.isVerified() || account.getCategory() != AccountCategory.MERCHANT || account.getChannel() == null) {
+        if (!account.isActive() || !account.isVerified() || account.getCategory() != AccountCategory.MERCHANT
+                || account.getChannel() == null || account.getChannel() == org.pms.silverocean.service.payment.wrappers.PaymentChannel.FLUTTER_WAVE
+                || !paymentPlatformFactory.isAvailableForNewPayments(account.getChannel())) {
             throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);
         }
-        if (!providerService.isActive() || !ProviderServiceStatus.LISTED.name().equals(providerService.getStatus())
+        if (!providerService.isActive() || !java.util.Set.of(ProviderServiceStatus.LISTED.name(), ProviderServiceStatus.HIDDEN.name()).contains(providerService.getStatus())
                 || !profile.isActive() || !"ACTIVE".equals(profile.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND);
         }
@@ -152,33 +199,163 @@ public class ServiceBookingService {
         if (!currentFlow && !legacyFlow) {
             throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
         }
-        booking.setStatus(BookingStatus.COMPLETED.name());
         if (evidenceReference == null || evidenceReference.isBlank() || evidenceReference.length() > 500) {
             throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
         }
+        ZonedDateTime providerCompletedAt = utcNow();
+        booking.setStatus(BookingStatus.AWAITING_CUSTOMER_CONFIRMATION.name());
         booking.setCompletionEvidenceReference(evidenceReference.trim());
-        booking.setCompletedAt(ZonedDateTime.now(ZoneId.of("UTC")));
+        booking.setCompletedAt(providerCompletedAt);
+        booking.setDisputeDeadlineAt(providerCompletedAt.plus(CUSTOMER_CONFIRMATION_WINDOW));
         bookingDao.save(booking, Permission.COMPLETE_SP_BOOKING);
         sendBookingNotification(booking, NotificationType.SP_BOOKING_COMPLETED_EMAIL);
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
-    public void cancelBooking(long bookingId, String reason) {
-        ServiceBooking booking = bookingDao.findByIdAndCustomerOrProviderForUpdate(bookingId, userDao.getUserId())
+    public void acceptCompletion(long bookingId) {
+        long customerId = userDao.getUserId();
+        ServiceBooking booking = bookingDao.findByIdAndCustomerOrProviderForUpdate(bookingId, customerId)
+                .filter(candidate -> java.util.Objects.equals(candidate.getCreatedBy(), customerId))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_BOOKING_NOT_FOUND));
-        if (BookingStatus.COMPLETED.name().equals(booking.getStatus()) || BookingStatus.CANCELLED.name().equals(booking.getStatus())) {
+        if (!BookingStatus.AWAITING_CUSTOMER_CONFIRMATION.name().equals(booking.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
         }
-        booking.setStatus(BookingStatus.CANCELLED.name());
+        if (complaintDao.existsOpenComplaintForBooking(bookingId)) {
+            throw new PMSCustomException(ResponseCode.SP_COMPLAINT_ALREADY_EXISTS);
+        }
+        finalizeCompletion(booking, utcNow(), true, "CUSTOMER_CONFIRMED_SP_BOOKING_COMPLETION");
+    }
+
+    @Scheduled(fixedDelayString = "${services.booking-auto-finalization-scan-ms:300000}")
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public void autoFinalizeExpiredCustomerConfirmations() {
+        ZonedDateTime now = utcNow();
+        Pageable batch = PageRequest.of(0, AUTO_FINALIZATION_BATCH_SIZE,
+                Sort.by(Sort.Direction.ASC, "disputeDeadlineAt", "id"));
+        for (int scan = 0; scan < AUTO_FINALIZATION_MAX_BATCHES; scan++) {
+            List<Long> bookingIds = bookingDao.findIdsReadyForAutoFinalization(now, batch);
+            for (Long bookingId : bookingIds) {
+                bookingDao.findByIdForUpdate(bookingId).ifPresent(booking -> {
+                    if (!BookingStatus.AWAITING_CUSTOMER_CONFIRMATION.name().equals(booking.getStatus())
+                            || booking.getDisputeDeadlineAt() == null
+                            || booking.getDisputeDeadlineAt().isAfter(now)
+                            || complaintDao.existsOpenComplaintForBooking(booking.getId())) {
+                        return;
+                    }
+                    finalizeCompletion(booking, now, false, "SYSTEM_AUTO_FINALIZED_SP_BOOKING_COMPLETION");
+                });
+            }
+            if (bookingIds.size() < AUTO_FINALIZATION_BATCH_SIZE) {
+                break;
+            }
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${services.booking-request-expiry-scan-ms:300000}")
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public void expireStaleUnpaidRequests() {
+        ZonedDateTime now = utcNow();
+        Pageable batch = PageRequest.of(0, AUTO_FINALIZATION_BATCH_SIZE,
+                Sort.by(Sort.Direction.ASC, "scheduledAt", "id"));
+        for (int scan = 0; scan < AUTO_FINALIZATION_MAX_BATCHES; scan++) {
+            List<Long> bookingIds = bookingDao.findIdsReadyForRequestExpiry(now, batch);
+            for (Long bookingId : bookingIds) {
+                bookingDao.findByIdForUpdate(bookingId).ifPresent(booking -> {
+                    if (!java.util.Set.of(BookingStatus.PENDING.name(), BookingStatus.AWAITING_PAYMENT.name())
+                            .contains(booking.getStatus()) || booking.getScheduledAt() == null
+                            || booking.getScheduledAt().isAfter(now)) {
+                        return;
+                    }
+                    booking.setStatus(BookingStatus.CANCELLED.name());
+                    booking.setCancellationReason("The requested service time passed before payment was completed.");
+                    applyCancellationFinance(booking);
+                    bookingDao.save(booking, "SYSTEM_SP_BOOKING_REQUEST_EXPIRED");
+                    notifyProgress(booking);
+                });
+            }
+            if (bookingIds.size() < AUTO_FINALIZATION_BATCH_SIZE) {
+                break;
+            }
+        }
+    }
+
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public void cancelBooking(long bookingId, String reason) {
+        long actorUserId = userDao.getUserId();
+        ServiceBooking booking = bookingDao.findByIdAndCustomerOrProviderForUpdate(bookingId, actorUserId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_BOOKING_NOT_FOUND));
+        if (BookingStatus.COMPLETED.name().equals(booking.getStatus())
+                || BookingStatus.AWAITING_CUSTOMER_CONFIRMATION.name().equals(booking.getStatus())
+                || BookingStatus.CANCELLED.name().equals(booking.getStatus())) {
+            throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
+        }
         if (reason == null || reason.isBlank()) {
             throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
         }
-        booking.setCancellationReason(reason.trim());
-        if ("PAID".equals(booking.getPaymentStatus())) {
-            booking.setRefundStatus("REQUESTED");
+        boolean customerCancellation = java.util.Objects.equals(booking.getCreatedBy(), actorUserId);
+        if (customerCancellation && !customerMayCancelBeforePayment(booking)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "A paid or started service cannot be cancelled by the customer. Use the complaint process for help.");
         }
+        booking.setStatus(BookingStatus.CANCELLED.name());
+        booking.setCancellationReason(reason.trim());
+        applyCancellationFinance(booking);
         bookingDao.save(booking, Permission.CANCEL_SP_BOOKING);
         sendBookingNotification(booking, NotificationType.SP_BOOKING_CANCELLED_EMAIL);
+    }
+
+    private boolean customerMayCancelBeforePayment(ServiceBooking booking) {
+        if (!java.util.Set.of(BookingStatus.PENDING.name(), BookingStatus.AWAITING_PAYMENT.name())
+                .contains(booking.getStatus())) {
+            return false;
+        }
+        String paymentStatus = org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                booking.getPaymentStatus(), "NOT_INVOICED");
+        if (!java.util.Set.of("NOT_INVOICED", "UNPAID").contains(paymentStatus)) {
+            return false;
+        }
+        if (org.apache.commons.lang3.StringUtils.isBlank(booking.getInvoiceRef())) {
+            return true;
+        }
+        return invoiceDao.getInvoiceByRefForUpdate(booking.getInvoiceRef())
+                .map(invoice -> {
+                    BigDecimal total = invoice.moneyAmount().max(BigDecimal.ZERO);
+                    BigDecimal pending = invoice.moneyPendingAmount().max(BigDecimal.ZERO).min(total);
+                    return !invoice.isPaid() && total.subtract(pending).signum() == 0;
+                })
+                // An invoice reference without its invoice cannot be proved unpaid.
+                .orElse(false);
+    }
+
+    private void applyCancellationFinance(ServiceBooking booking) {
+        BigDecimal collectedAmount = voidInvoiceAndReturnCollectedAmount(booking);
+        if (collectedAmount.signum() <= 0 && "PAID".equals(booking.getPaymentStatus())) {
+            collectedAmount = booking.getQuotedAmount() == null ? BigDecimal.ZERO : booking.getQuotedAmount();
+        }
+        if (collectedAmount.signum() > 0) {
+            BigDecimal quotedAmount = booking.getQuotedAmount() == null ? collectedAmount : booking.getQuotedAmount();
+            booking.setPaymentStatus(collectedAmount.compareTo(quotedAmount) >= 0 ? "PAID" : "PARTIALLY_PAID");
+            booking.setRefundStatus("REQUESTED");
+            booking.setRefundedAmount(collectedAmount.min(quotedAmount));
+        }
+    }
+
+    private BigDecimal voidInvoiceAndReturnCollectedAmount(ServiceBooking booking) {
+        if (org.apache.commons.lang3.StringUtils.isBlank(booking.getInvoiceRef())) return BigDecimal.ZERO;
+        PMSInvoice invoice = invoiceDao.getInvoiceByRefForUpdate(booking.getInvoiceRef()).orElse(null);
+        if (invoice == null) return BigDecimal.ZERO;
+        BigDecimal total = invoice.moneyAmount().max(BigDecimal.ZERO);
+        BigDecimal pending = invoice.moneyPendingAmount().max(BigDecimal.ZERO).min(total);
+        BigDecimal collected = total.subtract(pending);
+        if (invoice.isPaid() || pending.signum() <= 0) {
+            collected = total;
+        }
+        if (!invoice.isPaid()) {
+            invoice.setActive(false);
+            invoice.setTransactionInProgress(false);
+            invoiceDao.saveInvoice(invoice);
+        }
+        return collected;
     }
 
     public Page<ServiceBookingDTO> listBookingsForService(long serviceId, Pageable pageable) {
@@ -201,28 +378,118 @@ public class ServiceBookingService {
             if (BookingStatus.AWAITING_PAYMENT.name().equals(booking.getStatus())) {
                 booking.setPaymentStatus("PAID");
                 booking.setProviderReference(providerReference);
+                ProviderService providerService = serviceDao.findAnyByIdForUpdate(booking.getServiceId()).orElse(null);
+                ProviderProfile profile = providerService == null ? null
+                        : profileDao.findByIdForUpdate(providerService.getProfileId()).orElse(null);
+                Users owner = profile == null ? null
+                        : userDao.findActiveByIdForUpdate(profile.getUserId()).orElse(null);
+                var account = profile == null || booking.getPaymentAccountId() == null ? null
+                        : accountDao.findAnyAccountForUpdate(booking.getPaymentAccountId()).orElse(null);
+                if (!canAcceptMarketplacePayment(booking, providerService, profile, owner, account)) {
+                    booking.setStatus(BookingStatus.CANCELLED.name());
+                    booking.setRefundStatus("REQUESTED");
+                    booking.setRefundedAmount(booking.getQuotedAmount());
+                    bookingDao.save(booking, "SYSTEM_SP_ENFORCEMENT_PAYMENT_REFUND_REQUESTED");
+                    notifyProgress(booking);
+                    return;
+                }
                 booking.setStatus(BookingStatus.PAID.name());
                 bookingDao.save(booking, "SYSTEM_SP_BOOKING_PAYMENT_CONFIRMED");
                 notifyProgress(booking);
-            } else if (BookingStatus.CANCELLED.name().equals(booking.getStatus()) && !"PAID".equals(booking.getPaymentStatus())) {
+            } else if (BookingStatus.CANCELLED.name().equals(booking.getStatus())
+                    && "UNPAID".equals(booking.getPaymentStatus())) {
                 booking.setPaymentStatus("PAID");
                 booking.setProviderReference(providerReference);
                 booking.setRefundStatus("REQUESTED");
+                booking.setRefundedAmount(booking.getQuotedAmount());
                 bookingDao.save(booking, "SYSTEM_SP_LATE_PAYMENT_REFUND_REQUESTED");
                 notifyProgress(booking);
             }
         });
     }
 
+    private boolean canAcceptMarketplacePayment(ServiceBooking booking, ProviderService service,
+                                                 ProviderProfile profile,
+                                                 Users owner,
+                                                 org.pms.silverocean.database.pms.entities.PaymentAccount account) {
+        return service != null && service.isActive()
+                && java.util.Set.of(ProviderServiceStatus.LISTED.name(), ProviderServiceStatus.HIDDEN.name()).contains(service.getStatus())
+                && profile != null && profile.isActive() && "ACTIVE".equals(profile.getStatus())
+                && activeVerifiedOwner(owner)
+                && supportedMerchantAccount(account, profile.getUserId())
+                && java.util.Objects.equals(account.getId(), booking.getPaymentAccountId())
+                && java.util.Objects.equals(account.getChannel().name(), booking.getPaymentChannel())
+                && booking.getScheduledAt() != null && booking.getScheduledAt().isAfter(utcNow());
+    }
+
+    private ProviderReadiness requireProviderReadiness(ProviderService service) {
+        ProviderProfile profile = profileDao.findByIdForUpdate(service.getProfileId())
+                .filter(candidate -> candidate.isActive() && "ACTIVE".equals(candidate.getStatus()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        Users owner = userDao.findActiveByIdForUpdate(profile.getUserId())
+                .filter(this::activeVerifiedOwner)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        if (profile.getPaymentAccountId() == null) {
+            throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND);
+        }
+        var account = accountDao.findAnyAccountForUpdate(profile.getPaymentAccountId())
+                .filter(candidate -> supportedMerchantAccount(candidate, profile.getUserId())
+                        && paymentPlatformFactory.isAvailableForNewPayments(candidate.getChannel()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        return new ProviderReadiness(profile, owner, account);
+    }
+
+    private boolean activeVerifiedOwner(Users owner) {
+        return owner != null && owner.isActive() && owner.isVerified()
+                && org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name().equals(owner.getAccountStatus());
+    }
+
+    private boolean supportedMerchantAccount(org.pms.silverocean.database.pms.entities.PaymentAccount account,
+                                             long ownerUserId) {
+        return account != null && account.isActive() && account.isVerified()
+                && account.getCategory() == AccountCategory.MERCHANT
+                && account.getChannel() != null
+                && account.getChannel() != org.pms.silverocean.service.payment.wrappers.PaymentChannel.FLUTTER_WAVE
+                && java.util.Objects.equals(account.getCreatedBy(), ownerUserId);
+    }
+
+    private void requireSettlementDestination(ServiceBooking booking) {
+        ProviderService listing = serviceDao.findAnyByIdForUpdate(booking.getServiceId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        ProviderProfile profile = profileDao.findByIdForUpdate(listing.getProfileId())
+                .filter(candidate -> candidate.isActive() && "ACTIVE".equals(candidate.getStatus()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        userDao.findActiveByIdForUpdate(profile.getUserId())
+                .filter(this::activeVerifiedOwner)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.KYC_ACCOUNT_RESTRICTED));
+        if (booking.getPaymentAccountId() == null) {
+            throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);
+        }
+        accountDao.findAnyAccountForUpdate(booking.getPaymentAccountId())
+                .filter(candidate -> supportedMerchantAccount(candidate, profile.getUserId()))
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND));
+    }
+
+    private record ProviderReadiness(ProviderProfile profile, Users owner,
+                                     org.pms.silverocean.database.pms.entities.PaymentAccount account) {}
+
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ServiceBookingDTO updateFinance(long bookingId, MarketplaceFinanceRequest request) {
-        if (!userDao.hasRole(PMSRole.FINANCE) && !userDao.hasRole(PMSRole.SUPER_ADMIN)) {
+        if (!userDao.hasRole(PMSRole.FINANCE)) {
             throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);
         }
         ServiceBooking booking = bookingDao.findByIdForUpdate(bookingId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_BOOKING_NOT_FOUND));
         String reference = request.providerReference() == null ? null : request.providerReference().trim();
         boolean refund = request.type() == MarketplaceFinanceRequest.FinanceType.REFUND;
+        if (!refund && complaintDao.existsOpenComplaintForBooking(bookingId)) {
+            throw new PMSCustomException(ResponseCode.SP_COMPLAINT_ALREADY_EXISTS);
+        }
+        if (!refund && (booking.getDisputeDeadlineAt() == null
+                || booking.getDisputeDeadlineAt().isAfter(ZonedDateTime.now(ZoneId.of("UTC"))))) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Settlement remains on hold until the customer complaint period has ended.");
+        }
         var previous = new org.pms.silverocean.service.payment.MarketplaceFinanceGuard.Entry(
                 refund ? booking.getRefundStatus() : booking.getSettlementStatus(),
                 refund ? booking.getRefundedAmount() : booking.getSettledAmount(),
@@ -230,22 +497,37 @@ public class ServiceBookingService {
         var other = new org.pms.silverocean.service.payment.MarketplaceFinanceGuard.Entry(
                 refund ? booking.getSettlementStatus() : booking.getRefundStatus(),
                 refund ? booking.getSettledAmount() : booking.getRefundedAmount(), null);
-        if (org.pms.silverocean.service.payment.MarketplaceFinanceGuard.validate(
-                booking.getQuotedAmount(), "PAID".equals(booking.getPaymentStatus()),
+        boolean partiallyPaidRefund = refund && "PARTIALLY_PAID".equals(booking.getPaymentStatus());
+        BigDecimal financeLimit = partiallyPaidRefund ? booking.getRefundedAmount() : booking.getQuotedAmount();
+        boolean exactBookingReplay = org.pms.silverocean.service.payment.MarketplaceFinanceGuard.validate(
+                financeLimit, "PAID".equals(booking.getPaymentStatus()) || partiallyPaidRefund,
                 BookingStatus.COMPLETED.name().equals(booking.getStatus()), refund,
                 new org.pms.silverocean.service.payment.MarketplaceFinanceGuard.Entry(request.status().name(), request.amount(), reference),
-                previous, other)) return toDTO(booking);
+                previous, other);
         if (request.status() == MarketplaceFinanceRequest.FinanceStatus.CONFIRMED && (reference == null || reference.isBlank())) {
             throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
         }
+        if (!refund && request.status() == MarketplaceFinanceRequest.FinanceStatus.CONFIRMED) {
+            requireSettlementDestination(booking);
+        }
+        if (request.status() == MarketplaceFinanceRequest.FinanceStatus.CONFIRMED) {
+            financeOperations.recordConfirmed(booking, resolveProviderUserId(booking), request.type(),
+                    request.amount(), reference, userDao.getUserId());
+        }
+        if (exactBookingReplay) return toDTO(booking);
         if (request.type() == MarketplaceFinanceRequest.FinanceType.REFUND) {
-            if (!"PAID".equals(booking.getPaymentStatus()) || request.amount().compareTo(booking.getQuotedAmount()) > 0) {
+            BigDecimal refundableAmount = partiallyPaidRefund ? booking.getRefundedAmount() : booking.getQuotedAmount();
+            boolean refundableStatus = "PAID".equals(booking.getPaymentStatus()) || partiallyPaidRefund;
+            if (!refundableStatus || refundableAmount == null
+                    || request.amount().compareTo(refundableAmount) > 0
+                    || (partiallyPaidRefund && request.amount().compareTo(refundableAmount) != 0)) {
                 throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
             }
             booking.setRefundStatus(request.status().name());
             booking.setRefundedAmount(request.amount());
             booking.setRefundReference(reference);
-            if(request.status()==MarketplaceFinanceRequest.FinanceStatus.CONFIRMED&&request.amount().compareTo(booking.getQuotedAmount())==0){booking.setPaymentStatus("REFUNDED");if(!BookingStatus.COMPLETED.name().equals(booking.getStatus()))booking.setStatus(BookingStatus.CANCELLED.name());}
+            if(request.status()==MarketplaceFinanceRequest.FinanceStatus.CONFIRMED
+                    && request.amount().compareTo(refundableAmount)==0){booking.setPaymentStatus("REFUNDED");if(!BookingStatus.COMPLETED.name().equals(booking.getStatus()))booking.setStatus(BookingStatus.CANCELLED.name());}
         } else {
             BigDecimal refunded = booking.getRefundedAmount() == null ? BigDecimal.ZERO : booking.getRefundedAmount();
             BigDecimal maximumSettlement = booking.getQuotedAmount().subtract(refunded);
@@ -261,7 +543,37 @@ public class ServiceBookingService {
         return toDTO(booking);
     }
 
+    private long resolveProviderUserId(ServiceBooking booking) {
+        ProviderService listing = serviceDao.findById(booking.getServiceId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        return profileDao.findById(listing.getProfileId())
+                .map(ProviderProfile::getUserId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+    }
+
+    public Page<MarketplaceFinanceQueueDTO> listFinanceQueue(Pageable pageable,
+            MarketplaceFinanceRequest.FinanceType type,
+            MarketplaceFinanceRequest.FinanceStatus status) {
+        if (!userDao.hasRole(PMSRole.FINANCE)) {
+            throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);
+        }
+        List<String> statuses = status == null
+                ? List.of(MarketplaceFinanceRequest.FinanceStatus.REQUESTED.name(),
+                        MarketplaceFinanceRequest.FinanceStatus.PROCESSING.name(),
+                        MarketplaceFinanceRequest.FinanceStatus.FAILED.name())
+                : List.of(status.name());
+        Pageable bounded = PageRequest.of(Math.max(0, pageable.getPageNumber()),
+                Math.min(100, Math.max(1, pageable.getPageSize())));
+        return hydrateFinanceQueue(bookingDao.findFinanceQueue(bounded, type == null ? null : type.name(), statuses));
+    }
+
     private void applyLocation(ServiceBooking booking, CreateBookingRequest request, long userId) {
+        String address=org.apache.commons.lang3.StringUtils.trimToNull(request.serviceAddress());
+        if (address == null && request.unitId() == null) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Enter the address where the service is required or select a linked unit.");
+        }
+        booking.setServiceAddress(address == null ? "Linked unit " + request.unitId() : address);
         if (request.unitId() != null) {
             var unit = unitDao.findByIdAndStaffOrOwnerOrTenant(request.unitId(), userId)
                     .orElseThrow(() -> new PMSCustomException(ResponseCode.UNIT_NOT_FOUND));
@@ -275,11 +587,71 @@ public class ServiceBookingService {
         }
     }
 
+    private void finalizeCompletion(ServiceBooking booking, ZonedDateTime finalizedAt,
+                                    boolean customerAccepted, String auditAction) {
+        booking.setStatus(BookingStatus.COMPLETED.name());
+        if (booking.getCompletedAt() == null) {
+            booking.setCompletedAt(finalizedAt);
+        }
+        if (customerAccepted || booking.getDisputeDeadlineAt() == null) {
+            // Explicit acceptance ends the confirmation/complaint window early.
+            booking.setDisputeDeadlineAt(finalizedAt);
+        }
+        boolean settlementReleased = releaseSettlement(booking);
+        bookingDao.save(booking, auditAction);
+        notifyProgress(booking);
+        if (settlementReleased) {
+            notifyFinanceRecord(booking, false);
+        }
+    }
+
+    private boolean releaseSettlement(ServiceBooking booking) {
+        String settlementStatus = org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                booking.getSettlementStatus(), "PENDING");
+        String refundStatus = org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                booking.getRefundStatus(), "NOT_REQUIRED");
+        if (!"PAID".equals(booking.getPaymentStatus())
+                || !"PENDING".equals(settlementStatus)
+                || java.util.Set.of("REQUESTED", "PROCESSING", "FAILED").contains(refundStatus)
+                || booking.getQuotedAmount() == null) {
+            return false;
+        }
+        BigDecimal confirmedRefund = "CONFIRMED".equals(refundStatus) && booking.getRefundedAmount() != null
+                ? booking.getRefundedAmount() : BigDecimal.ZERO;
+        BigDecimal releasableAmount = booking.getQuotedAmount().subtract(confirmedRefund);
+        if (releasableAmount.signum() <= 0) {
+            return false;
+        }
+        booking.setSettlementStatus(MarketplaceFinanceRequest.FinanceStatus.REQUESTED.name());
+        booking.setSettledAmount(releasableAmount);
+        booking.setSettlementReference(null);
+        return true;
+    }
+
+    private ZonedDateTime utcNow() {
+        return ZonedDateTime.now(ZoneId.of("UTC"));
+    }
+
+    private void assertIdempotentPayload(ServiceBooking existing, CreateBookingRequest request) {
+        ZonedDateTime requestedAt=request.scheduledAt().atZone(ZoneId.of("Africa/Nairobi")).withZoneSameInstant(ZoneId.of("UTC"));
+        boolean matches=existing.getServiceId()==request.serviceId()
+                && java.util.Objects.equals(existing.getScheduledAt(),requestedAt)
+                && java.util.Objects.equals(org.apache.commons.lang3.StringUtils.trimToNull(existing.getNotes()),org.apache.commons.lang3.StringUtils.trimToNull(request.notes()))
+                && java.util.Objects.equals(existing.getPropertyId(),request.propertyId())
+                && java.util.Objects.equals(existing.getUnitId(),request.unitId())
+                && java.util.Objects.equals(org.apache.commons.lang3.StringUtils.trimToNull(existing.getServiceAddress()),
+                    org.apache.commons.lang3.StringUtils.defaultIfBlank(org.apache.commons.lang3.StringUtils.trimToNull(request.serviceAddress()),
+                            request.unitId()==null?null:"Linked unit "+request.unitId()));
+        if(!matches)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                "This booking request key was already used for different details. Refresh the form and try again.");
+    }
+
     private PMSInvoice createMarketplaceInvoice(ServiceBooking booking, ProviderService service, long providerUserId,
                                                 long paymentAccountId) {
         Users customer = userDao.findById(booking.getCreatedBy())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
-        String serviceName = service.getCategoryName() == null ? "Service booking" : service.getCategoryName();
+        String serviceName = org.apache.commons.lang3.StringUtils.defaultIfBlank(service.getTitle(),
+                service.getCategoryName() == null ? "Service booking" : service.getCategoryName());
         String escapedName = HtmlUtils.htmlEscape(serviceName);
         PMSInvoice invoice = new PMSInvoice();
         invoice.setUnitId(booking.getUnitId() == null ? 0 : booking.getUnitId());
@@ -316,18 +688,57 @@ public class ServiceBookingService {
         Map<Long,ProviderService> services=serviceDao.findAllById(page.stream().map(ServiceBooking::getServiceId).distinct().toList()).stream().collect(Collectors.toMap(ProviderService::getId,Function.identity()));
         Map<Long,ProviderProfile> profiles=profileDao.findAllById(services.values().stream().map(ProviderService::getProfileId).distinct().toList()).stream().collect(Collectors.toMap(ProviderProfile::getId,Function.identity()));
         Map<Long,Users> users=userDao.findAllById(page.stream().map(ServiceBooking::getCreatedBy).distinct().toList()).stream().collect(Collectors.toMap(Users::getId,Function.identity()));
-        List<ServiceBookingDTO> content=page.stream().map(booking->{ProviderService service=services.get(booking.getServiceId());ProviderProfile profile=service==null?null:profiles.get(service.getProfileId());Users user=users.get(booking.getCreatedBy());return new ServiceBookingDTO(booking,service==null?null:service.getCategoryName(),profile==null?null:profile.getBusinessName(),user==null?null:user.getFullName(),userDao.getUserId());}).toList();
+        Map<Long,org.pms.silverocean.database.pms.entities.ComplaintCase> complaints=complaintDao.findActiveByBookingIds(page.stream().map(ServiceBooking::getId).toList()).stream().collect(Collectors.toMap(org.pms.silverocean.database.pms.entities.ComplaintCase::getBookingId,Function.identity()));
+        long viewerId=userDao.getUserId();
+        List<ServiceBookingDTO> content=page.stream().map(booking->{ProviderService service=services.get(booking.getServiceId());ProviderProfile profile=service==null?null:profiles.get(service.getProfileId());Users user=users.get(booking.getCreatedBy());String currentName=service==null?null:org.apache.commons.lang3.StringUtils.defaultIfBlank(service.getTitle(),service.getCategoryName());String name=org.apache.commons.lang3.StringUtils.defaultIfBlank(booking.getServiceTitleSnapshot(),currentName);String currentProvider=profile==null?null:profile.getBusinessName();String providerName=org.apache.commons.lang3.StringUtils.defaultIfBlank(booking.getProviderBusinessNameSnapshot(),currentProvider);return new ServiceBookingDTO(booking,name,providerName,user==null?null:user.getFullName(),viewerId).withRated(java.util.Objects.equals(booking.getCreatedBy(),viewerId)&&ratingDao.existsByBookingIdAndRater(booking.getId(),viewerId)).withDispute(complaints.get(booking.getId()));}).toList();
+        return new PageImpl<>(content,page.getPageable(),page.getTotalElements());
+    }
+
+    private Page<MarketplaceFinanceQueueDTO> hydrateFinanceQueue(Page<ServiceBooking> page) {
+        if (page.isEmpty()) return new PageImpl<>(List.of(), page.getPageable(), page.getTotalElements());
+        Map<Long,ProviderService> services=serviceDao.findAllById(page.stream().map(ServiceBooking::getServiceId).distinct().toList()).stream().collect(Collectors.toMap(ProviderService::getId,Function.identity()));
+        Map<Long,ProviderProfile> profiles=profileDao.findAllById(services.values().stream().map(ProviderService::getProfileId).distinct().toList()).stream().collect(Collectors.toMap(ProviderProfile::getId,Function.identity()));
+        Map<Long,Users> customers=userDao.findAllById(page.stream().map(ServiceBooking::getCreatedBy).distinct().toList()).stream().collect(Collectors.toMap(Users::getId,Function.identity()));
+        java.util.Set<Long> disputed=complaintDao.findActiveByBookingIds(page.stream().map(ServiceBooking::getId).toList()).stream()
+                .filter(complaint -> java.util.Set.of("OPEN","UNDER_REVIEW","ESCALATED").contains(complaint.getStatus()))
+                .map(org.pms.silverocean.database.pms.entities.ComplaintCase::getBookingId)
+                .collect(java.util.stream.Collectors.toSet());
+        ZonedDateTime now=utcNow();
+        List<MarketplaceFinanceQueueDTO> content=page.stream().map(booking->{
+            ProviderService listing=services.get(booking.getServiceId());
+            ProviderProfile provider=listing==null?null:profiles.get(listing.getProfileId());
+            Users customer=customers.get(booking.getCreatedBy());
+            boolean hold=disputed.contains(booking.getId()) || (booking.getDisputeDeadlineAt()!=null && booking.getDisputeDeadlineAt().isAfter(now));
+            return new MarketplaceFinanceQueueDTO(booking.getId(),booking.getInvoiceRef(),
+                    org.apache.commons.lang3.StringUtils.defaultIfBlank(booking.getServiceTitleSnapshot(),
+                            listing==null?null:org.apache.commons.lang3.StringUtils.defaultIfBlank(listing.getTitle(),listing.getCategoryName())),
+                    org.apache.commons.lang3.StringUtils.defaultIfBlank(booking.getProviderBusinessNameSnapshot(),
+                            provider==null?null:provider.getBusinessName()),provider==null?null:provider.getUserId(),
+                    customer==null?null:customer.getFullName(),booking.getQuotedAmount(),booking.getCurrency(),
+                    booking.getPaymentStatus(),booking.getPaymentAccountId(),booking.getPaymentChannel(),
+                    booking.getRefundStatus(),booking.getRefundedAmount(),booking.getRefundReference(),
+                    booking.getSettlementStatus(),booking.getSettledAmount(),booking.getSettlementReference(),
+                    hold,booking.getDisputeDeadlineAt(),booking.getCreatedOn());
+        }).toList();
         return new PageImpl<>(content,page.getPageable(),page.getTotalElements());
     }
 
     private ServiceBookingDTO toDTO(ServiceBooking booking, ProviderService service) {
-        String serviceName = service != null ? service.getCategoryName() : null;
-        String providerName = service != null
+        String currentServiceName = service != null ? org.apache.commons.lang3.StringUtils.defaultIfBlank(service.getTitle(), service.getCategoryName()) : null;
+        String serviceName = org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                booking.getServiceTitleSnapshot(), currentServiceName);
+        String currentProviderName = service != null
                 ? profileDao.findById(service.getProfileId()).map(ProviderProfile::getBusinessName).orElse(null)
                 : null;
+        String providerName = org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                booking.getProviderBusinessNameSnapshot(), currentProviderName);
         String bookedByName = userDao.findById(booking.getCreatedBy())
                 .map(Users::getFullName).orElse(null);
-        return new ServiceBookingDTO(booking, serviceName, providerName, bookedByName, userDao.getUserId());
+        long viewerId=userDao.getUserId();
+        return new ServiceBookingDTO(booking, serviceName, providerName, bookedByName, viewerId)
+                .withRated(java.util.Objects.equals(booking.getCreatedBy(),viewerId)
+                        && ratingDao.existsByBookingIdAndRater(booking.getId(),viewerId))
+                .withDispute(complaintDao.findActiveByBookingId(booking.getId()).orElse(null));
     }
 
     private void sendBookingNotification(ServiceBooking booking, NotificationType type) {
@@ -336,7 +747,7 @@ public class ServiceBookingService {
                     booking.getScheduledAt()!=null?booking.getScheduledAt().toString():"",
                     booking.getCancellationReason()!=null?HtmlUtils.htmlEscape(booking.getCancellationReason()):"");
             notificationService.queueEmailAndInAppOnce(bookingEventKey(booking),user.getEmail(),type,message,
-                    "SERVICE_BOOKING_STATUS",bookingMessage(booking),"/dashboard/services");
+                    "SERVICE_BOOKING_STATUS",bookingMessage(booking),buyerBookingLink(booking));
         });
         notifyProvider(booking);
     }
@@ -346,21 +757,23 @@ public class ServiceBookingService {
     private void notifyFinanceRecord(ServiceBooking booking,boolean refund){
         String key="service-finance:"+booking.getId()+":"+(refund?"refund":"settlement")+":"+(refund?booking.getRefundStatus():booking.getSettlementStatus())+":"+(refund?booking.getRefundedAmount():booking.getSettledAmount());
         String message=refund?"The refund record for service booking #"+booking.getId()+" was updated.":"The receiving-payment record for service booking #"+booking.getId()+" was updated.";
-        if(refund)businessAlerts.publish(booking.getCreatedBy(),key,"SERVICE_BOOKING_STATUS",message,"/dashboard/services");
+        if(refund)businessAlerts.publish(booking.getCreatedBy(),key,"SERVICE_BOOKING_STATUS",message,buyerBookingLink(booking));
         serviceDao.findById(booking.getServiceId()).flatMap(service->profileDao.findById(service.getProfileId())).filter(ProviderProfile::isActive)
                 .filter(profile->!refund||!java.util.Objects.equals(profile.getUserId(),booking.getCreatedBy()))
-                .ifPresent(profile->businessAlerts.publish(profile.getUserId(),key,"SERVICE_BOOKING_STATUS",message,"/dashboard/services"));
+                .ifPresent(profile->businessAlerts.publish(profile.getUserId(),key,"SERVICE_BOOKING_STATUS",message,providerBookingLink(booking)));
     }
     private String bookingMessage(ServiceBooking booking){
         return "Service booking "+booking.getId()+": "+booking.getStatus().replace('_',' ').toLowerCase(java.util.Locale.ROOT)+".";
     }
     private void notifyProgress(ServiceBooking booking){
-        businessAlerts.publish(booking.getCreatedBy(),bookingEventKey(booking),"SERVICE_BOOKING_STATUS",bookingMessage(booking),"/dashboard/services");
+        businessAlerts.publish(booking.getCreatedBy(),bookingEventKey(booking),"SERVICE_BOOKING_STATUS",bookingMessage(booking),buyerBookingLink(booking));
         notifyProvider(booking);
     }
     private void notifyProvider(ServiceBooking booking){
         serviceDao.findById(booking.getServiceId()).flatMap(service->profileDao.findById(service.getProfileId()))
                 .filter(ProviderProfile::isActive).filter(profile->!java.util.Objects.equals(profile.getUserId(),booking.getCreatedBy()))
-                .ifPresent(profile->businessAlerts.publish(profile.getUserId(),bookingEventKey(booking),"SERVICE_BOOKING_STATUS",bookingMessage(booking),"/dashboard/services"));
+                .ifPresent(profile->businessAlerts.publish(profile.getUserId(),bookingEventKey(booking),"SERVICE_BOOKING_STATUS",bookingMessage(booking),providerBookingLink(booking)));
     }
+    private String buyerBookingLink(ServiceBooking booking){return "/dashboard/marketplace?tab=bookings&bookingId="+booking.getId();}
+    private String providerBookingLink(ServiceBooking booking){return "/dashboard/marketplace?tab=bookings&bookingId="+booking.getId();}
 }

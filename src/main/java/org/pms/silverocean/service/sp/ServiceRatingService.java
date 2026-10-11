@@ -25,6 +25,7 @@ public class ServiceRatingService {
     private final ServiceBookingDao bookingDao;
     private final RiskScoreService riskScoreService;
     private final UserDao userDao;
+    private final ProviderServiceDao serviceDao;
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ServiceRatingDTO rateService(RateServiceRequest request) {
@@ -45,7 +46,11 @@ public class ServiceRatingService {
         rating.setComment(request.comment());
         rating.setActive(true);
         rating.setCreatedBy(userId);
-        ratingDao.save(rating, Permission.RATE_SP_SERVICE);
+        try {
+            ratingDao.save(rating, Permission.RATE_SP_SERVICE);
+        } catch (org.springframework.dao.DataIntegrityViolationException duplicate) {
+            throw new PMSCustomException(ResponseCode.SP_RATING_ALREADY_SUBMITTED);
+        }
 
         riskScoreService.recomputeRiskLabel(booking.getServiceId());
 
@@ -53,6 +58,12 @@ public class ServiceRatingService {
     }
 
     public Page<ServiceRatingDTO> listRatingsForService(long serviceId, Pageable pageable) {
+        // Ratings are part of the public listing, not a side channel through
+        // which a hidden, suspended or deactivated service can be enumerated.
+        // findByIdEnriched applies the complete directory gate, including
+        // provider/KYC/subscription/payment-rail availability.
+        serviceDao.findByIdEnriched(serviceId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
         return ratingDao.findByServiceId(pageable, serviceId).map(ServiceRatingDTO::new);
     }
 }

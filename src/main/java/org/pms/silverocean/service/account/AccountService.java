@@ -28,6 +28,8 @@ import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
 import org.pms.silverocean.service.security.DecryptDTO;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.pms.silverocean.database.pms.CommunityFundRepo;
+import org.pms.silverocean.database.pms.ServiceBookingRepo;
+import org.pms.silverocean.database.pms.SokoOrderRepo;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -49,6 +51,8 @@ public class AccountService {
     private final PaymentPlatformFactory paymentPlatformFactory;
     private final NotificationService notificationService;
     private final CommunityFundRepo communityFundRepo;
+    private final ServiceBookingRepo serviceBookingRepo;
+    private final SokoOrderRepo sokoOrderRepo;
     private final ApplicationEventPublisher eventPublisher;
 
     /**
@@ -191,6 +195,7 @@ public class AccountService {
     public void updateAccountProperty(Long accountId, UpdateAccountPropertyRequestDTO dto) {
         PaymentAccount account = accountDao.getAccountForUpdate(accountId);
         assertOwnerOrAdmin(account);
+        assertNoMarketplaceDependency(accountId);
 
         AccountPropertyDefinition definition = account.getChannel().findProperty(dto.key());
         if (invalidConfigurationValue(dto.value())) {
@@ -244,10 +249,19 @@ public class AccountService {
     public void deleteAccount(Long accountId) {
         PaymentAccount account = accountDao.getAccountForUpdate(accountId);
         assertOwnerOrAdmin(account);
+        assertNoMarketplaceDependency(accountId);
         if (communityFundRepo.existsByPaymentAccountIdAndActiveTrueAndStatusIn(accountId,List.of("DRAFT","OPEN","FROZEN"))) {
             throw new PMSCustomException(ResponseCode.ACCOUNT_UNAUTHORIZED);
         }
         accountDao.deleteAccount(account);
+    }
+
+    private void assertNoMarketplaceDependency(Long accountId) {
+        if (serviceBookingRepo.existsMarketplaceDependencyOnPaymentAccount(accountId)
+                || sokoOrderRepo.existsMarketplaceDependencyOnPaymentAccount(accountId)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Finish or resolve all open Soko and Services payments, refunds and settlements before changing this receiving account.");
+        }
     }
 
     public List<AccountPropertyDTO> getChannelProperties(org.pms.silverocean.service.payment.wrappers.PaymentChannel channel) {

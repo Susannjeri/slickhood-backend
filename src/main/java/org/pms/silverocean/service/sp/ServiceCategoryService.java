@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.Locale;
 
 @Service
 @Slf4j
@@ -34,6 +35,7 @@ public class ServiceCategoryService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ServiceCategoryDTO createCategory(CreateCategoryRequest request) {
+        rejectSokoRetailCategory(request.name());
         long userId = userDao.getUserId();
         ServiceCategory category = new ServiceCategory();
         category.setName(request.name());
@@ -48,6 +50,7 @@ public class ServiceCategoryService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ServiceCategoryDTO updateCategory(long categoryId, UpdateCategoryRequest request) {
+        rejectSokoRetailCategory(request.name());
         ServiceCategory category = categoryDao.findById(categoryId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
         requireVersion(category, request.version());
@@ -82,6 +85,7 @@ public class ServiceCategoryService {
         var category = categoryDao.findById(categoryId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
         requireVersion(category, version);
+        rejectSokoRetailCategory(category.getName());
         category.setActive(true);
         categoryDao.save(category, Permission.MANAGE_SP_CATEGORIES);
         return new ServiceCategoryDTO(category);
@@ -94,12 +98,20 @@ public class ServiceCategoryService {
     }
 
     public Set<EnumWrapper> listPricingUnitList() {
-        return EnumSet.allOf(PricingUnit.class).stream()
+        return EnumSet.of(PricingUnit.PER_JOB, PricingUnit.FIXED).stream()
                 .map(pricingUnit -> new EnumWrapper(pricingUnit.name(), i18NService.getLocalizedMessage(pricingUnit.getLabel()), null))
                 .collect(Collectors.toSet());
     }
 
     private void requireVersion(ServiceCategory category, long version) {
         if (category.getVersion() != version) throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA);
+    }
+
+    private void rejectSokoRetailCategory(String name) {
+        String normalized = name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
+        if (normalized.contains("grocery") || normalized.contains("groceries") || normalized.contains("supermarket")) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Grocery retail belongs in Soko and cannot be published as a Services category.");
+        }
     }
 }

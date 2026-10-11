@@ -23,8 +23,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,13 +41,15 @@ class ServiceRatingServiceTest {
     private RiskScoreService riskScoreService;
     @Mock
     private UserDao userDao;
+    @Mock
+    private ProviderServiceDao providerServiceDao;
 
     private ServiceRatingService service;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        service = new ServiceRatingService(ratingDao, bookingDao, riskScoreService, userDao);
+        service = new ServiceRatingService(ratingDao, bookingDao, riskScoreService, userDao, providerServiceDao);
     }
 
     private ServiceBooking makeBooking(long id, long serviceId, String status) {
@@ -137,5 +142,49 @@ class ServiceRatingServiceTest {
         verify(ratingDao).save(captor.capture(), anyString());
         assertEquals(1, captor.getValue().getStars());
         verify(riskScoreService).recomputeRiskLabel(20L);
+    }
+
+    @Test
+    void rateService_mapsConcurrentDuplicateInsertToAlreadySubmitted() {
+        when(userDao.getUserId()).thenReturn(1L);
+        when(bookingDao.findByIdAndBookingCreatedByForRead(100L, 1L))
+                .thenReturn(Optional.of(makeBooking(100L, 10L, BookingStatus.COMPLETED.name())));
+        when(ratingDao.existsByBookingIdAndRater(100L, 1L)).thenReturn(false);
+        doThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate rating"))
+                .when(ratingDao).save(any(ServiceRating.class), anyString());
+
+        PMSCustomException ex = assertThrows(PMSCustomException.class,
+                () -> service.rateService(new RateServiceRequest(100L, 5, "Excellent")));
+
+        assertEquals(ResponseCode.SP_RATING_ALREADY_SUBMITTED, ex.getResponseCode());
+        verify(riskScoreService, never()).recomputeRiskLabel(anyLong());
+    }
+
+    @Test
+    void listRatingsForService_rejectsHiddenOrUnavailableListingWithoutReadingRatings() {
+        when(providerServiceDao.findByIdEnriched(10L)).thenReturn(Optional.empty());
+
+        PMSCustomException ex = assertThrows(PMSCustomException.class,
+                () -> service.listRatingsForService(10L, org.springframework.data.domain.PageRequest.of(0, 20)));
+
+        assertEquals(ResponseCode.SP_SERVICE_NOT_FOUND, ex.getResponseCode());
+        verify(ratingDao, never()).findByServiceId(any(), anyLong());
+    }
+
+    @Test
+    void listRatingsForService_returnsRatingsForPublicDirectoryListing() {
+        var listing = org.mockito.Mockito.mock(org.pms.silverocean.service.sp.wrappers.ProviderServiceDTO.class);
+        when(providerServiceDao.findByIdEnriched(10L)).thenReturn(Optional.of(listing));
+        ServiceRating rating = new ServiceRating();
+        rating.setId(5L);
+        rating.setServiceId(10L);
+        rating.setStars(4);
+        when(ratingDao.findByServiceId(any(), eq(10L)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(java.util.List.of(rating)));
+
+        var result = service.listRatingsForService(10L, org.springframework.data.domain.PageRequest.of(0, 20));
+
+        assertEquals(1, result.getTotalElements());
+        assertEquals(4, result.getContent().get(0).stars());
     }
 }

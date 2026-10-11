@@ -10,6 +10,8 @@ import org.pms.silverocean.database.pms.entities.ServiceCategory;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.account.dao.AccountDao;
+import org.pms.silverocean.service.account.enums.AccountCategory;
 import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
@@ -19,8 +21,10 @@ import org.pms.silverocean.service.sp.dao.ProviderProfileDao;
 import org.pms.silverocean.service.sp.dao.RefereeDao;
 import org.pms.silverocean.service.sp.dao.RiskScoreDao;
 import org.pms.silverocean.service.sp.dao.ServiceCategoryDao;
+import org.pms.silverocean.service.sp.dao.ServiceBookingDao;
 import org.pms.silverocean.service.sp.enums.DocumentType;
 import org.pms.silverocean.service.sp.enums.ProviderServiceStatus;
+import org.pms.silverocean.service.sp.enums.PricingUnit;
 import org.pms.silverocean.service.sp.wrappers.AddServiceRequest;
 import org.pms.silverocean.service.sp.wrappers.AssignTierRequest;
 import org.pms.silverocean.service.sp.wrappers.ProviderServiceDTO;
@@ -32,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Set;
 import java.util.LinkedHashSet;
+import org.apache.commons.lang3.StringUtils;
 
 @Service
 @Slf4j
@@ -48,9 +53,12 @@ public class ProviderServiceService {
     private final NotificationService notificationService;
     private final I18NService i18NService;
     private final MarketplaceKycGate marketplaceKycGate;
+    private final AccountDao accountDao;
+    private final ServiceBookingDao bookingDao;
 
     public record Readiness(Set<String> uploadedDocumentTypes,Set<String> verifiedDocumentTypes,
                             Set<String> outstandingDocumentTypes,int refereeCount,int verifiedRefereeCount,int requiredReferees) {}
+    private static final Set<PricingUnit> BOOKABLE_FIXED_PRICE_UNITS = Set.of(PricingUnit.PER_JOB, PricingUnit.FIXED);
 
     public Readiness serviceReadiness(long serviceId){
         var profile=profileDao.findByUserIdAndActive(userDao.getUserId()).orElseThrow(()->new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
@@ -78,8 +86,8 @@ public class ProviderServiceService {
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ProviderServiceDTO addService(AddServiceRequest request) {
         long userId = userDao.getUserId();
-        var profile = profileDao.findByUserIdAndActive(userId)
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        var profile = requireApprovedProfile(userId);
+        requireFixedPrice(request.pricingUnit());
 
         ServiceCategory category = categoryDao.findById(request.categoryId())
                 .filter(ServiceCategory::isActive)
@@ -89,6 +97,7 @@ public class ProviderServiceService {
         service.setProfileId(profile.getId());
         service.setCategoryId(category.getId());
         service.setCategoryName(category.getName());
+        applyCatalogueDetails(service, request, category);
         service.setAmount(request.amount());
         service.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(request.currency()));
         service.setPricingUnit(request.pricingUnit());
@@ -105,14 +114,18 @@ public class ProviderServiceService {
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ProviderServiceDTO editService(long serviceId, AddServiceRequest request) {
         long userId = userDao.getUserId();
-        var profile = profileDao.findByUserIdAndActive(userId)
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        var profile = requireApprovedProfile(userId);
+        requireFixedPrice(request.pricingUnit());
 
         ProviderService service = serviceDao.findOwnedForUpdate(serviceId, profile.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
 
         if (!ProviderServiceStatus.DRAFT.name().equals(service.getStatus())&&!ProviderServiceStatus.HIDDEN.name().equals(service.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_EDITABLE);
+        }
+        if (ProviderServiceStatus.HIDDEN.name().equals(service.getStatus())
+                && bookingDao.existsNonTerminalBookingForService(service.getId())) {
+            throw new PMSCustomException(ResponseCode.SP_SERVICE_HAS_ACTIVE_WORK);
         }
 
         ServiceCategory category = categoryDao.findById(request.categoryId())
@@ -121,6 +134,7 @@ public class ProviderServiceService {
 
         service.setCategoryId(category.getId());
         service.setCategoryName(category.getName());
+        applyCatalogueDetails(service, request, category);
         service.setAmount(request.amount());
         service.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(request.currency()));
         service.setPricingUnit(request.pricingUnit());
@@ -133,8 +147,7 @@ public class ProviderServiceService {
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public void submitForReview(long serviceId) {
         long userId = userDao.getUserId();
-        var profile = profileDao.findByUserIdAndActive(userId)
-                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        var profile = requireApprovedProfile(userId);
 
         ProviderService service = serviceDao.findOwnedForUpdate(serviceId, profile.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
@@ -142,6 +155,7 @@ public class ProviderServiceService {
         if (!ProviderServiceStatus.DRAFT.name().equals(service.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_EDITABLE);
         }
+        requireFixedPrice(service.getPricingUnit());
 
         validateReadiness(service, false);
 
@@ -193,6 +207,7 @@ public class ProviderServiceService {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_CANNOT_APPROVE);
         }
         validateReadiness(service, true);
+        requireFixedPrice(service.getPricingUnit());
         service.setStatus(ProviderServiceStatus.LISTED.name());
         serviceDao.save(service, Permission.APPROVE_SP_SERVICE);
         riskScoreService.setVerified(serviceId);
@@ -209,11 +224,21 @@ public class ProviderServiceService {
         sendServiceNotification(service, NotificationType.SP_SERVICE_REJECTED_EMAIL, adminNotes);
     }
 
+    private void requireFixedPrice(PricingUnit pricingUnit) {
+        if (!BOOKABLE_FIXED_PRICE_UNITS.contains(pricingUnit)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Services currently support a fixed price for the complete job. Choose per job or fixed pricing.");
+        }
+    }
+
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public void suspendService(long serviceId, String reason) {
-        ProviderService service = serviceDao.findByIdForUpdate(serviceId)
+        ProviderService service = serviceDao.findAnyByIdForUpdate(serviceId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
-        if(!ProviderServiceStatus.LISTED.name().equals(service.getStatus())||org.apache.commons.lang3.StringUtils.isBlank(reason))throw new PMSCustomException(ResponseCode.SP_SERVICE_CANNOT_APPROVE);
+        if (ProviderServiceStatus.SUSPENDED.name().equals(service.getStatus())) return;
+        if (org.apache.commons.lang3.StringUtils.isBlank(reason)) {
+            throw new PMSCustomException(ResponseCode.SP_SERVICE_CANNOT_APPROVE);
+        }
         service.setStatus(ProviderServiceStatus.SUSPENDED.name());
         serviceDao.save(service, Permission.SUSPEND_SP_SERVICE);
         sendServiceNotification(service, NotificationType.SP_SERVICE_SUSPENDED_EMAIL, reason);
@@ -226,6 +251,10 @@ public class ProviderServiceService {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
         ProviderService service = serviceDao.findOwnedForUpdate(serviceId, profile.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        if (bookingDao.existsNonTerminalBookingForService(serviceId)
+                || bookingDao.existsActiveUnpaidInvoiceForService(serviceId)) {
+            throw new PMSCustomException(ResponseCode.SP_SERVICE_HAS_ACTIVE_WORK);
+        }
         service.setStatus(ProviderServiceStatus.REMOVED.name());
         service.setActive(false);
         serviceDao.save(service, Permission.REMOVE_SP_SERVICE);
@@ -240,10 +269,24 @@ public class ProviderServiceService {
     }
 
     private void validateReadiness(ProviderService service, boolean requireVerified) {
+        if (StringUtils.isBlank(service.getTitle()) || StringUtils.length(StringUtils.trim(service.getTitle())) < 3
+                || StringUtils.isBlank(service.getDescription()) || StringUtils.length(StringUtils.trim(service.getDescription())) < 20) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Add a clear service name and description before submitting it for review.");
+        }
         ServiceCategory category = categoryDao.findById(service.getCategoryId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
         if(requireVerified){
             var profile=profileDao.findById(service.getProfileId()).filter(ProviderProfile::isActive).orElseThrow(()->new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+            if (!"ACTIVE".equals(profile.getStatus()) || profile.getPaymentAccountId() == null) {
+                throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);
+            }
+            var paymentAccount = accountDao.getAccountByIdAndCreatedBy(profile.getPaymentAccountId(), profile.getUserId());
+            if (!paymentAccount.isActive() || !paymentAccount.isVerified()
+                    || paymentAccount.getCategory() != AccountCategory.MERCHANT || paymentAccount.getChannel() == null
+                    || paymentAccount.getChannel() == org.pms.silverocean.service.payment.wrappers.PaymentChannel.FLUTTER_WAVE) {
+                throw new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND);
+            }
             var user=userDao.findById(profile.getUserId()).orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
             var type=org.pms.silverocean.service.users.ProfileType.valueOf(user.getProfileType());
             marketplaceKycGate.require(profile.getUserId(),"PROVIDER_TYPE","SERVICE_PROVIDER",type);
@@ -288,14 +331,33 @@ public class ProviderServiceService {
         return new ProviderServiceDTO(service, providerName, latitude, longitude, riskLabel);
     }
 
+    private void applyCatalogueDetails(ProviderService service, AddServiceRequest request, ServiceCategory category) {
+        String title = StringUtils.trimToNull(request.title());
+        String description = StringUtils.trimToNull(request.description());
+        service.setTitle(StringUtils.left(title != null ? title : category.getName(), 120));
+        String defaultDescription = StringUtils.defaultIfBlank(category.getDescription(),
+                "Professional " + category.getName().toLowerCase(java.util.Locale.ROOT)
+                        + " service. Contact the provider to confirm the scope and timing.");
+        service.setDescription(StringUtils.left(description != null ? description : defaultDescription, 2000));
+    }
+
+    private ProviderProfile requireApprovedProfile(long userId) {
+        ProviderProfile profile = profileDao.findByUserIdAndActive(userId)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        if (!org.pms.silverocean.service.sp.enums.ProviderProfileStatus.ACTIVE.name().equals(profile.getStatus())) {
+            throw new PMSCustomException(ResponseCode.FORBIDDEN_ACCESS);
+        }
+        return profile;
+    }
+
     private void sendServiceNotification(ProviderService service, NotificationType type, String extra) {
         try {
             profileDao.findById(service.getProfileId()).ifPresent(profile -> {
                 userDao.findById(profile.getUserId()).ifPresent(user -> {
                     String message = String.format(
                             i18NService.getLocalizedMessage(type.getBody()),
-                            service.getCategoryName(),
-                            extra != null ? extra : ""
+                            org.springframework.web.util.HtmlUtils.htmlEscape(service.getCategoryName()),
+                            org.springframework.web.util.HtmlUtils.htmlEscape(extra != null ? extra : "")
                     );
                     notificationService.queueEmailAndInApp(user.getEmail(),type,message,"SERVICE_LISTING_REVIEW","Your service listing review was updated. Open /dashboard/services to review its status and any next step.");
                 });

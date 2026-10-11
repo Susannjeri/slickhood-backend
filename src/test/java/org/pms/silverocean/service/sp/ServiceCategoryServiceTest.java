@@ -30,6 +30,9 @@ class ServiceCategoryServiceTest {
     @Test void categoryAuditIsValidJsonAndIncludesRequirements() throws Exception {var category=new ServiceCategory();category.setName("Quoted \"category\"");category.setDescription("Line\nTwo");category.setRequiredNumberOfReferees(2);category.setRequiredDocumentTypes(Set.of(DocumentType.GOOD_CONDUCT));category.setActive(false);var json=new com.fasterxml.jackson.databind.ObjectMapper().readTree(category.toAuditJSON());assertEquals(2,json.get("requiredNumberOfReferees").asInt());assertEquals("GOOD_CONDUCT",json.get("requiredDocumentTypes").get(0).asText());org.junit.jupiter.api.Assertions.assertFalse(json.get("active").asBoolean());}
     @Test void retiredCategoryCanBeReactivatedWithoutRemovingRequirements(){var category=new ServiceCategory();category.setId(8L);category.setActive(false);category.setRequiredNumberOfReferees(2);category.setVersion(3);when(categoryDao.findById(8L)).thenReturn(java.util.Optional.of(category));var dto=service.reactivateCategory(8L,3);org.junit.jupiter.api.Assertions.assertTrue(dto.active());assertEquals(2,dto.requiredNumberOfReferees());verify(categoryDao).save(category,org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_SP_CATEGORIES);}
     @Test void staleCategoryEditCannotOverwriteANewerChange(){var category=new ServiceCategory();category.setId(8L);category.setName("Current");category.setVersion(4);when(categoryDao.findById(8L)).thenReturn(java.util.Optional.of(category));var request=new org.pms.silverocean.service.sp.wrappers.UpdateCategoryRequest("Stale","Old",Set.of(),0,3);org.junit.jupiter.api.Assertions.assertThrows(org.pms.silverocean.service.PMSCustomException.class,()->service.updateCategory(8L,request));assertEquals("Current",category.getName());org.mockito.Mockito.verify(categoryDao,org.mockito.Mockito.never()).save(org.mockito.Mockito.any(),org.mockito.Mockito.anyString());}
+    @Test void groceryCategoryCannotBeCreated(){var request=new CreateCategoryRequest("Fresh Grocery Delivery","Retail belongs in Soko",Set.of(),0);var ex=org.junit.jupiter.api.Assertions.assertThrows(org.pms.silverocean.service.PMSCustomException.class,()->service.createCategory(request));assertEquals(org.pms.silverocean.common.ResponseCode.INVALID_FIELD_DATA,ex.getResponseCode());org.mockito.Mockito.verify(categoryDao,org.mockito.Mockito.never()).save(org.mockito.Mockito.any(),org.mockito.Mockito.anyString());}
+    @Test void supermarketCategoryCannotBeIntroducedByUpdate(){var category=new ServiceCategory();category.setId(8L);category.setName("Errands");category.setVersion(4);when(categoryDao.findById(8L)).thenReturn(java.util.Optional.of(category));var request=new org.pms.silverocean.service.sp.wrappers.UpdateCategoryRequest("Neighbourhood Supermarket","Retail belongs in Soko",Set.of(),0,4);var ex=org.junit.jupiter.api.Assertions.assertThrows(org.pms.silverocean.service.PMSCustomException.class,()->service.updateCategory(8L,request));assertEquals(org.pms.silverocean.common.ResponseCode.INVALID_FIELD_DATA,ex.getResponseCode());assertEquals("Errands",category.getName());org.mockito.Mockito.verify(categoryDao,org.mockito.Mockito.never()).save(org.mockito.Mockito.any(),org.mockito.Mockito.anyString());}
+    @Test void retiredGroceriesCategoryCannotBeReactivated(){var category=new ServiceCategory();category.setId(8L);category.setName("Groceries and pantry");category.setActive(false);category.setVersion(3);when(categoryDao.findById(8L)).thenReturn(java.util.Optional.of(category));var ex=org.junit.jupiter.api.Assertions.assertThrows(org.pms.silverocean.service.PMSCustomException.class,()->service.reactivateCategory(8L,3));assertEquals(org.pms.silverocean.common.ResponseCode.INVALID_FIELD_DATA,ex.getResponseCode());org.junit.jupiter.api.Assertions.assertFalse(category.isActive());org.mockito.Mockito.verify(categoryDao,org.mockito.Mockito.never()).save(org.mockito.Mockito.any(),org.mockito.Mockito.anyString());}
 
     @Mock
     private ServiceCategoryDao categoryDao;
@@ -120,27 +123,22 @@ class ServiceCategoryServiceTest {
     // --- listPricingUnitList ---
 
     @Test
-    void listPricingUnitList_returnsSetWithAllPricingUnits() {
+    void listPricingUnitList_returnsOnlyProductionSafeFixedPriceUnits() {
         when(i18NService.getLocalizedMessage(anyString())).thenAnswer(inv -> inv.getArgument(0).toString());
 
         Set<EnumWrapper> result = service.listPricingUnitList();
 
         assertNotNull(result);
-        // PricingUnit has exactly 11 values
-        assertEquals(PricingUnit.values().length, result.size());
-        assertEquals(11, result.size());
+        assertEquals(2, result.size());
     }
 
     @Test
-    void listPricingUnitList_containsEnumNames_matchingPricingUnitValues() {
+    void listPricingUnitList_containsOnlyPerJobAndFixed() {
         when(i18NService.getLocalizedMessage(anyString())).thenAnswer(inv -> "translated:" + inv.getArgument(0).toString());
 
         Set<EnumWrapper> result = service.listPricingUnitList();
 
-        Set<String> expectedIds = new java.util.HashSet<>();
-        for (PricingUnit unit : PricingUnit.values()) {
-            expectedIds.add(unit.name());
-        }
+        Set<String> expectedIds = Set.of(PricingUnit.PER_JOB.name(), PricingUnit.FIXED.name());
         Set<String> actualIds = new java.util.HashSet<>();
         result.forEach(wrapper -> actualIds.add(wrapper.id()));
 

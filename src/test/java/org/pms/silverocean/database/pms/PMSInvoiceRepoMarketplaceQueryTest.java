@@ -23,12 +23,16 @@ class PMSInvoiceRepoMarketplaceQueryTest {
                 .contains("O.RESERVATION_EXPIRES_AT > UTC_TIMESTAMP(6)")
                 .contains("B.STATUS = 'AWAITING_PAYMENT'")
                 .contains("B.PAYMENT_STATUS = 'UNPAID'")
+                .contains("S.STATUS IN ('LISTED', 'HIDDEN')")
+                .contains("P.ACTIVE = 1")
+                .contains("P.STATUS = 'ACTIVE'")
                 .contains("O.CUSTOMER_USER_ID = I.BILLED_USER_ID")
                 .contains("S.OWNER_USER_ID = I.PAY_TO_USER_ID")
                 .contains("B.CREATED_BY = I.BILLED_USER_ID")
                 .contains("P.USER_ID = I.PAY_TO_USER_ID")
                 .contains("A.CATEGORY = 'MERCHANT'")
                 .contains("A.CREATED_BY = I.PAY_TO_USER_ID")
+                .contains("A.CHANNEL <> 'FLUTTER_WAVE'")
                 .contains("O.PAYMENT_CHANNEL IS NULL OR O.PAYMENT_CHANNEL = A.CHANNEL")
                 .contains("B.PAYMENT_CHANNEL IS NULL OR B.PAYMENT_CHANNEL = A.CHANNEL");
     }
@@ -51,6 +55,9 @@ class PMSInvoiceRepoMarketplaceQueryTest {
                 .contains("O.RESERVATION_EXPIRES_AT > UTC_TIMESTAMP(6)")
                 .contains("B.STATUS = 'AWAITING_PAYMENT'")
                 .contains("B.PAYMENT_STATUS = 'UNPAID'")
+                .contains("S.STATUS IN ('LISTED', 'HIDDEN')")
+                .contains("P.ACTIVE = 1")
+                .contains("P.STATUS = 'ACTIVE'")
                 .contains("O.CUSTOMER_USER_ID = I.BILLED_USER_ID")
                 .contains("S.OWNER_USER_ID = I.PAY_TO_USER_ID")
                 .contains("B.CREATED_BY = I.BILLED_USER_ID")
@@ -59,6 +66,7 @@ class PMSInvoiceRepoMarketplaceQueryTest {
                 .contains("A.VERIFIED = 1")
                 .contains("A.CATEGORY = 'MERCHANT'")
                 .contains("A.CREATED_BY = I.PAY_TO_USER_ID")
+                .contains("A.CHANNEL <> 'FLUTTER_WAVE'")
                 .contains("O.PAYMENT_CHANNEL IS NULL OR O.PAYMENT_CHANNEL = A.CHANNEL")
                 .contains("B.PAYMENT_CHANNEL IS NULL OR B.PAYMENT_CHANNEL = A.CHANNEL");
         assertThat(countOccurrences(sql, ":INVOICEREFS")).isEqualTo(2);

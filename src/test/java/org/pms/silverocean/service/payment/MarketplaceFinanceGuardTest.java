@@ -24,10 +24,17 @@ class MarketplaceFinanceGuardTest {
     @Test void incompleteJobCannotBeSettled(){
         assertThrows(PMSCustomException.class,()->MarketplaceFinanceGuard.validate(TOTAL,true,false,false,entry("CONFIRMED","100","S"),entry("PENDING","0",null),entry("NOT_REQUIRED","0",null)));
     }
+    @Test void failedRefundRemainsASettlementHoldUntilRetried(){
+        assertThrows(PMSCustomException.class,()->MarketplaceFinanceGuard.validate(TOTAL,true,true,false,entry("CONFIRMED","100","S"),entry("PENDING","0",null),entry("FAILED","100",null)));
+    }
     @Test void confirmedDecisionRequiresEvidenceReference(){
         assertThrows(PMSCustomException.class,()->MarketplaceFinanceGuard.validate(TOTAL,true,true,true,entry("CONFIRMED","20",""),entry("REQUESTED","20",null),entry("PENDING","0",null)));
     }
     @Test void validPartialRefundCanBeRecorded(){
         assertFalse(MarketplaceFinanceGuard.validate(TOTAL,true,true,true,entry("CONFIRMED","20","R"),entry("REQUESTED","20",null),entry("CONFIRMED","80","S")));
+    }
+    @Test void confirmationMustMatchTheFullRequestedAmount(){
+        assertThrows(PMSCustomException.class,()->MarketplaceFinanceGuard.validate(TOTAL,true,true,false,
+                entry("CONFIRMED","90","SET-1"),entry("REQUESTED","100",null),entry("NOT_REQUIRED","0",null)));
     }
 }

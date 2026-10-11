@@ -131,4 +131,40 @@ class SubscriptionEntitlementInterceptorTest {
         verify(entitlements,never()).requireProduct(SubscriptionProduct.SERVICES);
         verify(entitlements,never()).requireSessionBusinessProductIfApplicable();
     }
+
+    @Test void servicesShoppingHistoryAndExistingJobFulfilmentAreSubscriptionNeutral() {
+        var interceptor = new SubscriptionEntitlementInterceptor(entitlements);
+        String[][] requests = {
+                {"GET", "/sp/directory"}, {"GET", "/sp/directory/42"},
+                {"GET", "/sp/category/list"}, {"GET", "/sp/pricing/unit/list"},
+                {"GET", "/sp/profile"}, {"GET", "/sp/service/list"},
+                {"GET", "/sp/service/42/readiness"}, {"PUT", "/sp/service/42/pause"},
+                {"POST", "/sp/booking/create"}, {"GET", "/sp/booking/my"},
+                {"GET", "/sp/booking/service/42"}, {"PUT", "/sp/booking/42/start"},
+                {"PUT", "/sp/booking/42/complete"}, {"PUT", "/sp/booking/42/cancel"},
+                {"PUT", "/sp/booking/42/accept-completion"},
+                {"POST", "/sp/rating/submit"}, {"GET", "/sp/rating/42/list"},
+                {"POST", "/sp/complaint/file"}, {"GET", "/sp/complaint/service/42/list"}
+        };
+        for (String[] requestSpec : requests) {
+            when(request.getMethod()).thenReturn(requestSpec[0]);
+            when(request.getRequestURI()).thenReturn(requestSpec[1]);
+            assertTrue(interceptor.preHandle(request, response, new Object()));
+        }
+
+        verify(entitlements, never()).requireProduct(SubscriptionProduct.SERVICES);
+        verify(entitlements, never()).requireSessionBusinessProductIfApplicable();
+    }
+
+    @Test void providerNewCommercialWorkStillRequiresServicesSubscription() {
+        var interceptor = new SubscriptionEntitlementInterceptor(entitlements);
+        for (String path : new String[]{"/sp/service/add", "/sp/service/42/submit",
+                "/sp/service/42/resume", "/sp/booking/42/confirm"}) {
+            when(request.getMethod()).thenReturn(path.endsWith("/add") ? "POST" : "PUT");
+            when(request.getRequestURI()).thenReturn(path);
+            assertTrue(interceptor.preHandle(request, response, new Object()));
+        }
+
+        verify(entitlements, org.mockito.Mockito.times(4)).requireProduct(SubscriptionProduct.SERVICES);
+    }
 }

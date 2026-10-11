@@ -58,6 +58,8 @@ public enum NotificationType {
     ACCOUNT_VERIFICATION_SUCCESS_EMAIL("email.account.verification.success.subject","email.account.verification.success.body", true, NotificationChannel.EMAIL),
     SUBSCRIPTION_SALES_REQUEST_EMAIL("email.subscription.sales.request.subject", "email.subscription.sales.request.body", true, NotificationChannel.EMAIL),
     SP_SERVICE_APPROVED_EMAIL("email.sp.service.approved.subject", "email.sp.service.approved.body", false, NotificationChannel.EMAIL),
+    SP_PROFILE_APPROVED_EMAIL("email.sp.profile.approved.subject", "email.sp.profile.approved.body", false, NotificationChannel.EMAIL),
+    SP_PROFILE_REJECTED_EMAIL("email.sp.profile.rejected.subject", "email.sp.profile.rejected.body", false, NotificationChannel.EMAIL),
     SP_SERVICE_APPROVED_SMS("sms.sp.service.approved", false, NotificationChannel.SMS),
     SP_SERVICE_REJECTED_EMAIL("email.sp.service.rejected.subject", "email.sp.service.rejected.body", false, NotificationChannel.EMAIL),
     SP_SERVICE_REJECTED_SMS("sms.sp.service.rejected", false, NotificationChannel.SMS),

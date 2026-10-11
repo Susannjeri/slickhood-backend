@@ -75,7 +75,8 @@ public class AccountActivationFilter extends OncePerRequestFilter {
             return;
         }
         if (!AccountStatus.ACTIVE.name().equals(accessState.accountStatus())
-                && !INTERNAL_ROLES.contains(activeRole)) {
+                && !INTERNAL_ROLES.contains(activeRole)
+                && !servicesRecoveryOperation(request, accessState.accountStatus())) {
             deny(response, ResponseCode.KYC_ACCOUNT_RESTRICTED,
                     "Complete identity verification before using this feature.",
                     accessState.operationalAccountStatus());
@@ -131,5 +132,20 @@ public class AccountActivationFilter extends OncePerRequestFilter {
 
     private boolean allowed(String path) {
         return ALLOWED_EXACT_PATHS.contains(path) || ALLOWED_PREFIXES.stream().anyMatch(path::startsWith);
+    }
+
+    private boolean servicesRecoveryOperation(HttpServletRequest request, String accountStatus) {
+        if (!Set.of(AccountStatus.PENDING_KYC.name(), AccountStatus.KYC_UNDER_REVIEW.name(),
+                AccountStatus.KYC_REJECTED.name()).contains(accountStatus)) {
+            return false;
+        }
+        String path = request.getRequestURI();
+        if ("GET".equals(request.getMethod())) {
+            return "/sp/booking/my".equals(path) || path.matches("/sp/booking/service/\\d+");
+        }
+        if ("PUT".equals(request.getMethod())) {
+            return path.matches("/sp/booking/\\d+/(start|complete|cancel|accept-completion)");
+        }
+        return "POST".equals(request.getMethod()) && "/sp/complaint/file".equals(path);
     }
 }

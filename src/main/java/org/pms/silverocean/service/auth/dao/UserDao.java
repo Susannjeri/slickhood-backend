@@ -65,6 +65,10 @@ public class UserDao {
         return userRepo.findFirstByRefreshToken(refreshToken);
     }
 
+    public Optional<Users> findActiveByIdForUpdate(long userId) {
+        return userRepo.findActiveByIdForUpdate(userId);
+    }
+
     public Optional<Users> findByCurrentOrReplayRefreshTokenForUpdate(String refreshToken) {
         return userRepo.findByCurrentOrReplayRefreshTokenForUpdate(refreshToken);
     }

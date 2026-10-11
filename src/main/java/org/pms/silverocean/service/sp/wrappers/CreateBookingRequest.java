@@ -12,5 +12,14 @@ public record CreateBookingRequest(
     @NotNull @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime scheduledAt,
     @Size(max=2000) String notes,
     @Positive Long propertyId,
-    @Positive Long unitId
-) {}
+    @Positive Long unitId,
+    @Size(max=500) String serviceAddress,
+    @Size(max=100) String idempotencyKey
+) {
+    public CreateBookingRequest(Long serviceId, LocalDateTime scheduledAt, String notes, Long propertyId, Long unitId) {
+        this(serviceId, scheduledAt, notes, propertyId, unitId, null, null);
+    }
+    public CreateBookingRequest(Long serviceId, LocalDateTime scheduledAt, String notes, Long propertyId, Long unitId, String idempotencyKey) {
+        this(serviceId, scheduledAt, notes, propertyId, unitId, null, idempotencyKey);
+    }
+}

@@ -21,10 +21,18 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
         // SlickHood product. Endpoint role checks still protect affiliate and
         // administrator data, but neither persona may be sent through billing.
         if (path.startsWith("/affiliate")) return true;
+        // Finance operations are staff workflows protected by a FINANCE-only
+        // endpoint role. Staff must never need to buy a provider subscription.
+        if (path.matches("/sp/booking/[^/]+/finance")) return true;
         // Finance, administration and linked-rider operations are protected by
         // endpoint roles/ownership. Requiring the merchant's Soko subscription
         // here would incorrectly bill staff and riders merely to perform work.
         if (isSokoOperationalExemption(path)) return true;
+        // Subscription expiry must prevent a provider from taking or publishing
+        // new commercial work, but it must never strand an existing paid job.
+        // Controller permissions and service ownership/state checks continue to
+        // protect these buyer and fulfilment operations.
+        if (isServicesOperationalExemption(path, request.getMethod())) return true;
         if (path.startsWith("/smart-gate")) {
             entitlements.requireFeatureOrAddOn(entitlements.sessionBusinessProduct(),
                     "GATE_MANAGEMENT_INCLUDED_UNITS", SubscriptionProduct.GATE_MANAGEMENT_ADDON);
@@ -82,5 +90,32 @@ public class SubscriptionEntitlementInterceptor implements HandlerInterceptor {
                 || path.equals("/soko/rider/assignments")
                 || path.startsWith("/soko/rider/kyc")
                 ;
+    }
+
+    private boolean isServicesOperationalExemption(String path, String method) {
+        if (path.startsWith("/sp/directory")
+                || path.equals("/sp/category/list")
+                || path.equals("/sp/pricing/unit/list")
+                || path.equals("/sp/booking/my")
+                || path.matches("/sp/booking/service/[^/]+")) {
+            return true;
+        }
+        if ("GET".equalsIgnoreCase(method)) {
+            return path.equals("/sp/profile")
+                    || path.equals("/sp/service/list")
+                    || path.matches("/sp/service/[^/]+/readiness")
+                    || path.startsWith("/sp/rating/")
+                    || path.startsWith("/sp/complaint/");
+        }
+        if ("POST".equalsIgnoreCase(method)) {
+            return path.equals("/sp/booking/create")
+                    || path.equals("/sp/rating/submit")
+                    || path.equals("/sp/complaint/file");
+        }
+        if ("PUT".equalsIgnoreCase(method)) {
+            return path.matches("/sp/booking/[^/]+/(start|complete|cancel|accept-completion)")
+                    || path.matches("/sp/service/[^/]+/pause");
+        }
+        return false;
     }
 }

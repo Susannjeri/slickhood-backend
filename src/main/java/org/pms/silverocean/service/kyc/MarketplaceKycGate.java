@@ -30,6 +30,10 @@ public class MarketplaceKycGate {
     private final org.pms.silverocean.database.pms.ProviderDocumentRepo providerDocuments;
 
     public void require(long userId,String scopeType,String scopeKey,ProfileType profileType){
+        if(releases.findFirstByStatusAndActiveTrueOrderByVersionNoDesc("PUBLISHED").isEmpty()){
+            throw new PMSCustomException(ResponseCode.ERROR_UPDATING_CONFIG,
+                    "Provider approval is paused because the production KYC policy is not published. Contact an administrator.");
+        }
         List<String> missing=missingRequirements(userId,scopeType,scopeKey,profileType);
         if(!missing.isEmpty())throw new PMSCustomException(ResponseCode.KYC_MISSING_DOCUMENTS,"Complete these KYC requirements before continuing: "+String.join(", ",missing)+".");
     }

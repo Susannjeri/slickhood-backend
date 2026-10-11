@@ -30,6 +30,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
+import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.DecimalMax;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -87,12 +90,12 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
     @GetMapping("/directory")
     public ResponseEntity<ResponseDTO> directory(Pageable pageable,
                                                   @RequestParam(required = false) Long categoryId,
-                                                  @RequestParam(required = false) String query,
-                                                  @RequestParam(required = false) BigDecimal minAmount,
-                                                  @RequestParam(required = false) BigDecimal maxAmount,
-                                                  @RequestParam(required = false) Double latitude,
-                                                  @RequestParam(required = false) Double longitude,
-                                                  @RequestParam(required = false) Double radiusKm) {
+                                                  @RequestParam(required = false) @Size(max=100) String query,
+                                                  @RequestParam(required = false) @DecimalMin("0.0") BigDecimal minAmount,
+                                                  @RequestParam(required = false) @DecimalMin("0.0") BigDecimal maxAmount,
+                                                  @RequestParam(required = false) @DecimalMin("-90.0") @DecimalMax("90.0") Double latitude,
+                                                  @RequestParam(required = false) @DecimalMin("-180.0") @DecimalMax("180.0") Double longitude,
+                                                  @RequestParam(required = false) @DecimalMin("0.1") @DecimalMax("100.0") Double radiusKm) {
         var page = directoryService.searchDirectory(pageable, categoryId, query, minAmount, maxAmount, latitude, longitude, radiusKm);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_SERVICE_LIST.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_SERVICE_LIST), page.getContent(),
@@ -137,7 +140,7 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
     }
 
     @PutMapping("/profile")
-    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SETUP_SP_PROFILE)")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_SP_PROFILE)")
     public ResponseEntity<ResponseDTO> editMyProfile(@RequestBody @Valid SetupProfileRequest request){
         return ResponseEntity.ok(new ResponseDTO(true,ResponseCode.SP_PROFILE_DETAILS.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_PROFILE_DETAILS),profileService.editMyProfile(request)));
@@ -290,6 +293,14 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
                 i18NService.getLocalizedMessage(ResponseCode.SP_BOOKING_UPDATED)));
     }
 
+    @PutMapping("/booking/{bookingId}/accept-completion")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).VIEW_SP_BOOKING)")
+    public ResponseEntity<ResponseDTO> acceptBookingCompletion(@PathVariable long bookingId) {
+        bookingService.acceptCompletion(bookingId);
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_BOOKING_UPDATED.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.SP_BOOKING_UPDATED)));
+    }
+
     @PutMapping("/booking/{bookingId}/start")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).COMPLETE_SP_BOOKING)")
     public ResponseEntity<ResponseDTO> startBooking(@PathVariable long bookingId) {
@@ -301,19 +312,30 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
     @PutMapping("/booking/{bookingId}/cancel")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).CANCEL_SP_BOOKING)")
     public ResponseEntity<ResponseDTO> cancelBooking(@PathVariable long bookingId,
-                                                     @RequestParam(required = false) String reason) {
-        bookingService.cancelBooking(bookingId, reason);
+            @RequestBody @Valid org.pms.silverocean.service.sp.wrappers.ReasonRequest request) {
+        bookingService.cancelBooking(bookingId, request.reason());
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_BOOKING_UPDATED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_BOOKING_UPDATED)));
     }
 
     @PutMapping("/booking/{bookingId}/finance")
-    @PreAuthorize("hasAnyRole('FINANCE','SUPER_ADMIN')")
+    @PreAuthorize("hasRole('FINANCE')")
     public ResponseEntity<ResponseDTO> updateBookingFinance(@PathVariable long bookingId,
                                                             @RequestBody @Valid MarketplaceFinanceRequest request) {
         var booking = bookingService.updateFinance(bookingId, request);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_BOOKING_UPDATED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_BOOKING_UPDATED), booking));
+    }
+
+    @GetMapping("/booking/finance/queue")
+    @PreAuthorize("hasRole('FINANCE')")
+    public ResponseEntity<ResponseDTO> listBookingFinanceQueue(Pageable pageable,
+            @RequestParam(required = false) MarketplaceFinanceRequest.FinanceType type,
+            @RequestParam(required = false) MarketplaceFinanceRequest.FinanceStatus status) {
+        var page = bookingService.listFinanceQueue(pageable, type, status);
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_BOOKING_LIST.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.SP_BOOKING_LIST),
+                page.getContent(), page.getTotalPages(), page.getTotalElements(), page.getSize()));
     }
 
     @GetMapping("/booking/my")

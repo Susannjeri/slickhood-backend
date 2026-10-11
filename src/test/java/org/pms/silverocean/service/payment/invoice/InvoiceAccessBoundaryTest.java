@@ -193,15 +193,23 @@ class InvoiceAccessBoundaryTest {
         PMSInvoice invoice = marketplaceInvoice(185L, 175L);
         Users customer = new Users();
         customer.setId(185L); customer.setFullName("Marketplace Customer");
+        Users provider = new Users();
+        provider.setId(175L); provider.setFullName("Provider Owner");
+        provider.setOrganizationName("CleanCo Services");
         when(users.getUserId()).thenReturn(175L);
         when(users.getActiveRole()).thenReturn(PMSRole.SERVICE_PROVIDER);
         when(invoices.getInvoiceForOwnerOrTenantView(3594L, 175L)).thenReturn(Optional.of(invoice));
         when(users.findById(185L)).thenReturn(Optional.of(customer));
+        when(users.findById(175L)).thenReturn(Optional.of(provider));
 
         var result = service.getInvoice(3594L);
 
         assertEquals("INV-SERVICE-3594", result.ref());
         assertEquals("Marketplace Customer", result.tenantName());
+        assertEquals("CleanCo Services", result.issuerName());
+        assertEquals("CleanCo Services", result.propertyName());
+        assertEquals("SERVICES", result.issuerType());
+        assertEquals(null, result.issuerLogoUrl());
         verify(invoices).getInvoiceForOwnerOrTenantView(3594L, 175L);
         verify(invoices, never()).getInvoiceById(3594L);
     }

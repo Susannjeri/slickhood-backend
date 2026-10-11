@@ -5,11 +5,16 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 public interface ProviderProfileRepo extends JpaRepository<ProviderProfile, Long> {
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM ProviderProfile p WHERE p.id=:id AND p.active=true")
     Optional<ProviderProfile> lockActiveProfile(long id);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM ProviderProfile p WHERE p.id=:id AND p.active=true")
+    Optional<ProviderProfile> findByIdForUpdate(long id);
     @Query("SELECT p FROM ProviderProfile p WHERE p.userId = :userId AND p.active = true AND p.status=:status")
     Optional<ProviderProfile> findByUserIdAndStatus(long userId, String status);
 
@@ -18,4 +23,6 @@ public interface ProviderProfileRepo extends JpaRepository<ProviderProfile, Long
 
     @Query("SELECT COUNT(p) > 0 FROM ProviderProfile p WHERE p.userId = :userId AND p.active = true")
     boolean existsByUserId(long userId);
+
+    Page<ProviderProfile> findByStatusAndActiveTrue(String status, Pageable pageable);
 }

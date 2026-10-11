@@ -8,6 +8,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.ZonedDateTime;
+import java.util.List;
 import java.util.Optional;
 
 @Service
@@ -22,7 +24,7 @@ public class ServiceBookingDao {
 
     public void save(ServiceBooking booking, String auditAction) {
         booking.setLastModifiedDate(LocalDateTime.now());
-        repo.save(booking);
+        repo.saveAndFlush(booking);
         auditLogService.createAuditLog(booking, auditAction);
     }
 
@@ -54,11 +56,33 @@ public class ServiceBookingDao {
         return repo.findByIdAndBookingCreatedByForRead(id, userId);
     }
 
+    public Optional<ServiceBooking> findByCreatedByAndClientRequestId(long userId,String requestId){return repo.findByCreatedByAndClientRequestId(userId,requestId);}
+
+    public List<Long> findIdsReadyForAutoFinalization(ZonedDateTime now, Pageable pageable) {
+        return repo.findIdsReadyForAutoFinalization(now, pageable);
+    }
+
+    public List<Long> findIdsReadyForRequestExpiry(ZonedDateTime now, Pageable pageable) {
+        return repo.findIdsReadyForRequestExpiry(now, pageable);
+    }
+
     public Optional<ServiceBooking> findById(long id) {
         return repo.findById(id);
     }
 
     public boolean existsCompletedBookingForService(long bookingId, long serviceId) {
         return repo.existsCompletedBookingForService(bookingId, serviceId);
+    }
+
+    public boolean existsNonTerminalBookingForService(long serviceId) {
+        return repo.existsNonTerminalBookingForService(serviceId);
+    }
+
+    public boolean existsActiveUnpaidInvoiceForService(long serviceId) {
+        return repo.existsActiveUnpaidInvoiceForService(serviceId);
+    }
+
+    public Page<ServiceBooking> findFinanceQueue(Pageable pageable, String financeType, List<String> statuses) {
+        return repo.findFinanceQueue(pageable, financeType, statuses);
     }
 }

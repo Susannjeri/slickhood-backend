@@ -17,6 +17,10 @@ import jakarta.persistence.LockModeType;
 public interface UserRepo extends JpaRepository<Users, Long>, JpaSpecificationExecutor<Users> {
     Optional<Users> findByEmail(String email);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM Users u WHERE u.id=:id AND u.active=true")
+    Optional<Users> findActiveByIdForUpdate(@Param("id") long id);
+
     @Modifying
     @Query("UPDATE Users u SET u.active=false WHERE u.email=:username")
     void deactivateAccount(@Param("username") String username);

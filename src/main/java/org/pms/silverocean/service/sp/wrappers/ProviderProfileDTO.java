@@ -7,13 +7,15 @@ import java.time.ZonedDateTime;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ProviderProfileDTO(
-    long id, long userId, String businessName, String status,
+    long id, long version, long userId, String businessName, String description, String serviceArea, String status,
     ZonedDateTime consentTimestamp, Double latitude, Double longitude,
-    String adminNotes, Long paymentAccountId, ZonedDateTime createdOn
+    String adminNotes, Long reviewedByUserId, ZonedDateTime reviewedAt,
+    Long paymentAccountId, ZonedDateTime createdOn
 ) {
     public ProviderProfileDTO(ProviderProfile p) {
-        this(p.getId(), p.getUserId(), p.getBusinessName(), p.getStatus(),
+        this(p.getId(), p.getVersion(), p.getUserId(), p.getBusinessName(), p.getDescription(), p.getServiceArea(), p.getStatus(),
              p.getConsentTimestamp(), p.getLatitude(), p.getLongitude(),
-             p.getAdminNotes(), p.getPaymentAccountId(), p.getCreatedOn());
+             p.getAdminNotes(), p.getReviewedByUserId(), p.getReviewedAt(),
+             p.getPaymentAccountId(), p.getCreatedOn());
     }
 }

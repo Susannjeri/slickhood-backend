@@ -54,6 +54,29 @@ class AccountActivationFilterTest {
         assertThat(run("/kyc/current").getStatus()).isEqualTo(200);
     }
 
+    @Test void pendingKycProviderCanFulfilOrProtectExistingServiceBookingsButCannotAcceptNewWork() throws Exception {
+        pendingCustomer(PMSRole.SERVICE_PROVIDER);
+
+        assertThat(run("GET", "/sp/booking/my").getStatus()).isEqualTo(200);
+        assertThat(run("GET", "/sp/booking/service/42").getStatus()).isEqualTo(200);
+        assertThat(run("PUT", "/sp/booking/42/start").getStatus()).isEqualTo(200);
+        assertThat(run("PUT", "/sp/booking/42/complete").getStatus()).isEqualTo(200);
+        assertThat(run("PUT", "/sp/booking/42/cancel").getStatus()).isEqualTo(200);
+        assertThat(run("PUT", "/sp/booking/42/accept-completion").getStatus()).isEqualTo(200);
+        assertThat(run("POST", "/sp/complaint/file").getStatus()).isEqualTo(200);
+        assertThat(run("POST", "/sp/booking/create").getStatus()).isEqualTo(403);
+        assertThat(run("PUT", "/sp/booking/42/confirm").getStatus()).isEqualTo(403);
+    }
+
+    @Test void rejectedKycProviderCanFinishExistingWorkButCannotConfirmANewRequest() throws Exception {
+        accessState(9L, true, AccountStatus.KYC_REJECTED);
+        when(users.getActiveRole()).thenReturn(PMSRole.SERVICE_PROVIDER);
+
+        assertThat(run("PUT", "/sp/booking/42/start").getStatus()).isEqualTo(200);
+        assertThat(run("PUT", "/sp/booking/42/complete").getStatus()).isEqualTo(200);
+        assertThat(run("PUT", "/sp/booking/42/confirm").getStatus()).isEqualTo(403);
+    }
+
     @Test void accountStateNeverBlocksAssignmentScopedPublicRiderBearer() throws Exception {
         pendingCustomer(PMSRole.LANDLORD);
         assertThat(run("/soko/public/rider-assignment/accept").getStatus()).isEqualTo(200);
@@ -147,7 +170,11 @@ class AccountActivationFilterTest {
     }
 
     private MockHttpServletResponse run(String uri) throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", uri);
+        return run("GET", uri);
+    }
+
+    private MockHttpServletResponse run(String method, String uri) throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
         MockHttpServletResponse response = new MockHttpServletResponse();
         filter.doFilter(request, response, new MockFilterChain());
         return response;

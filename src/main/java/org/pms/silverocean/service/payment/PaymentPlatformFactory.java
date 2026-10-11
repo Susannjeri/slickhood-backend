@@ -49,6 +49,33 @@ public class PaymentPlatformFactory {
                        )).collect(Collectors.toSet());
     }
 
+    /**
+     * Returns whether a channel may be attached to a new commercial transaction.
+     * Historic accounts and callbacks remain readable when a rail is disabled, but
+     * new marketplace work must not be pinned to a provider that cannot collect it.
+     */
+    public boolean isAvailableForNewPayments(PaymentChannel channel) {
+        return channel != null
+                && channel != PaymentChannel.FLUTTER_WAVE
+                && platforms.values().stream()
+                .anyMatch(platform -> platform.channelType() == channel && platform.isActive());
+    }
+
+    /**
+     * Canonical set of rails that may currently be used for a new payment.
+     *
+     * Directory queries use this set inside the database predicate rather than
+     * filtering a page after it has been fetched. This keeps page totals and
+     * page boundaries correct when an operator disables a payment integration.
+     */
+    public Set<PaymentChannel> getAvailableChannelsForNewPayments() {
+        return platforms.values().stream()
+                .filter(PaymentPlatform::isActive)
+                .map(PaymentPlatform::channelType)
+                .filter(channel -> channel != PaymentChannel.FLUTTER_WAVE)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
     public String getChannelImage(PaymentChannel channel) {
        // Turning off checkout must not make existing account settings unreadable.
        return platforms.values().stream()

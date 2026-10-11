@@ -102,6 +102,10 @@ public class AccountDao {
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.ACCOUNT_NOT_FOUND));
     }
 
+    public Optional<PaymentAccount> findAnyAccountForUpdate(Long id) {
+        return accountRepo.findAnyForUpdate(id);
+    }
+
     public Page<PaymentAccount> getActiveSlickHoodAccount(Pageable pageable) {
         return accountRepo.listAllActiveSlickHoodAccount(pageable);
     }

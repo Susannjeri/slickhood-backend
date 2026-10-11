@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.List;
 
 @Service
 public class ComplaintCaseDao {
@@ -53,5 +54,17 @@ public class ComplaintCaseDao {
 
     public boolean existsOpenComplaintForBooking(long bookingId) {
         return repo.existsOpenComplaintForBooking(bookingId);
+    }
+
+    public boolean existsComplaintForBooking(long bookingId) {
+        return repo.existsComplaintForBooking(bookingId);
+    }
+
+    public Optional<ComplaintCase> findActiveByBookingId(long bookingId) {
+        return repo.findActiveByBookingId(bookingId);
+    }
+
+    public List<ComplaintCase> findActiveByBookingIds(List<Long> bookingIds) {
+        return repo.findActiveByBookingIds(bookingIds);
     }
 }

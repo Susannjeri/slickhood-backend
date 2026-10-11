@@ -4,6 +4,7 @@ import org.pms.silverocean.database.pms.ProviderServiceRepo;
 import org.pms.silverocean.database.pms.entities.ProviderService;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.sp.wrappers.ProviderServiceDTO;
+import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -18,11 +19,15 @@ public class ProviderServiceDao {
     private final ProviderServiceRepo repo;
     private final AuditLogService auditLogService;
     private final org.pms.silverocean.database.pms.ServiceTierRepo tiers;
+    private final PaymentPlatformFactory paymentPlatformFactory;
 
-    public ProviderServiceDao(ProviderServiceRepo repo, AuditLogService auditLogService, org.pms.silverocean.database.pms.ServiceTierRepo tiers) {
+    public ProviderServiceDao(ProviderServiceRepo repo, AuditLogService auditLogService,
+                              org.pms.silverocean.database.pms.ServiceTierRepo tiers,
+                              PaymentPlatformFactory paymentPlatformFactory) {
         this.repo = repo;
         this.auditLogService = auditLogService;
         this.tiers = tiers;
+        this.paymentPlatformFactory = paymentPlatformFactory;
     }
 
     public void save(ProviderService service, String auditAction) {
@@ -40,13 +45,32 @@ public class ProviderServiceDao {
     }
 
     public Page<ProviderServiceDTO> findListedByCategoryEnriched(Pageable pageable, Long categoryId) {
-        return repo.findListedByCategoryEnriched(pageable, categoryId);
+        var availableChannels = paymentPlatformFactory.getAvailableChannelsForNewPayments();
+        if (availableChannels.isEmpty()) return Page.empty(pageable);
+        return repo.findListedByCategoryEnriched(pageable, categoryId,
+                java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
+                        org.pms.silverocean.service.sp.enums.PricingUnit.FIXED),
+                org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SERVICES,
+                org.pms.silverocean.service.subscription.enums.SubscriptionStatus.ACTIVE,
+                org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name(),
+                org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT,
+                availableChannels);
     }
 
     public Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query,
                                                      BigDecimal minAmount, BigDecimal maxAmount,
                                                      Double latitude, Double longitude, Double minLat, Double maxLat, Double minLng, Double maxLng) {
-        return repo.searchDirectory(pageable, categoryId, query, minAmount, maxAmount, latitude, longitude, minLat, maxLat, minLng, maxLng);
+        var availableChannels = paymentPlatformFactory.getAvailableChannelsForNewPayments();
+        if (availableChannels.isEmpty()) return Page.empty(pageable);
+        return repo.searchDirectory(pageable, categoryId, query, minAmount, maxAmount, latitude, longitude,
+                minLat, maxLat, minLng, maxLng,
+                java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
+                        org.pms.silverocean.service.sp.enums.PricingUnit.FIXED),
+                org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SERVICES,
+                org.pms.silverocean.service.subscription.enums.SubscriptionStatus.ACTIVE,
+                org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name(),
+                org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT,
+                availableChannels);
     }
 
     public Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query,
@@ -55,7 +79,16 @@ public class ProviderServiceDao {
     }
 
     public Optional<ProviderServiceDTO> findByIdEnriched(long id) {
-        return repo.findByIdEnriched(id);
+        var availableChannels = paymentPlatformFactory.getAvailableChannelsForNewPayments();
+        if (availableChannels.isEmpty()) return Optional.empty();
+        return repo.findByIdEnriched(id,
+                java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
+                        org.pms.silverocean.service.sp.enums.PricingUnit.FIXED),
+                org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SERVICES,
+                org.pms.silverocean.service.subscription.enums.SubscriptionStatus.ACTIVE,
+                org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name(),
+                org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT,
+                availableChannels);
     }
 
     public Optional<ProviderService> findById(long id) {
@@ -67,6 +100,7 @@ public class ProviderServiceDao {
                 .orElseThrow(() -> new org.pms.silverocean.service.PMSCustomException(org.pms.silverocean.common.ResponseCode.INVALID_FIELD_DATA));
     }
     public Optional<ProviderService> findByIdForUpdate(long id){return repo.findByIdForUpdate(id);}
+    public Optional<ProviderService> findAnyByIdForUpdate(long id){return repo.findAnyByIdForUpdate(id);}
     public Optional<ProviderService> findOwnedForUpdate(long id,long profileId){return repo.findOwnedForUpdate(id,profileId);}
 
     public List<ProviderService> findAllById(Iterable<Long> ids) { return repo.findAllById(ids); }

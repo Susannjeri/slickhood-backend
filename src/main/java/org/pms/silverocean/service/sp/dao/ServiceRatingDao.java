@@ -8,6 +8,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 
 @Service
 public class ServiceRatingDao {
@@ -21,7 +23,7 @@ public class ServiceRatingDao {
 
     public void save(ServiceRating rating, String auditAction) {
         rating.setLastModifiedDate(LocalDateTime.now());
-        repo.save(rating);
+        repo.saveAndFlush(rating);
         auditLogService.createAuditLog(rating, auditAction);
     }
 
@@ -42,4 +44,7 @@ public class ServiceRatingDao {
     }
 
     public long countByServiceId(long serviceId) { return repo.countByServiceId(serviceId); }
+    public List<ServiceRatingRepo.ProviderRatingAggregate> aggregateByProfileIds(Collection<Long> profileIds) {
+        return profileIds.isEmpty() ? List.of() : repo.aggregateByProfileIds(profileIds);
+    }
 }

@@ -86,11 +86,16 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
               AND b.active = 1
               AND b.status = 'AWAITING_PAYMENT'
               AND b.payment_status = 'UNPAID'
+              AND s.active = 1
+              AND s.status IN ('LISTED', 'HIDDEN')
+              AND p.active = 1
+              AND p.status = 'ACTIVE'
               AND a.active = 1
               AND a.verified = 1
               AND a.category = 'MERCHANT'
               AND a.created_by = i.pay_to_user_id
               AND a.channel IS NOT NULL
+              AND a.channel <> 'FLUTTER_WAVE'
               AND (b.payment_channel IS NULL OR b.payment_channel = a.channel)
             """, nativeQuery = true)
     Optional<Long> findMarketplaceSourcePaymentAccountId(@Param("invoiceRef") String invoiceRef,
@@ -133,11 +138,16 @@ public interface PMSInvoiceRepo extends JpaRepository<PMSInvoice, Long>, JpaSpec
               AND b.active = 1
               AND b.status = 'AWAITING_PAYMENT'
               AND b.payment_status = 'UNPAID'
+              AND s.active = 1
+              AND s.status IN ('LISTED', 'HIDDEN')
+              AND p.active = 1
+              AND p.status = 'ACTIVE'
               AND a.active = 1
               AND a.verified = 1
               AND a.category = 'MERCHANT'
               AND a.created_by = i.pay_to_user_id
               AND a.channel IS NOT NULL
+              AND a.channel <> 'FLUTTER_WAVE'
               AND (b.payment_channel IS NULL OR b.payment_channel = a.channel)
             """, nativeQuery = true)
     List<String> findPayableMarketplaceInvoiceRefs(@Param("invoiceRefs") Collection<String> invoiceRefs);

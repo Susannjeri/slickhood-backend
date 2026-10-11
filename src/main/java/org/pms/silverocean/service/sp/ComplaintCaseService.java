@@ -5,6 +5,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.entities.ComplaintCase;
+import org.pms.silverocean.database.pms.entities.ProviderProfile;
+import org.pms.silverocean.database.pms.entities.ProviderService;
+import org.pms.silverocean.database.pms.entities.ServiceBooking;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -12,7 +15,6 @@ import org.pms.silverocean.service.auth.roles.enums.Permission;
 import org.pms.silverocean.service.config.ConfigDTO;
 import org.pms.silverocean.service.config.ConfigService;
 import org.pms.silverocean.service.config.enums.PMSConfigs;
-import org.pms.silverocean.service.notification.NotificationDTO;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.sp.dao.ComplaintCaseDao;
@@ -29,6 +31,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.ZonedDateTime;
 import java.util.function.Supplier;
 
 @Service
@@ -57,14 +60,30 @@ public class ComplaintCaseService {
     public ComplaintCaseDTO fileComplaint(FileComplaintRequest request) {
         long userId = userDao.getUserId();
 
-        var booking = bookingDao.findByIdAndBookingCreatedByForRead(request.bookingId(), userId)
+        var booking = bookingDao.findByIdAndCustomerOrProviderForUpdate(request.bookingId(), userId)
+                .filter(candidate -> java.util.Objects.equals(candidate.getCreatedBy(), userId))
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_BOOKING_NOT_FOUND));
 
-        if (!booking.isActive() || BookingStatus.CANCELLED.name().equals(booking.getStatus())) {
+        if (!booking.isActive() || !java.util.Set.of(
+                BookingStatus.PAID.name(),
+                BookingStatus.IN_PROGRESS.name(),
+                BookingStatus.AWAITING_CUSTOMER_CONFIRMATION.name(),
+                BookingStatus.COMPLETED.name()
+        ).contains(booking.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_BOOKING_NOT_ACTIVE);
         }
+        if (java.util.Set.of(BookingStatus.AWAITING_CUSTOMER_CONFIRMATION.name(),
+                BookingStatus.COMPLETED.name()).contains(booking.getStatus())) {
+            ZonedDateTime now = ZonedDateTime.now(java.time.ZoneId.of("UTC"));
+            if ("CONFIRMED".equals(booking.getSettlementStatus())
+                    || booking.getDisputeDeadlineAt() == null
+                    || !booking.getDisputeDeadlineAt().isAfter(now)) {
+                throw new PMSCustomException(ResponseCode.SP_BOOKING_NOT_ACTIVE,
+                        "The customer complaint period for this booking has ended.");
+            }
+        }
 
-        if (complaintDao.existsOpenComplaintForBooking(request.bookingId())) {
+        if (complaintDao.existsComplaintForBooking(request.bookingId())) {
             throw new PMSCustomException(ResponseCode.SP_COMPLAINT_ALREADY_EXISTS);
         }
 
@@ -79,7 +98,7 @@ public class ComplaintCaseService {
         complaintDao.save(complaint, Permission.FILE_SP_COMPLAINT);
 
         sendComplaintNotificationToProvider(complaint);
-        return toDTO(complaint);
+        return toDTO(complaint).withoutInternalReviewDetails();
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -95,32 +114,41 @@ public class ComplaintCaseService {
         complaintDao.save(complaint, Permission.REVIEW_SP_COMPLAINT);
     }
 
-    @Transactional(transactionManager = "pmsDBTransactionManager")
+    @Transactional(transactionManager = "pmsDBTransactionManager",
+            isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public void resolveComplaint(long complaintId, ReviewComplaintRequest request) {
         ComplaintCase complaint = complaintDao.findByIdForUpdate(complaintId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_COMPLAINT_NOT_FOUND));
+        if (!java.util.Set.of(ComplaintStatus.UNDER_REVIEW.name(), ComplaintStatus.ESCALATED.name()).contains(complaint.getStatus())) {
+            throw new PMSCustomException(ResponseCode.SP_COMPLAINT_CANNOT_REVIEW);
+        }
         complaint.setAdminNotes(request.adminNotes());
 
         ComplaintResolutionAction action = request.action();
+        complaint.setPublicResolution(publicResolution(action, request.resolution()));
         if (action == ComplaintResolutionAction.DISMISS) {
             complaint.setStatus(ComplaintStatus.RESOLVED.name());
             complaint.setResolution("DISMISSED");
         } else if (action == ComplaintResolutionAction.WARN) {
             complaint.setStatus(ComplaintStatus.RESOLVED.name());
             complaint.setResolution("WARNED");
-            addAdminNoteToProfile(complaint);
         } else if (action == ComplaintResolutionAction.SUSPEND_SERVICE) {
             complaint.setStatus(ComplaintStatus.RESOLVED.name());
             complaint.setResolution("UPHELD");
-            providerServiceService.suspendService(complaint.getServiceId(), request.adminNotes());
+            requestRefundForUpheldComplaint(complaint);
+            providerServiceService.suspendService(complaint.getServiceId(), complaint.getPublicResolution());
             riskScoreService.resetToUnderReview(complaint.getServiceId());
             checkFraudLimitAndBlacklist(complaint);
         } else if (action == ComplaintResolutionAction.ESCALATE) {
             complaint.setStatus(ComplaintStatus.ESCALATED.name());
+            complaint.setResolution("ESCALATED");
+            complaint.setPublicResolution(null);
         }
 
         complaintDao.save(complaint, Permission.RESOLVE_SP_COMPLAINT);
-        sendComplaintResolvedNotification(complaint);
+        if (ComplaintStatus.RESOLVED.name().equals(complaint.getStatus())) {
+            sendComplaintResolvedNotification(complaint);
+        }
     }
 
     public Page<ComplaintCaseDTO> listOpenComplaints(Pageable pageable) {
@@ -128,50 +156,68 @@ public class ComplaintCaseService {
     }
 
     public Page<ComplaintCaseDTO> listComplaintsForService(long serviceId, Pageable pageable) {
-        return complaintDao.findByServiceIdAndCreatedByOrServiceOwnerOrSuperAdmin(pageable, serviceId, userDao.getUserId()).map(this::toDTO);
+        return complaintDao.findByServiceIdAndCreatedByOrServiceOwnerOrSuperAdmin(pageable, serviceId, userDao.getUserId())
+                .map(complaint -> toDTO(complaint).withoutInternalReviewDetails());
     }
 
     private ComplaintCaseDTO toDTO(ComplaintCase complaint) {
         var service = serviceDao.findById(complaint.getServiceId()).orElse(null);
-        String serviceName = service != null ? service.getCategoryName() : null;
-        String serviceCreatorName = service != null
-                ? userDao.findById(service.getCreatedBy()).map(u -> u.getFullName()).orElse(null)
+        var booking = bookingDao.findById(complaint.getBookingId()).orElse(null);
+        String serviceName = org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                booking == null ? null : booking.getServiceTitleSnapshot(),
+                service != null ? org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                        service.getTitle(), service.getCategoryName()) : null);
+        String currentProviderName = service != null
+                ? profileDao.findById(service.getProfileId())
+                    .map(ProviderProfile::getBusinessName).orElse(null)
                 : null;
+        String serviceCreatorName = org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                booking == null ? null : booking.getProviderBusinessNameSnapshot(), currentProviderName);
         String complaintCreatorName = userDao.findById(complaint.getFiledByUserId())
                 .map(u -> u.getFullName()).orElse(null);
         return new ComplaintCaseDTO(complaint, serviceName, complaintCreatorName, serviceCreatorName);
     }
 
-    private void addAdminNoteToProfile(ComplaintCase complaint) {
-        try {
-            serviceDao.findById(complaint.getServiceId()).ifPresent(service -> {
-                profileDao.findById(service.getProfileId()).ifPresent(profile -> {
-                    String existing = profile.getAdminNotes() != null ? profile.getAdminNotes() : "";
-                    profile.setAdminNotes(existing + " | Warning: " + complaint.getAdminNotes());
-                    profileDao.save(profile, Permission.RESOLVE_SP_COMPLAINT);
-                });
-            });
-        } catch (Exception e) {
-            log.warn("Failed to add admin note to profile for complaint {}", complaint.getId(), e);
+    private String publicResolution(ComplaintResolutionAction action, String requestedMessage) {
+        String supplied = org.apache.commons.lang3.StringUtils.trimToNull(requestedMessage);
+        if (supplied != null) {
+            return org.apache.commons.lang3.StringUtils.left(supplied, 2000);
         }
+        return switch (action) {
+            case DISMISS -> "The complaint was reviewed and was not upheld.";
+            case WARN -> "The complaint was reviewed and a formal warning was issued to the provider.";
+            case SUSPEND_SERVICE -> "The complaint was upheld and this service was suspended.";
+            case ESCALATE -> null;
+        };
     }
 
     private void checkFraudLimitAndBlacklist(ComplaintCase complaint) {
-        try {
-            serviceDao.findById(complaint.getServiceId()).ifPresent(service -> {
-                int fraudLimit = fraudFailureLimitSupplier.get().intValue();
-                int upheldCount = complaintDao.countUpheldComplaintsForProfile(service.getProfileId());
-                if (upheldCount >= fraudLimit) {
-                    profileDao.findById(service.getProfileId()).ifPresent(profile -> {
-                        org.pms.silverocean.service.sp.enums.ProviderProfileStatus blacklisted = org.pms.silverocean.service.sp.enums.ProviderProfileStatus.BLACKLISTED;
-                        profile.setStatus(blacklisted.name());
-                        profileDao.save(profile, Permission.BLACKLIST_SP);
-                        log.info("Profile {} blacklisted due to {} upheld complaints", profile.getId(), upheldCount);
-                    });
-                }
-            });
-        } catch (Exception e) {
-            log.warn("Error during fraud limit check for complaint {}", complaint.getId(), e);
+        ProviderService service = serviceDao.findById(complaint.getServiceId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        // Serialize the threshold decision for every service owned by this profile.
+        // Query execution auto-flushes the current complaint's UPHELD transition.
+        ProviderProfile profile = profileDao.findByIdForUpdate(service.getProfileId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
+        int fraudLimit = fraudFailureLimitSupplier.get().intValue();
+        int upheldCount = complaintDao.countUpheldComplaintsForProfile(service.getProfileId());
+        if (upheldCount >= fraudLimit
+                && !org.pms.silverocean.service.sp.enums.ProviderProfileStatus.BLACKLISTED.name().equals(profile.getStatus())) {
+            profile.setStatus(org.pms.silverocean.service.sp.enums.ProviderProfileStatus.BLACKLISTED.name());
+            profileDao.save(profile, Permission.BLACKLIST_SP);
+            log.info("Profile {} blacklisted due to {} upheld complaints", profile.getId(), upheldCount);
+        }
+    }
+
+    private void requestRefundForUpheldComplaint(ComplaintCase complaint) {
+        ServiceBooking booking = bookingDao.findByIdForUpdate(complaint.getBookingId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_BOOKING_NOT_FOUND));
+        String refundStatus = org.apache.commons.lang3.StringUtils.defaultIfBlank(
+                booking.getRefundStatus(), "NOT_REQUIRED");
+        if ("PAID".equals(booking.getPaymentStatus())
+                && !java.util.Set.of("REQUESTED", "PROCESSING", "CONFIRMED").contains(refundStatus)) {
+            booking.setRefundStatus("REQUESTED");
+            booking.setRefundedAmount(booking.getQuotedAmount());
+            bookingDao.save(booking, "SP_UPHELD_COMPLAINT_REFUND_REQUESTED");
         }
     }
 
@@ -180,11 +226,14 @@ public class ComplaintCaseService {
             serviceDao.findById(complaint.getServiceId()).ifPresent(service ->
                 profileDao.findById(service.getProfileId()).ifPresent(profile ->
                     userDao.findById(profile.getUserId()).ifPresent(user -> {
+                        String serviceName=org.apache.commons.lang3.StringUtils.defaultIfBlank(service.getTitle(),service.getCategoryName());
+                        String safeServiceName=org.springframework.web.util.HtmlUtils.htmlEscape(serviceName);
                         String message = String.format(
                                 i18NService.getLocalizedMessage(NotificationType.SP_COMPLAINT_RECEIVED_EMAIL.getBody()),
-                                service.getCategoryName()
+                                safeServiceName
                         );
-                        notificationService.sendNotification(new NotificationDTO(message, user.getEmail(), NotificationType.SP_COMPLAINT_RECEIVED_EMAIL));
+                        notificationService.queueEmailAndInApp(user.getEmail(),NotificationType.SP_COMPLAINT_RECEIVED_EMAIL,
+                                message,"SERVICE_COMPLAINT_RECEIVED","A customer reported a problem with "+serviceName+". Open /dashboard/marketplace?tab=bookings&bookingId="+complaint.getBookingId()+".");
                     })
                 )
             );
@@ -195,18 +244,32 @@ public class ComplaintCaseService {
 
     private void sendComplaintResolvedNotification(ComplaintCase complaint) {
         try {
-            serviceDao.findById(complaint.getServiceId()).ifPresent(service ->
+            serviceDao.findById(complaint.getServiceId()).ifPresent(service -> {
                 profileDao.findById(service.getProfileId()).ifPresent(profile ->
                     userDao.findById(profile.getUserId()).ifPresent(user -> {
+                        String serviceName=org.apache.commons.lang3.StringUtils.defaultIfBlank(service.getTitle(),service.getCategoryName());
+                        String safeServiceName=org.springframework.web.util.HtmlUtils.htmlEscape(serviceName);
                         String message = String.format(
                                 i18NService.getLocalizedMessage(NotificationType.SP_COMPLAINT_RESOLVED_EMAIL.getBody()),
-                                service.getCategoryName(),
-                                complaint.getResolution() != null ? complaint.getResolution() : ""
+                                safeServiceName,
+                                org.springframework.web.util.HtmlUtils.htmlEscape(
+                                        complaint.getPublicResolution() != null ? complaint.getPublicResolution() : "")
                         );
-                        notificationService.sendNotification(new NotificationDTO(message, user.getEmail(), NotificationType.SP_COMPLAINT_RESOLVED_EMAIL));
+                        notificationService.queueEmailAndInApp(user.getEmail(),NotificationType.SP_COMPLAINT_RESOLVED_EMAIL,
+                                message,"SERVICE_COMPLAINT_RESOLVED","The complaint about "+serviceName+" was reviewed. Open /dashboard/marketplace?tab=bookings&bookingId="+complaint.getBookingId()+".");
                     })
-                )
-            );
+                );
+                userDao.findById(complaint.getFiledByUserId()).ifPresent(customer -> {
+                    String serviceName=org.apache.commons.lang3.StringUtils.defaultIfBlank(service.getTitle(),service.getCategoryName());
+                    String safeServiceName=org.springframework.web.util.HtmlUtils.htmlEscape(serviceName);
+                    String message = String.format(
+                            i18NService.getLocalizedMessage(NotificationType.SP_COMPLAINT_RESOLVED_EMAIL.getBody()),
+                            safeServiceName, org.springframework.web.util.HtmlUtils.htmlEscape(
+                                    complaint.getPublicResolution() != null ? complaint.getPublicResolution() : ""));
+                    notificationService.queueEmailAndInApp(customer.getEmail(), NotificationType.SP_COMPLAINT_RESOLVED_EMAIL,
+                            message, "SERVICE_COMPLAINT_RESOLVED", "Your service complaint was reviewed. Open /dashboard/marketplace?tab=bookings&bookingId="+complaint.getBookingId()+" to see the outcome.");
+                });
+            });
         } catch (Exception e) {
             log.warn("Failed to send complaint resolved notification for complaint {}", complaint.getId(), e);
         }
