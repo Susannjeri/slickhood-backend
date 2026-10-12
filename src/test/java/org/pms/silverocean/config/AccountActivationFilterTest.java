@@ -54,6 +54,12 @@ class AccountActivationFilterTest {
         assertThat(run("/kyc/current").getStatus()).isEqualTo(200);
     }
 
+    @Test void pendingMarketplaceBuyerCanReadCheckoutReadinessButCannotCheckout() throws Exception {
+        pendingCustomer(PMSRole.MARKETPLACE_BUYER);
+        assertThat(run("GET", "/soko/buyer/checkout-profile").getStatus()).isEqualTo(200);
+        assertThat(run("POST", "/soko/order/checkout").getStatus()).isEqualTo(403);
+    }
+
     @Test void pendingKycProviderCanFulfilOrProtectExistingServiceBookingsButCannotAcceptNewWork() throws Exception {
         pendingCustomer(PMSRole.SERVICE_PROVIDER);
 

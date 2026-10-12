@@ -51,6 +51,11 @@ public final class SokoModels {
     /** An authenticated customer's system-linked, server-authoritative delivery destination. */
     public record DeliveryDestination(long unitId, long propertyId, String label, String address,
                                       double latitude, double longitude, String source, boolean preferred) {}
+    /** Authenticated checkout identity. All fields originate from the buyer account, never a shop. */
+    public record BuyerCheckoutProfile(String fullName, String email, String phoneNumber,
+                                       boolean emailVerified, boolean phoneVerified,
+                                       boolean readyForCheckout, List<String> missingRequirements,
+                                       List<DeliveryDestination> deliveryDestinations) {}
     public record ProductImages(long productId, List<String> imageUrls) {}
     public record StoreDetail(PublicStore store, List<PublicProduct> products) {}
     /** Seller-facing rider view. OTP material, internal user links and moderation notes never leave the service. */
@@ -70,7 +75,8 @@ public final class SokoModels {
     /** Buyer/merchant order view. Persistence, routing and recovery-control metadata stay server-side. */
     public record OrderView(long id, String orderNumber, long storeId, String status, String paymentStatus,
                             String invoiceRef, String deliveryMethod, String deliveryAddress,
-                            Double deliveryLatitude, Double deliveryLongitude, String customerPhone, String notes,
+                            Double deliveryLatitude, Double deliveryLongitude, String customerName,
+                            String customerEmail, String customerPhone, String notes,
                             Long destinationUnitId, BigDecimal subtotal, BigDecimal deliveryFee, BigDecimal total,
                             String currency, ZonedDateTime placedAt, ZonedDateTime confirmedAt,
                             ZonedDateTime dispatchedAt, ZonedDateTime completedAt, Long riderId,
@@ -92,6 +98,8 @@ public final class SokoModels {
                     showCustomerDeliveryDetails?order.getDeliveryAddress():null,
                     showCustomerDeliveryDetails?order.getDeliveryLatitude():null,
                     showCustomerDeliveryDetails?order.getDeliveryLongitude():null,
+                    showCustomerDeliveryDetails?order.getCustomerNameSnapshot():null,
+                    showCustomerDeliveryDetails?order.getCustomerEmailSnapshot():null,
                     showCustomerDeliveryDetails?order.getCustomerPhone():null,
                     showCustomerDeliveryDetails?order.getNotes():null,
                     showCustomerDeliveryDetails?order.getDestinationUnitId():null,

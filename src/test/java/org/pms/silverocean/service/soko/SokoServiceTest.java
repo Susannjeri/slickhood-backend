@@ -20,6 +20,7 @@ import org.pms.silverocean.database.pms.entities.SokoProduct;
 import org.pms.silverocean.database.pms.entities.SokoProductVariation;
 import org.pms.silverocean.database.pms.entities.SokoRider;
 import org.pms.silverocean.database.pms.entities.SokoStore;
+import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.auth.dao.UserDao;
@@ -33,6 +34,7 @@ import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.kyc.MarketplaceKycGate;
+import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.visitor.VisitorService;
 import org.pms.silverocean.service.subscription.SubscriptionEntitlementService;
 import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
@@ -546,6 +548,10 @@ class SokoServiceTest {
 
     @BeforeEach void setup(){
         service=new SokoService(stores,products,productImages,variations,orders,financeOperations,items,riders,units,invoices,accounts,users,visitors,garage,malwarePolicy,encryption,notifications,businessAlerts,i18n,marketplaceKycGate,subscriptionEntitlements);
+        Users buyer=new Users();buyer.setId(4L);buyer.setFullName("Jane Buyer");buyer.setEmail("buyer@example.test");buyer.setEmailVerified(true);buyer.setPhoneNumber("0712345678");buyer.setPhoneVerified(true);buyer.setActive(true);buyer.setAccountStatus(AccountStatus.ACTIVE.name());
+        lenient().when(users.getUserObject()).thenReturn(buyer);
+        lenient().when(users.getCurrentAccessState()).thenReturn(Optional.of(
+                new UserDao.AccountAccessState(4L,true,AccountStatus.ACTIVE.name())));
         lenient().when(users.getActiveRole()).thenReturn(PMSRole.SERVICE_PROVIDER);
         lenient().when(stores.findByIdForCheckout(anyLong())).thenAnswer(call->stores.findByIdAndActiveTrue(call.getArgument(0)));
         lenient().when(orders.findPendingCheckoutForUpdate(anyLong(),anyLong(),any())).thenReturn(List.of());
@@ -851,6 +857,23 @@ class SokoServiceTest {
         SokoProduct published=service.publishProduct(5L);assertEquals("FRESH_PRODUCE",published.getCategory());assertEquals("PUBLISHED",published.getStatus());verify(marketplaceKycGate).require(eq(7L),eq("SOKO_CATEGORY"),eq("FRESH_PRODUCE"),any());
     }
 
+    @Test void productPublishRejectsInactiveAndRemovedRowsButKeepsPublishedRetriesIdempotent(){
+        SokoStore store=publishedStore();SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setName("Carrots");product.setCategory("FRESH_PRODUCE");product.setImageUrl("legacy.jpg");product.setStockQuantity(2);
+        when(users.getUserId()).thenReturn(7L);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));
+        product.setActive(false);product.setStatus("REMOVED");assertThrows(PMSCustomException.class,()->service.publishProduct(5L));
+        product.setActive(true);product.setStatus("REMOVED");assertThrows(PMSCustomException.class,()->service.publishProduct(5L));
+        product.setStatus("PUBLISHED");assertSame(product,service.publishProduct(5L));
+        verify(products,never()).save(any());verifyNoInteractions(marketplaceKycGate);
+    }
+
+    @Test void productModerationCannotApproveOrRejectSellerDrafts(){
+        SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setStatus("DRAFT");product.setActive(true);
+        when(users.getActiveRole()).thenReturn(PMSRole.SUPER_ADMIN);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));
+        assertThrows(PMSCustomException.class,()->service.moderateProduct(5L,new SokoRequests.ModerationDecision("APPROVE",null)));
+        assertThrows(PMSCustomException.class,()->service.moderateProduct(5L,new SokoRequests.ModerationDecision("REJECT","Not approved")));
+        verify(products,never()).save(any());verifyNoInteractions(marketplaceKycGate);
+    }
+
     @Test void legacyNonGroceryDraftCannotBePublished(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setName("Headphones");product.setCategory("Electronics & accessories");product.setImageUrl("https://images.example.test/headphones.jpg");product.setStockQuantity(2);product.setActive(true);product.setStatus("DRAFT");
         when(users.getUserId()).thenReturn(7L);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));when(stores.findByIdAndOwnerUserIdAndActiveTrue(2L,7L)).thenReturn(Optional.of(store));
@@ -907,6 +930,17 @@ class SokoServiceTest {
         SokoProduct updated=service.updateProduct(5L,request);
 
         assertEquals("DRAFT",updated.getStatus());assertEquals("Premium carrots",updated.getName());
+    }
+
+    @Test void sellerEditRecoversLegacyRejectedProductAsDraftForDirectPublishing(){
+        merchant();SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setName("Carrots");product.setDescription("Fresh");product.setCategory("FRESH_PRODUCE");product.setUnit("kg");product.setPrice(new BigDecimal("80"));product.setStockQuantity(10);product.setStatus("REJECTED");product.setActive(true);
+        when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));when(variations.findAllByProductIdAndActiveTrueOrderByNameAscValueAsc(5L)).thenReturn(List.of());when(products.save(any())).thenAnswer(i->i.getArgument(0));
+
+        var request=new SokoRequests.ProductUpsert(2L,"Carrots","Fresh","FRESH_PRODUCE","kg",new BigDecimal("80"),7,null,null);
+        SokoProduct updated=service.updateProduct(5L,request);
+
+        assertEquals("DRAFT",updated.getStatus());assertEquals(7,updated.getStockQuantity());
+        verify(products).save(product);
     }
 
     @Test void stockOnlyPublishedProductUpdateRemainsSaleable(){
@@ -1232,7 +1266,7 @@ class SokoServiceTest {
 
     @Test void checkoutRejectsSelfOrdersBeforeStockOrInvoiceMutation(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(4L);store.setStatus("PUBLISHED");store.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"self-order")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"self-order")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678",null,null);
 
         PMSCustomException failure=assertThrows(PMSCustomException.class,()->service.checkout(request,"self-order"));
@@ -1241,7 +1275,6 @@ class SokoServiceTest {
     }
 
     @Test void checkoutEnforcesProductionCartCapsEvenWhenCalledOutsideTheController(){
-        when(users.getUserId()).thenReturn(4L);
         var tooManyLines=new SokoRequests.Checkout(2L,java.util.stream.LongStream.rangeClosed(1,26).mapToObj(id->new SokoRequests.CheckoutItem(id,1)).toList(),"PICKUP",null,"0712345678",null,null);
         var excessiveQuantity=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,101)),"PICKUP",null,"0712345678",null,null);
 
@@ -1254,7 +1287,7 @@ class SokoServiceTest {
     @Test void checkoutBlocksASecondLiveUnpaidOrderAfterTakingTheStoreLock(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);
         SokoOrder unpaid=new SokoOrder();unpaid.setId(9L);unpaid.setStoreId(2L);unpaid.setCustomerUserId(4L);unpaid.setStatus("PENDING_PAYMENT");unpaid.setReservationExpiresAt(ZonedDateTime.now().plusMinutes(5));unpaid.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"second-order")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(orders.findPendingCheckoutForUpdate(eq(4L),eq(2L),any())).thenReturn(List.of(unpaid));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"second-order")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(orders.findPendingCheckoutForUpdate(eq(4L),eq(2L),any())).thenReturn(List.of(unpaid));
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678",null,null);
 
         PMSCustomException failure=assertThrows(PMSCustomException.class,()->service.checkout(request,"second-order"));
@@ -1266,7 +1299,7 @@ class SokoServiceTest {
         SokoStore store=new SokoStore();store.setId(2L);store.setName("Fresh Corner");store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);
         SokoOrder winner=new SokoOrder();winner.setId(9L);winner.setStoreId(2L);winner.setCustomerUserId(4L);winner.setCheckoutIdempotencyKey("same-key");winner.setDeliveryMethod("PICKUP");winner.setCustomerPhone("0712345678");winner.setActive(true);
         SokoOrderItem item=new SokoOrderItem();item.setOrderId(9L);item.setProductId(5L);item.setQuantity(1);item.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"same-key")).thenReturn(Optional.empty(),Optional.of(winner));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"same-key")).thenReturn(Optional.empty(),Optional.of(winner));when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678",null,null);
 
         assertEquals(9L,service.checkout(request,"same-key").order().id());
@@ -1276,7 +1309,7 @@ class SokoServiceTest {
 
     @Test void newCheckoutRejectsSellerWithoutActiveSokoSubscriptionBeforeStockReservation(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"inactive-seller")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"inactive-seller")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
         doThrow(new PMSCustomException(org.pms.silverocean.common.ResponseCode.SUBSCRIPTION_ACCESS_REQUIRED))
                 .when(subscriptionEntitlements).requireActiveProductForOwner(7L,SubscriptionProduct.SOKO);
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678",null,null);
@@ -1289,7 +1322,7 @@ class SokoServiceTest {
 
     @Test void checkoutRechecksCurrentMerchantKycBeforeStockReservation(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"revoked-merchant-kyc")).thenReturn(Optional.empty());when(stores.findByIdForCheckout(2L)).thenReturn(Optional.of(store));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"revoked-merchant-kyc")).thenReturn(Optional.empty());when(stores.findByIdForCheckout(2L)).thenReturn(Optional.of(store));
         doThrow(new PMSCustomException(org.pms.silverocean.common.ResponseCode.KYC_MISSING_DOCUMENTS))
                 .when(marketplaceKycGate).require(eq(7L),eq("PROVIDER_TYPE"),eq("SOKO_MERCHANT"),any());
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678",null,null);
@@ -1305,7 +1338,7 @@ class SokoServiceTest {
         SokoStore store=publishedStore();
         var account=new org.pms.silverocean.database.pms.entities.PaymentAccount();account.setActive(true);account.setVerified(true);account.setCreatedBy(7L);account.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);account.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);
         SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setName("Carrots");product.setCategory("FRESH_PRODUCE");product.setUnit("kg");product.setPrice(new BigDecimal("80"));product.setCurrency("KES");product.setStockQuantity(10);product.setStatus("PUBLISHED");product.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"expired-category-kyc")).thenReturn(Optional.empty());when(stores.findByIdForCheckout(2L)).thenReturn(Optional.of(store));when(accounts.getAccountByIdAndCreatedBy(3L,7L)).thenReturn(account);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"expired-category-kyc")).thenReturn(Optional.empty());when(stores.findByIdForCheckout(2L)).thenReturn(Optional.of(store));when(accounts.getAccountByIdAndCreatedBy(3L,7L)).thenReturn(account);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));
         doNothing().when(marketplaceKycGate).require(eq(7L),eq("PROVIDER_TYPE"),eq("SOKO_MERCHANT"),any());
         doThrow(new PMSCustomException(org.pms.silverocean.common.ResponseCode.KYC_MISSING_DOCUMENTS))
                 .when(marketplaceKycGate).require(eq(7L),eq("SOKO_CATEGORY"),eq("FRESH_PRODUCE"),any());
@@ -1359,7 +1392,7 @@ class SokoServiceTest {
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);store.setPickupEnabled(true);store.setAddress("Market Road");store.setLatitude(-1.28);store.setLongitude(36.82);store.setCurrency("KES");store.setPaymentAccountId(3L);
         var account=new org.pms.silverocean.database.pms.entities.PaymentAccount();account.setActive(true);account.setVerified(true);account.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);account.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);
         SokoProduct otherSellerProduct=new SokoProduct();otherSellerProduct.setId(5L);otherSellerProduct.setStoreId(99L);otherSellerProduct.setStatus("PUBLISHED");otherSellerProduct.setStockQuantity(10);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"one-seller-only")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(accounts.getAccountByIdAndCreatedBy(3L,7L)).thenReturn(account);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(otherSellerProduct));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"one-seller-only")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(accounts.getAccountByIdAndCreatedBy(3L,7L)).thenReturn(account);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(otherSellerProduct));
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678",null,null);
         assertThrows(PMSCustomException.class,()->service.checkout(request,"one-seller-only"));
         verify(orders,never()).save(any());verify(invoices,never()).createInvoice(any());verify(products,never()).save(any());
@@ -1369,7 +1402,7 @@ class SokoServiceTest {
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);store.setPickupEnabled(true);store.setAddress("Market Road");store.setLatitude(-1.28);store.setLongitude(36.82);store.setCurrency("KES");store.setPaymentAccountId(3L);
         var account=new org.pms.silverocean.database.pms.entities.PaymentAccount();account.setActive(true);account.setVerified(true);account.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);account.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);
         SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setCategory("FRESH_PRODUCE");product.setStatus("PUBLISHED");product.setCurrency("USD");product.setStockQuantity(10);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"currency-mismatch")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(accounts.getAccountByIdAndCreatedBy(3L,7L)).thenReturn(account);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"currency-mismatch")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(accounts.getAccountByIdAndCreatedBy(3L,7L)).thenReturn(account);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678",null,null);
         assertThrows(PMSCustomException.class,()->service.checkout(request,"currency-mismatch"));assertEquals(10,product.getStockQuantity());verify(products,never()).save(any());verify(orders,never()).save(any());verify(invoices,never()).createInvoice(any());
     }
@@ -1379,9 +1412,38 @@ class SokoServiceTest {
         var account=new org.pms.silverocean.database.pms.entities.PaymentAccount();account.setActive(true);account.setVerified(true);account.setCreatedBy(7L);account.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);account.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);
         SokoProduct product=new SokoProduct();product.setId(5L);product.setStoreId(2L);product.setName("Milk");product.setCategory("DAIRY_EGGS");product.setUnit("litre");product.setPrice(new BigDecimal("120"));product.setCurrency("KES");product.setStockQuantity(3);product.setStatus("PUBLISHED");product.setActive(true);
         when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"delivery-pin-1")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(accounts.getAccountByIdAndCreatedBy(3L,7L)).thenReturn(account);when(accounts.getAccountById(3L)).thenReturn(account);when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));when(variations.findAllByProductIdAndActiveTrueOrderByNameAscValueAsc(5L)).thenReturn(List.of());when(orders.save(any())).thenAnswer(invocation->{SokoOrder saved=invocation.getArgument(0);if(saved.getId()==null)saved.setId(9L);return saved;});when(items.save(any())).thenAnswer(invocation->invocation.getArgument(0));doAnswer(invocation->{org.pms.silverocean.database.pms.entities.PMSInvoice invoice=invocation.getArgument(0);invoice.setRef("INV-9");return null;}).when(invoices).createInvoice(any());
-        var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY","Kenyatta Avenue","0712345678",null,null,-1.2900,36.8200);
+        var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY","Kenyatta Avenue","+254799999999",null,null,-1.2900,36.8200);
         var result=service.checkout(request,"delivery-pin-1");
-        assertEquals(-1.2900,result.order().deliveryLatitude());assertEquals(36.8200,result.order().deliveryLongitude());assertEquals("Kenyatta Avenue",result.order().deliveryAddress());assertEquals("+254712345678",result.order().customerPhone());assertEquals("Fresh Corner",result.storeName());assertEquals("Market Road",result.storeAddress());assertEquals(-1.286389,result.storeLatitude());assertEquals(36.817223,result.storeLongitude());verify(invoices).createInvoice(any());
+        assertEquals(-1.2900,result.order().deliveryLatitude());assertEquals(36.8200,result.order().deliveryLongitude());assertEquals("Kenyatta Avenue",result.order().deliveryAddress());assertEquals("Jane Buyer",result.order().customerName());assertEquals("buyer@example.test",result.order().customerEmail());assertEquals("+254712345678",result.order().customerPhone());assertEquals("Fresh Corner",result.storeName());assertEquals("Market Road",result.storeAddress());assertEquals(-1.286389,result.storeLatitude());assertEquals(36.817223,result.storeLongitude());
+        var invoice=org.mockito.ArgumentCaptor.forClass(org.pms.silverocean.database.pms.entities.PMSInvoice.class);verify(invoices).createInvoice(invoice.capture());assertEquals("buyer@example.test",invoice.getValue().getCustomerEmail());assertEquals("+254712345678",invoice.getValue().getCustomerPhoneNumber());
+    }
+
+    @Test void checkoutProfileReportsAuthoritativeVerificationAndSavedDestinations(){
+        var tenancy=destination(11L,21L,"A-11","Alpha Court","Alpha Road","-1.2862,36.8174");
+        when(units.findAcceptedTenancyDeliveryDestinations(4L)).thenReturn(List.of(tenancy));when(units.findHomeownerDeliveryDestinations(4L)).thenReturn(List.of());
+        var profile=service.buyerCheckoutProfile();
+        assertTrue(profile.readyForCheckout());assertTrue(profile.emailVerified());assertTrue(profile.phoneVerified());assertEquals("Jane Buyer",profile.fullName());assertEquals("buyer@example.test",profile.email());assertEquals("+254712345678",profile.phoneNumber());assertTrue(profile.missingRequirements().isEmpty());assertEquals(11L,profile.deliveryDestinations().getFirst().unitId());assertTrue(profile.deliveryDestinations().getFirst().preferred());
+    }
+
+    @Test void checkoutProfileAndCheckoutFailClosedWhenPhoneIsNotVerified(){
+        Users buyer=users.getUserObject();buyer.setPhoneVerified(false);buyer.setAccountStatus(AccountStatus.PENDING_KYC.name());
+        assertTrue(buyer.isActive());
+        when(users.getCurrentAccessState()).thenReturn(Optional.of(
+                new UserDao.AccountAccessState(4L,true,AccountStatus.PENDING_KYC.name())));
+        var profile=service.buyerCheckoutProfile();assertFalse(profile.readyForCheckout());assertTrue(profile.missingRequirements().contains("VERIFIED_PHONE"));assertTrue(profile.missingRequirements().contains("ACTIVE_ACCOUNT"));assertTrue(profile.deliveryDestinations().isEmpty());
+        var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"+254799999999",null,null);
+        assertThrows(PMSCustomException.class,()->service.checkout(request,"unverified-buyer"));verifyNoInteractions(units,stores,products,variations,orders,items,invoices,accounts,subscriptionEntitlements);
+    }
+
+    @Test void checkoutProfileDoesNotDiscloseSavedDestinationsToSuspendedOrInactiveBuyer(){
+        Users buyer=users.getUserObject();assertTrue(buyer.isActive());
+        when(users.getCurrentAccessState()).thenReturn(Optional.of(
+                new UserDao.AccountAccessState(4L,false,AccountStatus.ACTIVE.name())));
+
+        var profile=service.buyerCheckoutProfile();
+
+        assertFalse(profile.readyForCheckout());assertTrue(profile.missingRequirements().contains("ACTIVE_ACCOUNT"));
+        assertTrue(profile.deliveryDestinations().isEmpty());verifyNoInteractions(units);
     }
 
     @Test void deliveryDestinationsUseOnlyCurrentUsersActiveResidencesAndPreferLatestCompletedAddress(){
@@ -1418,7 +1480,6 @@ class SokoServiceTest {
     }
 
     @Test void deliveryCheckoutRejectsArbitrarySystemUnitBeforeReadingShopOrMutatingStock(){
-        when(users.getUserId()).thenReturn(4L);
         when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"unknown-home")).thenReturn(Optional.empty());
         when(units.findAcceptedTenancyDeliveryDestinations(4L)).thenReturn(List.of());
         when(units.findHomeownerDeliveryDestinations(4L)).thenReturn(List.of());
@@ -1448,7 +1509,6 @@ class SokoServiceTest {
     }
 
     @Test void pickupRejectsSavedDestinationBeforeShopOrStockAccess(){
-        when(users.getUserId()).thenReturn(4L);
         when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"pickup-home")).thenReturn(Optional.empty());
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",
                 null,"0712345678",null,12L,null,null);
@@ -1463,7 +1523,7 @@ class SokoServiceTest {
         SokoStore store=new SokoStore();store.setId(2L);store.setName("Fresh Corner");
         SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setCheckoutIdempotencyKey("saved-replay");order.setDeliveryMethod("DELIVERY");order.setDeliveryAddress("Beta Road, B-12");order.setDeliveryLatitude(-1.2870);order.setDeliveryLongitude(36.8180);order.setDestinationUnitId(12L);order.setCustomerPhone("0712345678");order.setActive(true);
         SokoOrderItem item=new SokoOrderItem();item.setOrderId(9L);item.setProductId(5L);item.setQuantity(1);item.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"saved-replay")).thenReturn(Optional.of(order));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"saved-replay")).thenReturn(Optional.of(order));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
         var sameUnit=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY",
                 "Spoofed but ignored","0712345678",null,12L,40.0000,-70.0000);
         var changedUnit=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY",
@@ -1476,7 +1536,7 @@ class SokoServiceTest {
 
     @Test void deliveryCheckoutRejectsMissingOrOutsideLocationBeforeStockAndInvoice(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);store.setDeliveryEnabled(true);store.setLatitude(-1.286389);store.setLongitude(36.817223);store.setServiceRadiusKm(new BigDecimal("2"));
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(eq(4L),anyString())).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(eq(4L),anyString())).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
         var missing=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY","Kenyatta Avenue","0712345678",null,null,null,null);
         var outside=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY","Thika","0712345678",null,null,-1.0332,37.0693);
         assertThrows(PMSCustomException.class,()->service.checkout(missing,"delivery-missing"));assertThrows(PMSCustomException.class,()->service.checkout(outside,"delivery-outside"));verifyNoInteractions(products,invoices,accounts);
@@ -1484,42 +1544,42 @@ class SokoServiceTest {
 
     @Test void deliveryCheckoutRejectsShopWithoutMappedServiceArea(){
         SokoStore store=new SokoStore();store.setId(2L);store.setOwnerUserId(7L);store.setStatus("PUBLISHED");store.setActive(true);store.setDeliveryEnabled(true);store.setServiceRadiusKm(new BigDecimal("5"));
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"shop-location-missing")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"shop-location-missing")).thenReturn(Optional.empty());when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY","Kenyatta Avenue","0712345678",null,null,-1.2900,36.8200);
         assertThrows(PMSCustomException.class,()->service.checkout(request,"shop-location-missing"));verifyNoInteractions(products,invoices,accounts);
     }
 
     @Test void repeatedCheckoutKeyReturnsOriginalOrderWithoutReservingStockAgain(){
         SokoStore store=new SokoStore();store.setId(2L);store.setName("Fresh Corner");SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setCheckoutIdempotencyKey("checkout-1");order.setDeliveryMethod("PICKUP");order.setCustomerPhone("0712345678");order.setActive(true);SokoOrderItem item=new SokoOrderItem();item.setOrderId(9L);item.setProductId(5L);item.setQuantity(1);item.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"checkout-1")).thenReturn(Optional.of(order));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"checkout-1")).thenReturn(Optional.of(order));when(stores.findById(2L)).thenReturn(Optional.of(store));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"+254 712 345 678",null,null);
         assertEquals(9L,service.checkout(request,"checkout-1").order().id());verifyNoInteractions(products);
     }
 
     @Test void repeatedCheckoutKeyRejectsChangedSellerBeforeMutation(){
         SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setCheckoutIdempotencyKey("checkout-1");order.setDeliveryMethod("PICKUP");order.setCustomerPhone("0712345678");order.setActive(true);SokoOrderItem item=new SokoOrderItem();item.setOrderId(9L);item.setProductId(5L);item.setQuantity(1);item.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"checkout-1")).thenReturn(Optional.of(order));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"checkout-1")).thenReturn(Optional.of(order));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
         var changedSeller=new SokoRequests.Checkout(3L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678",null,null);
         assertThrows(PMSCustomException.class,()->service.checkout(changedSeller,"checkout-1"));verifyNoInteractions(products,invoices);verify(stores,never()).findById(anyLong());
     }
 
     @Test void repeatedCheckoutKeyRejectsChangedProductVariationOrQuantityBeforeMutation(){
         SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setCheckoutIdempotencyKey("checkout-1");order.setDeliveryMethod("DELIVERY");order.setDeliveryAddress("Market Road");order.setCustomerPhone("0712345678");order.setDestinationUnitId(12L);order.setActive(true);SokoOrderItem item=new SokoOrderItem();item.setOrderId(9L);item.setProductId(5L);item.setVariationId(11L);item.setQuantity(2);item.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"checkout-1")).thenReturn(Optional.of(order));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"checkout-1")).thenReturn(Optional.of(order));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
         var changedItems=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,3,12L)),"DELIVERY","Market Road","0712345678",null,12L);
         assertThrows(PMSCustomException.class,()->service.checkout(changedItems,"checkout-1"));verifyNoInteractions(products,invoices);verify(stores,never()).findById(anyLong());
     }
 
     @Test void repeatedCheckoutKeyRejectsChangedDeliveryNotes(){
         SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setCheckoutIdempotencyKey("checkout-1");order.setDeliveryMethod("PICKUP");order.setCustomerPhone("0712345678");order.setNotes("Call on arrival");order.setActive(true);SokoOrderItem item=new SokoOrderItem();item.setOrderId(9L);item.setProductId(5L);item.setQuantity(1);item.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"checkout-1")).thenReturn(Optional.of(order));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"checkout-1")).thenReturn(Optional.of(order));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
         var changedNotes=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678","Leave with security",null);
         assertThrows(PMSCustomException.class,()->service.checkout(changedNotes,"checkout-1"));verifyNoInteractions(products,invoices);verify(stores,never()).findById(anyLong());
     }
 
     @Test void repeatedCheckoutKeyRejectsChangedDeliveryPin(){
         SokoOrder order=new SokoOrder();order.setId(9L);order.setStoreId(2L);order.setCustomerUserId(4L);order.setCheckoutIdempotencyKey("checkout-1");order.setDeliveryMethod("DELIVERY");order.setDeliveryAddress("Market Road");order.setDeliveryLatitude(-1.2800);order.setDeliveryLongitude(36.8200);order.setCustomerPhone("0712345678");order.setActive(true);SokoOrderItem item=new SokoOrderItem();item.setOrderId(9L);item.setProductId(5L);item.setQuantity(1);item.setActive(true);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"checkout-1")).thenReturn(Optional.of(order));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"checkout-1")).thenReturn(Optional.of(order));when(items.findAllByOrderIdAndActiveTrueOrderById(9L)).thenReturn(List.of(item));
         var changedPin=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"DELIVERY","Market Road","0712345678",null,null,-1.2900,36.8300);
         assertThrows(PMSCustomException.class,()->service.checkout(changedPin,"checkout-1"));verifyNoInteractions(products,invoices);verify(stores,never()).findById(anyLong());
     }
@@ -1743,25 +1803,22 @@ class SokoServiceTest {
         var account=new org.pms.silverocean.database.pms.entities.PaymentAccount();
         account.setActive(true);account.setVerified(true);account.setCategory(org.pms.silverocean.service.account.enums.AccountCategory.MERCHANT);
         account.setChannel(org.pms.silverocean.service.payment.wrappers.PaymentChannel.MPESA);
-        when(users.getUserId()).thenReturn(4L);when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"stock-check")).thenReturn(Optional.empty());when(accounts.getAccountByIdAndCreatedBy(3L,store.getOwnerUserId())).thenReturn(account);
+        when(orders.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(4L,"stock-check")).thenReturn(Optional.empty());when(accounts.getAccountByIdAndCreatedBy(3L,store.getOwnerUserId())).thenReturn(account);
         when(stores.findByIdAndActiveTrue(2L)).thenReturn(Optional.of(store));when(products.findByIdForUpdate(5L)).thenReturn(Optional.of(product));
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,2)),"PICKUP",null,"0712345678",null,null);
         assertThrows(PMSCustomException.class,()->service.checkout(request,"stock-check"));verify(orders,never()).save(any());
     }
 
     @Test void checkoutRejectsBlankIdempotencyKeyBeforeReadingOrReservingCart(){
-        when(users.getUserId()).thenReturn(4L);
         var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"0712345678",null,null);
         assertThrows(PMSCustomException.class,()->service.checkout(request,"   "));
         verifyNoInteractions(stores,products,variations,orders,items,invoices,accounts);
     }
 
-    @Test void checkoutRejectsMalformedCustomerPhoneBeforeAnyReservationOrSellerLookup(){
-        when(users.getUserId()).thenReturn(4L);
-        var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"call-me",null,null);
-
-        assertThrows(PMSCustomException.class,()->service.checkout(request,"bad-phone"));
-
+    @Test void checkoutDoesNotTrustClientSuppliedPhoneBeforeAnyReservation(){
+        Users buyer=users.getUserObject();buyer.setPhoneVerified(false);
+        var request=new SokoRequests.Checkout(2L,List.of(new SokoRequests.CheckoutItem(5L,1)),"PICKUP",null,"+254799999999",null,null);
+        assertThrows(PMSCustomException.class,()->service.checkout(request,"spoofed-phone"));
         verifyNoInteractions(stores,products,variations,orders,items,invoices,accounts,subscriptionEntitlements);
     }
 

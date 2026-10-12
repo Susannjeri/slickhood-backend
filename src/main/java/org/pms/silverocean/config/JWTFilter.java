@@ -48,7 +48,7 @@ public class JWTFilter extends GenericFilter {
         // Rider assignment links carry their own narrow, assignment-scoped
         // bearer. Ignore a stale browser login on this public endpoint so an
         // unrelated expired session cannot prevent the rider from responding.
-        if (isPublicRiderAssignment(httpRequest)) {
+        if (isPublicRiderAssignment(httpRequest) || isPublicSokoCatalogRead(httpRequest)) {
             httpResponse.setHeader("Cache-Control", "no-store, max-age=0");
             httpResponse.setHeader("Pragma", "no-cache");
             httpResponse.setHeader("Referrer-Policy", "no-referrer");
@@ -172,6 +172,25 @@ public class JWTFilter extends GenericFilter {
         }
         return path.equals("/soko/public/rider-assignment")
                 || path.startsWith("/soko/public/rider-assignment/");
+    }
+
+    /**
+     * Product discovery is intentionally anonymous. A browser may still carry
+     * an expired account token after following a public website link; that
+     * unrelated token must not turn a public catalogue request into a 401.
+     * Checkout and every customer-specific route continue through normal JWT
+     * validation.
+     */
+    private boolean isPublicSokoCatalogRead(HttpServletRequest request) {
+        if (!"GET".equalsIgnoreCase(request.getMethod())) return false;
+        String path = request.getServletPath();
+        if (StringUtils.isBlank(path)) path = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (StringUtils.isNotBlank(contextPath) && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        return path.equals("/soko/catalog") || path.startsWith("/soko/catalog/")
+                || path.equals("/soko/categories");
     }
 
     private String normalizeRole(String role) {

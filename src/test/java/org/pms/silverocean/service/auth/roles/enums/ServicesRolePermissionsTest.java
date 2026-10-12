@@ -31,7 +31,7 @@ class ServicesRolePermissionsTest {
 
     @Test
     void buyerCapableRolesCanUseTheCompleteBuyerJourneyButNotSellerOrAdminFunctions() {
-        for (PMSPermission role : Set.of(PMSPermission.TENANT, PMSPermission.HOMEOWNER,
+        for (PMSPermission role : Set.of(PMSPermission.MARKETPLACE_BUYER,PMSPermission.TENANT, PMSPermission.HOMEOWNER,
                 PMSPermission.BUYER, PMSPermission.LANDLORD_PERMISSIONS, PMSPermission.PROPERTY_MANAGER,
                 PMSPermission.ESTATE_MANAGER)) {
             assertThat(role.getPermissions())
@@ -39,6 +39,16 @@ class ServicesRolePermissionsTest {
                     .doesNotContainAnyElementsOf(SELLER_FUNCTIONS)
                     .doesNotContainAnyElementsOf(ADMIN_MUTATIONS);
         }
+    }
+
+    @Test
+    void marketplaceBuyerHasNoSellerPropertyOrAdministrativeCapability() {
+        assertThat(PMSRole.MARKETPLACE_BUYER.isSelfAssignable()).isTrue();
+        assertThat(PMSPermission.MARKETPLACE_BUYER.getPermissions())
+                .containsAll(BUYER_FUNCTIONS)
+                .doesNotContainAnyElementsOf(SELLER_FUNCTIONS)
+                .doesNotContainAnyElementsOf(ADMIN_MUTATIONS)
+                .doesNotContain(CREATE_PROPERTY,CREATE_UNIT,CREATE_ACCOUNT,RECORD_MANUAL_PAYMENT);
     }
 
     @Test

@@ -24,6 +24,7 @@ import org.pms.silverocean.database.pms.entities.SokoProductImage;
 import org.pms.silverocean.database.pms.entities.SokoProductVariation;
 import org.pms.silverocean.database.pms.entities.SokoRider;
 import org.pms.silverocean.database.pms.entities.SokoStore;
+import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
 import org.pms.silverocean.service.account.enums.AccountCategory;
@@ -36,6 +37,7 @@ import org.pms.silverocean.service.filestorage.UploadMalwarePolicy;
 import org.pms.silverocean.service.security.EncryptionService;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.kyc.MarketplaceKycGate;
+import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.subscription.SubscriptionEntitlementService;
 import org.pms.silverocean.service.subscription.enums.SubscriptionProduct;
 import org.pms.silverocean.service.users.ProfileType;
@@ -174,6 +176,37 @@ public class SokoService {
     public List<DeliveryDestination> deliveryDestinations() {
         requireBuyerPersona();
         long userId=userDao.getUserId();
+        return deliveryDestinationsForUser(userId);
+    }
+
+    public SokoModels.BuyerCheckoutProfile buyerCheckoutProfile() {
+        requireBuyerPersona();
+        Users buyer=currentBuyer();
+        UserDao.AccountAccessState accessState=currentBuyerAccessState(buyer);
+        String fullName=StringUtils.trimToNull(buyer.getFullName());
+        String email=StringUtils.lowerCase(StringUtils.trimToNull(buyer.getEmail()),Locale.ROOT);
+        String phone=null;
+        if(StringUtils.isNotBlank(buyer.getPhoneNumber())){
+            try{phone=normalizeRequiredPhone(buyer.getPhoneNumber(),"Verify a valid buyer phone number before checkout.");}
+            catch(PMSCustomException ignored){phone=null;}
+        }
+        boolean emailVerified=buyer.isEmailVerified()&&PMSUtils.isValidEmail(email);
+        boolean phoneVerified=buyer.isPhoneVerified()&&phone!=null;
+        boolean activeAccount=AccountStatus.ACTIVE.name().equals(accessState.operationalAccountStatus());
+        List<String> missing=new ArrayList<>();
+        if(!activeAccount)missing.add("ACTIVE_ACCOUNT");
+        if(fullName==null)missing.add("FULL_NAME");
+        if(!emailVerified)missing.add("VERIFIED_EMAIL");
+        if(!phoneVerified)missing.add("VERIFIED_PHONE");
+        // The profile path is available while a buyer finishes contact
+        // verification. Property-linked addresses are not onboarding data and
+        // must never be disclosed to a pending, suspended or inactive account.
+        List<DeliveryDestination> destinations=activeAccount?deliveryDestinationsForUser(buyer.getId()):List.of();
+        return new SokoModels.BuyerCheckoutProfile(fullName,email,phone,emailVerified,phoneVerified,missing.isEmpty(),
+                List.copyOf(missing),destinations);
+    }
+
+    private List<DeliveryDestination> deliveryDestinationsForUser(long userId) {
         List<SystemDestination> destinations=authorizedSystemDestinations(userId);
         Long preferredUnitId=null;
         if(destinations.size()==1)preferredUnitId=destinations.getFirst().unitId();
@@ -232,7 +265,7 @@ public class SokoService {
 
     @Transactional
     public SokoProduct createProduct(SokoRequests.ProductUpsert request){
-        SokoStore store=ownedStore(request.storeId()); SokoProduct p=new SokoProduct(); p.setStoreId(store.getId()); p.setCreatedBy(userDao.getUserId()); p.setActive(true); p.setStatus(DRAFT); applyProduct(p,request,store); p=productRepo.save(p);syncVariations(p,request.variations());return productRepo.save(p);
+        SokoStore store=ownedStore(request.storeId()); SokoProduct p=new SokoProduct(); p.setStoreId(store.getId()); p.setCreatedBy(userDao.getUserId()); p.setActive(true); p.setStatus(DRAFT); applyProduct(p,request,store); p=productRepo.save(p);syncVariations(p,request.variations());p=productRepo.save(p);audit(p,"SOKO_PRODUCT_CREATED_DRAFT");return p;
     }
 
     @Transactional
@@ -244,18 +277,29 @@ public class SokoService {
         String previousStatus=p.getStatus();applyProduct(p,request,store);
         if(request.variations()==null&&!currentVariations.isEmpty())p.setStockQuantity(currentVariations.stream().mapToInt(SokoProductVariation::getStockQuantity).sum());
         if(request.variations()!=null){if(sameVariationStructure(currentVariations,request.variations()))updateVariationStock(p,currentVariations,request.variations());else syncVariations(p,request.variations());}
-        if(materialChange&&List.of(PUBLISHED,OUT_OF_STOCK).contains(previousStatus))p.setStatus(DRAFT);
+        // Product approval was removed from the seller journey. Legacy rows
+        // rejected by the old workflow become seller-owned drafts as soon as
+        // the merchant edits them, even when the edit is stock-only.
+        if(REJECTED.equals(previousStatus))p.setStatus(DRAFT);
+        else if(materialChange&&List.of(PUBLISHED,OUT_OF_STOCK).contains(previousStatus))p.setStatus(DRAFT);
         else if(!materialChange&&PUBLISHED.equals(previousStatus)&&p.getStockQuantity()==0)p.setStatus(OUT_OF_STOCK);
         else if(!materialChange&&OUT_OF_STOCK.equals(previousStatus)&&p.getStockQuantity()>0)p.setStatus(PUBLISHED);
-        return productRepo.save(p);
+        p=productRepo.save(p);audit(p,"SOKO_PRODUCT_UPDATED_"+p.getStatus());return p;
     }
 
     @Transactional
     public SokoProduct publishProduct(long id){
         SokoProduct p=productRepo.findByIdForUpdate(id).orElseThrow(this::notFound);
         SokoStore store=ownedStore(p.getStoreId());
-        if(SUSPENDED.equals(p.getStatus()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
-                "This product is suspended and cannot be published until its moderation issue is resolved.");
+        if(!p.isActive())throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Only an active product can be published.");
+        // A lost successful response is safe to replay. No transition, KYC
+        // call, notification or duplicate audit event is produced.
+        if(PUBLISHED.equals(p.getStatus()))return p;
+        if(!List.of(DRAFT,"PAUSED",OUT_OF_STOCK).contains(p.getStatus()))
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    SUSPENDED.equals(p.getStatus())
+                            ?"This product is suspended and cannot be published until its moderation issue is resolved."
+                            :"Only an active draft, paused or restocked product can be published.");
         if(!PUBLISHED.equals(store.getStatus())){
             String message=PENDING_REVIEW.equals(store.getStatus())
                     ? "Your shop is awaiting approval. Publish products after the shop has been approved."
@@ -267,7 +311,7 @@ public class SokoService {
         marketplaceKycGate.require(store.getOwnerUserId(),"SOKO_CATEGORY",p.getCategory(),profileType(store.getOwnerUserId()));
         if(StringUtils.isBlank(p.getImageUrl())&&productImageRepo.findAllByProductIdAndActiveTrueOrderByDisplayOrderAsc(id).isEmpty())
             throw new PMSCustomException(ResponseCode.INVALID_IMAGE,"Add at least one JPEG, PNG or WebP product photo before publishing.");
-        p.setStatus(p.getStockQuantity()>0?PUBLISHED:OUT_OF_STOCK); return productRepo.save(p);
+        p.setStatus(p.getStockQuantity()>0?PUBLISHED:OUT_OF_STOCK);p=productRepo.save(p);audit(p,"SOKO_PRODUCT_"+p.getStatus());return p;
     }
 
     @Transactional
@@ -283,7 +327,7 @@ public class SokoService {
     public Page<SokoProduct> adminProducts(Pageable pageable){requireSuperAdmin();return productRepo.findAllByActiveTrue(bounded(pageable));}
     public Page<SokoModels.AdminOrderSummary> adminOrders(Pageable pageable){requireSuperAdmin();return orderRepo.findAllByActiveTrue(bounded(pageable)).map(SokoModels.AdminOrderSummary::from);}
     @Transactional public SokoStore moderateStore(long id,SokoRequests.ModerationDecision request){requireSuperAdmin();SokoStore store=storeRepo.findByIdAndActiveTrue(id).orElseThrow(this::notFound);String decision=request.decision().toUpperCase(Locale.ROOT);if(("REJECT".equals(decision)||"SUSPEND".equals(decision))&&StringUtils.isBlank(request.reason()))throw invalid();switch(decision){case "APPROVE"->{if(!PENDING_REVIEW.equals(store.getStatus()))throw invalid();requireStoreContact(store);validatePublishable(store);marketplaceKycGate.require(store.getOwnerUserId(),"PROVIDER_TYPE","SOKO_MERCHANT",profileType(store.getOwnerUserId()));store.setStatus(PUBLISHED);}case "REJECT"->{if(!PENDING_REVIEW.equals(store.getStatus()))throw invalid();store.setStatus(REJECTED);}case "SUSPEND"->{if(!PUBLISHED.equals(store.getStatus()))throw invalid();store.setStatus(SUSPENDED);}case "REACTIVATE"->{if(!SUSPENDED.equals(store.getStatus()))throw invalid();requireStoreContact(store);validatePublishable(store);marketplaceKycGate.require(store.getOwnerUserId(),"PROVIDER_TYPE","SOKO_MERCHANT",profileType(store.getOwnerUserId()));store.setStatus(PUBLISHED);}default->throw invalid();}store.setReviewedAt(now());store.setReviewedByUserId(userDao.getUserId());store.setReviewReason(StringUtils.left(StringUtils.trimToNull(request.reason()),1000));store=storeRepo.save(store);notifyModeration(store.getOwnerUserId(),store.getName(),store.getStatus(),store.getReviewReason());return store;}
-    @Transactional public SokoProduct moderateProduct(long id,SokoRequests.ModerationDecision request){requireSuperAdmin();SokoProduct product=productRepo.findByIdForUpdate(id).orElseThrow(this::notFound);String decision=request.decision().toUpperCase(Locale.ROOT);if("SUSPEND".equals(decision)){if(StringUtils.isBlank(request.reason())||!List.of(PUBLISHED,OUT_OF_STOCK).contains(product.getStatus()))throw invalid();product.setStatus(SUSPENDED);}else if("REACTIVATE".equals(decision)){if(!SUSPENDED.equals(product.getStatus()))throw invalid();SokoStore store=storeRepo.findByIdAndActiveTrue(product.getStoreId()).orElseThrow(this::notFound);if(!PUBLISHED.equals(store.getStatus()))throw invalid();marketplaceKycGate.require(store.getOwnerUserId(),"SOKO_CATEGORY",product.getCategory(),profileType(store.getOwnerUserId()));product.setStatus(product.getStockQuantity()>0?PUBLISHED:OUT_OF_STOCK);}else throw invalid();product.setModeratedAt(now());product.setModeratedByUserId(userDao.getUserId());product.setModerationReason(StringUtils.left(StringUtils.trimToNull(request.reason()),1000));product=productRepo.save(product);SokoStore owner=storeRepo.findByIdAndActiveTrue(product.getStoreId()).orElseThrow(this::notFound);notifyModeration(owner.getOwnerUserId(),product.getName(),product.getStatus(),product.getModerationReason());return product;}
+    @Transactional public SokoProduct moderateProduct(long id,SokoRequests.ModerationDecision request){requireSuperAdmin();SokoProduct product=productRepo.findByIdForUpdate(id).filter(SokoProduct::isActive).orElseThrow(this::notFound);String decision=request.decision().toUpperCase(Locale.ROOT);if("SUSPEND".equals(decision)){if(StringUtils.isBlank(request.reason())||!List.of(PUBLISHED,OUT_OF_STOCK).contains(product.getStatus()))throw invalid();product.setStatus(SUSPENDED);}else if("REACTIVATE".equals(decision)){if(!SUSPENDED.equals(product.getStatus()))throw invalid();SokoStore store=storeRepo.findByIdAndActiveTrue(product.getStoreId()).orElseThrow(this::notFound);if(!PUBLISHED.equals(store.getStatus()))throw invalid();marketplaceKycGate.require(store.getOwnerUserId(),"SOKO_CATEGORY",product.getCategory(),profileType(store.getOwnerUserId()));product.setStatus(product.getStockQuantity()>0?PUBLISHED:OUT_OF_STOCK);}else throw invalid();product.setModeratedAt(now());product.setModeratedByUserId(userDao.getUserId());product.setModerationReason(StringUtils.left(StringUtils.trimToNull(request.reason()),1000));product=productRepo.save(product);audit(product,"SOKO_PRODUCT_MODERATED_"+product.getStatus());SokoStore owner=storeRepo.findByIdAndActiveTrue(product.getStoreId()).orElseThrow(this::notFound);notifyModeration(owner.getOwnerUserId(),product.getName(),product.getStatus(),product.getModerationReason());return product;}
 
     @Transactional
     public SokoModels.ProductImages replaceProductImages(long productId, List<MultipartFile> images) throws IOException {
@@ -313,6 +357,7 @@ public class SokoService {
         product.setImageUrl(null);
         if(List.of(PUBLISHED,OUT_OF_STOCK).contains(product.getStatus()))product.setStatus(DRAFT);
         productRepo.save(product);
+        audit(product,"SOKO_PRODUCT_IMAGES_REPLACED_"+product.getStatus());
         return productImages(productId);
     }
 
@@ -453,7 +498,8 @@ public class SokoService {
     @Transactional
     public OrderDetail checkout(SokoRequests.Checkout request,String idempotencyKey){
         requireBuyerPersona();
-        long customerUserId=userDao.getUserId();
+        BuyerIdentity buyer=verifiedCheckoutBuyer();
+        long customerUserId=buyer.userId();
         String cleanKey=StringUtils.trimToNull(idempotencyKey);
         if(cleanKey==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"A checkout idempotency key is required. Refresh your cart and try again.");
         if(cleanKey.length()>80||!cleanKey.matches("[A-Za-z0-9._:-]+"))throw invalid();
@@ -462,13 +508,13 @@ public class SokoService {
         if(request.items().stream().anyMatch(line->line==null||line.productId()==null||line.quantity()<1||line.quantity()>MAX_CHECKOUT_QUANTITY))
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Choose a quantity between 1 and 100 for each product.");
         if(request.items().stream().map(line->line.productId()+":"+String.valueOf(line.variationId())).distinct().count()!=request.items().size())throw invalid();
-        String customerPhone=normalizeRequiredPhone(request.customerPhone(),"Enter a valid customer phone number, for example 0712 345 678 or +254 712 345 678.");
+        String customerPhone=buyer.phoneNumber();
         var existing=orderRepo.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(customerUserId,cleanKey);
-        if(existing.isPresent())return existingCheckout(existing.get(),request,customerPhone);
+        if(existing.isPresent())return existingCheckout(existing.get(),request);
         CheckoutDestination destination=resolveCheckoutDestination(request,customerUserId);
         SokoStore store=storeRepo.findByIdForCheckout(request.storeId()).filter(s->PUBLISHED.equals(s.getStatus())).orElseThrow(this::notFound);
         existing=orderRepo.findByCustomerUserIdAndCheckoutIdempotencyKeyAndActiveTrue(customerUserId,cleanKey);
-        if(existing.isPresent())return existingCheckout(existing.get(),request,customerPhone);
+        if(existing.isPresent())return existingCheckout(existing.get(),request);
         if(store.getOwnerUserId()==customerUserId)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"You cannot place an order with your own Soko shop.");
         subscriptionEntitlements.requireActiveProductForOwner(store.getOwnerUserId(),SubscriptionProduct.SOKO);
         ProfileType sellerProfile=profileType(store.getOwnerUserId());
@@ -509,7 +555,7 @@ public class SokoService {
             product.setStockQuantity(product.getStockQuantity()-quantity);if(product.getStockQuantity()==0)product.setStatus(OUT_OF_STOCK);productRepo.save(product);
         }
         BigDecimal fee="DELIVERY".equalsIgnoreCase(request.deliveryMethod())?zero(store.getDeliveryFee()):BigDecimal.ZERO;
-        SokoOrder o=new SokoOrder(); o.setOrderNumber("SOKO-"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase(Locale.ROOT)); o.setStoreId(store.getId()); o.setStoreNameSnapshot(store.getName());o.setStoreAddressSnapshot(store.getAddress());o.setStorePhoneSnapshot(store.getPhoneNumber());o.setStoreLatitudeSnapshot(store.getLatitude());o.setStoreLongitudeSnapshot(store.getLongitude()); o.setCustomerUserId(customerUserId); o.setCreatedBy(customerUserId); o.setCheckoutIdempotencyKey(cleanKey); o.setActive(true); o.setStatus("PENDING_PAYMENT"); o.setPaymentStatus("UNPAID");o.setRefundStatus("NOT_REQUIRED");o.setSettlementStatus("PENDING");o.setReservationExpiresAt(now().plusMinutes(reservationMinutes)); o.setDeliveryMethod(request.deliveryMethod().toUpperCase(Locale.ROOT)); o.setDeliveryAddress(destination.address());o.setDeliveryLatitude(destination.latitude());o.setDeliveryLongitude(destination.longitude()); o.setCustomerPhone(customerPhone); o.setNotes(StringUtils.trimToNull(request.notes())); o.setDestinationUnitId(destination.unitId()); o.setSubtotal(subtotal); o.setDeliveryFee(fee); o.setTotal(subtotal.add(fee)); o.setCurrency(store.getCurrency());o.setPaymentAccountId(store.getPaymentAccountId());o.setPaymentChannel(accountDao.getAccountById(store.getPaymentAccountId()).getChannel().name()); o.setPlacedAt(now()); orderRepo.save(o);
+        SokoOrder o=new SokoOrder(); o.setOrderNumber("SOKO-"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase(Locale.ROOT)); o.setStoreId(store.getId()); o.setStoreNameSnapshot(store.getName());o.setStoreAddressSnapshot(store.getAddress());o.setStorePhoneSnapshot(store.getPhoneNumber());o.setStoreLatitudeSnapshot(store.getLatitude());o.setStoreLongitudeSnapshot(store.getLongitude()); o.setCustomerUserId(customerUserId);o.setCustomerNameSnapshot(buyer.fullName());o.setCustomerEmailSnapshot(buyer.email()); o.setCreatedBy(customerUserId); o.setCheckoutIdempotencyKey(cleanKey); o.setActive(true); o.setStatus("PENDING_PAYMENT"); o.setPaymentStatus("UNPAID");o.setRefundStatus("NOT_REQUIRED");o.setSettlementStatus("PENDING");o.setReservationExpiresAt(now().plusMinutes(reservationMinutes)); o.setDeliveryMethod(request.deliveryMethod().toUpperCase(Locale.ROOT)); o.setDeliveryAddress(destination.address());o.setDeliveryLatitude(destination.latitude());o.setDeliveryLongitude(destination.longitude()); o.setCustomerPhone(customerPhone); o.setNotes(StringUtils.trimToNull(request.notes())); o.setDestinationUnitId(destination.unitId()); o.setSubtotal(subtotal); o.setDeliveryFee(fee); o.setTotal(subtotal.add(fee)); o.setCurrency(store.getCurrency());o.setPaymentAccountId(store.getPaymentAccountId());o.setPaymentChannel(accountDao.getAccountById(store.getPaymentAccountId()).getChannel().name()); o.setPlacedAt(now()); orderRepo.save(o);
         List<SokoOrderItem> items=new ArrayList<>();
         for(int i=0;i<products.size();i++){SokoProduct p=products.get(i);SokoProductVariation v=selectedVariations.get(i);BigDecimal unitPrice=unitPrices.get(i);int qty=checkoutLines.get(i).quantity();SokoOrderItem it=new SokoOrderItem();it.setOrderId(o.getId());it.setProductId(p.getId());it.setProductName(p.getName());if(v!=null){it.setVariationId(v.getId());it.setVariationName(v.getName());it.setVariationValue(v.getValue());}it.setUnit(p.getUnit());it.setUnitPrice(unitPrice);it.setQuantity(qty);it.setLineTotal(unitPrice.multiply(BigDecimal.valueOf(qty)));it.setCreatedBy(userDao.getUserId());it.setActive(true);items.add(itemRepo.save(it));}
         PMSInvoice invoice=createInvoice(o,store,items);o.setInvoiceRef(invoice.getRef());orderRepo.save(o);notifyOrder(o,"Awaiting payment","");return detail(o,store,items,invoice.getId());
@@ -1079,7 +1125,7 @@ public class SokoService {
             if(distance>s.getServiceRadiusKm().doubleValue()+0.000001)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This location is outside the shop's "+s.getServiceRadiusKm().stripTrailingZeros().toPlainString()+" km delivery area. Choose pickup or another shop.");
         }else if("PICKUP".equalsIgnoreCase(deliveryMethod)){if(!s.isPickupEnabled())throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This shop does not offer pickup. Choose delivery or another shop.");if(StringUtils.isBlank(s.getAddress())||!validLatitude(s.getLatitude())||!validLongitude(s.getLongitude()))throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This shop has not configured a pickup location. Choose another shop.");}else throw invalid();
     }
-    private OrderDetail existingCheckout(SokoOrder existing,SokoRequests.Checkout request,String normalizedCustomerPhone){
+    private OrderDetail existingCheckout(SokoOrder existing,SokoRequests.Checkout request){
         List<SokoOrderItem> savedItems=itemRepo.findAllByOrderIdAndActiveTrueOrderById(existing.getId());
         Map<String,Integer> requestedItems=request.items().stream().collect(Collectors.toMap(line->line.productId()+":"+String.valueOf(line.variationId()),SokoRequests.CheckoutItem::quantity));
         Map<String,Integer> persistedItems=savedItems.stream().collect(Collectors.toMap(line->line.getProductId()+":"+String.valueOf(line.getVariationId()),SokoOrderItem::getQuantity));
@@ -1094,14 +1140,13 @@ public class SokoService {
         boolean matches=existing.getStoreId()==request.storeId()
                 &&java.util.Objects.equals(existing.getDeliveryMethod(),requestedMethod)
                 &&destinationMatches
-                &&java.util.Objects.equals(normalizeStoredPhone(existing.getCustomerPhone()),normalizedCustomerPhone)
                 &&java.util.Objects.equals(StringUtils.trimToNull(existing.getNotes()),StringUtils.trimToNull(request.notes()))
                 &&java.util.Objects.equals(existing.getDestinationUnitId(),request.destinationUnitId())
                 &&persistedItems.equals(requestedItems);
         if(!matches)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"This checkout key was already used for a different order. Refresh your cart and try again.");
         SokoStore store=storeRepo.findById(existing.getStoreId()).orElseThrow(this::notFound);return detail(existing,store,savedItems);
     }
-    private PMSInvoice createInvoice(SokoOrder o,SokoStore s,List<SokoOrderItem> items){PMSInvoice inv=new PMSInvoice();inv.setUnitId(o.getDestinationUnitId()==null?0:o.getDestinationUnitId());inv.setPropertyId(0);inv.setDescription(("Soko order "+o.getOrderNumber()).getBytes(StandardCharsets.UTF_8));String html=items.stream().map(i->"<tr><td><span>"+HtmlUtils.htmlEscape(i.getProductName())+" x "+i.getQuantity()+"</span></td><td class='amount-col'>"+i.getLineTotal()+"</td></tr>").collect(Collectors.joining());inv.setHtmlDescription(html.getBytes(StandardCharsets.UTF_8));inv.setMoneyAmount(o.getTotal());inv.setMoneyPendingAmount(o.getTotal());inv.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(o.getCurrency()));inv.setBilledUserId(o.getCustomerUserId());inv.setPayToUserId(s.getOwnerUserId());inv.setPaymentAccountId(o.getPaymentAccountId());inv.setActive(true);inv.setBillingType("SOKO");inv.setCustomerPhoneNumber(o.getCustomerPhone());userDao.findById(o.getCustomerUserId()).ifPresent(u->inv.setCustomerEmail(u.getEmail()));invoiceDao.createInvoice(inv);return inv;}
+    private PMSInvoice createInvoice(SokoOrder o,SokoStore s,List<SokoOrderItem> items){PMSInvoice inv=new PMSInvoice();inv.setUnitId(o.getDestinationUnitId()==null?0:o.getDestinationUnitId());inv.setPropertyId(0);inv.setDescription(("Soko order "+o.getOrderNumber()).getBytes(StandardCharsets.UTF_8));String html=items.stream().map(i->"<tr><td><span>"+HtmlUtils.htmlEscape(i.getProductName())+" x "+i.getQuantity()+"</span></td><td class='amount-col'>"+i.getLineTotal()+"</td></tr>").collect(Collectors.joining());inv.setHtmlDescription(html.getBytes(StandardCharsets.UTF_8));inv.setMoneyAmount(o.getTotal());inv.setMoneyPendingAmount(o.getTotal());inv.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(o.getCurrency()));inv.setBilledUserId(o.getCustomerUserId());inv.setPayToUserId(s.getOwnerUserId());inv.setPaymentAccountId(o.getPaymentAccountId());inv.setActive(true);inv.setBillingType("SOKO");inv.setCustomerPhoneNumber(o.getCustomerPhone());inv.setCustomerEmail(o.getCustomerEmailSnapshot());invoiceDao.createInvoice(inv);return inv;}
     private void assignAndRegisterDelivery(SokoOrder o,SokoRequests.Dispatch d){
         if(d==null||d.riderId()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Select a verified, registered and available SlickHood rider. One-off courier dispatch is no longer available.");
         if(d.expectedArrivalTime()==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Enter the rider's expected arrival time before dispatching the order.");
@@ -1409,6 +1454,32 @@ public class SokoService {
     private Double storeLatitude(SokoOrder order,SokoStore store){return order.getStoreLatitudeSnapshot()!=null?order.getStoreLatitudeSnapshot():store.getLatitude();}
     private Double storeLongitude(SokoOrder order,SokoStore store){return order.getStoreLongitudeSnapshot()!=null?order.getStoreLongitudeSnapshot():store.getLongitude();}
     private SokoStore ownedStore(long id){requireMerchantRole();return storeRepo.findByIdAndOwnerUserIdAndActiveTrue(id,userDao.getUserId()).orElseThrow(this::notFound);}
+    private Users currentBuyer(){
+        Users buyer=userDao.getUserObject();
+        if(buyer==null||buyer.getId()==null)throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS);
+        return buyer;
+    }
+    private BuyerIdentity verifiedCheckoutBuyer(){
+        Users buyer=currentBuyer();
+        UserDao.AccountAccessState accessState=currentBuyerAccessState(buyer);
+        if(!AccountStatus.ACTIVE.name().equals(accessState.operationalAccountStatus()))throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS,"Sign in to an active buyer account before checkout.");
+        String fullName=StringUtils.trimToNull(buyer.getFullName());
+        if(fullName==null)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Add the buyer's full name before checkout.");
+        String email=StringUtils.lowerCase(StringUtils.trimToNull(buyer.getEmail()),Locale.ROOT);
+        if(!buyer.isEmailVerified()||email==null||!PMSUtils.isValidEmail(email))
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Confirm the buyer's email address before checkout.");
+        if(!buyer.isPhoneVerified())
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,"Confirm the buyer's phone number before checkout.");
+        String phone=normalizeRequiredPhone(buyer.getPhoneNumber(),"Confirm a valid buyer phone number before checkout.");
+        return new BuyerIdentity(buyer.getId(),StringUtils.left(fullName,160),email,phone);
+    }
+    private UserDao.AccountAccessState currentBuyerAccessState(Users buyer){
+        return userDao.getCurrentAccessState()
+                .filter(state->state.userId()==buyer.getId())
+                .orElseThrow(()->new PMSCustomException(ResponseCode.INVALID_USER_DETAILS,
+                        "We could not confirm this buyer account. Sign in again before checkout."));
+    }
+    private record BuyerIdentity(long userId,String fullName,String email,String phoneNumber){}
     /** Internal operational identities must switch to a customer role before transacting as a Soko buyer. */
     private void requireBuyerPersona(){if(internalPlatformRoleActive())throw new PMSCustomException(ResponseCode.INVALID_ROLE);}
     /** A privileged operational role cannot double as a rider merely because a historical phone link exists. */

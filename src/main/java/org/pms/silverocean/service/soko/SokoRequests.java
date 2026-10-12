@@ -71,7 +71,12 @@ public final class SokoRequests {
             @NotEmpty @Size(max=25) List<@Valid CheckoutItem> items,
             @NotBlank @Pattern(regexp="(?i)DELIVERY|PICKUP") String deliveryMethod,
             @Size(max=500) String deliveryAddress,
-            @NotBlank @Size(max=30) String customerPhone,
+            /**
+             * Rolling-client compatibility only. Checkout identity is always
+             * read from the authenticated, phone-verified buyer account and
+             * this value is never persisted or trusted.
+             */
+            @Size(max=30) String customerPhone,
             @Size(max=1000) String notes,
             Long destinationUnitId,
             @DecimalMin("-90.0") @DecimalMax("90.0") Double deliveryLatitude,

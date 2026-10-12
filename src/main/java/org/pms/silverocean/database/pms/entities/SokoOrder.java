@@ -42,6 +42,9 @@ public class SokoOrder extends BaseCreatorEntity implements Auditable {
     /** Customer-selected delivery pin frozen at checkout for radius enforcement and fulfilment. */
     private Double deliveryLatitude;
     private Double deliveryLongitude;
+    /** Buyer identity frozen at checkout; seller/profile edits cannot rewrite historical orders. */
+    private String customerNameSnapshot;
+    private String customerEmailSnapshot;
     private String customerPhone;
     private String notes;
     private Long destinationUnitId;

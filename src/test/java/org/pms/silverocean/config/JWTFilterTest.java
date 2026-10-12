@@ -230,6 +230,27 @@ class JWTFilterTest {
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
+    @Test
+    void publicSokoCatalogueIgnoresAnUnrelatedStaleLoginButCheckoutDoesNot() throws Exception {
+        request.setMethod("GET");
+        request.setRequestURI("/soko/catalog/sellers");
+
+        filter.doFilter(request,response,chain);
+
+        verify(chain).doFilter(request,response);
+        verifyNoInteractions(jwtService);
+
+        request=new MockHttpServletRequest("POST","/soko/order/checkout");
+        request.addHeader("Authorization","Bearer access-token");
+        response=new MockHttpServletResponse();
+        when(i18nService.getLocalizedMessage(anyString())).thenReturn("Invalid token");
+        when(jwtService.validateToken("access-token")).thenThrow(new RuntimeException("expired"));
+
+        filter.doFilter(request,response,chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+    }
+
     private void stubValidatedToken(Claims claims, boolean currentSession) {
         when(jwtService.validateToken("access-token")).thenReturn(parsedToken);
         when(parsedToken.getBody()).thenReturn(claims);

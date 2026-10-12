@@ -26,6 +26,11 @@ public class KycRequirementResolver {
     }
 
     public Set<KycRequirement> resolve(Set<PMSRole> roles, ProfileType profileType) {
+        // Marketplace customers prove ownership of both contact channels at
+        // checkout. They do not need seller/property identity documents merely
+        // to buy groceries or request a service. Adding any governed role later
+        // reopens the normal role-specific KYC journey.
+        if (roles != null && roles.equals(Set.of(PMSRole.MARKETPLACE_BUYER))) return Set.of();
         Map<String, KycRequirement> requirements = new LinkedHashMap<>();
         add(requirements, "IDENTITY_FRONT", "Government identity document", true,
                 Set.of(KycDocumentType.NATIONAL_ID_FRONT, KycDocumentType.PASSPORT, KycDocumentType.ALIEN_ID_FRONT));

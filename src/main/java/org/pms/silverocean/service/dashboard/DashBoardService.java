@@ -18,6 +18,7 @@ import org.pms.silverocean.database.pms.PropertyOwnershipRepo;
 import org.pms.silverocean.database.pms.SaleTransactionRepo;
 import org.pms.silverocean.database.pms.LeaseDocumentRepo;
 import org.pms.silverocean.database.pms.EstateServiceChargeRepo;
+import org.pms.silverocean.database.pms.SokoOrderRepo;
 import org.pms.silverocean.service.sales.SaleStatus;
 import org.pms.silverocean.service.leasedocument.LeaseDocumentStatus;
 import org.pms.silverocean.service.lease.wrappers.TenancyProjection;
@@ -50,12 +51,14 @@ public class DashBoardService {
     private final LeaseDocumentRepo documentRepo;
     private final EstateServiceChargeRepo chargeRepo;
     private final InsuranceOperationsService insuranceOperationsService;
+    private final SokoOrderRepo sokoOrderRepo;
 
     public DashBoardService(UnitReportDao unitReportDao, UserDao userDao, ThreadPoolBeans threadPoolBeans,
                             UserReportDao userReportDao, InvoiceReportDao invoiceReportDao,
                             CurrencyConversionService currencyConversionService, ServiceProviderReportDao serviceProviderReportDao, VisitorReportDao visitorReportDao,
                             PropertyOwnershipRepo ownershipRepo, SaleTransactionRepo saleRepo, LeaseDocumentRepo documentRepo,
                             EstateServiceChargeRepo chargeRepo, InsuranceOperationsService insuranceOperationsService,
+                            SokoOrderRepo sokoOrderRepo,
                             @Value("${spring.datasource.hikari.maximum-pool-size:10}") int maxPoolSize) {
         this.unitReportDao = unitReportDao;
         this.userDao = userDao;
@@ -70,6 +73,7 @@ public class DashBoardService {
         this.documentRepo = documentRepo;
         this.chargeRepo = chargeRepo;
         this.insuranceOperationsService = insuranceOperationsService;
+        this.sokoOrderRepo = sokoOrderRepo;
     }
 
     public CompletableFuture<ReportDto> getReportDtoPerActiveRole(PMSRole activeRole) {
@@ -90,6 +94,7 @@ public class DashBoardService {
             case HOMEOWNER -> buildHomeownerDto().thenApply(dto -> (ReportDto) dto);
             case SALES_AGENT -> buildSalesAgentDto().thenApply(dto -> (ReportDto) dto);
             case BUYER -> buildBuyerDto().thenApply(dto -> (ReportDto) dto);
+            case MARKETPLACE_BUYER -> buildMarketplaceBuyerDto().thenApply(dto -> (ReportDto) dto);
             case INSURANCE_ADVISER, INSURANCE_MANAGER -> buildInsuranceDto(activeRole).thenApply(dto -> (ReportDto) dto);
             case GUARD -> buildGuardDto().thenApply(dto -> (ReportDto) dto);
             case SUPER_ADMIN -> buildSuperAdminDto().thenApply(dto -> (ReportDto) dto);
@@ -169,6 +174,20 @@ public class DashBoardService {
                 documentRepo.countByRecipientUserIdAndStatusAndActiveTrue(userId, LeaseDocumentStatus.ISSUED),
                 saleRepo.countByBuyerUserIdAndStatusAndActiveTrue(userId, SaleStatus.COMPLETED),
                 "Properties in progress", "Offers to review", "Documents awaiting action", "Completed purchases"));
+    }
+
+    private CompletableFuture<BusinessRoleDashboardDto> buildMarketplaceBuyerDto() {
+        long userId = userDao.getUserId();
+        return CompletableFuture.completedFuture(new BusinessRoleDashboardDto("MARKETPLACE_BUYER",
+                sokoOrderRepo.countByCustomerUserIdAndActiveTrue(userId),
+                sokoOrderRepo.countByCustomerUserIdAndStatusInAndActiveTrue(userId,
+                        List.of("PENDING_PAYMENT")),
+                sokoOrderRepo.countByCustomerUserIdAndStatusInAndActiveTrue(userId,
+                        List.of("PAYMENT_RECEIVED", "CONFIRMED", "PACKED", "DELIVERY_ASSIGNED",
+                                "ASSIGNMENT_ACCEPTED", "DISPATCHED")),
+                sokoOrderRepo.countByCustomerUserIdAndStatusInAndActiveTrue(userId,
+                        List.of("COMPLETED")),
+                "Soko orders", "Awaiting payment", "Orders in progress", "Completed orders"));
     }
 
     private CompletableFuture<LandLordDto> buildLandlordDto() {

@@ -11,6 +11,7 @@ import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
+import org.pms.silverocean.service.auth.roles.enums.PMSRole;
 import org.pms.silverocean.service.auth.totp.impl.OTPEncryptionService;
 import org.pms.silverocean.service.auth.totp.impl.OtpType;
 import org.pms.silverocean.service.notification.NotificationDTO;
@@ -18,10 +19,12 @@ import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationChannel;
 import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.wrappers.EnumWrapper;
+import org.pms.silverocean.service.kyc.AccountStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
@@ -83,6 +86,7 @@ public class SilverOceanUserService {
         return new UserDTO(loggedInUser, profileType, roleNames);
     }
 
+    @Transactional(transactionManager = "pmsDBTransactionManager")
     public void verifyOTPAndUpdateContact(String code) {
         Users loggedInUser = userDao.getUserObject();
         if (loggedInUser == null) {
@@ -109,9 +113,25 @@ public class SilverOceanUserService {
                 loggedInUser.setCountry(locale.getDisplayCountry());
                 loggedInUser.setCountryCode(locale.getCountry());
             }
+            activateContactVerifiedMarketplaceBuyer(loggedInUser);
         }
         loggedInUser.setLastModifiedDate(LocalDateTime.now());
         userDao.save(loggedInUser);
+    }
+
+    /**
+     * A MarketplaceBuyer is a lightweight customer identity, not a property
+     * buyer or a vendor. Only an account assigned solely to that role is
+     * activated by contact verification. Any additional governed role keeps
+     * the ordinary KYC state and requirements.
+     */
+    private void activateContactVerifiedMarketplaceBuyer(Users user) {
+        if (!user.isActive() || !user.isEmailVerified() || !user.isPhoneVerified()
+                || StringUtils.isBlank(user.getEmail()) || StringUtils.isBlank(user.getPhoneNumber())) return;
+        var roles = userRoleRepo.findByUserId(user.getId()).stream().filter(role -> role.isActive()).toList();
+        if (roles.size() == 1 && PMSRole.MARKETPLACE_BUYER.getName().equals(roles.getFirst().getName())) {
+            user.setAccountStatus(AccountStatus.ACTIVE.name());
+        }
     }
 
     public ContactVerificationDispatch saveChangeContactRequestAndSendOTP(String contact, NotificationChannel channel) {

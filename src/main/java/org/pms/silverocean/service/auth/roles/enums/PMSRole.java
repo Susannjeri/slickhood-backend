@@ -13,6 +13,7 @@ public enum PMSRole {
     LANDLORD("Landlord", "Property Owners configure their real estate holdings by creating property records and defining unit layouts.", true),
     SERVICE_PROVIDER("ServiceProvider", "Registers to offer one or more service categories (e.g., cleaning, pest control, electrical)", true),
     ASSET_PORTFOLIO_MANAGER("AssetPortfolioManager", "SlickHood Wealth owner: tracks assets, net worth, performance, obligations and goals", true),
+    MARKETPLACE_BUYER("MarketplaceBuyer", "Verified customer who can buy products and request marketplace services", true),
     AFFILIATE("Affiliate", "Recruits users (Landlords, Service Providers)through unique links, earns commissions", true),
     TENANT("Tenant", "Receives invitation, submits documentation, accepts lease terms", false),
     PROPERTY_MANAGER("PropertyManager", "Supports onboarding, handles approvals and lease activations", false),

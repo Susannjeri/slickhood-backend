@@ -22,6 +22,7 @@ import org.pms.silverocean.service.notification.email.EmailService;
 import org.pms.silverocean.service.payment.PaymentPlatform;
 import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.pms.silverocean.service.payment.PaymentDao;
+import org.pms.silverocean.service.payment.PaymentPhoneNumber;
 import org.pms.silverocean.service.payment.PaymentRequestException;
 import org.pms.silverocean.service.payment.invoice.wrappers.InvoiceDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
@@ -31,6 +32,7 @@ import org.pms.silverocean.service.property.UnitDao;
 import org.pms.silverocean.service.property.wrappers.PropertyNameAddressAndTypeProjection;
 import org.pms.silverocean.service.property.wrappers.TenantNameEmailPhoneAndUnitRefProjection;
 import org.pms.silverocean.service.soko.SokoService;
+import org.pms.silverocean.service.kyc.AccountStatus;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -525,8 +527,25 @@ public class InvoiceService {
             invoiceDao.saveInvoice(invoice);
         }
         validateSubscriptionPaymentAccount(invoice, paymentChannel, accountId);
+        // A Soko buyer cannot redirect an STK prompt by changing the request
+        // payload. The billed user's current, verified identity is the only
+        // authoritative payer phone for this order.
+        String payerPhone=isSokoInvoice(invoice)?verifiedSokoPayerPhone(invoice):phoneNumber;
         PaymentPlatform platform = paymentPlatformFactory.getPlatform(paymentChannel);
-        return platform.processPayment(invoice, phoneNumber, accountId);
+        return platform.processPayment(invoice, payerPhone, accountId);
+    }
+
+    private String verifiedSokoPayerPhone(PMSInvoice invoice) {
+        UserDao.AccountAccessState accessState=userDao.getCurrentAccessState()
+                .filter(state->state.userId()==invoice.getBilledUserId())
+                .filter(state->AccountStatus.ACTIVE.name().equals(state.operationalAccountStatus()))
+                .orElseThrow(()->new PaymentRequestException(ResponseCode.INVALID_USER_DETAILS));
+        Users payer=userDao.findActiveByIdForUpdate(invoice.getBilledUserId())
+                .orElseThrow(()->new PaymentRequestException(ResponseCode.INVALID_USER_DETAILS));
+        if (accessState.userId()!=payer.getId() || !payer.isEmailVerified() || !payer.isPhoneVerified()) {
+            throw new PaymentRequestException(ResponseCode.INVALID_USER_DETAILS);
+        }
+        return PaymentPhoneNumber.normalizeKenyanMsisdn(payer.getPhoneNumber());
     }
 
     private PMSInvoice accessibleInvoice(long invoiceId) {

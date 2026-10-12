@@ -50,4 +50,14 @@ class KycRequirementResolverTest {
                 .stream().map(KycRequirement::code).toList();
         assertEquals(List.of("IDENTITY_FRONT", "IDENTITY_BACK", "SELFIE", "OWNERSHIP", "TAX"), codes);
     }
+
+    @Test void marketplaceBuyerUsesVerifiedContactsInsteadOfSellerOrPropertyKyc() {
+        assertTrue(resolver.resolve(Set.of(PMSRole.MARKETPLACE_BUYER),ProfileType.INDIVIDUAL).isEmpty());
+    }
+
+    @Test void addingAGovernedRoleToMarketplaceBuyerRestoresItsFullKycRequirements() {
+        Set<KycRequirement> requirements=resolver.resolve(Set.of(PMSRole.MARKETPLACE_BUYER,PMSRole.SERVICE_PROVIDER),ProfileType.INDIVIDUAL);
+        assertTrue(requirements.stream().anyMatch(requirement->"IDENTITY_FRONT".equals(requirement.code())&&requirement.required()));
+        assertTrue(requirements.stream().anyMatch(requirement->"TAX".equals(requirement.code())&&requirement.required()));
+    }
 }

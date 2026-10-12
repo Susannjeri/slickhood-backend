@@ -9,7 +9,7 @@ class BillingParticipantPermissionsTest {
 
     @ParameterizedTest
     @EnumSource(value = PMSPermission.class, names = {
-            "SERVICE_PROVIDER", "SALES_AGENT", "ASSET_PORTFOLIO_MANAGER", "BUYER"
+            "SERVICE_PROVIDER", "SALES_AGENT", "ASSET_PORTFOLIO_MANAGER", "BUYER", "MARKETPLACE_BUYER"
     })
     void billingParticipantsCanReadTheirParticipantScopedRecords(PMSPermission rolePermissions) {
         assertThat(rolePermissions.getPermissions()).contains(
@@ -21,7 +21,7 @@ class BillingParticipantPermissionsTest {
 
     @ParameterizedTest
     @EnumSource(value = PMSPermission.class, names = {
-            "SERVICE_PROVIDER", "SALES_AGENT", "ASSET_PORTFOLIO_MANAGER", "BUYER"
+            "SERVICE_PROVIDER", "SALES_AGENT", "ASSET_PORTFOLIO_MANAGER", "BUYER", "MARKETPLACE_BUYER"
     })
     void billingParticipantsCannotReconcilePaymentsManually(PMSPermission rolePermissions) {
         assertThat(rolePermissions.getPermissions())

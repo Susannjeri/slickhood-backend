@@ -147,7 +147,7 @@ public class RoleService {
 
     private Set<IdNameDescDTO> resolvePropertiesForRole(Long userId, Role role) {
         PMSRole pmsRole = PMSRole.roleFromSavedName(role.getName());
-        if (PMSRole.SUPER_ADMIN.equals(pmsRole)) {
+        if (Set.of(PMSRole.SUPER_ADMIN, PMSRole.MARKETPLACE_BUYER).contains(pmsRole)) {
             return Set.of();
         }
         if (Set.of(PMSRole.LANDLORD, PMSRole.ESTATE_MANAGER, PMSRole.SALES_AGENT).contains(pmsRole)) {

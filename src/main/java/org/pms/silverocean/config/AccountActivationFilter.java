@@ -43,7 +43,7 @@ public class AccountActivationFilter extends OncePerRequestFilter {
             "/sp/directory/", "/soko/catalog/", "/soko/public/rider-assignment",
             "/affiliate/public/", "/public/property-listings");
     private static final Set<String> ALLOWED_EXACT_PATHS = Set.of(
-            "/soko/catalog", "/soko/categories");
+            "/soko/catalog", "/soko/categories", "/soko/buyer/checkout-profile");
 
     private final UserDao userDao;
     private final I18NService i18NService;

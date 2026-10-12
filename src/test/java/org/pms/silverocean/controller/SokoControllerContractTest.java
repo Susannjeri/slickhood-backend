@@ -94,6 +94,24 @@ class SokoControllerContractTest {
     }
 
     @Test
+    void buyerCheckoutProfileIsPrivateAndNeverCached() throws Exception {
+        when(service.buyerCheckoutProfile()).thenReturn(new SokoModels.BuyerCheckoutProfile(
+                "Jane Buyer","buyer@example.test","+254712345678",true,true,true,
+                List.of(),List.of(new SokoModels.DeliveryDestination(11L,21L,"Home","Nairobi",
+                -1.28,36.82,"TENANCY",true))));
+
+        mockMvc.perform(get("/soko/buyer/checkout-profile"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control","no-store, max-age=0"))
+                .andExpect(header().string("Referrer-Policy","no-referrer"))
+                .andExpect(jsonPath("$.data[0].fullName").value("Jane Buyer"))
+                .andExpect(jsonPath("$.data[0].emailVerified").value(true))
+                .andExpect(jsonPath("$.data[0].phoneVerified").value(true))
+                .andExpect(jsonPath("$.data[0].readyForCheckout").value(true))
+                .andExpect(jsonPath("$.data[0].deliveryDestinations[0].unitId").value(11));
+    }
+
+    @Test
     void publicRiderBoundaryReturnsPrivacyHeadersAndRoutesAllPersonalActions() throws Exception {
         var view=new SokoModels.PublicRiderAssignment("SOKO-1","DELIVERY_ASSIGNED","Fresh Corner","Market Road",
                 java.time.ZonedDateTime.now().plusHours(1),1,List.of(new SokoModels.PublicRiderItem("Milk","litre",1)),false,null);

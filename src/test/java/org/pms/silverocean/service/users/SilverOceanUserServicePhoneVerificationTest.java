@@ -9,11 +9,14 @@ import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.UserRoleRepo;
 import org.pms.silverocean.database.pms.entities.UserOTP;
 import org.pms.silverocean.database.pms.entities.Users;
+import org.pms.silverocean.database.pms.entities.Role;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.auth.dao.UserDao;
 import org.pms.silverocean.service.auth.totp.impl.OTPEncryptionService;
 import org.pms.silverocean.service.auth.totp.impl.OtpType;
+import org.pms.silverocean.service.auth.roles.enums.PMSRole;
+import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.notification.NotificationService;
 import org.pms.silverocean.service.notification.common.NotificationChannel;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -126,5 +129,46 @@ class SilverOceanUserServicePhoneVerificationTest {
         assertEquals("+254111379961", currentUser.getPhoneNumber());
         assertTrue(currentUser.isPhoneVerified());
         verify(userDao).save(currentUser);
+    }
+
+    @Test
+    void soleMarketplaceBuyerActivatesOnlyAfterVerifiedEmailAndPhone() {
+        currentUser.setActive(true);
+        currentUser.setEmailVerified(true);
+        currentUser.setAccountStatus(AccountStatus.PENDING_KYC.name());
+        Role buyerRole=new Role(PMSRole.MARKETPLACE_BUYER.getName(),PMSRole.MARKETPLACE_BUYER.getDescription(),true);
+        buyerRole.setActive(true);
+        when(userRoleRepo.findByUserId(41L)).thenReturn(java.util.Set.of(buyerRole));
+        UserOTP activeOtp=new UserOTP();activeOtp.setChannel(OtpType.SMS.name());
+        UserOTP verifiedOtp=new UserOTP();verifiedOtp.setChannel(NotificationChannel.SMS.name());verifiedOtp.setContact("+254111379961");
+        when(otpEncryptionService.getActiveOTP(41L)).thenReturn(Optional.of(activeOtp));
+        when(otpEncryptionService.verifyOTPAgainstValueInDB("owner@example.com","ABC123",OtpType.SMS)).thenReturn(true);
+        when(otpEncryptionService.getLastVerifiedOTP(41L)).thenReturn(verifiedOtp);
+
+        service.verifyOTPAndUpdateContact("ABC123");
+
+        assertEquals(AccountStatus.ACTIVE.name(),currentUser.getAccountStatus());
+        assertTrue(currentUser.isPhoneVerified());
+        verify(userDao).save(currentUser);
+    }
+
+    @Test
+    void phoneVerificationDoesNotBypassSellerKyc() {
+        currentUser.setActive(true);
+        currentUser.setEmailVerified(true);
+        currentUser.setAccountStatus(AccountStatus.PENDING_KYC.name());
+        Role sellerRole=new Role(PMSRole.SERVICE_PROVIDER.getName(),PMSRole.SERVICE_PROVIDER.getDescription(),true);
+        sellerRole.setActive(true);
+        when(userRoleRepo.findByUserId(41L)).thenReturn(java.util.Set.of(sellerRole));
+        UserOTP activeOtp=new UserOTP();activeOtp.setChannel(OtpType.SMS.name());
+        UserOTP verifiedOtp=new UserOTP();verifiedOtp.setChannel(NotificationChannel.SMS.name());verifiedOtp.setContact("+254111379961");
+        when(otpEncryptionService.getActiveOTP(41L)).thenReturn(Optional.of(activeOtp));
+        when(otpEncryptionService.verifyOTPAgainstValueInDB("owner@example.com","ABC123",OtpType.SMS)).thenReturn(true);
+        when(otpEncryptionService.getLastVerifiedOTP(41L)).thenReturn(verifiedOtp);
+
+        service.verifyOTPAndUpdateContact("ABC123");
+
+        assertEquals(AccountStatus.PENDING_KYC.name(),currentUser.getAccountStatus());
+        assertTrue(currentUser.isPhoneVerified());
     }
 }

@@ -10,6 +10,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.entities.PMSInvoice;
 import org.pms.silverocean.database.pms.entities.PaymentAccount;
+import org.pms.silverocean.database.pms.entities.Users;
 import org.pms.silverocean.service.I18NService;
 import org.pms.silverocean.service.PMSCustomException;
 import org.pms.silverocean.service.account.dao.AccountDao;
@@ -27,6 +28,7 @@ import org.pms.silverocean.service.payment.wrappers.PaymentChannelDTO;
 import org.pms.silverocean.service.payment.wrappers.PaymentResponse;
 import org.pms.silverocean.service.property.UnitDao;
 import org.pms.silverocean.service.soko.SokoService;
+import org.pms.silverocean.service.kyc.AccountStatus;
 
 import java.util.Optional;
 import java.util.Set;
@@ -292,7 +294,13 @@ class InvoiceServiceSubscriptionPaymentTest {
         when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB", billingType)).thenReturn(Optional.of(12L));
         when(accountDao.getAccountById(12L)).thenReturn(account);
         when(paymentPlatformFactory.getPlatform(PaymentChannel.PESAWISE)).thenReturn(paymentPlatform);
-        when(paymentPlatform.processPayment(invoice, null, 12L)).thenReturn(expected);
+        String expectedPhone=null;
+        if ("SOKO".equals(billingType)) {
+            when(userDao.getCurrentAccessState()).thenReturn(Optional.of(activeBuyerAccessState()));
+            when(userDao.findActiveByIdForUpdate(7L)).thenReturn(Optional.of(verifiedSokoBuyer()));
+            expectedPhone="254712345678";
+        }
+        when(paymentPlatform.processPayment(invoice, expectedPhone, 12L)).thenReturn(expected);
 
         assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.PESAWISE, null, 12L));
 
@@ -327,14 +335,55 @@ class InvoiceServiceSubscriptionPaymentTest {
         org.mockito.Mockito.doAnswer(call->{invoice.setPaymentAccountId(13L);return null;})
                 .when(sokoService).selectPendingPaymentDestination(invoice,account);
         when(paymentPlatformFactory.getPlatform(PaymentChannel.MPESA)).thenReturn(paymentPlatform);
-        when(paymentPlatform.processPayment(invoice, "0712345678", 13L)).thenReturn(expected);
+        when(userDao.getCurrentAccessState()).thenReturn(Optional.of(activeBuyerAccessState()));
+        when(userDao.findActiveByIdForUpdate(7L)).thenReturn(Optional.of(verifiedSokoBuyer()));
+        when(paymentPlatform.processPayment(invoice, "254712345678", 13L)).thenReturn(expected);
 
-        assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, "0712345678", 13L));
+        assertSame(expected, service.initInvoicePayment("INV-SUB", PaymentChannel.MPESA, "+254700000000", 13L));
 
         org.mockito.InOrder paymentOrder=org.mockito.Mockito.inOrder(sokoService,paymentPlatform);
         paymentOrder.verify(sokoService).selectPendingPaymentDestination(invoice,account);
-        paymentOrder.verify(paymentPlatform).processPayment(invoice,"0712345678",13L);
+        paymentOrder.verify(paymentPlatform).processPayment(invoice,"254712345678",13L);
         verify(accountDao, never()).isAttachedToProperty(13L, 0L);
+    }
+
+    @Test
+    void sokoPaymentRejectsRequestPhoneWhenTheBilledBuyerPhoneIsNotVerified() {
+        PMSInvoice invoice=propertyInvoice("SOKO",12L);
+        PaymentAccount account=paymentAccount(AccountCategory.MERCHANT,PaymentChannel.MPESA,99L);
+        Users buyer=verifiedSokoBuyer();buyer.setPhoneVerified(false);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB",7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB","SOKO")).thenReturn(Optional.of(12L));
+        when(accountDao.getAccountById(12L)).thenReturn(account);
+        when(userDao.getCurrentAccessState()).thenReturn(Optional.of(activeBuyerAccessState()));
+        when(userDao.findActiveByIdForUpdate(7L)).thenReturn(Optional.of(buyer));
+
+        PaymentRequestException error=assertThrows(PaymentRequestException.class,
+                ()->service.initInvoicePayment("INV-SUB",PaymentChannel.MPESA,"+254700000000",12L));
+
+        assertEquals(ResponseCode.INVALID_USER_DETAILS,error.getResponseCode());
+        verify(paymentPlatformFactory,never()).getPlatform(any());
+        verify(paymentPlatform,never()).processPayment(any(),any(),org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void sokoPaymentRejectsVerifiedContactsWhenEffectiveAccountStateIsPending() {
+        PMSInvoice invoice=propertyInvoice("SOKO",12L);
+        PaymentAccount account=paymentAccount(AccountCategory.MERCHANT,PaymentChannel.MPESA,99L);
+        when(userDao.getUserId()).thenReturn(7L);
+        when(invoiceDao.getInvoiceForOwnerOrTenantView("INV-SUB",7L)).thenReturn(Optional.of(invoice));
+        when(invoiceDao.getMarketplaceSourcePaymentAccountId("INV-SUB","SOKO")).thenReturn(Optional.of(12L));
+        when(accountDao.getAccountById(12L)).thenReturn(account);
+        when(userDao.getCurrentAccessState()).thenReturn(Optional.of(
+                new UserDao.AccountAccessState(7L,true,AccountStatus.PENDING_KYC.name())));
+
+        PaymentRequestException error=assertThrows(PaymentRequestException.class,
+                ()->service.initInvoicePayment("INV-SUB",PaymentChannel.MPESA,"+254700000000",12L));
+
+        assertEquals(ResponseCode.INVALID_USER_DETAILS,error.getResponseCode());
+        verify(userDao,never()).findActiveByIdForUpdate(7L);
+        verify(paymentPlatformFactory,never()).getPlatform(any());
     }
 
     @ParameterizedTest
@@ -550,5 +599,17 @@ class InvoiceServiceSubscriptionPaymentTest {
         invoice.setBillingType(billingType);
         invoice.setPaymentAccountId(paymentAccountId);
         return invoice;
+    }
+
+    private static Users verifiedSokoBuyer() {
+        Users buyer=new Users();buyer.setId(7L);buyer.setEmail("buyer@example.test");buyer.setEmailVerified(true);
+        buyer.setPhoneNumber("0712 345 678");buyer.setPhoneVerified(true);buyer.setActive(true);
+        // A legacy null/raw status remains payable only because the uncached
+        // authoritative access-state resolver reports this buyer as ACTIVE.
+        buyer.setVerified(true);buyer.setAccountStatus(null);return buyer;
+    }
+
+    private static UserDao.AccountAccessState activeBuyerAccessState() {
+        return new UserDao.AccountAccessState(7L,true,AccountStatus.ACTIVE.name());
     }
 }

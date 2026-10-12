@@ -21,11 +21,13 @@ class SokoControllerSecurityTest {
         var sellers=SokoController.class.getMethod("sellers",Pageable.class,String.class,String.class)
                 .getAnnotation(PreAuthorize.class);
         var destinations=SokoController.class.getMethod("deliveryDestinations");
+        var checkoutProfile=SokoController.class.getMethod("buyerCheckoutProfile");
         var controller=SokoController.class.getAnnotation(PreAuthorize.class);
 
         assertThat(sellers).isNotNull();
         assertThat(sellers.value()).isEqualTo("permitAll()");
         assertThat(destinations.getAnnotation(PreAuthorize.class)).isNull();
+        assertThat(checkoutProfile.getAnnotation(PreAuthorize.class)).isNull();
         assertThat(controller).isNotNull();
         assertThat(controller.value()).isEqualTo("isAuthenticated()");
     }
