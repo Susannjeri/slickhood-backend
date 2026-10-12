@@ -42,6 +42,7 @@ import org.apache.commons.lang3.StringUtils;
 @Slf4j
 @RequiredArgsConstructor
 public class ProviderServiceService {
+    private static final java.math.BigDecimal MAX_SERVICE_UNIT_RATE = new java.math.BigDecimal("99999999.99");
     private final ProviderServiceDao serviceDao;
     private final ProviderProfileDao profileDao;
     private final ServiceCategoryDao categoryDao;
@@ -58,7 +59,9 @@ public class ProviderServiceService {
 
     public record Readiness(Set<String> uploadedDocumentTypes,Set<String> verifiedDocumentTypes,
                             Set<String> outstandingDocumentTypes,int refereeCount,int verifiedRefereeCount,int requiredReferees) {}
-    private static final Set<PricingUnit> BOOKABLE_FIXED_PRICE_UNITS = Set.of(PricingUnit.PER_JOB, PricingUnit.FIXED);
+    private static final Set<PricingUnit> SUPPORTED_PRICING_UNITS = Set.of(
+            PricingUnit.PER_HOUR, PricingUnit.PER_DAY, PricingUnit.PER_WEEK,
+            PricingUnit.PER_MONTH, PricingUnit.PER_JOB, PricingUnit.FIXED);
 
     public Readiness serviceReadiness(long serviceId){
         var profile=profileDao.findByUserIdAndActive(userDao.getUserId()).orElseThrow(()->new PMSCustomException(ResponseCode.SP_PROFILE_NOT_FOUND));
@@ -87,7 +90,7 @@ public class ProviderServiceService {
     public ProviderServiceDTO addService(AddServiceRequest request) {
         long userId = userDao.getUserId();
         var profile = requireApprovedProfile(userId);
-        requireFixedPrice(request.pricingUnit());
+        requireSupportedPricingUnit(request.pricingUnit());
 
         ServiceCategory category = categoryDao.findById(request.categoryId())
                 .filter(ServiceCategory::isActive)
@@ -98,7 +101,7 @@ public class ProviderServiceService {
         service.setCategoryId(category.getId());
         service.setCategoryName(category.getName());
         applyCatalogueDetails(service, request, category);
-        service.setAmount(request.amount());
+        service.setAmount(normalizedServiceAmount(request.amount()));
         service.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(request.currency()));
         service.setPricingUnit(request.pricingUnit());
         service.setStatus(ProviderServiceStatus.DRAFT.name());
@@ -115,12 +118,13 @@ public class ProviderServiceService {
     public ProviderServiceDTO editService(long serviceId, AddServiceRequest request) {
         long userId = userDao.getUserId();
         var profile = requireApprovedProfile(userId);
-        requireFixedPrice(request.pricingUnit());
+        requireSupportedPricingUnit(request.pricingUnit());
 
         ProviderService service = serviceDao.findOwnedForUpdate(serviceId, profile.getId())
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
 
-        if (!ProviderServiceStatus.DRAFT.name().equals(service.getStatus())&&!ProviderServiceStatus.HIDDEN.name().equals(service.getStatus())) {
+        if (!Set.of(ProviderServiceStatus.DRAFT.name(), ProviderServiceStatus.HIDDEN.name(),
+                ProviderServiceStatus.APPROVED.name()).contains(service.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_EDITABLE);
         }
         if (ProviderServiceStatus.HIDDEN.name().equals(service.getStatus())
@@ -135,7 +139,7 @@ public class ProviderServiceService {
         service.setCategoryId(category.getId());
         service.setCategoryName(category.getName());
         applyCatalogueDetails(service, request, category);
-        service.setAmount(request.amount());
+        service.setAmount(normalizedServiceAmount(request.amount()));
         service.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(request.currency()));
         service.setPricingUnit(request.pricingUnit());
         service.setStatus(ProviderServiceStatus.DRAFT.name());
@@ -155,7 +159,7 @@ public class ProviderServiceService {
         if (!ProviderServiceStatus.DRAFT.name().equals(service.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_EDITABLE);
         }
-        requireFixedPrice(service.getPricingUnit());
+        requireSupportedPricingUnit(service.getPricingUnit());
 
         validateReadiness(service, false);
 
@@ -207,11 +211,33 @@ public class ProviderServiceService {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_CANNOT_APPROVE);
         }
         validateReadiness(service, true);
-        requireFixedPrice(service.getPricingUnit());
-        service.setStatus(ProviderServiceStatus.LISTED.name());
+        requireSupportedPricingUnit(service.getPricingUnit());
+        service.setStatus(ProviderServiceStatus.APPROVED.name());
         serviceDao.save(service, Permission.APPROVE_SP_SERVICE);
         riskScoreService.setVerified(serviceId);
         sendServiceNotification(service, NotificationType.SP_SERVICE_APPROVED_EMAIL, adminNotes);
+    }
+
+    @Transactional(transactionManager = "pmsDBTransactionManager")
+    public ProviderServiceDTO publishService(long serviceId) {
+        long userId = userDao.getUserId();
+        ProviderProfile profile = requireApprovedProfile(userId);
+        ProviderService service = serviceDao.findOwnedForUpdate(serviceId, profile.getId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND));
+        if (!service.isActive()) {
+            throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_EDITABLE);
+        }
+        if (ProviderServiceStatus.LISTED.name().equals(service.getStatus())) return toDTO(service);
+        if (!ProviderServiceStatus.APPROVED.name().equals(service.getStatus())) {
+            throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_EDITABLE);
+        }
+        requireSupportedPricingUnit(service.getPricingUnit());
+        validateReadiness(service, true);
+        categoryDao.findById(service.getCategoryId()).filter(ServiceCategory::isActive)
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
+        service.setStatus(ProviderServiceStatus.LISTED.name());
+        serviceDao.save(service, Permission.EDIT_SP_SERVICE);
+        return toDTO(service);
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
@@ -224,10 +250,26 @@ public class ProviderServiceService {
         sendServiceNotification(service, NotificationType.SP_SERVICE_REJECTED_EMAIL, adminNotes);
     }
 
-    private void requireFixedPrice(PricingUnit pricingUnit) {
-        if (!BOOKABLE_FIXED_PRICE_UNITS.contains(pricingUnit)) {
+    private void requireSupportedPricingUnit(PricingUnit pricingUnit) {
+        if (!SUPPORTED_PRICING_UNITS.contains(pricingUnit)) {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
-                    "Services currently support a fixed price for the complete job. Choose per job or fixed pricing.");
+                    "Choose per hour, per day, per week, per month, per job or fixed pricing.");
+        }
+    }
+
+    private java.math.BigDecimal normalizedServiceAmount(java.math.BigDecimal amount) {
+        try {
+            java.math.BigDecimal normalized = org.pms.silverocean.service.payment.money.MonetaryPolicy.positive(amount);
+            if (normalized.compareTo(MAX_SERVICE_UNIT_RATE) > 0) {
+                throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                        "The service unit price is above the supported transaction limit.");
+            }
+            return normalized;
+        } catch (PMSCustomException known) {
+            throw known;
+        } catch (IllegalArgumentException invalidAmount) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Enter a valid service unit price.");
         }
     }
 

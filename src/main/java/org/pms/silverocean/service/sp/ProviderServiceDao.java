@@ -16,6 +16,13 @@ import java.math.BigDecimal;
 
 @Service
 public class ProviderServiceDao {
+    private static final java.util.Set<org.pms.silverocean.service.sp.enums.PricingUnit> BOOKABLE_PRICING_UNITS =
+            java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_HOUR,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_DAY,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_WEEK,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_MONTH,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.FIXED);
     private final ProviderServiceRepo repo;
     private final AuditLogService auditLogService;
     private final org.pms.silverocean.database.pms.ServiceTierRepo tiers;
@@ -48,8 +55,7 @@ public class ProviderServiceDao {
         var availableChannels = paymentPlatformFactory.getAvailableChannelsForNewPayments();
         if (availableChannels.isEmpty()) return Page.empty(pageable);
         return repo.findListedByCategoryEnriched(pageable, categoryId,
-                java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
-                        org.pms.silverocean.service.sp.enums.PricingUnit.FIXED),
+                BOOKABLE_PRICING_UNITS,
                 org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SERVICES,
                 org.pms.silverocean.service.subscription.enums.SubscriptionStatus.ACTIVE,
                 org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name(),
@@ -59,13 +65,19 @@ public class ProviderServiceDao {
 
     public Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query,
                                                      BigDecimal minAmount, BigDecimal maxAmount,
+                                                     org.pms.silverocean.service.sp.enums.PricingUnit pricingUnit,
                                                      Double latitude, Double longitude, Double minLat, Double maxLat, Double minLng, Double maxLng) {
         var availableChannels = paymentPlatformFactory.getAvailableChannelsForNewPayments();
         if (availableChannels.isEmpty()) return Page.empty(pageable);
-        return repo.searchDirectory(pageable, categoryId, query, minAmount, maxAmount, latitude, longitude,
+        java.util.Set<org.pms.silverocean.service.sp.enums.PricingUnit> filterPricingUnits = pricingUnit == null
+                ? BOOKABLE_PRICING_UNITS
+                : pricingUnit == org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB
+                    ? java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
+                            org.pms.silverocean.service.sp.enums.PricingUnit.FIXED)
+                    : java.util.Set.of(pricingUnit);
+        return repo.searchDirectory(pageable, categoryId, query, minAmount, maxAmount, filterPricingUnits, latitude, longitude,
                 minLat, maxLat, minLng, maxLng,
-                java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
-                        org.pms.silverocean.service.sp.enums.PricingUnit.FIXED),
+                BOOKABLE_PRICING_UNITS,
                 org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SERVICES,
                 org.pms.silverocean.service.subscription.enums.SubscriptionStatus.ACTIVE,
                 org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name(),
@@ -75,15 +87,22 @@ public class ProviderServiceDao {
 
     public Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query,
                                                      BigDecimal minAmount, BigDecimal maxAmount) {
-        return searchDirectory(pageable,categoryId,query,minAmount,maxAmount,null,null,null,null,null,null);
+        return searchDirectory(pageable,categoryId,query,minAmount,maxAmount,null,null,null,null,null,null,null);
+    }
+
+    public Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query,
+                                                     BigDecimal minAmount, BigDecimal maxAmount,
+                                                     Double latitude, Double longitude, Double minLat,
+                                                     Double maxLat, Double minLng, Double maxLng) {
+        return searchDirectory(pageable, categoryId, query, minAmount, maxAmount, null,
+                latitude, longitude, minLat, maxLat, minLng, maxLng);
     }
 
     public Optional<ProviderServiceDTO> findByIdEnriched(long id) {
         var availableChannels = paymentPlatformFactory.getAvailableChannelsForNewPayments();
         if (availableChannels.isEmpty()) return Optional.empty();
         return repo.findByIdEnriched(id,
-                java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
-                        org.pms.silverocean.service.sp.enums.PricingUnit.FIXED),
+                BOOKABLE_PRICING_UNITS,
                 org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SERVICES,
                 org.pms.silverocean.service.subscription.enums.SubscriptionStatus.ACTIVE,
                 org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name(),

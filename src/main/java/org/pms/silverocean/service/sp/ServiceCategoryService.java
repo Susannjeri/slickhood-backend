@@ -35,10 +35,10 @@ public class ServiceCategoryService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ServiceCategoryDTO createCategory(CreateCategoryRequest request) {
-        rejectSokoRetailCategory(request.name());
+        String categoryName = requireAvailableCanonicalName(request.name(), null);
         long userId = userDao.getUserId();
         ServiceCategory category = new ServiceCategory();
-        category.setName(request.name());
+        category.setName(categoryName);
         category.setDescription(request.description());
         category.setRequiredDocumentTypes(request.requiredDocumentTypes());
         category.setRequiredNumberOfReferees(request.requiredNumberOfReferees());
@@ -50,11 +50,10 @@ public class ServiceCategoryService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ServiceCategoryDTO updateCategory(long categoryId, UpdateCategoryRequest request) {
-        rejectSokoRetailCategory(request.name());
         ServiceCategory category = categoryDao.findById(categoryId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
         requireVersion(category, request.version());
-        category.setName(request.name());
+        category.setName(requireAvailableCanonicalName(request.name(), categoryId));
         category.setDescription(request.description());
         category.setRequiredDocumentTypes(request.requiredDocumentTypes());
         category.setRequiredNumberOfReferees(request.requiredNumberOfReferees());
@@ -85,7 +84,7 @@ public class ServiceCategoryService {
         var category = categoryDao.findById(categoryId)
                 .orElseThrow(() -> new PMSCustomException(ResponseCode.SP_CATEGORY_NOT_FOUND));
         requireVersion(category, version);
-        rejectSokoRetailCategory(category.getName());
+        category.setName(requireAvailableCanonicalName(category.getName(), categoryId));
         category.setActive(true);
         categoryDao.save(category, Permission.MANAGE_SP_CATEGORIES);
         return new ServiceCategoryDTO(category);
@@ -98,7 +97,8 @@ public class ServiceCategoryService {
     }
 
     public Set<EnumWrapper> listPricingUnitList() {
-        return EnumSet.of(PricingUnit.PER_JOB, PricingUnit.FIXED).stream()
+        return EnumSet.of(PricingUnit.PER_HOUR, PricingUnit.PER_DAY, PricingUnit.PER_WEEK,
+                        PricingUnit.PER_MONTH, PricingUnit.PER_JOB, PricingUnit.FIXED).stream()
                 .map(pricingUnit -> new EnumWrapper(pricingUnit.name(), i18NService.getLocalizedMessage(pricingUnit.getLabel()), null))
                 .collect(Collectors.toSet());
     }
@@ -113,5 +113,29 @@ public class ServiceCategoryService {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
                     "Grocery retail belongs in Soko and cannot be published as a Services category.");
         }
+    }
+
+    private String requireAvailableCanonicalName(String requestedName, Long currentCategoryId) {
+        rejectSokoRetailCategory(requestedName);
+        String canonical = canonicalCategoryName(requestedName);
+        categoryDao.findByNameIgnoreCase(canonical)
+                .filter(existing -> currentCategoryId == null
+                        || !java.util.Objects.equals(existing.getId(), currentCategoryId))
+                .ifPresent(existing -> {
+                    throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                            "This service category already exists. Update or reactivate the existing category instead.");
+                });
+        return canonical;
+    }
+
+    private String canonicalCategoryName(String requestedName) {
+        String trimmed = requestedName == null ? "" : requestedName.trim();
+        return switch (trimmed.toLowerCase(Locale.ROOT)) {
+            case "plumbing", "plumbing service", "plumbing services" -> "Plumbing services";
+            case "cooking", "cooking service", "cooking services", "chef", "chef service", "chef services" ->
+                    "Chef services";
+            case "catering", "catering service", "catering services" -> "Catering services";
+            default -> trimmed;
+        };
     }
 }

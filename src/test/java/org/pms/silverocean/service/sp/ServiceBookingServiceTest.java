@@ -56,6 +56,21 @@ import static org.mockito.Mockito.when;
 
 class ServiceBookingServiceTest {
 
+    @Test
+    void bookingQuoteSnapshotIsRequiredAtTheApiBoundary() {
+        try (var factory = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
+            var validator = factory.getValidator();
+            LocalDateTime scheduledAt = LocalDateTime.now().plusDays(1);
+            var missingQuote = new CreateBookingRequest(10L, scheduledAt, null, null, null,
+                    "12 Market Road, Nairobi", null, BigDecimal.ONE, null, null, null);
+            var currentQuote = fixedPriceRequest(10L, scheduledAt, null, null, null,
+                    "12 Market Road, Nairobi", null);
+
+            org.junit.jupiter.api.Assertions.assertFalse(validator.validate(missingQuote).isEmpty());
+            org.junit.jupiter.api.Assertions.assertTrue(validator.validate(currentQuote).isEmpty());
+        }
+    }
+
     @Mock
     private ServiceBookingDao bookingDao;
     @Mock
@@ -136,6 +151,8 @@ class ServiceBookingServiceTest {
         s.setActive(true);
         s.setCategoryName(categoryName);
         s.setPricingUnit(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB);
+        s.setAmount(new BigDecimal("1000.00"));
+        s.setCurrency("KES");
         return s;
     }
 
@@ -147,6 +164,9 @@ class ServiceBookingServiceTest {
         b.setStatus(status);
         b.setQuotedAmount(new BigDecimal("1000.00"));
         b.setCurrency("KES");
+        b.setPricingUnit(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB);
+        b.setPricingUnitRate(new BigDecimal("1000.00"));
+        b.setUnitQuantity(BigDecimal.ONE);
         b.setPaymentAccountId(50L);
         b.setPaymentChannel(PaymentChannel.MPESA.name());
         b.setScheduledAt(LocalDateTime.now().plusDays(1).atZone(ZoneId.of("UTC")));
@@ -172,6 +192,19 @@ class ServiceBookingServiceTest {
         return u;
     }
 
+    private CreateBookingRequest fixedPriceRequest(long serviceId, LocalDateTime scheduledAt, String notes,
+                                                   Long propertyId, Long unitId) {
+        return fixedPriceRequest(serviceId, scheduledAt, notes, propertyId, unitId, null, null);
+    }
+
+    private CreateBookingRequest fixedPriceRequest(long serviceId, LocalDateTime scheduledAt, String notes,
+                                                   Long propertyId, Long unitId, String serviceAddress,
+                                                   String idempotencyKey) {
+        return new CreateBookingRequest(serviceId, scheduledAt, notes, propertyId, unitId, serviceAddress,
+                idempotencyKey, BigDecimal.ONE, new BigDecimal("1000.00"), "KES",
+                org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB);
+    }
+
     // --- createBooking ---
 
     @Test
@@ -179,7 +212,7 @@ class ServiceBookingServiceTest {
         when(userDao.getUserId()).thenReturn(1L);
         when(serviceDao.findByIdForUpdate(10L)).thenReturn(Optional.empty());
 
-        CreateBookingRequest request = new CreateBookingRequest(10L, LocalDateTime.now().plusDays(1), "notes", null, null);
+        CreateBookingRequest request = fixedPriceRequest(10L, LocalDateTime.now().plusDays(1), "notes", null, null);
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,
                 () -> service.createBooking(request));
@@ -192,7 +225,7 @@ class ServiceBookingServiceTest {
         ProviderService ps = makeProviderService(10L, 5L, ProviderServiceStatus.SUBMITTED.name(), "Cleaning");
         when(serviceDao.findByIdForUpdate(10L)).thenReturn(Optional.of(ps));
 
-        CreateBookingRequest request = new CreateBookingRequest(10L, LocalDateTime.now().plusDays(1), "notes", null, null);
+        CreateBookingRequest request = fixedPriceRequest(10L, LocalDateTime.now().plusDays(1), "notes", null, null);
 
         PMSCustomException ex = assertThrows(PMSCustomException.class,
                 () -> service.createBooking(request));
@@ -216,7 +249,7 @@ class ServiceBookingServiceTest {
         when(userDao.findById(1L)).thenReturn(Optional.of(booker));
         when(userDao.findActiveByIdForUpdate(1L)).thenReturn(Optional.of(booker));
 
-        CreateBookingRequest request = new CreateBookingRequest(10L, LocalDateTime.now().plusDays(1),
+        CreateBookingRequest request = fixedPriceRequest(10L, LocalDateTime.now().plusDays(1),
                 "Please call first", null, null, "12 Market Road, Nairobi", "checkout-1");
 
         ServiceBookingDTO dto = service.createBooking(request);
@@ -244,6 +277,87 @@ class ServiceBookingServiceTest {
     }
 
     @Test
+    void createBookingCalculatesVariableQuoteAndScheduledEndFromWholeQuantity() {
+        when(userDao.getUserId()).thenReturn(1L);
+        ProviderService listing = makeProviderService(10L, 5L, ProviderServiceStatus.LISTED.name(), "Cleaning");
+        listing.setPricingUnit(org.pms.silverocean.service.sp.enums.PricingUnit.PER_HOUR);
+        listing.setAmount(new BigDecimal("200"));
+        when(serviceDao.findByIdForUpdate(10L)).thenReturn(Optional.of(listing));
+        doAnswer(invocation -> {
+            ((ServiceBooking) invocation.getArgument(0)).setId(1L);
+            return null;
+        }).when(bookingDao).save(any(ServiceBooking.class), anyString());
+        LocalDateTime startsAt = LocalDateTime.now().plusDays(2).withNano(0);
+
+        ServiceBookingDTO created = service.createBooking(new CreateBookingRequest(
+                10L, startsAt, null, null, null, "12 Market Road, Nairobi", null,
+                new BigDecimal("3"), new BigDecimal("200.00"), "KES",
+                org.pms.silverocean.service.sp.enums.PricingUnit.PER_HOUR));
+
+        ArgumentCaptor<ServiceBooking> saved = ArgumentCaptor.forClass(ServiceBooking.class);
+        verify(bookingDao).save(saved.capture(), anyString());
+        assertEquals(new BigDecimal("200.00"), saved.getValue().getPricingUnitRate());
+        assertEquals(new BigDecimal("3"), saved.getValue().getUnitQuantity());
+        assertEquals(new BigDecimal("600.00"), saved.getValue().getQuotedAmount());
+        assertEquals(startsAt.plusHours(3).atZone(ZoneId.of("Africa/Nairobi")).withZoneSameInstant(ZoneId.of("UTC")),
+                saved.getValue().getScheduledEndAt());
+        assertEquals(saved.getValue().getScheduledEndAt(), created.scheduledEndAt());
+    }
+
+    @Test
+    void createBookingRequiresQuantityForVariablePricing() {
+        when(userDao.getUserId()).thenReturn(1L);
+        ProviderService listing = makeProviderService(10L, 5L, ProviderServiceStatus.LISTED.name(), "Cleaning");
+        listing.setPricingUnit(org.pms.silverocean.service.sp.enums.PricingUnit.PER_DAY);
+        when(serviceDao.findByIdForUpdate(10L)).thenReturn(Optional.of(listing));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.createBooking(
+                new CreateBookingRequest(10L, LocalDateTime.now().plusDays(2), null, null, null,
+                        "12 Market Road, Nairobi", null, null, null, null, null)));
+
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
+        verify(bookingDao, never()).save(any(), anyString());
+    }
+
+    @Test
+    void createBookingRejectsQuantityAboveOneForFixedPricing() {
+        when(userDao.getUserId()).thenReturn(1L);
+        when(serviceDao.findByIdForUpdate(10L)).thenReturn(Optional.of(
+                makeProviderService(10L, 5L, ProviderServiceStatus.LISTED.name(), "Cleaning")));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.createBooking(
+                new CreateBookingRequest(10L, LocalDateTime.now().plusDays(2), null, null, null,
+                        "12 Market Road, Nairobi", null, new BigDecimal("2"), null, null, null)));
+
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
+    }
+
+    @Test
+    void createBookingRejectsAbsentPartialAndStaleExpectedQuote() {
+        when(userDao.getUserId()).thenReturn(1L);
+        ProviderService listing = makeProviderService(10L, 5L, ProviderServiceStatus.LISTED.name(), "Cleaning");
+        when(serviceDao.findByIdForUpdate(10L)).thenReturn(Optional.of(listing));
+        LocalDateTime scheduledAt = LocalDateTime.now().plusDays(2);
+
+        PMSCustomException partial = assertThrows(PMSCustomException.class, () -> service.createBooking(
+                new CreateBookingRequest(10L, scheduledAt, null, null, null, "12 Market Road, Nairobi",
+                        null, BigDecimal.ONE, new BigDecimal("1000"), null, null)));
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, partial.getResponseCode());
+
+        PMSCustomException stale = assertThrows(PMSCustomException.class, () -> service.createBooking(
+                new CreateBookingRequest(10L, scheduledAt, null, null, null, "12 Market Road, Nairobi",
+                        null, BigDecimal.ONE, new BigDecimal("900"), "KES",
+                        org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB)));
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, stale.getResponseCode());
+
+        PMSCustomException absent = assertThrows(PMSCustomException.class, () -> service.createBooking(
+                new CreateBookingRequest(10L, scheduledAt, null, null, null,
+                        "12 Market Road, Nairobi", null)));
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, absent.getResponseCode());
+        verify(bookingDao, never()).save(any(), anyString());
+    }
+
+    @Test
     void createBooking_rejectsProviderWhoseServicesSubscriptionExpired() {
         when(userDao.getUserId()).thenReturn(1L);
         ProviderService listing = makeProviderService(10L, 5L, ProviderServiceStatus.LISTED.name(), "Cleaning");
@@ -255,7 +369,7 @@ class ServiceBookingServiceTest {
                         org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SERVICES);
 
         PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.createBooking(
-                new CreateBookingRequest(10L, LocalDateTime.now().plusDays(1), null, null, null,
+                fixedPriceRequest(10L, LocalDateTime.now().plusDays(1), null, null, null,
                         "12 Market Road, Nairobi", null)));
 
         assertEquals(ResponseCode.SUBSCRIPTION_ACCESS_REQUIRED, error.getResponseCode());
@@ -280,7 +394,7 @@ class ServiceBookingServiceTest {
         when(profileDao.findByIdForUpdate(5L)).thenReturn(Optional.of(makeProfile(5L, "CleanCo")));
         when(userDao.findById(1L)).thenReturn(Optional.of(customer));
 
-        ServiceBookingDTO result = service.createBooking(new CreateBookingRequest(10L, scheduledAt,
+        ServiceBookingDTO result = service.createBooking(fixedPriceRequest(10L, scheduledAt,
                 "Please call first", null, null, "12 Market Road, Nairobi", " checkout-1 "));
 
         assertEquals(31L, result.id());
@@ -300,7 +414,7 @@ class ServiceBookingServiceTest {
         when(bookingDao.findByCreatedByAndClientRequestId(1L, "checkout-1")).thenReturn(Optional.of(existing));
 
         PMSCustomException ex = assertThrows(PMSCustomException.class, () -> service.createBooking(
-                new CreateBookingRequest(10L, scheduledAt, null, null, null,
+                fixedPriceRequest(10L, scheduledAt, null, null, null,
                         "Different address", "checkout-1")));
 
         assertEquals(ResponseCode.INVALID_FIELD_DATA, ex.getResponseCode());
@@ -315,7 +429,7 @@ class ServiceBookingServiceTest {
         when(profileDao.findByIdForUpdate(5L)).thenReturn(Optional.of(makeProfile(5L, "CleanCo")));
 
         PMSCustomException ex = assertThrows(PMSCustomException.class, () -> service.createBooking(
-                new CreateBookingRequest(10L, LocalDateTime.now().plusDays(1), null, null, null)));
+                fixedPriceRequest(10L, LocalDateTime.now().plusDays(1), null, null, null)));
 
         assertEquals(ResponseCode.INVALID_FIELD_DATA, ex.getResponseCode());
         verify(bookingDao, never()).save(any(), anyString());
@@ -333,7 +447,7 @@ class ServiceBookingServiceTest {
         doAnswer(inv -> { ((ServiceBooking) inv.getArgument(0)).setId(32L); return null; })
                 .when(bookingDao).save(any(ServiceBooking.class), anyString());
 
-        service.createBooking(new CreateBookingRequest(10L, LocalDateTime.now().plusDays(1),
+        service.createBooking(fixedPriceRequest(10L, LocalDateTime.now().plusDays(1),
                 null, 77L, 9L, null, null));
 
         ArgumentCaptor<ServiceBooking> captor = ArgumentCaptor.forClass(ServiceBooking.class);
@@ -356,7 +470,7 @@ class ServiceBookingServiceTest {
         when(userDao.findActiveByIdForUpdate(99L)).thenReturn(Optional.of(expiredOwner));
 
         PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.createBooking(
-                new CreateBookingRequest(10L, LocalDateTime.now().plusDays(1), null, null, null,
+                fixedPriceRequest(10L, LocalDateTime.now().plusDays(1), null, null, null,
                         "12 Market Road, Nairobi", null)));
 
         assertEquals(ResponseCode.SP_SERVICE_NOT_FOUND, error.getResponseCode());
@@ -373,7 +487,7 @@ class ServiceBookingServiceTest {
         when(paymentPlatformFactory.isAvailableForNewPayments(PaymentChannel.MPESA)).thenReturn(false);
 
         PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.createBooking(
-                new CreateBookingRequest(10L, LocalDateTime.now().plusDays(1), null, null, null,
+                fixedPriceRequest(10L, LocalDateTime.now().plusDays(1), null, null, null,
                         "12 Market Road, Nairobi", null)));
 
         assertEquals(ResponseCode.SP_SERVICE_NOT_FOUND, error.getResponseCode());
@@ -1138,14 +1252,14 @@ class ServiceBookingServiceTest {
         when(serviceDao.findByIdForUpdate(10L)).thenReturn(Optional.of(makeProviderService(10L,5L,"LISTED","Cleaning")));
         ProviderProfile profile=makeProfile(5L,"CleanCo");profile.setStatus("BLACKLISTED");
         when(profileDao.findByIdForUpdate(5L)).thenReturn(Optional.of(profile));
-        assertThrows(PMSCustomException.class,()->service.createBooking(new CreateBookingRequest(10L,LocalDateTime.now().plusDays(1),null,null,null)));
+        assertThrows(PMSCustomException.class,()->service.createBooking(fixedPriceRequest(10L,LocalDateTime.now().plusDays(1),null,null,null)));
         org.mockito.Mockito.verifyNoInteractions(bookingDao);
     }
     @Test void bookingRejectsPastNairobiTimeAtServiceBoundary(){
         when(userDao.getUserId()).thenReturn(1L);
         when(serviceDao.findByIdForUpdate(10L)).thenReturn(Optional.of(makeProviderService(10L,5L,"LISTED","Cleaning")));
         when(profileDao.findByIdForUpdate(5L)).thenReturn(Optional.of(makeProfile(5L,"CleanCo")));
-        assertThrows(PMSCustomException.class,()->service.createBooking(new CreateBookingRequest(10L,LocalDateTime.now(ZoneId.of("Africa/Nairobi")).minusMinutes(1),null,null,null)));
+        assertThrows(PMSCustomException.class,()->service.createBooking(fixedPriceRequest(10L,LocalDateTime.now(ZoneId.of("Africa/Nairobi")).minusMinutes(1),null,null,null)));
         org.mockito.Mockito.verifyNoInteractions(bookingDao);
     }
     @Test void inactivePaymentAccountCannotIssueInvoice(){

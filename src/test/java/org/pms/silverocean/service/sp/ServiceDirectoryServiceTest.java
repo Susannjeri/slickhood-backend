@@ -50,7 +50,7 @@ class ServiceDirectoryServiceTest {
                 PageRequest.of(0, 12), null, null, new BigDecimal("500"), new BigDecimal("100")));
 
         assertEquals(ResponseCode.INVALID_FIELD_DATA, ex.getResponseCode());
-        verify(serviceDao, never()).searchDirectory(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(serviceDao, never()).searchDirectory(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -59,31 +59,54 @@ class ServiceDirectoryServiceTest {
                 PageRequest.of(0, 12), null, "cleaning", null, null, -1.28, null, 10.0));
 
         assertEquals(ResponseCode.INVALID_FIELD_DATA, ex.getResponseCode());
-        verify(serviceDao, never()).searchDirectory(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(serviceDao, never()).searchDirectory(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void searchDirectory_usesGlobalPriceOrderWhileKeepingLocationRadiusFilter() {
-        when(serviceDao.searchDirectory(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(serviceDao.searchDirectory(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of()));
 
         service.searchDirectory(PageRequest.of(0, 24, Sort.by("amount").ascending()), null, null,
                 null, null, -1.2864, 36.8172, 10.0);
 
-        verify(serviceDao).searchDirectory(any(), eq(null), eq(null), eq(null), eq(null),
+        verify(serviceDao).searchDirectory(any(), eq(null), eq(null), eq(null), eq(null), eq(null),
                 eq(null), eq(null), any(), any(), any(), any());
     }
 
     @Test
     void searchDirectory_usesDistanceOrderForLocationAwareDefaultResults() {
-        when(serviceDao.searchDirectory(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(serviceDao.searchDirectory(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of()));
 
         service.searchDirectory(PageRequest.of(0, 24), null, null,
                 null, null, -1.2864, 36.8172, 10.0);
 
-        verify(serviceDao).searchDirectory(any(), eq(null), eq(null), eq(null), eq(null),
+        verify(serviceDao).searchDirectory(any(), eq(null), eq(null), eq(null), eq(null), eq(null),
                 eq(-1.2864), eq(36.8172), any(), any(), any(), any());
+    }
+
+    @Test
+    void searchDirectoryPassesPricingUnitIntoDatabasePagination() {
+        when(serviceDao.searchDirectory(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        service.searchDirectory(PageRequest.of(0, 24), 4L, "cleaning", null, null,
+                PricingUnit.PER_HOUR, null, null, null);
+
+        verify(serviceDao).searchDirectory(any(), eq(4L), eq("cleaning"), eq(null), eq(null),
+                eq(PricingUnit.PER_HOUR), eq(null), eq(null), eq(null), eq(null), eq(null), eq(null));
+    }
+
+    @Test
+    void searchDirectoryRejectsUnsupportedPricingUnit() {
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.searchDirectory(
+                PageRequest.of(0, 24), null, null, null, null,
+                PricingUnit.PER_VISIT, null, null, null));
+
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
+        verify(serviceDao, never()).searchDirectory(any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any());
     }
 
     @Test

@@ -10,7 +10,7 @@ import java.util.Set;
 
 public record UpdateCategoryRequest(
         @NotBlank @Size(max = 160) String name,
-        @Size(max = 1000) String description,
+        @NotBlank @Size(min = 20, max = 1000) String description,
         Set<DocumentType> requiredDocumentTypes,
         @Min(0) @Max(100) int requiredNumberOfReferees,
         @Min(0) long version

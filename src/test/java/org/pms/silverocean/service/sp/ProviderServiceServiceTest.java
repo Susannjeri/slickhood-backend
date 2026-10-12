@@ -85,6 +85,7 @@ class ProviderServiceServiceTest {
         approvedProfile.setPaymentAccountId(40L);
         when(profileDao.findById(10L)).thenReturn(Optional.of(approvedProfile));
         var user=new org.pms.silverocean.database.pms.entities.Users();user.setId(1L);
+        user.setProfileType(org.pms.silverocean.service.users.ProfileType.INDIVIDUAL.name());
         when(userDao.findById(1L)).thenReturn(Optional.of(user));
         PaymentAccount account=new PaymentAccount();account.setId(40L);account.setActive(true);account.setVerified(true);
         account.setCategory(AccountCategory.MERCHANT);account.setChannel(PaymentChannel.MPESA);
@@ -329,15 +330,20 @@ class ProviderServiceServiceTest {
     }
 
     @Test
-    void addService_rejectsVariableUnitUntilQuantityAndQuoteAcceptanceAreSupported() {
+    void addService_acceptsSupportedVariablePricingUnit() {
         when(userDao.getUserId()).thenReturn(1L);
-        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(makeProfile(10L, 1L)));
+        ProviderProfile profile = makeProfile(10L, 1L);
+        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(profile));
+        when(profileDao.findById(10L)).thenReturn(Optional.of(profile));
+        when(categoryDao.findById(3L)).thenReturn(Optional.of(makeCategory(3L, "Plumbing services")));
+        doAnswer(invocation -> { ((ProviderService) invocation.getArgument(0)).setId(22L); return null; })
+                .when(serviceDao).save(any(), anyString());
 
-        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.addService(
-                new AddServiceRequest(3L, new BigDecimal("200.00"), "KES", PricingUnit.PER_HOUR)));
+        ProviderServiceDTO added = service.addService(
+                new AddServiceRequest(3L, new BigDecimal("200"), "KES", PricingUnit.PER_HOUR));
 
-        assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
-        verify(serviceDao, org.mockito.Mockito.never()).save(any(), anyString());
+        assertEquals(PricingUnit.PER_HOUR, added.pricingUnit());
+        assertEquals(new BigDecimal("200.00"), added.amount());
     }
 
     // --- submitForReview ---
@@ -453,7 +459,7 @@ class ProviderServiceServiceTest {
     }
 
     @Test
-    void approveService_setsStatusLISTED_andCallsSetVerified_onSuccess() {
+    void approveService_setsStatusApproved_andCallsSetVerified_onSuccess() {
         ProviderService s = makeService(8L, 10L, ProviderServiceStatus.SUBMITTED.name());
         when(serviceDao.findByIdForUpdate(8L)).thenReturn(Optional.of(s));
         doNothing().when(serviceDao).save(any(ProviderService.class), anyString());
@@ -465,8 +471,56 @@ class ProviderServiceServiceTest {
 
         ArgumentCaptor<ProviderService> captor = ArgumentCaptor.forClass(ProviderService.class);
         verify(serviceDao).save(captor.capture(), anyString());
-        assertEquals(ProviderServiceStatus.LISTED.name(), captor.getValue().getStatus());
+        assertEquals(ProviderServiceStatus.APPROVED.name(), captor.getValue().getStatus());
         verify(riskScoreService).setVerified(8L);
+    }
+
+    @Test
+    void approvedOwnerCanPublishService() {
+        when(userDao.getUserId()).thenReturn(1L);
+        ProviderProfile profile = makeProfile(10L, 1L);
+        profile.setPaymentAccountId(40L);
+        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(profile));
+        when(profileDao.findById(10L)).thenReturn(Optional.of(profile));
+        ProviderService listing = makeService(8L, 10L, ProviderServiceStatus.APPROVED.name());
+        listing.setCategoryId(2L);
+        when(serviceDao.findOwnedForUpdate(8L, 10L)).thenReturn(Optional.of(listing));
+        when(categoryDao.findById(2L)).thenReturn(Optional.of(makeCategory(2L, "Plumbing services")));
+
+        ProviderServiceDTO published = service.publishService(8L);
+
+        assertEquals(ProviderServiceStatus.LISTED.name(), published.status());
+        verify(serviceDao).save(listing, org.pms.silverocean.service.auth.roles.enums.Permission.EDIT_SP_SERVICE);
+    }
+
+    @Test
+    void publishingAnAlreadyListedOwnedServiceIsIdempotent() {
+        when(userDao.getUserId()).thenReturn(1L);
+        ProviderProfile profile = makeProfile(10L, 1L);
+        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(profile));
+        when(profileDao.findById(10L)).thenReturn(Optional.of(profile));
+        ProviderService listing = makeService(8L, 10L, ProviderServiceStatus.LISTED.name());
+        when(serviceDao.findOwnedForUpdate(8L, 10L)).thenReturn(Optional.of(listing));
+
+        assertEquals(ProviderServiceStatus.LISTED.name(), service.publishService(8L).status());
+        verify(serviceDao, org.mockito.Mockito.never()).save(any(), anyString());
+    }
+
+    @Test
+    void editingApprovedServiceReturnsItToDraftForReview() {
+        when(userDao.getUserId()).thenReturn(1L);
+        ProviderProfile profile = makeProfile(10L, 1L);
+        when(profileDao.findByUserIdAndActive(1L)).thenReturn(Optional.of(profile));
+        when(profileDao.findById(10L)).thenReturn(Optional.of(profile));
+        ProviderService listing = makeService(8L, 10L, ProviderServiceStatus.APPROVED.name());
+        when(serviceDao.findOwnedForUpdate(8L, 10L)).thenReturn(Optional.of(listing));
+        when(categoryDao.findById(2L)).thenReturn(Optional.of(makeCategory(2L, "Plumbing services")));
+
+        ProviderServiceDTO edited = service.editService(8L,
+                new AddServiceRequest(2L, new BigDecimal("500"), "KES", PricingUnit.PER_DAY));
+
+        assertEquals(ProviderServiceStatus.DRAFT.name(), edited.status());
+        assertEquals(PricingUnit.PER_DAY, edited.pricingUnit());
     }
 
     @Test

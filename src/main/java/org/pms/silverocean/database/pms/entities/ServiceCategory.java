@@ -27,6 +27,7 @@ import java.util.Set;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor
 public class ServiceCategory extends BaseCreatorEntity implements Auditable {
     private String name;
+    @Column(length = 1000)
     private String description;
 
     @ElementCollection(fetch = FetchType.EAGER)

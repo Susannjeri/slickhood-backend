@@ -13,6 +13,7 @@ import org.pms.silverocean.service.sp.enums.DocumentType;
 import org.pms.silverocean.service.sp.enums.PricingUnit;
 import org.pms.silverocean.service.sp.wrappers.CreateCategoryRequest;
 import org.pms.silverocean.service.sp.wrappers.ServiceCategoryDTO;
+import org.pms.silverocean.service.sp.wrappers.UpdateCategoryRequest;
 import org.pms.silverocean.service.wrappers.EnumWrapper;
 
 import java.util.Set;
@@ -26,7 +27,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ServiceCategoryServiceTest {
-    @Test void refereeBoundsAreValidatedAtTheApiBoundary(){try(var factory=jakarta.validation.Validation.buildDefaultValidatorFactory()){var validator=factory.getValidator();assertEquals(0,validator.validate(new CreateCategoryRequest("General",null,Set.of(),0)).size());org.junit.jupiter.api.Assertions.assertFalse(validator.validate(new CreateCategoryRequest("General",null,Set.of(),-1)).isEmpty());org.junit.jupiter.api.Assertions.assertFalse(validator.validate(new CreateCategoryRequest("General",null,Set.of(),101)).isEmpty());}}
+    @Test void refereeBoundsAreValidatedAtTheApiBoundary(){try(var factory=jakarta.validation.Validation.buildDefaultValidatorFactory()){var validator=factory.getValidator();String description="A clear professional service description.";assertEquals(0,validator.validate(new CreateCategoryRequest("General",description,Set.of(),0)).size());org.junit.jupiter.api.Assertions.assertFalse(validator.validate(new CreateCategoryRequest("General",description,Set.of(),-1)).isEmpty());org.junit.jupiter.api.Assertions.assertFalse(validator.validate(new CreateCategoryRequest("General",description,Set.of(),101)).isEmpty());}}
+    @Test void categoryDescriptionIsRequiredAndMustBeUseful(){try(var factory=jakarta.validation.Validation.buildDefaultValidatorFactory()){var validator=factory.getValidator();org.junit.jupiter.api.Assertions.assertFalse(validator.validate(new CreateCategoryRequest("General",null,Set.of(),0)).isEmpty());org.junit.jupiter.api.Assertions.assertFalse(validator.validate(new CreateCategoryRequest("General","Too short",Set.of(),0)).isEmpty());}}
     @Test void categoryAuditIsValidJsonAndIncludesRequirements() throws Exception {var category=new ServiceCategory();category.setName("Quoted \"category\"");category.setDescription("Line\nTwo");category.setRequiredNumberOfReferees(2);category.setRequiredDocumentTypes(Set.of(DocumentType.GOOD_CONDUCT));category.setActive(false);var json=new com.fasterxml.jackson.databind.ObjectMapper().readTree(category.toAuditJSON());assertEquals(2,json.get("requiredNumberOfReferees").asInt());assertEquals("GOOD_CONDUCT",json.get("requiredDocumentTypes").get(0).asText());org.junit.jupiter.api.Assertions.assertFalse(json.get("active").asBoolean());}
     @Test void retiredCategoryCanBeReactivatedWithoutRemovingRequirements(){var category=new ServiceCategory();category.setId(8L);category.setActive(false);category.setRequiredNumberOfReferees(2);category.setVersion(3);when(categoryDao.findById(8L)).thenReturn(java.util.Optional.of(category));var dto=service.reactivateCategory(8L,3);org.junit.jupiter.api.Assertions.assertTrue(dto.active());assertEquals(2,dto.requiredNumberOfReferees());verify(categoryDao).save(category,org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_SP_CATEGORIES);}
     @Test void staleCategoryEditCannotOverwriteANewerChange(){var category=new ServiceCategory();category.setId(8L);category.setName("Current");category.setVersion(4);when(categoryDao.findById(8L)).thenReturn(java.util.Optional.of(category));var request=new org.pms.silverocean.service.sp.wrappers.UpdateCategoryRequest("Stale","Old",Set.of(),0,3);org.junit.jupiter.api.Assertions.assertThrows(org.pms.silverocean.service.PMSCustomException.class,()->service.updateCategory(8L,request));assertEquals("Current",category.getName());org.mockito.Mockito.verify(categoryDao,org.mockito.Mockito.never()).save(org.mockito.Mockito.any(),org.mockito.Mockito.anyString());}
@@ -123,25 +125,76 @@ class ServiceCategoryServiceTest {
     // --- listPricingUnitList ---
 
     @Test
-    void listPricingUnitList_returnsOnlyProductionSafeFixedPriceUnits() {
+    void listPricingUnitList_returnsSupportedTimeAndFixedPriceUnits() {
         when(i18NService.getLocalizedMessage(anyString())).thenAnswer(inv -> inv.getArgument(0).toString());
 
         Set<EnumWrapper> result = service.listPricingUnitList();
 
         assertNotNull(result);
-        assertEquals(2, result.size());
+        assertEquals(6, result.size());
     }
 
     @Test
-    void listPricingUnitList_containsOnlyPerJobAndFixed() {
+    void listPricingUnitList_containsEverySupportedBookingUnit() {
         when(i18NService.getLocalizedMessage(anyString())).thenAnswer(inv -> "translated:" + inv.getArgument(0).toString());
 
         Set<EnumWrapper> result = service.listPricingUnitList();
 
-        Set<String> expectedIds = Set.of(PricingUnit.PER_JOB.name(), PricingUnit.FIXED.name());
+        Set<String> expectedIds = Set.of(PricingUnit.PER_HOUR.name(), PricingUnit.PER_DAY.name(),
+                PricingUnit.PER_WEEK.name(), PricingUnit.PER_MONTH.name(), PricingUnit.PER_JOB.name(),
+                PricingUnit.FIXED.name());
         Set<String> actualIds = new java.util.HashSet<>();
         result.forEach(wrapper -> actualIds.add(wrapper.id()));
 
         assertEquals(expectedIds, actualIds);
+    }
+
+    @Test
+    void legacyCookingNameIsCanonicalizedToChefServices() {
+        when(userDao.getUserId()).thenReturn(7L);
+        doAnswer(inv -> { ((ServiceCategory) inv.getArgument(0)).setId(9L); return null; })
+                .when(categoryDao).save(any(), anyString());
+
+        ServiceCategoryDTO created = service.createCategory(new CreateCategoryRequest(
+                " Cooking ", "Professional meal preparation in the customer's home.", Set.of(), 0));
+
+        assertEquals("Chef services", created.name());
+    }
+
+    @Test
+    void canonicalAliasCannotRecreateAnExistingCategory() {
+        ServiceCategory existing = new ServiceCategory();
+        existing.setId(4L);
+        existing.setName("Plumbing services");
+        when(categoryDao.findByNameIgnoreCase("Plumbing services")).thenReturn(java.util.Optional.of(existing));
+
+        var error = org.junit.jupiter.api.Assertions.assertThrows(
+                org.pms.silverocean.service.PMSCustomException.class,
+                () -> service.createCategory(new CreateCategoryRequest("Plumbing",
+                        "Professional plumbing repair and installation services.", Set.of(), 0)));
+
+        assertEquals(org.pms.silverocean.common.ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
+        org.mockito.Mockito.verify(categoryDao, org.mockito.Mockito.never()).save(any(), anyString());
+    }
+
+    @Test
+    void updatingCategoryWithLargeIdDoesNotTreatSameRowAsDuplicate() {
+        ServiceCategory existing = new ServiceCategory();
+        existing.setId(1000L);
+        existing.setName("Plumbing services");
+        existing.setDescription("Professional plumbing repair and installation services.");
+        existing.setVersion(3L);
+        existing.setActive(true);
+        when(categoryDao.findById(1000L)).thenReturn(java.util.Optional.of(existing));
+        when(categoryDao.findByNameIgnoreCase("Plumbing services"))
+                .thenReturn(java.util.Optional.of(existing));
+
+        ServiceCategoryDTO updated = service.updateCategory(1000L, new UpdateCategoryRequest(
+                "Plumbing services", "Installation, repair and maintenance of plumbing systems.",
+                Set.of(), 0, 3L));
+
+        assertEquals("Plumbing services", updated.name());
+        org.mockito.Mockito.verify(categoryDao).save(existing,
+                org.pms.silverocean.service.auth.roles.enums.Permission.MANAGE_SP_CATEGORIES);
     }
 }

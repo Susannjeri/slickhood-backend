@@ -57,6 +57,14 @@ public class ServiceBookingService {
     private static final java.time.Duration CUSTOMER_CONFIRMATION_WINDOW = java.time.Duration.ofHours(48);
     private static final int AUTO_FINALIZATION_BATCH_SIZE = 100;
     private static final int AUTO_FINALIZATION_MAX_BATCHES = 10;
+    private static final BigDecimal MAX_BOOKING_TOTAL = new BigDecimal("99999999.99");
+    private static final java.util.Set<org.pms.silverocean.service.sp.enums.PricingUnit> BOOKABLE_PRICING_UNITS =
+            java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_HOUR,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_DAY,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_WEEK,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_MONTH,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.FIXED);
     private final ServiceBookingDao bookingDao;
     private final ProviderServiceDao serviceDao;
     private final ProviderProfileDao profileDao;
@@ -92,10 +100,10 @@ public class ServiceBookingService {
         if (!service.isActive() || !ProviderServiceStatus.LISTED.name().equals(service.getStatus())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND);
         }
-        if (!java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
-                org.pms.silverocean.service.sp.enums.PricingUnit.FIXED).contains(service.getPricingUnit())) {
+        if (!BOOKABLE_PRICING_UNITS.contains(service.getPricingUnit())) {
             throw new PMSCustomException(ResponseCode.SP_SERVICE_NOT_FOUND);
         }
+        BigDecimal unitQuantity = normalizedUnitQuantity(service.getPricingUnit(), request.unitQuantity());
         ProviderReadiness readiness = requireProviderReadiness(service);
         ProviderProfile profile = readiness.profile();
         subscriptionEntitlements.requireActiveProductForOwner(profile.getUserId(),
@@ -115,10 +123,23 @@ public class ServiceBookingService {
         if (java.util.Objects.equals(service.getCreatedBy(), userId)) {
             throw new PMSCustomException(ResponseCode.SP_BOOKING_INVALID_STATUS);
         }
-        booking.setScheduledAt(request.scheduledAt().atZone(ZoneId.of("Africa/Nairobi")).withZoneSameInstant(ZoneId.of("UTC")));
+        ZonedDateTime scheduledLocal = request.scheduledAt().atZone(ZoneId.of("Africa/Nairobi"));
+        booking.setScheduledAt(scheduledLocal.withZoneSameInstant(ZoneId.of("UTC")));
+        booking.setScheduledEndAt(scheduledEndAt(scheduledLocal, service.getPricingUnit(), unitQuantity));
         booking.setNotes(request.notes());
-        booking.setQuotedAmount(service.getAmount());
-        booking.setCurrency(service.getCurrency());
+        BigDecimal unitRate = org.pms.silverocean.service.payment.money.MonetaryPolicy.positive(service.getAmount());
+        String bookingCurrency = org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(service.getCurrency());
+        requireExpectedQuote(request, unitRate, bookingCurrency, service.getPricingUnit());
+        BigDecimal quotedAmount = org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(
+                unitRate.multiply(unitQuantity));
+        if (quotedAmount.compareTo(MAX_BOOKING_TOTAL) > 0) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "The service total is above the supported transaction limit.");
+        }
+        booking.setPricingUnitRate(unitRate);
+        booking.setUnitQuantity(unitQuantity);
+        booking.setQuotedAmount(quotedAmount);
+        booking.setCurrency(bookingCurrency);
         booking.setPricingUnit(service.getPricingUnit());
         applyLocation(booking, request, userId);
         booking.setStatus(BookingStatus.PENDING.name());
@@ -639,11 +660,86 @@ public class ServiceBookingService {
                 && java.util.Objects.equals(org.apache.commons.lang3.StringUtils.trimToNull(existing.getNotes()),org.apache.commons.lang3.StringUtils.trimToNull(request.notes()))
                 && java.util.Objects.equals(existing.getPropertyId(),request.propertyId())
                 && java.util.Objects.equals(existing.getUnitId(),request.unitId())
+                && normalizedStoredQuantity(existing).compareTo(
+                        normalizedUnitQuantity(existing.getPricingUnit(), request.unitQuantity())) == 0
+                && expectedQuoteMatches(request, existing.getPricingUnitRate(), existing.getCurrency(),
+                        existing.getPricingUnit())
                 && java.util.Objects.equals(org.apache.commons.lang3.StringUtils.trimToNull(existing.getServiceAddress()),
                     org.apache.commons.lang3.StringUtils.defaultIfBlank(org.apache.commons.lang3.StringUtils.trimToNull(request.serviceAddress()),
                             request.unitId()==null?null:"Linked unit "+request.unitId()));
         if(!matches)throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
                 "This booking request key was already used for different details. Refresh the form and try again.");
+    }
+
+    private BigDecimal normalizedUnitQuantity(org.pms.silverocean.service.sp.enums.PricingUnit pricingUnit,
+                                               BigDecimal requestedQuantity) {
+        boolean fixedPrice = java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
+                org.pms.silverocean.service.sp.enums.PricingUnit.FIXED).contains(pricingUnit);
+        if (requestedQuantity == null) {
+            if (fixedPrice) return BigDecimal.ONE;
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Enter how many hours, days, weeks or months you need.");
+        }
+        BigDecimal quantity = requestedQuantity.stripTrailingZeros();
+        if (quantity.signum() <= 0 || quantity.compareTo(new BigDecimal("999")) > 0
+                || quantity.scale() > 0) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA, "Enter a valid service quantity.");
+        }
+        if (fixedPrice && quantity.compareTo(BigDecimal.ONE) != 0) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Per job and fixed-price services must use a quantity of one.");
+        }
+        return quantity;
+    }
+
+    private ZonedDateTime scheduledEndAt(ZonedDateTime scheduledLocal,
+                                         org.pms.silverocean.service.sp.enums.PricingUnit pricingUnit,
+                                         BigDecimal unitQuantity) {
+        long quantity = unitQuantity.longValueExact();
+        ZonedDateTime end = switch (pricingUnit) {
+            case PER_HOUR -> scheduledLocal.plusHours(quantity);
+            case PER_DAY -> scheduledLocal.plusDays(quantity);
+            case PER_WEEK -> scheduledLocal.plusWeeks(quantity);
+            case PER_MONTH -> scheduledLocal.plusMonths(quantity);
+            default -> null;
+        };
+        return end == null ? null : end.withZoneSameInstant(ZoneId.of("UTC"));
+    }
+
+    private BigDecimal normalizedStoredQuantity(ServiceBooking booking) {
+        return booking.getUnitQuantity() == null
+                ? BigDecimal.ONE : booking.getUnitQuantity().stripTrailingZeros();
+    }
+
+    private void requireExpectedQuote(CreateBookingRequest request, BigDecimal unitRate, String currency,
+                                      org.pms.silverocean.service.sp.enums.PricingUnit pricingUnit) {
+        if (!expectedQuoteMatches(request, unitRate, currency, pricingUnit)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "The service price or price type changed. Refresh the service and confirm the new quote.");
+        }
+    }
+
+    private boolean expectedQuoteMatches(CreateBookingRequest request, BigDecimal unitRate, String currency,
+                                         org.pms.silverocean.service.sp.enums.PricingUnit pricingUnit) {
+        if (request.expectedUnitRate() == null || request.expectedCurrency() == null
+                || request.expectedPricingUnit() == null) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Refresh the service before booking so its complete quote can be confirmed.");
+        }
+        try {
+            BigDecimal expectedRate = org.pms.silverocean.service.payment.money.MonetaryPolicy.positive(
+                    request.expectedUnitRate());
+            String expectedCurrency = org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(
+                    request.expectedCurrency());
+            return unitRate != null
+                    && org.pms.silverocean.service.payment.money.MonetaryPolicy.amount(unitRate)
+                    .compareTo(expectedRate) == 0
+                    && expectedCurrency.equals(currency)
+                    && request.expectedPricingUnit() == pricingUnit;
+        } catch (IllegalArgumentException invalidQuote) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Refresh the service before booking so its current quote can be confirmed.");
+        }
     }
 
     private PMSInvoice createMarketplaceInvoice(ServiceBooking booking, ProviderService service, long providerUserId,
@@ -653,11 +749,18 @@ public class ServiceBookingService {
         String serviceName = org.apache.commons.lang3.StringUtils.defaultIfBlank(service.getTitle(),
                 service.getCategoryName() == null ? "Service booking" : service.getCategoryName());
         String escapedName = HtmlUtils.htmlEscape(serviceName);
+        BigDecimal quantity = normalizedStoredQuantity(booking);
+        String pricingSummary = quantity.toPlainString() + " × "
+                + booking.getCurrency() + " " + booking.getPricingUnitRate() + " "
+                + booking.getPricingUnit().name().replace('_', ' ').toLowerCase(java.util.Locale.ROOT);
         PMSInvoice invoice = new PMSInvoice();
         invoice.setUnitId(booking.getUnitId() == null ? 0 : booking.getUnitId());
         invoice.setPropertyId(booking.getPropertyId() == null ? 0 : booking.getPropertyId());
-        invoice.setDescription(("Marketplace service: " + serviceName).getBytes(StandardCharsets.UTF_8));
-        invoice.setHtmlDescription(("<tr><td><span>" + escapedName + "</span></td><td class='amount-col'>" + booking.getQuotedAmount() + "</td></tr>").getBytes(StandardCharsets.UTF_8));
+        invoice.setDescription(("Marketplace service: " + serviceName + " (" + pricingSummary + ")")
+                .getBytes(StandardCharsets.UTF_8));
+        invoice.setHtmlDescription(("<tr><td><span>" + escapedName + "</span><br><small>"
+                + HtmlUtils.htmlEscape(pricingSummary) + "</small></td><td class='amount-col'>"
+                + booking.getQuotedAmount() + "</td></tr>").getBytes(StandardCharsets.UTF_8));
         invoice.setMoneyAmount(booking.getQuotedAmount());
         invoice.setMoneyPendingAmount(booking.getQuotedAmount());
         invoice.setCurrency(org.pms.silverocean.service.payment.money.MonetaryPolicy.currency(booking.getCurrency()));

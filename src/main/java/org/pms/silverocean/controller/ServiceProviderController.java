@@ -88,21 +88,25 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
     }
 
     @GetMapping("/directory")
+    @PreAuthorize("permitAll()")
     public ResponseEntity<ResponseDTO> directory(Pageable pageable,
                                                   @RequestParam(required = false) Long categoryId,
                                                   @RequestParam(required = false) @Size(max=100) String query,
                                                   @RequestParam(required = false) @DecimalMin("0.0") BigDecimal minAmount,
                                                   @RequestParam(required = false) @DecimalMin("0.0") BigDecimal maxAmount,
+                                                  @RequestParam(required = false) org.pms.silverocean.service.sp.enums.PricingUnit pricingUnit,
                                                   @RequestParam(required = false) @DecimalMin("-90.0") @DecimalMax("90.0") Double latitude,
                                                   @RequestParam(required = false) @DecimalMin("-180.0") @DecimalMax("180.0") Double longitude,
                                                   @RequestParam(required = false) @DecimalMin("0.1") @DecimalMax("100.0") Double radiusKm) {
-        var page = directoryService.searchDirectory(pageable, categoryId, query, minAmount, maxAmount, latitude, longitude, radiusKm);
+        var page = directoryService.searchDirectory(pageable, categoryId, query, minAmount, maxAmount,
+                pricingUnit, latitude, longitude, radiusKm);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_SERVICE_LIST.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_SERVICE_LIST), page.getContent(),
                 page.getTotalPages(), page.getTotalElements(), page.getSize()));
     }
 
     @GetMapping("/directory/{serviceId}")
+    @PreAuthorize("permitAll()")
     public ResponseEntity<ResponseDTO> directoryDetails(@PathVariable long serviceId) {
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_SERVICE_LIST.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_SERVICE_LIST), directoryService.getServiceDetails(serviceId)));
@@ -194,6 +198,14 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
         serviceService.submitForReview(serviceId);
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_SERVICE_SUBMITTED.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_SERVICE_SUBMITTED)));
+    }
+
+    @PutMapping("/service/{serviceId}/publish")
+    @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).EDIT_SP_SERVICE)")
+    public ResponseEntity<ResponseDTO> publishService(@PathVariable long serviceId) {
+        var service = serviceService.publishService(serviceId);
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_SERVICE_STATUS_UPDATED.getCode(),
+                "Service published successfully.", service));
     }
 
     @GetMapping("/service/list")

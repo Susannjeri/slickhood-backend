@@ -1,6 +1,8 @@
 package org.pms.silverocean.service.sp.wrappers;
 
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
@@ -11,7 +13,7 @@ import java.math.BigDecimal;
 
 public record AddServiceRequest(
     @NotNull @Positive Long categoryId,
-    @NotNull @DecimalMin("0.01") BigDecimal amount,
+    @NotNull @DecimalMin("0.01") @DecimalMax("99999999.99") @Digits(integer = 8, fraction = 2) BigDecimal amount,
     @NotNull @ValidCurrency String currency,
     @NotNull PricingUnit pricingUnit,
     @Size(min = 3, max = 120) String title,

@@ -9,6 +9,7 @@ import org.pms.silverocean.database.pms.ServiceTierRepo;
 import org.pms.silverocean.service.audit.AuditLogService;
 import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.pms.silverocean.service.payment.wrappers.PaymentChannel;
+import org.pms.silverocean.service.sp.enums.PricingUnit;
 import org.springframework.data.domain.PageRequest;
 
 import java.util.Set;
@@ -67,5 +68,22 @@ class ProviderServiceDaoPaymentAvailabilityTest {
 
         verify(repo).findListedByCategoryEnriched(any(), any(), any(), any(), any(), any(), any(),
                 org.mockito.ArgumentMatchers.eq(enabled));
+    }
+
+    @Test
+    void perJobDirectoryFilterAlsoIncludesLegacyFixedListings() {
+        Set<PaymentChannel> enabled = Set.of(PaymentChannel.MPESA);
+        when(paymentPlatformFactory.getAvailableChannelsForNewPayments()).thenReturn(enabled);
+        when(repo.searchDirectory(any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+
+        dao.searchDirectory(PageRequest.of(0, 24), null, null, null, null,
+                PricingUnit.PER_JOB, null, null, null, null, null, null);
+
+        verify(repo).searchDirectory(any(), any(), any(), any(), any(),
+                org.mockito.ArgumentMatchers.argThat(units -> units.contains(PricingUnit.PER_JOB)
+                        && units.contains(PricingUnit.FIXED) && units.size() == 2),
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 }

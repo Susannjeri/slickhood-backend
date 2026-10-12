@@ -58,6 +58,7 @@ public interface ProviderServiceRepo extends JpaRepository<ProviderService, Long
             "AND pay.active=true AND pay.verified=true AND pay.createdBy=p.userId AND pay.category=:merchantCategory AND pay.channel IN :availableChannels " +
             "AND EXISTS (SELECT subscription.id FROM UserSubscription subscription WHERE subscription.createdBy=p.userId AND subscription.productKey=:productKey AND subscription.status=:subscriptionStatus AND subscription.active=true AND (subscription.endAt IS NULL OR subscription.endAt>CURRENT_TIMESTAMP)) " +
             "AND (:categoryId IS NULL OR s.categoryId=:categoryId) " +
+            "AND s.pricingUnit IN :filterPricingUnits " +
             "AND (:query IS NULL OR LOWER(s.categoryName) LIKE LOWER(CONCAT('%',:query,'%')) OR LOWER(s.title) LIKE LOWER(CONCAT('%',:query,'%')) OR LOWER(s.description) LIKE LOWER(CONCAT('%',:query,'%')) OR LOWER(p.businessName) LIKE LOWER(CONCAT('%',:query,'%')) OR LOWER(p.description) LIKE LOWER(CONCAT('%',:query,'%')) OR LOWER(p.serviceArea) LIKE LOWER(CONCAT('%',:query,'%'))) " +
             "AND (:minAmount IS NULL OR s.amount>=:minAmount) AND (:maxAmount IS NULL OR s.amount<=:maxAmount) " +
             "AND (:minLat IS NULL OR (ROUND(p.latitude,2) BETWEEN :minLat AND :maxLat AND ROUND(p.longitude,2) BETWEEN :minLng AND :maxLng)) " +
@@ -68,10 +69,12 @@ public interface ProviderServiceRepo extends JpaRepository<ProviderService, Long
                     "AND pay.active=true AND pay.verified=true AND pay.createdBy=p.userId AND pay.category=:merchantCategory AND pay.channel IN :availableChannels " +
                     "AND EXISTS (SELECT subscription.id FROM UserSubscription subscription WHERE subscription.createdBy=p.userId AND subscription.productKey=:productKey AND subscription.status=:subscriptionStatus AND subscription.active=true AND (subscription.endAt IS NULL OR subscription.endAt>CURRENT_TIMESTAMP)) " +
                     "AND (:categoryId IS NULL OR s.categoryId=:categoryId) " +
+                    "AND s.pricingUnit IN :filterPricingUnits " +
                     "AND (:query IS NULL OR LOWER(s.categoryName) LIKE LOWER(CONCAT('%',:query,'%')) OR LOWER(s.title) LIKE LOWER(CONCAT('%',:query,'%')) OR LOWER(s.description) LIKE LOWER(CONCAT('%',:query,'%')) OR LOWER(p.businessName) LIKE LOWER(CONCAT('%',:query,'%')) OR LOWER(p.description) LIKE LOWER(CONCAT('%',:query,'%')) OR LOWER(p.serviceArea) LIKE LOWER(CONCAT('%',:query,'%'))) " +
                     "AND (:minAmount IS NULL OR s.amount>=:minAmount) AND (:maxAmount IS NULL OR s.amount<=:maxAmount) " +
                     "AND (:minLat IS NULL OR (ROUND(p.latitude,2) BETWEEN :minLat AND :maxLat AND ROUND(p.longitude,2) BETWEEN :minLng AND :maxLng))")
     Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query, BigDecimal minAmount, BigDecimal maxAmount,
+                                             java.util.Collection<org.pms.silverocean.service.sp.enums.PricingUnit> filterPricingUnits,
                                              Double latitude, Double longitude, Double minLat, Double maxLat, Double minLng, Double maxLng,
                                              java.util.Collection<org.pms.silverocean.service.sp.enums.PricingUnit> pricingUnits,
                                              org.pms.silverocean.service.subscription.enums.SubscriptionProduct productKey,

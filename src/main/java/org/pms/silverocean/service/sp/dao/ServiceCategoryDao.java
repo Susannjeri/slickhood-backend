@@ -41,4 +41,8 @@ public class ServiceCategoryDao {
     public Optional<ServiceCategory> findByNameAndActive(String name, boolean active) {
         return repo.findByNameAndActive(name, active);
     }
+
+    public Optional<ServiceCategory> findByNameIgnoreCase(String name) {
+        return repo.findFirstByNameIgnoreCaseOrderByIdAsc(name);
+    }
 }

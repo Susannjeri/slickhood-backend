@@ -37,6 +37,7 @@ public class ServiceBooking extends BaseCreatorEntity implements Auditable {
     @jakarta.persistence.Column(length = 100)
     private String clientRequestId;
     private ZonedDateTime scheduledAt;
+    private ZonedDateTime scheduledEndAt;
     private ZonedDateTime completedAt;
     private String status;
     @jakarta.persistence.Column(length = 2000)
@@ -47,6 +48,10 @@ public class ServiceBooking extends BaseCreatorEntity implements Auditable {
     private String currency;
     @Enumerated(EnumType.STRING)
     private PricingUnit pricingUnit;
+    @jakarta.persistence.Column(nullable = false, precision = 19, scale = 2)
+    private BigDecimal pricingUnitRate = BigDecimal.ZERO;
+    @jakarta.persistence.Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal unitQuantity = BigDecimal.ONE;
     private Long propertyId;
     private Long unitId;
     @jakarta.persistence.Column(length = 500)

@@ -19,6 +19,13 @@ import org.pms.silverocean.service.sp.dao.ServiceRatingDao;
 @Slf4j
 @RequiredArgsConstructor
 public class ServiceDirectoryService {
+    private static final java.util.Set<org.pms.silverocean.service.sp.enums.PricingUnit> SUPPORTED_PRICING_UNITS =
+            java.util.Set.of(org.pms.silverocean.service.sp.enums.PricingUnit.PER_HOUR,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_DAY,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_WEEK,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_MONTH,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.PER_JOB,
+                    org.pms.silverocean.service.sp.enums.PricingUnit.FIXED);
     private final ProviderServiceDao serviceDao;
     private final RiskScoreDao riskScoreDao;
     private final ServiceRatingDao ratingDao;
@@ -29,6 +36,7 @@ public class ServiceDirectoryService {
 
     public Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query,
                                                      BigDecimal minAmount, BigDecimal maxAmount,
+                                                     org.pms.silverocean.service.sp.enums.PricingUnit pricingUnit,
                                                      Double latitude, Double longitude, Double radiusKm) {
         if (minAmount != null && maxAmount != null && minAmount.compareTo(maxAmount) > 0) {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
@@ -38,19 +46,30 @@ public class ServiceDirectoryService {
             throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
                     "Latitude and longitude must be supplied together.");
         }
+        if (pricingUnit != null && !SUPPORTED_PRICING_UNITS.contains(pricingUnit)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Choose per hour, per day, per week, per month, per job or fixed pricing.");
+        }
         Double minLat=null,maxLat=null,minLng=null,maxLng=null;
         if(latitude!=null){double radius=Math.max(1,Math.min(radiusKm==null?25:radiusKm,100));double latDelta=radius/111.0;double lngDelta=radius/(111.0*Math.max(.2,Math.cos(Math.toRadians(latitude))));minLat=latitude-latDelta;maxLat=latitude+latDelta;minLng=longitude-lngDelta;maxLng=longitude+lngDelta;}
         var amountOrder=pageable.getSort().getOrderFor("amount");
         boolean lowestPriceFirst=amountOrder!=null && amountOrder.isAscending();
         Double orderingLatitude=lowestPriceFirst?null:latitude;
         Double orderingLongitude=lowestPriceFirst?null:longitude;
-        return enrichRatings(serviceDao.searchDirectory(bounded(pageable), categoryId, StringUtils.trimToNull(query), minAmount, maxAmount,
+        return enrichRatings(serviceDao.searchDirectory(bounded(pageable), categoryId, StringUtils.trimToNull(query), minAmount, maxAmount, pricingUnit,
                 orderingLatitude,orderingLongitude,minLat,maxLat,minLng,maxLng));
     }
 
     public Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query,
                                                      BigDecimal minAmount, BigDecimal maxAmount) {
-        return searchDirectory(pageable,categoryId,query,minAmount,maxAmount,null,null,null);
+        return searchDirectory(pageable,categoryId,query,minAmount,maxAmount,null,null,null,null);
+    }
+
+    public Page<ProviderServiceDTO> searchDirectory(Pageable pageable, Long categoryId, String query,
+                                                     BigDecimal minAmount, BigDecimal maxAmount,
+                                                     Double latitude, Double longitude, Double radiusKm) {
+        return searchDirectory(pageable, categoryId, query, minAmount, maxAmount, null,
+                latitude, longitude, radiusKm);
     }
 
     public ServiceDetailsDTO getServiceDetails(long serviceId) {
