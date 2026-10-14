@@ -102,6 +102,7 @@ class ServiceBookingServiceTest {
     private ServiceFinanceOperationService financeOperations;
 
     private ServiceBookingService service;
+    private Users verifiedBookingBuyer;
     @Test void financeAlertsKeepSettlementRecordsProviderOnly(){
         ServiceBooking booking=new ServiceBooking();booking.setId(9L);booking.setServiceId(2L);booking.setCreatedBy(8L);booking.setRefundStatus("CONFIRMED");booking.setRefundedAmount(new BigDecimal("20"));booking.setSettlementStatus("CONFIRMED");booking.setSettledAmount(new BigDecimal("80"));
         ProviderService listing=new ProviderService();listing.setProfileId(3L);ProviderProfile profile=new ProviderProfile();profile.setUserId(7L);profile.setActive(true);
@@ -122,6 +123,11 @@ class ServiceBookingServiceTest {
                 notificationService, businessAlerts, i18NService, accountDao, paymentPlatformFactory, invoiceDao, unitDao, ratingDao,
                 complaintDao, subscriptionEntitlements, financeOperations);
         when(paymentPlatformFactory.isAvailableForNewPayments(any())).thenReturn(true);
+        verifiedBookingBuyer = makeVerifiedBookingBuyer(1L, "Alice Tenant", "alice@test.com");
+        when(userDao.findActiveByIdForUpdate(1L)).thenReturn(Optional.of(verifiedBookingBuyer));
+        when(userDao.getCurrentAccessState()).thenReturn(Optional.of(
+                new UserDao.AccountAccessState(1L, true,
+                        org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name())));
         Users providerOwner = makeUser(99L, "CleanCo owner", "owner@clean.test");
         providerOwner.setActive(true);
         providerOwner.setVerified(true);
@@ -192,6 +198,17 @@ class ServiceBookingServiceTest {
         return u;
     }
 
+    private Users makeVerifiedBookingBuyer(long id, String fullName, String email) {
+        Users buyer = makeUser(id, fullName, email);
+        buyer.setActive(true);
+        buyer.setVerified(true);
+        buyer.setAccountStatus(org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name());
+        buyer.setEmailVerified(true);
+        buyer.setPhoneNumber("+254712345678");
+        buyer.setPhoneVerified(true);
+        return buyer;
+    }
+
     private CreateBookingRequest fixedPriceRequest(long serviceId, LocalDateTime scheduledAt, String notes,
                                                    Long propertyId, Long unitId) {
         return fixedPriceRequest(serviceId, scheduledAt, notes, propertyId, unitId, null, null);
@@ -206,6 +223,51 @@ class ServiceBookingServiceTest {
     }
 
     // --- createBooking ---
+
+    @Test
+    void createBookingRejectsInactiveBuyerBeforeLockingProviderService() {
+        when(userDao.getUserId()).thenReturn(1L);
+        when(userDao.getCurrentAccessState()).thenReturn(Optional.of(
+                new UserDao.AccountAccessState(1L, false,
+                        org.pms.silverocean.service.kyc.AccountStatus.ACTIVE.name())));
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.createBooking(
+                fixedPriceRequest(10L, LocalDateTime.now().plusDays(1), null, null, null,
+                        "12 Market Road, Nairobi", "inactive-buyer")));
+
+        assertEquals(ResponseCode.INVALID_USER_DETAILS, error.getResponseCode());
+        verify(userDao, never()).findActiveByIdForUpdate(1L);
+        verify(serviceDao, never()).findByIdForUpdate(anyLong());
+        verify(bookingDao, never()).save(any(), anyString());
+    }
+
+    @Test
+    void createBookingRejectsBuyerWhoseEmailIsNotVerifiedBeforeLockingProviderService() {
+        when(userDao.getUserId()).thenReturn(1L);
+        verifiedBookingBuyer.setEmailVerified(false);
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.createBooking(
+                fixedPriceRequest(10L, LocalDateTime.now().plusDays(1), null, null, null,
+                        "12 Market Road, Nairobi", "unverified-email")));
+
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
+        verify(serviceDao, never()).findByIdForUpdate(anyLong());
+        verify(bookingDao, never()).save(any(), anyString());
+    }
+
+    @Test
+    void createBookingRejectsBuyerWhosePhoneIsNotVerifiedBeforeLockingProviderService() {
+        when(userDao.getUserId()).thenReturn(1L);
+        verifiedBookingBuyer.setPhoneVerified(false);
+
+        PMSCustomException error = assertThrows(PMSCustomException.class, () -> service.createBooking(
+                fixedPriceRequest(10L, LocalDateTime.now().plusDays(1), null, null, null,
+                        "12 Market Road, Nairobi", "unverified-phone")));
+
+        assertEquals(ResponseCode.INVALID_FIELD_DATA, error.getResponseCode());
+        verify(serviceDao, never()).findByIdForUpdate(anyLong());
+        verify(bookingDao, never()).save(any(), anyString());
+    }
 
     @Test
     void createBooking_throwsSP_SERVICE_NOT_FOUND_whenServiceAbsent() {
@@ -245,7 +307,7 @@ class ServiceBookingServiceTest {
         ProviderProfile profile = makeProfile(5L, "CleanCo");
         when(profileDao.findByIdForUpdate(5L)).thenReturn(Optional.of(profile));
 
-        Users booker = makeUser(1L, "Alice Tenant", "alice@test.com");
+        Users booker = makeVerifiedBookingBuyer(1L, "Alice Tenant", "alice@test.com");
         when(userDao.findById(1L)).thenReturn(Optional.of(booker));
         when(userDao.findActiveByIdForUpdate(1L)).thenReturn(Optional.of(booker));
 
@@ -272,6 +334,7 @@ class ServiceBookingServiceTest {
         assertEquals("CleanCo", dto.serviceProviderName());
         assertEquals("Alice Tenant", dto.bookedByUserName());
         assertEquals(BookingStatus.PENDING.name(), dto.status());
+        verify(userDao).getCurrentAccessState();
         verify(subscriptionEntitlements).requireActiveProductForOwner(99L,
                 org.pms.silverocean.service.subscription.enums.SubscriptionProduct.SERVICES);
     }
@@ -379,7 +442,7 @@ class ServiceBookingServiceTest {
     @Test
     void createBooking_replaysExistingIdempotentRequestWithoutSavingDuplicate() {
         when(userDao.getUserId()).thenReturn(1L);
-        Users customer = makeUser(1L, "Alice Tenant", "alice@test.com");
+        Users customer = makeVerifiedBookingBuyer(1L, "Alice Tenant", "alice@test.com");
         when(userDao.findActiveByIdForUpdate(1L)).thenReturn(Optional.of(customer));
         LocalDateTime scheduledAt = LocalDateTime.now().plusDays(1).withNano(0);
         ServiceBooking existing = makeBooking(31L, 10L, BookingStatus.PENDING.name());
@@ -405,7 +468,8 @@ class ServiceBookingServiceTest {
     @Test
     void createBooking_rejectsReusedIdempotencyKeyWhenAddressChanged() {
         when(userDao.getUserId()).thenReturn(1L);
-        when(userDao.findActiveByIdForUpdate(1L)).thenReturn(Optional.of(makeUser(1L, "Alice", "alice@test.com")));
+        when(userDao.findActiveByIdForUpdate(1L)).thenReturn(Optional.of(
+                makeVerifiedBookingBuyer(1L, "Alice", "alice@test.com")));
         LocalDateTime scheduledAt = LocalDateTime.now().plusDays(1).withNano(0);
         ServiceBooking existing = makeBooking(31L, 10L, BookingStatus.PENDING.name());
         existing.setScheduledAt(scheduledAt.atZone(ZoneId.of("Africa/Nairobi")).withZoneSameInstant(ZoneId.of("UTC")));

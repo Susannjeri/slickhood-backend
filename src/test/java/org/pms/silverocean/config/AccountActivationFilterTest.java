@@ -60,6 +60,15 @@ class AccountActivationFilterTest {
         assertThat(run("POST", "/soko/order/checkout").getStatus()).isEqualTo(403);
     }
 
+    @Test void pendingCustomerCanBrowseExactAndDetailedPublicServicesDirectory() throws Exception {
+        pendingCustomer(PMSRole.MARKETPLACE_BUYER);
+
+        assertThat(run("GET", "/sp/directory").getStatus()).isEqualTo(200);
+        assertThat(run("GET", "/sp/directory/42").getStatus()).isEqualTo(200);
+
+        verify(users, never()).getCurrentAccessState();
+    }
+
     @Test void pendingKycProviderCanFulfilOrProtectExistingServiceBookingsButCannotAcceptNewWork() throws Exception {
         pendingCustomer(PMSRole.SERVICE_PROVIDER);
 

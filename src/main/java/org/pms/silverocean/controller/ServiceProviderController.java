@@ -27,6 +27,8 @@ import org.pms.silverocean.service.sp.wrappers.PaymentAccountRequest;
 import org.pms.silverocean.service.sp.wrappers.CompletionEvidenceRequest;
 import org.pms.silverocean.service.sp.wrappers.MarketplaceFinanceRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
@@ -111,6 +113,19 @@ public class ServiceProviderController extends OutputStreamErrorHandler {
         return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_SERVICE_LIST.getCode(),
                 i18NService.getLocalizedMessage(ResponseCode.SP_SERVICE_LIST), directoryService.getServiceDetails(serviceId)));
     }
+
+    @GetMapping("/directory/categories")
+    @PreAuthorize("permitAll()")
+    public ResponseEntity<ResponseDTO> directoryCategories() {
+        var page = categoryService.listCategories(PageRequest.of(0, 200, Sort.by("name").ascending()));
+        var categories = page.getContent().stream()
+                .map(category -> new PublicDirectoryCategory(category.id(), category.name()))
+                .toList();
+        return ResponseEntity.ok(new ResponseDTO(true, ResponseCode.SP_CATEGORY_LIST.getCode(),
+                i18NService.getLocalizedMessage(ResponseCode.SP_CATEGORY_LIST), categories));
+    }
+
+    public record PublicDirectoryCategory(long id, String name) {}
 
     @PostMapping("/profile/setup")
     @PreAuthorize("hasAuthority(T(org.pms.silverocean.service.auth.roles.enums.Permission).SETUP_SP_PROFILE)")

@@ -48,7 +48,9 @@ public class JWTFilter extends GenericFilter {
         // Rider assignment links carry their own narrow, assignment-scoped
         // bearer. Ignore a stale browser login on this public endpoint so an
         // unrelated expired session cannot prevent the rider from responding.
-        if (isPublicRiderAssignment(httpRequest) || isPublicSokoCatalogRead(httpRequest)) {
+        if (isPublicRiderAssignment(httpRequest)
+                || isPublicSokoCatalogRead(httpRequest)
+                || isPublicServicesDirectoryRead(httpRequest)) {
             httpResponse.setHeader("Cache-Control", "no-store, max-age=0");
             httpResponse.setHeader("Pragma", "no-cache");
             httpResponse.setHeader("Referrer-Policy", "no-referrer");
@@ -191,6 +193,25 @@ public class JWTFilter extends GenericFilter {
         }
         return path.equals("/soko/catalog") || path.startsWith("/soko/catalog/")
                 || path.equals("/soko/categories");
+    }
+
+    /**
+     * Service discovery is intentionally public. A stale browser token must
+     * not stop a guest from opening the directory or an individual listing.
+     * Only safe reads bypass JWT validation; booking and provider mutations
+     * continue through the authenticated request path.
+     */
+    private boolean isPublicServicesDirectoryRead(HttpServletRequest request) {
+        if (!"GET".equalsIgnoreCase(request.getMethod())) return false;
+        String path = request.getServletPath();
+        if (StringUtils.isBlank(path)) path = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (StringUtils.isNotBlank(contextPath) && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        return path.equals("/sp/directory")
+                || path.equals("/sp/directory/categories")
+                || path.matches("/sp/directory/\\d+");
     }
 
     private String normalizeRole(String role) {

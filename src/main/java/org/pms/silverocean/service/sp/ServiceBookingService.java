@@ -2,6 +2,7 @@ package org.pms.silverocean.service.sp;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.pms.silverocean.common.PMSUtils;
 import org.pms.silverocean.common.ResponseCode;
 import org.pms.silverocean.database.pms.entities.ProviderProfile;
 import org.pms.silverocean.database.pms.entities.ProviderService;
@@ -21,6 +22,7 @@ import org.pms.silverocean.service.notification.common.NotificationType;
 import org.pms.silverocean.service.payment.invoice.InvoiceDao;
 import org.pms.silverocean.service.payment.PaymentPlatformFactory;
 import org.pms.silverocean.service.property.UnitDao;
+import org.pms.silverocean.service.kyc.AccountStatus;
 import org.pms.silverocean.service.sp.dao.ProviderProfileDao;
 import org.pms.silverocean.service.sp.dao.ComplaintCaseDao;
 import org.pms.silverocean.service.sp.dao.ServiceBookingDao;
@@ -83,12 +85,12 @@ public class ServiceBookingService {
 
     @Transactional(transactionManager = "pmsDBTransactionManager")
     public ServiceBookingDTO createBooking(CreateBookingRequest request) {
-        long userId = userDao.getUserId();
+        Users buyer = requireVerifiedBookingBuyer();
+        long userId = buyer.getId();
         String requestId=org.apache.commons.lang3.StringUtils.trimToNull(request.idempotencyKey());
         if(requestId!=null){
             // Serialise retries per buyer so two concurrent requests cannot both
             // cross the pre-insert idempotency check.
-            userDao.findActiveByIdForUpdate(userId).orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS));
             var existing=bookingDao.findByCreatedByAndClientRequestId(userId,requestId);
             if(existing.isPresent()){
                 assertIdempotentPayload(existing.get(),request);
@@ -154,6 +156,52 @@ public class ServiceBookingService {
         }
         notifyProgress(booking);
         return toDTO(booking, service);
+    }
+
+    /**
+     * Locks and verifies the authenticated buyer before a provider listing is
+     * locked or any booking state is created. The contact flags alone are not
+     * enough: the stored email and phone must also remain valid.
+     */
+    private Users requireVerifiedBookingBuyer() {
+        UserDao.AccountAccessState accessState = userDao.getCurrentAccessState()
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS,
+                        "We could not confirm this buyer account. Sign in again before requesting a service."));
+        if (!AccountStatus.ACTIVE.name().equals(accessState.operationalAccountStatus())) {
+            throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS,
+                    "Sign in to an active buyer account before requesting a service.");
+        }
+        Users buyer = userDao.findActiveByIdForUpdate(accessState.userId())
+                .orElseThrow(() -> new PMSCustomException(ResponseCode.INVALID_USER_DETAILS,
+                        "Sign in to an active buyer account before requesting a service."));
+        String storedAccountStatus = org.apache.commons.lang3.StringUtils.trimToNull(buyer.getAccountStatus());
+        if (storedAccountStatus != null && !AccountStatus.ACTIVE.name().equals(storedAccountStatus)) {
+            throw new PMSCustomException(ResponseCode.INVALID_USER_DETAILS,
+                    "Sign in to an active buyer account before requesting a service.");
+        }
+        if (org.apache.commons.lang3.StringUtils.isBlank(buyer.getFullName())) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Add the buyer's full name before requesting a service.");
+        }
+
+        String email = org.apache.commons.lang3.StringUtils.lowerCase(
+                org.apache.commons.lang3.StringUtils.trimToNull(buyer.getEmail()), java.util.Locale.ROOT);
+        if (!buyer.isEmailVerified() || !PMSUtils.isValidEmail(email)) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Confirm the buyer's email address before requesting a service.");
+        }
+        if (!buyer.isPhoneVerified()) {
+            throw new PMSCustomException(ResponseCode.INVALID_FIELD_DATA,
+                    "Confirm the buyer's phone number before requesting a service.");
+        }
+        String phone = org.apache.commons.lang3.StringUtils.defaultString(buyer.getPhoneNumber())
+                .trim().replaceAll("[\\s()\\-]", "");
+        if (phone.matches("254\\d{9}")) phone = "+" + phone;
+        if (org.apache.commons.lang3.StringUtils.isBlank(PMSUtils.getLocalisedPhoneNumber(phone))) {
+            throw new PMSCustomException(ResponseCode.INVALID_PHONENUMBER,
+                    "Confirm a valid buyer phone number before requesting a service.");
+        }
+        return buyer;
     }
 
     @Transactional(transactionManager = "pmsDBTransactionManager")

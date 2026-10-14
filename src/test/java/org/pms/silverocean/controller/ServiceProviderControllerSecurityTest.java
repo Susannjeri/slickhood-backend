@@ -9,9 +9,11 @@ class ServiceProviderControllerSecurityTest {
     @Test void financeEndpointRequiresFinanceRole() throws Exception {var method=ServiceProviderController.class.getMethod("updateBookingFinance",long.class,org.pms.silverocean.service.sp.wrappers.MarketplaceFinanceRequest.class);assertThat(method.getAnnotation(org.springframework.web.bind.annotation.PutMapping.class)).isNotNull();assertThat(method.getAnnotation(PreAuthorize.class)).isNotNull();assertThat(method.getAnnotation(PreAuthorize.class).value()).isEqualTo("hasRole('FINANCE')");}
     @Test void publicDirectoryOverridesAuthenticatedControllerDefault() {
         var methods = java.util.Arrays.stream(ServiceProviderController.class.getDeclaredMethods())
-                .filter(method -> method.getName().equals("directory") || method.getName().equals("directoryDetails"))
+                .filter(method -> method.getName().equals("directory")
+                        || method.getName().equals("directoryDetails")
+                        || method.getName().equals("directoryCategories"))
                 .toList();
-        assertThat(methods).hasSize(2).allSatisfy(method ->
+        assertThat(methods).hasSize(3).allSatisfy(method ->
                 assertThat(method.getAnnotation(PreAuthorize.class)).isNotNull()
                         .extracting(PreAuthorize::value).isEqualTo("permitAll()"));
     }

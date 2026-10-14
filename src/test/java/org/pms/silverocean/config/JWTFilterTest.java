@@ -251,6 +251,65 @@ class JWTFilterTest {
         assertThat(response.getStatus()).isEqualTo(401);
     }
 
+    @Test
+    void publicServicesDirectoryIgnoresAnUnrelatedStaleLoginForExactAndDetailReads() throws Exception {
+        request.setMethod("GET");
+        request.setRequestURI("/sp/directory");
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verifyNoInteractions(jwtService);
+        assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store, max-age=0");
+
+        request = new MockHttpServletRequest("GET", "/sp/directory/42");
+        request.addHeader("Authorization", "Bearer stale-access-token");
+        response = new MockHttpServletResponse();
+        chain = org.mockito.Mockito.mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verifyNoInteractions(jwtService);
+
+        request = new MockHttpServletRequest("GET", "/sp/directory/categories");
+        request.addHeader("Authorization", "Bearer stale-access-token");
+        response = new MockHttpServletResponse();
+        chain = org.mockito.Mockito.mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
+    void publicServicesDirectoryBypassIsReadOnly() throws Exception {
+        request = new MockHttpServletRequest("POST", "/sp/directory");
+        request.addHeader("Authorization", "Bearer access-token");
+        response = new MockHttpServletResponse();
+        when(i18nService.getLocalizedMessage(anyString())).thenReturn("Invalid token");
+        when(jwtService.validateToken("access-token")).thenThrow(new RuntimeException("expired"));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        verify(chain, never()).doFilter(request, response);
+    }
+
+    @Test
+    void legacyServicesDirectoryRoutesDoNotBypassJwtValidation() throws Exception {
+        request.setMethod("GET");
+        request.setRequestURI("/sp/directory/list");
+        when(i18nService.getLocalizedMessage(anyString())).thenReturn("Invalid token");
+        when(jwtService.validateToken("access-token")).thenThrow(new RuntimeException("expired"));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        verify(chain, never()).doFilter(request, response);
+    }
+
     private void stubValidatedToken(Claims claims, boolean currentSession) {
         when(jwtService.validateToken("access-token")).thenReturn(parsedToken);
         when(parsedToken.getBody()).thenReturn(claims);
