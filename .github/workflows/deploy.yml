@@ -30,6 +30,9 @@ jobs:
       - name: Build with Maven
         run: mvn -B clean verify --file pom.xml
 
+      - name: Test production preflight contracts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
       - name: Verify immutable artifact revision
         shell: bash
         run: |
@@ -319,8 +322,12 @@ jobs:
               whatsapp_status="${2:-}"
               whatsapp_args=""
               insurance_args=""
+              marketplace_args=""
               if [ "${3:-}" = "require-insurance" ]; then
                 insurance_args="--require-public-insurance-cors"
+              fi
+              if [ "${4:-}" = "require-marketplace" ]; then
+                marketplace_args="--require-public-marketplace-cors"
               fi
               if [ -n "$whatsapp_status" ]; then
                 whatsapp_args="--expected-whatsapp-status $whatsapp_status"
@@ -331,7 +338,7 @@ jobs:
                 --expected-flyway-version "$required_version" \
                 --expected-bucket "$expected_bucket" \
                 --expected-region "$expected_region" \
-                $whatsapp_args $insurance_args
+                $whatsapp_args $insurance_args $marketplace_args
             }
             verify_large_authorization_header() {
               probe_correlation="slickhood-header-probe-$stamp"
@@ -588,7 +595,7 @@ jobs:
               exit 1
             fi
             if wait_for_health; then
-              run_preflight 131 enabled require-insurance
+              run_preflight 131 enabled require-insurance require-marketplace
               verify_large_authorization_header
               curl --fail --silent --show-error https://app.slickhood.com/api/deployed-hash | python3 -c 'import json,sys; p=json.load(sys.stdin); expected="${{ github.sha }}"; assert any(d.get("hash") in (expected, expected[:7]) for d in p.get("data", [])), "Deployed revision mismatch"'
               nginx_installed=false

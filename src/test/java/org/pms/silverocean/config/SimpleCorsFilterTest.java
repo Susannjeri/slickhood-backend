@@ -47,6 +47,44 @@ class SimpleCorsFilterTest {
     }
 
     @Test
+    void publicWebsiteCanReadMarketplaceCataloguesWithoutOpeningBuyerOrSellerApis() throws Exception {
+        var source = configured("https://app.slickhood.com", true).corsConfigurationSource();
+
+        for (String path : new String[]{
+                "/soko/catalog",
+                "/soko/catalog/sellers",
+                "/soko/categories",
+                "/sp/directory",
+                "/sp/directory/categories",
+                "/sp/directory/123"
+        }) {
+            var request = new org.springframework.mock.web.MockHttpServletRequest("OPTIONS", path);
+            request.addHeader("Origin", "https://slickhood.com");
+            request.addHeader("Access-Control-Request-Method", "GET");
+            request.addHeader("Access-Control-Request-Headers", "content-type,x-correlation-id");
+            var response = new org.springframework.mock.web.MockHttpServletResponse();
+            var policy = source.getCorsConfiguration(request);
+
+            assertThat(new org.springframework.web.cors.DefaultCorsProcessor()
+                    .processRequest(policy, request, response)).as(path).isTrue();
+            assertThat(response.getHeader("Access-Control-Allow-Origin"))
+                    .as(path).isEqualTo("https://slickhood.com");
+            assertThat(response.getHeader("Access-Control-Allow-Credentials")).as(path).isNull();
+            assertThat(policy.checkOrigin("https://www.slickhood.com"))
+                    .as(path).isEqualTo("https://www.slickhood.com");
+            assertThat(policy.checkOrigin("https://slickhood.com.attacker.invalid")).as(path).isNull();
+            assertThat(policy.checkHttpMethod(org.springframework.http.HttpMethod.POST)).as(path).isNull();
+        }
+
+        assertThat(source.getCorsConfiguration(
+                        new org.springframework.mock.web.MockHttpServletRequest("POST", "/soko/order/checkout"))
+                .checkOrigin("https://slickhood.com")).isNull();
+        assertThat(source.getCorsConfiguration(
+                        new org.springframework.mock.web.MockHttpServletRequest("POST", "/sp/booking/create"))
+                .checkOrigin("https://slickhood.com")).isNull();
+    }
+
+    @Test
     void productionRejectsHttpOrigins() {
         SimpleCorsFilter filter = configured("http://app.slickhood.com", true);
         assertThatThrownBy(filter::corsConfigurationSource)

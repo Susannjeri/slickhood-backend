@@ -45,6 +45,15 @@ DEFAULT_FILES = (
     Path("/home/silverocean/backend/config/application.properties"),
 )
 PLACEHOLDER = re.compile(r"^\$\{([^}:]+)(?::([^}]*))?}$")
+PUBLIC_WEBSITE_ORIGINS = ("https://slickhood.com", "https://www.slickhood.com")
+PUBLIC_MARKETPLACE_READS = (
+    ("Soko catalogue", "/api/soko/catalog?page=0&size=1"),
+    ("Services directory", "/api/sp/directory?page=0&size=1"),
+)
+PROTECTED_MARKETPLACE_MUTATIONS = (
+    ("Soko checkout", "/api/soko/order/checkout"),
+    ("Services booking", "/api/sp/booking/create"),
+)
 
 
 class Preflight:
@@ -159,6 +168,91 @@ def request_status(url: str, *, method: str = "GET", headers: dict[str, str] | N
         return error.code, error.read(1_048_576), dict(error.headers.items())
 
 
+def response_header(headers: dict[str, str], name: str) -> str:
+    expected = name.lower()
+    return next((value for key, value in headers.items() if key.lower() == expected), "")
+
+
+def cors_rejected(status: int, headers: dict[str, str]) -> bool:
+    return status in (400, 401, 403) and not response_header(headers, "Access-Control-Allow-Origin")
+
+
+def check_public_marketplace_cors(preflight: Preflight, public_origin: str) -> None:
+    """Verify the website can only read anonymous marketplace catalogues.
+
+    The corporate website and authenticated application are separate origins.
+    This probe deliberately covers both allowed website hosts, an attacker
+    origin, and the two account-bearing mutations that must remain app-only.
+    """
+    for website_origin in PUBLIC_WEBSITE_ORIGINS:
+        for label, path in PUBLIC_MARKETPLACE_READS:
+            status, _, headers = request_status(
+                f"{public_origin}{path}",
+                headers={"Origin": website_origin, "X-Correlation-Id": "marketplace-cors-preflight"},
+            )
+            options_status, _, options_headers = request_status(
+                f"{public_origin}{path}",
+                method="OPTIONS",
+                headers={
+                    "Origin": website_origin,
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "content-type,x-correlation-id",
+                },
+            )
+            get_allowed = (
+                status == 200
+                and response_header(headers, "Access-Control-Allow-Origin") == website_origin
+                and response_header(headers, "Access-Control-Allow-Credentials").lower() != "true"
+            )
+            preflight_allowed = (
+                options_status in (200, 204)
+                and response_header(options_headers, "Access-Control-Allow-Origin") == website_origin
+                and response_header(options_headers, "Access-Control-Allow-Credentials").lower() != "true"
+            )
+            check_name = f"public {label} browser access from {website_origin}"
+            if get_allowed and preflight_allowed:
+                preflight.pass_(check_name)
+            else:
+                preflight.fail(check_name, "anonymous GET or GET preflight was blocked or allowed credentials")
+
+    hostile_origin = "https://untrusted.invalid"
+    for label, path in PUBLIC_MARKETPLACE_READS:
+        status, _, headers = request_status(
+            f"{public_origin}{path}", headers={"Origin": hostile_origin}
+        )
+        options_status, _, options_headers = request_status(
+            f"{public_origin}{path}",
+            method="OPTIONS",
+            headers={
+                "Origin": hostile_origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "content-type,x-correlation-id",
+            },
+        )
+        check_name = f"public {label} rejects untrusted browser origins"
+        if cors_rejected(status, headers) and cors_rejected(options_status, options_headers):
+            preflight.pass_(check_name)
+        else:
+            preflight.fail(check_name, "an untrusted origin could read or preflight the catalogue")
+
+    for website_origin in PUBLIC_WEBSITE_ORIGINS:
+        for label, path in PROTECTED_MARKETPLACE_MUTATIONS:
+            status, _, headers = request_status(
+                f"{public_origin}{path}",
+                method="OPTIONS",
+                headers={
+                    "Origin": website_origin,
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+            check_name = f"{label} remains app-only from {website_origin}"
+            if cors_rejected(status, headers):
+                preflight.pass_(check_name)
+            else:
+                preflight.fail(check_name, "the public website origin was allowed to preflight a protected mutation")
+
+
 def check_readiness(preflight: Preflight, readiness_url: str, expected_scope: set[str],
                     expected_whatsapp_status: str | None = None) -> None:
     try:
@@ -179,7 +273,8 @@ def check_readiness(preflight: Preflight, readiness_url: str, expected_scope: se
         preflight.fail("backend production readiness", "unreachable or invalid response")
 
 
-def check_cors(preflight: Preflight, public_origin: str, require_public_insurance: bool = False) -> None:
+def check_cors(preflight: Preflight, public_origin: str, require_public_insurance: bool = False,
+               require_public_marketplace: bool = False) -> None:
     try:
         status, _, headers = request_status(
             f"{public_origin}/api/auth/login",
@@ -226,6 +321,8 @@ def check_cors(preflight: Preflight, public_origin: str, require_public_insuranc
             else:
                 preflight.fail(f"public insurance browser access from {insurance_origin}",
                                "channel lookup or verification preflight blocked")
+        if require_public_marketplace:
+            check_public_marketplace_cors(preflight, public_origin)
     except (OSError, urllib.error.URLError):
         preflight.fail("HTTPS same-origin and CORS rejection contract", "preflight request failed")
 
@@ -529,6 +626,7 @@ def main() -> int:
     parser.add_argument("--expected-region", required=True)
     parser.add_argument("--expected-whatsapp-status", choices=("enabled", "on-hold"))
     parser.add_argument("--require-public-insurance-cors", action="store_true")
+    parser.add_argument("--require-public-marketplace-cors", action="store_true")
     args = parser.parse_args()
 
     preflight = Preflight()
@@ -551,7 +649,8 @@ def main() -> int:
         if args.expected_whatsapp_status == "enabled":
             expected_scope.add("whatsapp")
     check_readiness(preflight, args.readiness_url, expected_scope, args.expected_whatsapp_status)
-    check_cors(preflight, args.public_origin.rstrip("/"), args.require_public_insurance_cors)
+    check_cors(preflight, args.public_origin.rstrip("/"), args.require_public_insurance_cors,
+               args.require_public_marketplace_cors)
     check_database(preflight, config, args.expected_flyway_version)
 
     bucket = required(preflight, config, "S3 bucket", "garage.s3.bucket", "GARAGE_S3_BUCKET")

@@ -66,6 +66,21 @@ public class SimpleCorsFilter {
         source.registerCorsConfiguration("/public/insurance/**", publicWebsite);
         source.registerCorsConfiguration("/public/property-listings/**", publicWebsite);
 
+        // The public corporate website renders the anonymous Soko and Services
+        // catalogues directly. Only catalogue reads are cross-origin: checkout,
+        // bookings and every account-bearing action stay on the authenticated
+        // application origin and continue to use the default policy below.
+        CorsConfiguration publicMarketplace = new CorsConfiguration();
+        publicMarketplace.setAllowedOrigins(List.copyOf(publicWebsiteOrigins));
+        publicMarketplace.setAllowedMethods(List.of("GET", "OPTIONS"));
+        publicMarketplace.setAllowedHeaders(List.of("Content-Type", "X-Correlation-Id"));
+        publicMarketplace.setAllowCredentials(false);
+        source.registerCorsConfiguration("/soko/catalog", publicMarketplace);
+        source.registerCorsConfiguration("/soko/catalog/**", publicMarketplace);
+        source.registerCorsConfiguration("/soko/categories", publicMarketplace);
+        source.registerCorsConfiguration("/sp/directory", publicMarketplace);
+        source.registerCorsConfiguration("/sp/directory/**", publicMarketplace);
+
         // Rider links are public bearer flows, not session-bearing API calls.
         // Keep them on the configured application origins while refusing
         // credentials and unrelated headers such as Authorization.
